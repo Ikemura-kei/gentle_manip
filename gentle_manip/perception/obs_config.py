@@ -1,0 +1,99 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
+
+
+@dataclass
+class PointCloudConfig:
+    cameras: List[str]                      # e.g. ["cam_wrist", "cam_ext"]
+    crop_min: Tuple[float, float, float]    # workspace bounding box min (meters)
+    crop_max: Tuple[float, float, float]    # workspace bounding box max (meters)
+    max_points: int = 2048                  # subsample target after merge + crop
+
+
+@dataclass
+class VoxelConfig:
+    cameras: List[str]
+    voxel_size: float                       # meters per voxel edge
+    crop_min: Tuple[float, float, float]
+    crop_max: Tuple[float, float, float]
+
+
+@dataclass
+class ImageConfig:
+    cameras: List[str]                      # which RGB streams to pass through
+
+
+@dataclass
+class TactileConfig:
+    sensors: List[str]                      # e.g. ["tactile_left", "tactile_right"]
+    # GelSight Mini images are passed through as-is (no processing in pipeline)
+
+
+@dataclass
+class ObsConfig:
+    """
+    Declares which modalities PerceptionPipeline includes in the output obs dict.
+
+    Rules:
+      - ee_pos, ee_quat, gripper_width are always included.
+      - All other modalities are opt-in via the fields below.
+      - tactile is real-only; set to None for any sim experiment.
+      - point_cloud and voxel are mutually exclusive (use one or the other).
+
+    Loaded from configs/obs/*.yaml via ObsConfig.from_dict().
+    """
+    include_joint_pos: bool = False
+    include_joint_vel: bool = False
+
+    point_cloud: Optional[PointCloudConfig] = None
+    voxel: Optional[VoxelConfig] = None
+    images: Optional[ImageConfig] = None
+    tactile: Optional[TactileConfig] = None
+
+    def validate(self) -> None:
+        if self.point_cloud is not None and self.voxel is not None:
+            raise ValueError("point_cloud and voxel are mutually exclusive in ObsConfig")
+
+    @classmethod
+    def from_dict(cls, d: dict) -> ObsConfig:
+        """Build from a plain dict (e.g. loaded via yaml.safe_load)."""
+        pc = None
+        if "point_cloud" in d:
+            pc_d = d["point_cloud"]
+            pc = PointCloudConfig(
+                cameras=pc_d["cameras"],
+                crop_min=tuple(pc_d["crop_min"]),
+                crop_max=tuple(pc_d["crop_max"]),
+                max_points=pc_d.get("max_points", 2048),
+            )
+
+        voxel = None
+        if "voxel" in d:
+            v_d = d["voxel"]
+            voxel = VoxelConfig(
+                cameras=v_d["cameras"],
+                voxel_size=v_d["voxel_size"],
+                crop_min=tuple(v_d["crop_min"]),
+                crop_max=tuple(v_d["crop_max"]),
+            )
+
+        images = None
+        if "images" in d:
+            images = ImageConfig(cameras=d["images"]["cameras"])
+
+        tactile = None
+        if "tactile" in d:
+            tactile = TactileConfig(sensors=d["tactile"]["sensors"])
+
+        cfg = cls(
+            include_joint_pos=d.get("include_joint_pos", False),
+            include_joint_vel=d.get("include_joint_vel", False),
+            point_cloud=pc,
+            voxel=voxel,
+            images=images,
+            tactile=tactile,
+        )
+        cfg.validate()
+        return cfg

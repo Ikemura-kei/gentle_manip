@@ -1,0 +1,450 @@
+# CLAUDE.md — Gentle Manipulation Sim2Real Framework
+
+## Project Overview
+
+This is a sim2real research framework for **defowrmable and fragile object manipulation**, built around **Genesis** (MPM soft body simulation) and **XArm7**. The goal is to train policies in simulation (using RL or DP3) and deploy them on a real XArm7 robot with minimal sim2real gap.
+
+**Policy methods used:** RL (SAC/TD3 via RSL-RL) and DP3 (Diffusion Policy with 3D point clouds).
+
+**This is NOT a community benchmark** — it's a research framework for fast sim-to-real iteration. Keep things simple: plain classes, YAML configs, no framework magic.
+
+For old implementation, check:   
+* https://github.com/Ikemura-kei/codesign-dfom
+* https://github.com/Ikemura-kei/codesign_genesis
+* https://github.com/Ikemura-kei/gentle_manipulation — real-robot only (no sim); source of calibrated camera extrinsics, XArm7 control parameters, and point cloud pipeline details
+---
+
+If anything was installed for running the modules, please add them into requirements.txt if not present yet.
+
+## Architecture — The Big Picture
+
+```
+PolicyEnv (Gym interface — IDENTICAL for sim and real)
+    │
+    ├── PerceptionPipeline (shared code: RawObs → obs dict)
+    ├── ActionPipeline (shared code: policy output → scaled command)
+    │
+    └── Backend (interchangeable)
+         ├── SimBackend (Genesis subprocess → RawObs)
+         └── RealBackend (XArm SDK + RealSense → RawObs)
+```
+
+**Critical design rule:** The `RawObs` dataclass is the sim/real boundary. Everything above it (perception, action processing, PolicyEnv) is shared code that runs identically in sim and real. Everything below it (Genesis or hardware) is backend-specific. This prevents silent sim2real parity bugs.
+
+---
+
+## Directory Structure
+
+```
+gentle_manip/
+├── __init__.py
+│
+├── tasks/                              # Task definitions
+│   ├── __init__.py                     #   TASK_MAP dict: name → class
+│   ├── base_task.py                    #   Abstract: scene_spec, reward, success
+│   ├── single_lift.py                  #   Lift 1 object to height, hold 3s
+│   ├── multi_lift.py                   #   Sequential multi-object clearing
+│   ├── flat_place.py                   #   Pick + place on same-height surface
+│   ├── terrain_place.py                #   Pick + place on varying-height platforms
+│   ├── push_to_goal.py                 #   Push object to target pose
+│   └── scoop_transfer.py              #   Scoop + transfer to container
+│
+├── scenes/                             # Scene composition
+│   ├── scene_spec.py                   #   Declarative dataclasses (NO Genesis imports)
+│   ├── scene_builder.py                #   SceneSpec → Genesis API calls (ONLY file that touches Genesis scene creation)
+│   └── fixtures.py                     #   Table, platform, chopping board, bin builders
+│
+├── assets/                             # All static assets (meshes, URDFs)
+│   ├── registry.py                     #   OBJECT_MAP: name → ObjectDef(mesh_path, default_E, default_nu, default_rho, ...)
+│   ├── materials.py                    #   Material presets (youngs_modulus, poisson_ratio, density ranges)
+│   ├── meshes/
+│   │   ├── objects/                    #   Soft/rigid object .obj files (tofu, waffle, spam, gelatin, ...)
+│   │   └── fixtures/                   #   Fixture .obj files (table, bin, platform, ...)
+│   └── urdfs/                          #   Robot URDFs (xarm7, gripper)
+│
+├── robot/                              # XArm7 only (sim + real)
+│   ├── xarm7_sim.py                    #   Genesis: add URDF to scene, control, read state
+│   ├── xarm7_real.py                   #   Hardware: XArm SDK, servo_cartesian_aa, gripper
+│   └── xarm7_config.py                 #   Shared constants: joint names, default angles, kp/kv, EE link, bounds, URDF path
+│
+├── perception/                         # Shared obs processing (sim AND real use same code)
+│   ├── pipeline.py                     #   PerceptionPipeline: RawObs → policy obs dict
+│   ├── depth_to_pointcloud.py          #   Pinhole backprojection (shared math)
+│   ├── pointcloud_ops.py              #   Crop, subsample, voxelize
+│   └── obs_config.py                   #   ObsConfig dataclass: which modalities to include
+│
+├── actions/                            # Shared action processing
+│   ├── pipeline.py                     #   ActionPipeline: policy output → scaled command
+│   └── action_config.py                #   ActionConfig: control mode, scales, clips
+│
+├── envs/                               # Sim and real environments
+│   ├── raw_obs.py                      #   RawObs dataclass (the sim/real boundary)
+│   ├── policy_env.py                   #   PolicyEnv: shared Gym wrapper
+│   ├── sim_backend.py                  #   Genesis → RawObs adapter
+│   ├── real_backend.py                 #   XArm SDK + RealSense → RawObs adapter
+│   ├── genesis_process.py              #   Subprocess isolation (memory-leak fix)
+│   └── sim_feedback.py                 #   SimFeedback dataclass (stress, particle pos)
+│
+├── rewards/                            # Reward components (composable via config)
+│   ├── __init__.py                     #   build_reward_fn(config) → composite callable
+│   ├── stress.py                       #   Von Mises: mean_stress * 0.2 + top10 * 0.8, capped, squared / 6000
+│   ├── distance.py                     #   exp(-k*dist), dist-to-obj, dist-to-goal
+│   ├── lift.py                         #   Lift progress with grasp gating (grasp_gate_dist=0.079)
+│   ├── placement.py                    #   Release height, impact force, pressing penalty
+│   └── success.py                      #   Binary success reward
+│
+├── domain_randomization/
+│   ├── dr_config.py                    #   What to randomize + ranges
+│   └── presets.py                      #   "mild", "aggressive"
+│
+├── evaluation/
+│   ├── evaluate.py                     #   Run N episodes, aggregate metrics
+│   └── metrics.py                      #   Success rate, stress metrics, gentleness rubric
+│
+├── demos/                              # Demo collection (for DP3)
+│   ├── teleop_keyboard.py
+│   ├── teleop_spacemouse.py
+│   └── record.py                       #   Record transitions (point clouds + actions)
+│
+├── diagnostics/
+│   ├── parity_check.py                 #   Compare sim/real obs spaces, replay trajectories
+│   └── calibration.py                  #   Camera extrinsics from AprilTags
+│
+├── visualization/
+│   ├── point_cloud_viewer.py           #   Open3D viewer (separate process)
+│   └── video_recorder.py
+│
+├── wrappers/
+│   ├── rsl_rl_wrapper.py               #   RSL-RL vec env interface (wraps PolicyEnv)
+│   ├── flatten_obs_wrapper.py          #   For flat-state RL policies
+│   └── recording_wrapper.py            #   Trajectory recording
+│
+├── configs/
+│   ├── tasks/                          #   Per-task YAML
+│   ├── obs/                            #   state_ee_only.yaml, state_joint_only.yaml, point_cloud_2cam.yaml, voxel.yaml, tactile_imitation.yaml
+│   ├── action/                         #   delta_pose_delta_gripper.yaml
+│   ├── dr/                             #   mild.yaml, aggressive.yaml
+│   └── setup/                          #   sim_default.yaml, real_lab.yaml
+│
+├── scripts/
+│   ├── train.py
+│   ├── evaluate.py
+│   ├── deploy_real.py
+│   ├── collect_demos.py
+│   ├── visualize.py
+│   └── check_parity.py
+│
+└── tests/
+```
+
+---
+
+## Physical Workspace Setup (Real Robot)
+
+- **Robot**: XArm7 with parallel-jaw gripper
+- **Cameras**:
+  - `cam_wrist` — Intel RealSense D405 (serial: `230322271104`), wrist-mounted. Resolution 640×480, depth range 0.1–0.6 m. Extrinsics are **dynamic**: backend computes `world_T_cam = world_T_ee @ ee_T_cam` each step using the fixed calibrated `ee_T_cam` offset. The pipeline treats it identically to other cameras — the backend handles the update.
+  - `cam_ext` — Intel RealSense L515 (serial: `f1120484`), world-fixed. Resolution 640×480, depth range 0.1–0.85 m. Static extrinsics calibrated once via AprilTag.
+- **Tactile sensors**: 2× GelSight Mini (one per gripper finger). **Real-only** — not simulated.
+  - Used for a pure real imitation learning baseline (no sim involved).
+  - Represented as RGB images `(num_envs, H, W, 3)` uint8 in `RawObs.tactile_images`.
+  - In sim: `tactile_images` is an empty dict. `ObsConfig.tactile = None` → pipeline skips it.
+  - In real imitation baseline: `ObsConfig.tactile` is set → pipeline includes GelSight streams.
+
+Camera names used in code and configs: `"cam_wrist"`, `"cam_ext"`, `"tactile_left"`, `"tactile_right"`.
+
+**Point cloud pipeline (real, from reference repo):**
+- Per-camera: 20% random subsample before merging (efficiency; reduces variance but avoids pytorch3d FPS cost twice)
+- Final downsample: **farthest-point sampling** (pytorch3d) to 1500 points — not random; use this for real/sim parity
+- Combined crop bounds: `crop_min=[0.15, -0.25, 0.0075]`, `crop_max=[0.8, 0.25, 0.45]` (meters, robot-base frame) — use these as defaults in `configs/obs/point_cloud_2cam.yaml`
+
+---
+
+## Key Data Structures
+
+### RawObs (the sim/real contract)
+
+**Batching convention**: `RawObs` fields always carry a leading `num_envs` dimension.
+- Sim: `num_envs = N` (e.g. 64 or 256 parallel Genesis envs). Genesis returns `(N, ...)` arrays directly — no loop needed.
+- Real: `num_envs = 1`. `RealBackend` wraps scalar/1D reads in `np.expand_dims` to add the batch dim.
+
+This means `PerceptionPipeline` and `ActionPipeline` always operate on batched inputs and produce batched outputs. The policy always sees `(num_envs, ...)` shaped observations, whether in sim or real. No shape special-casing anywhere.
+
+Camera intrinsics/extrinsics are **per-camera, not per-env** — camera geometry is shared across all parallel envs. Domain randomization of camera pose is a separate concern if ever needed.
+
+```python
+@dataclass
+class RawObs:
+    """Both sim and real backends produce this. Same fields, same units.
+    All robot-state arrays have a leading num_envs dimension.
+    Real deployment uses num_envs=1.
+    """
+    ee_pos: np.ndarray              # (num_envs, 3)   meters, world frame
+    ee_quat: np.ndarray             # (num_envs, 4)   wxyz convention
+    gripper_width: np.ndarray       # (num_envs,)     meters  ← array, not float
+    joint_pos: Optional[np.ndarray] # (num_envs, 7)   radians
+    joint_vel: Optional[np.ndarray] # (num_envs, 7)   rad/s
+    depth_images: Dict[str, np.ndarray]   # cam_name → (num_envs, H, W) float32 meters
+    rgb_images: Dict[str, np.ndarray]     # cam_name → (num_envs, H, W, 3) uint8
+    camera_intrinsics: Dict[str, np.ndarray]   # cam_name → (3, 3)   shared across envs
+    camera_extrinsics: Dict[str, np.ndarray]   # cam_name → (4, 4)   world_T_cam
+    tactile_images: Dict[str, np.ndarray] # sensor_name → (num_envs, H, W, 3) uint8; empty dict in sim
+```
+
+### SceneSpec (declarative scene description)
+
+```python
+@dataclass
+class SceneSpec:
+    objects:  List[ObjectEntry]   # soft/rigid objects to spawn
+    fixtures: List[FixtureEntry]  # table, platform, chopping_board, bin
+    cameras:  List[CameraEntry]   # name, pos, lookat, fov, resolution
+    sim_dt: float = 4e-3
+    sim_substeps: int = 6
+    plane_friction: float = 1.0
+    mpm_bounds: Tuple = ((0.05, -0.26, -0.03), (0.6, 0.26, 0.35))
+    mpm_grid_density: float = 200
+
+@dataclass
+class ObjectEntry:
+    name: str                              # "tofu", "waffle", "spam", "gelatin"
+    object_type: str = "soft"             # "soft" | "rigid"
+    count: int = 1                        # can spawn multiple instances
+    youngs_modulus: Optional[float] = None  # override default E (Pa)
+    poisson_ratio: Optional[float] = None   # override default ν, must be in (0, 0.5)
+    density: Optional[float] = None         # override default ρ (kg/m³)
+    pose_range: Optional[Dict] = None      # randomization bounds {"x": (lo, hi), ...}
+    scale: float = 1.0
+
+@dataclass
+class FixtureEntry:
+    fixture_type: str                     # "table" | "platform" | "chopping_board" | "bin"
+    pose: Tuple[float, float, float] = (0, 0, 0)
+    params: Dict[str, Any] = field(default_factory=dict)  # e.g. {"height": 0.08} for platform
+
+@dataclass
+class CameraEntry:
+    name: str                             # must match real_lab.yaml and ObsConfig cameras list
+    pos: Tuple[float, float, float]
+    lookat: Tuple[float, float, float]
+    fov: float = 40.0                     # degrees, must be in (0, 180)
+    resolution: Tuple[int, int] = (640, 480)  # (width, height)
+```
+
+### SimFeedback (from Genesis, not available in real)
+
+```python
+@dataclass
+class SimFeedback:
+    von_mises_stress: np.ndarray    # (n_particles,)
+    particle_positions: np.ndarray  # (n_particles, 3)
+    object_center: np.ndarray       # (3,) mean of particles
+    ee_pos: np.ndarray
+    gripper_width: float
+    # ... task-specific fields
+```
+
+---
+
+## XArm7 Configuration
+
+`robot/xarm7_config.py` is a **constants-only** file with three clearly marked sections. Do not use sim-only constants in `real_backend.py` or vice versa.
+
+Tunable values (KP, KV, DEFAULT_EE_POSE, DEFAULT_GRIPPER_WIDTH) can be overridden per-experiment via YAML without changing this file. The override is applied in the constructor of the robot module:
+- `XArm7Sim.__init__` merges `sim_default.yaml → robot.*` over sim-only defaults
+- `XArm7Real.__init__` merges `real_lab.yaml → robot.*` over real-only defaults
+
+```python
+# ── Shared ────────────────────────────────────────────────────────────────────
+JOINT_NAMES          # 7 arm + 6 gripper joints (13 total)
+EE_LINK = 'xarm_gripper_base_link'
+EE_BOUNDS_MIN = [0.26, -0.225, 0.1715]   # workspace limits (meters)
+EE_BOUNDS_MAX = [0.59,  0.225, 0.460]
+DEFAULT_ACTION_SCALES = [0.0052, 0.0052, 0.006, 0.001, 0.001, 0.001, 0.05]
+
+# ── Sim only ──────────────────────────────────────────────────────────────────
+KP = [8000]*7 + [100000]*6    # TODO: confirm after URDF inertia tuning
+KV = [600]*7  + [1000]*6
+LINKS_TO_KEEP = ['xarm_gripper_base_link']
+DEFAULT_JOINT_ANGLES = [...]  # TODO: confirm once scene layout is finalised
+
+# ── Real only ─────────────────────────────────────────────────────────────────
+DEFAULT_EE_POSE = [0.4, 0.0, 0.21, 3.1416, 0.0, 0.0]  # xyz (m) + rotvec (rad); home from reference repo
+DEFAULT_GRIPPER_WIDTH = 0.08                             # meters open; TODO: confirm on hardware
+
+# TCP offset: XArm SDK reports a different TCP than "our" TCP definition.
+# The API TCP is 0.13 m below "our" TCP in the tool Z-axis.
+# In xarm7_real.py: convert targets from "our" TCP → API TCP before every set_servo_cartesian_aa call.
+TCP_API_TO_TCP_OURS_OFFSET = [0.0, 0.0, 0.13]  # meters, applied as T_api = T_ours @ inv(offset)
+
+SERVO_SPEED_MM_S = 60     # passed to set_servo_cartesian_aa(speed=)
+SERVO_MVACC      = 500    # passed to set_servo_cartesian_aa(mvacc=)
+
+# Calibrated D405 (wrist) ee_T_cam — world_T_cam_wrist = world_T_ee @ EE_T_CAM_WRIST each step
+EE_T_CAM_WRIST = [
+    [-0.44208658, -0.89689883,  0.01148644,  0.07132349],
+    [ 0.89628746, -0.44221313, -0.03341173, -0.00272051],
+    [ 0.03504640, -0.00447573,  0.99937566, -0.16624549],
+    [ 0.0,         0.0,         0.0,         1.0       ],
+]
+
+# Calibrated L515 (external) world_T_cam — static, loaded once
+WORLD_T_CAM_EXT = [
+    [ 0.0128031, -0.00699895, -0.99989354,  1.00457119],
+    [ 0.99985145, -0.01145051,  0.01288271, -0.00277939],
+    [-0.01153946, -0.99990995,  0.00685131,  0.10592796],
+    [ 0.0,         0.0,         0.0,         1.0       ],
+]
+```
+
+**Servo mode transition (real backend startup):** After homing in position mode (mode 0), wait 0.25 s, then switch to servo mode (mode 1), then wait another 0.25 s before accepting commands. Skipping these delays causes unstable behaviour at the start of teleoperation or deployment.
+
+---
+
+## ObsConfig and ActionConfig
+
+### ObsConfig (`perception/obs_config.py`)
+
+Controls which modalities `PerceptionPipeline` includes. Loaded from `configs/obs/*.yaml` via `ObsConfig.from_dict()`.
+
+- `ee_pos`, `ee_quat`, `gripper_width` are **always** included — not configurable.
+- All other modalities are opt-in. `point_cloud` and `voxel` are mutually exclusive.
+- `tactile` is real-only — always `None` in sim configs.
+
+```python
+@dataclass
+class ObsConfig:
+    include_joint_pos: bool = False
+    include_joint_vel: bool = False
+    point_cloud: Optional[PointCloudConfig] = None  # cameras, crop_min/max, max_points
+    voxel:       Optional[VoxelConfig]      = None  # cameras, voxel_size, crop_min/max
+    images:      Optional[ImageConfig]      = None  # which RGB cameras to pass through
+    tactile:     Optional[TactileConfig]    = None  # GelSight Mini sensors (real only)
+```
+
+### ActionConfig (`actions/action_config.py`)
+
+Loaded from `configs/action/*.yaml` via `ActionConfig.from_dict()`.
+
+```python
+@dataclass
+class ActionConfig:
+    scales: List[float]            # per-dim multipliers; length = action_dim
+    clip: Tuple[float, float]      # (min, max) applied before scaling, default (-1, 1)
+```
+
+### Obs space / action space convention
+
+`PerceptionPipeline.build_obs_space()` and `ActionPipeline.build_action_space()` follow the **gymnasium single-env convention**: shapes declared without a `num_envs` leading dimension (e.g. `ee_pos` → `(3,)`, `point_cloud` → `(max_points, 3)`).
+
+`PerceptionPipeline.process()` and `ActionPipeline.process()` operate on **batched** inputs and always return `(num_envs, ...)` arrays. In obs dict, `gripper_width` is `(num_envs, 1)` to match the space's `(1,)` shape.
+
+---
+
+## Genesis Process Isolation (CRITICAL)
+
+Genesis leaks GPU memory on relaunch. Solution: run Genesis in a **subprocess** (`multiprocessing.Process`), kill the process to reclaim all memory, then spawn a new one.
+
+```python
+class GenesisProcess:
+    def start(self)                          # spawn subprocess, init Genesis, build scene
+    def stop(self)                           # kill process → OS reclaims all GPU memory
+    def restart(self, new_scene_spec=None)   # stop + start (used when stiffness changes)
+    def send_action(self, action)
+    def get_robot_state(self) -> dict
+    def get_camera_frames(self) -> Tuple[dict, dict]
+    def get_sim_feedback(self) -> SimFeedback
+    def reset(self, **kwargs)
+```
+
+Communication is via `multiprocessing.Queue`. The worker loop runs inside the child process and owns all Genesis/GPU resources. When `restart()` is called (e.g. to change object stiffness), the old process is killed and a new one spawned — no memory leak.
+
+---
+
+## Reward Composition
+
+Rewards are individual functions composed via YAML config. Old format was `"success:2.0|stress:0.001|dist_to_obj:1.0|lift:1.0|"`. New format:
+
+```yaml
+# configs/tasks/single_lift.yaml
+rewards:
+  success: {scale: 2.0}
+  stress: {scale: 0.001, cap: 14000.0, divisor: 6000.0, mean_weight: 0.2, top10_weight: 0.8}
+  dist_to_obj: {scale: 1.0, decay: 20.0}
+  lift: {scale: 1.0, grasp_gate_dist: 0.079}
+```
+
+The stress reward math (preserve from old code):
+```
+combined = mean_stress * 0.2 + top10_median_stress * 0.8
+capped = clip(combined, 0, 14000)
+reward = -(capped^2 / 6000) * scale
+```
+
+---
+
+## Old Code Reference
+
+This project is a restructured version of two existing repos:
+- `codesign-dfom` (https://github.com/Ikemura-kei/codesign-dfom) — original Genesis-based framework
+- `codesign_genesis` (https://github.com/Ikemura-kei/codesign_genesis) — improved version
+
+Key files from old code and where they map:
+
+| Old | New | Notes |
+|-----|-----|-------|
+| `core/simulator/simulator.py` | `scenes/scene_builder.py` + `envs/genesis_process.py` | Split scene setup from sim loop |
+| `core/simulator/robots/xarm7.py` | `robot/xarm7_sim.py` + `robot/xarm7_config.py` | Separate config from Genesis-specific code |
+| `xarm7_infra/envs/xarm7_basic_env.py` | `envs/real_backend.py` | Extract RawObs interface |
+| `core/envs/soft_body_base_env.py` | `tasks/base_task.py` + `envs/sim_backend.py` | Split task logic from env |
+| `core/envs/soft_body_pick_up_env.py` | `tasks/single_lift.py` | Task-specific reward/success |
+| Point cloud utils (scattered) | `perception/pipeline.py` + `perception/pointcloud_ops.py` | Single source of truth |
+| Action scaling (duplicated) | `actions/pipeline.py` | Shared between sim and real |
+| `core/wrappers/rsl_rl_wrapper.py` | `wrappers/rsl_rl_wrapper.py` | Now wraps PolicyEnv |
+| Thread-based Genesis isolation | `envs/genesis_process.py` | Upgraded: thread → subprocess |
+
+---
+
+## Conventions
+
+- **Units**: meters, radians, seconds everywhere. No mm. (The XArm SDK uses mm/deg internally; `xarm7_real.py` is the only place that converts.)
+- **Quaternion order**: (w, x, y, z) — enforce this at the RawObs boundary. The reference real-robot repo had an unresolved quaternion sign-flip issue; test this explicitly when first running real deployment.
+- **Camera names**: must match between SceneSpec (sim) and real_lab.yaml (real). Use `"cam_wrist"` and `"cam_ext"`. Tactile sensor names: `"tactile_left"`, `"tactile_right"`.
+- **World frame**: robot base at origin, z-up.
+- **Config**: plain YAML files loaded with yaml.safe_load or yacs. No Hydra.
+- **No over-abstraction**: XArm7 is the only robot. Don't build multi-robot abstractions.
+- **Shared code first**: any observation or action processing must go through PerceptionPipeline / ActionPipeline. Never duplicate processing logic between sim and real.
+
+---
+
+## Implementation Priority
+
+Steps marked ✅ are complete and tested. Steps marked (GPU) require Genesis installed.
+
+| # | Component | Files | GPU? |
+|---|-----------|-------|------|
+| ✅ 1 | RawObs | `envs/raw_obs.py` | No |
+| ✅ 2 | Obs config | `perception/obs_config.py` | No |
+| ✅ 3 | Depth unprojection | `perception/depth_to_pointcloud.py` | No |
+| ✅ 4 | Point cloud ops | `perception/pointcloud_ops.py` | No |
+| ✅ 5 | Perception pipeline | `perception/pipeline.py` | No |
+| ✅ 6 | Action pipeline | `actions/action_config.py` + `actions/pipeline.py` | No |
+| ✅ 7 | Scene spec | `scenes/scene_spec.py` | No |
+| ✅ 8 | Robot config | `robot/xarm7_config.py` | No |
+| 9 | Genesis process | `envs/genesis_process.py` | Yes |
+| 10 | Scene builder | `scenes/scene_builder.py` + `scenes/fixtures.py` | Yes |
+| 11 | Sim robot | `robot/xarm7_sim.py` | Yes |
+| 12 | Sim feedback | `envs/sim_feedback.py` | No |
+| 13 | First task | `tasks/base_task.py` + `tasks/single_lift.py` | No |
+| 14 | Rewards | `rewards/` | No |
+| 15 | Sim env | `envs/sim_backend.py` + `envs/policy_env.py` | Yes |
+| 16 | RL wrapper | `wrappers/rsl_rl_wrapper.py` | No |
+| 17 | Real backend | `envs/real_backend.py` + `robot/xarm7_real.py` | No (needs hardware) |
+
+---
+
+## Testing
+
+- `test_perception_pipeline.py`: feed synthetic RawObs through PerceptionPipeline, verify output shapes and types match obs_space
+- `test_scene_builder.py`: build a SceneSpec, verify it produces a valid Genesis scene (integration test, needs GPU)
+- `test_env_lifecycle.py`: create PolicyEnv with SimBackend, run reset → step → step → reset cycle, verify no crashes or shape mismatches

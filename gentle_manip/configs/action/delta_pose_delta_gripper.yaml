@@ -1,0 +1,4 @@
+# 6D delta pose (x, y, z, roll, pitch, yaw) + 1D gripper
+# Policy outputs in [-1, 1]; scales convert to physical units.
+scales: [0.0052, 0.0052, 0.006, 0.001, 0.001, 0.001, 0.05]
+clip: [-1.0, 1.0]

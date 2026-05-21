@@ -1,0 +1,3 @@
+# ee_pos + ee_quat + gripper_width only (always included, no extras)
+include_joint_pos: false
+include_joint_vel: false

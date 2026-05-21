@@ -1,0 +1,9 @@
+# Core
+numpy
+gymnasium
+
+# Visualization
+matplotlib
+
+# Testing
+pytest

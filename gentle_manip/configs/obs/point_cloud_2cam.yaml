@@ -1,0 +1,8 @@
+include_joint_pos: false
+include_joint_vel: false
+
+point_cloud:
+  cameras: ["cam_wrist", "cam_ext"]
+  crop_min: [0.1, -0.3, 0.0]
+  crop_max: [0.6, 0.3, 0.5]
+  max_points: 2048
