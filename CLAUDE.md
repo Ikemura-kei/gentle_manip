@@ -33,6 +33,29 @@ PolicyEnv (Gym interface — IDENTICAL for sim and real)
 
 ---
 
+## Third-Party Dependencies
+
+Third-party libraries whose source may need modification live in `third_party/` as git submodules.
+
+```
+third_party/
+└── genesis/    # Genesis physics engine (fork: https://github.com/Ikemura-kei/Genesis_fork)
+```
+
+After cloning, initialise with:
+```bash
+git submodule update --init --recursive
+```
+
+Install Genesis in editable mode so the rest of the codebase can `import genesis` normally:
+```bash
+pip install -e third_party/genesis
+```
+
+Never `pip install genesis` from PyPI — always use the fork in `third_party/genesis`.
+
+---
+
 ## Directory Structure
 
 ```
