@@ -1,0 +1,59 @@
+from __future__ import annotations
+
+import numpy as np
+
+from gentle_manip.envs.raw_obs import RawObs
+from gentle_manip.envs.sim_feedback import SimFeedback
+from gentle_manip.scenes.scene_spec import CameraEntry, FixtureEntry, ObjectEntry, SceneSpec
+from gentle_manip.tasks.base_task import BaseTask
+
+
+class SingleLiftTask(BaseTask):
+    """Lift one object to a target height and hold it there for hold_steps steps.
+
+    Success: object_center_z > initial_z + lift_height, sustained for hold_steps
+    consecutive steps.
+    """
+
+    def __init__(self, task_cfg: dict) -> None:
+        super().__init__(task_cfg)
+        self.lift_height: float = float(task_cfg.get("lift_height", 0.15))
+        self.hold_steps: int = int(task_cfg.get("hold_steps", 30))
+        self.object_name: str = str(task_cfg.get("object_name", "tofu"))
+
+        self._initial_z: np.ndarray | None = None
+        self._success_counter: np.ndarray | None = None
+
+    @property
+    def scene_spec(self) -> SceneSpec:
+        return SceneSpec(
+            objects=[ObjectEntry(name=self.object_name)],
+            fixtures=[FixtureEntry(fixture_type="table")],
+            cameras=[
+                CameraEntry(
+                    name="cam_wrist",
+                    pos=(0.55, 0.0, 0.35),
+                    lookat=(0.4, 0.0, 0.1),
+                ),
+                CameraEntry(
+                    name="cam_ext",
+                    pos=(1.0, -0.5, 0.5),
+                    lookat=(0.4, 0.0, 0.1),
+                ),
+            ],
+        )
+
+    def reset(self, sim_feedback: SimFeedback) -> None:
+        super().reset(sim_feedback)
+        num_envs = sim_feedback.object_center.shape[0]
+        self._initial_z = sim_feedback.object_center[:, 2].copy()
+        self._success_counter = np.zeros(num_envs, dtype=np.int32)
+
+    def is_success(self, sim_feedback: SimFeedback, raw_obs: RawObs) -> np.ndarray:
+        if self._initial_z is None or self._success_counter is None:
+            return np.zeros(sim_feedback.object_center.shape[0], dtype=bool)
+
+        obj_z = sim_feedback.object_center[:, 2]
+        lifted = obj_z > (self._initial_z + self.lift_height)
+        self._success_counter = np.where(lifted, self._success_counter + 1, 0)
+        return self._success_counter >= self.hold_steps

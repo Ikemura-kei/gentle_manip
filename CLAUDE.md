@@ -86,12 +86,11 @@ gentle_manip/
 │   └── sim_feedback.py                 #   SimFeedback dataclass (stress, particle pos)
 │
 ├── rewards/                            # Reward components (composable via config)
-│   ├── __init__.py                     #   build_reward_fn(config) → composite callable
+│   ├── __init__.py                     #   build_reward_fn(config) → CompositeReward
 │   ├── stress.py                       #   Von Mises: mean_stress * 0.2 + top10 * 0.8, capped, squared / 6000
-│   ├── distance.py                     #   exp(-k*dist), dist-to-obj, dist-to-goal
+│   ├── distance.py                     #   exp(-k*dist): DistToObjReward, DistToGoalReward
 │   ├── lift.py                         #   Lift progress with grasp gating (grasp_gate_dist=0.079)
-│   ├── placement.py                    #   Release height, impact force, pressing penalty
-│   └── success.py                      #   Binary success reward
+│   └── placement.py                    #   Release height penalty (pressing/impact need extra contact fields)
 │
 ├── domain_randomization/
 │   ├── dr_config.py                    #   What to randomize + ranges
@@ -233,16 +232,25 @@ class CameraEntry:
 
 ### SimFeedback (from Genesis, not available in real)
 
+Only universal fields are first-class. Everything task- or object-specific goes in
+`extra` so the struct doesn't need updating as tasks and object types evolve.
+
 ```python
 @dataclass
 class SimFeedback:
-    von_mises_stress: np.ndarray    # (n_particles,)
-    particle_positions: np.ndarray  # (n_particles, 3)
-    object_center: np.ndarray       # (3,) mean of particles
-    ee_pos: np.ndarray
-    gripper_width: float
-    # ... task-specific fields
+    ee_pos: np.ndarray        # (num_envs, 3)   end-effector world position
+    gripper_width: np.ndarray # (num_envs,)     metres
+    object_center: np.ndarray # (num_envs, 3)   representative object position
+    extra: Dict[str, Any] = field(default_factory=dict)
+    # Examples of extra keys:
+    #   extra["von_mises_stress"]    (num_envs, n_particles)  — soft bodies only
+    #   extra["particle_positions"]  (num_envs, n_particles, 3)
+    #   extra["contact_force"]       (num_envs,)              — rigid surrogates
 ```
+
+**Important:** `SimFeedback` must only contain raw sim state (physics quantities). Task-derived state such as success must NOT be stored here — the sim is unaware of task logic. `BaseTask.compute_reward` calls `is_success` itself and adds the sparse bonus directly, keeping the boundary clean.
+
+Reward components that require soft-body data should let the `KeyError` propagate naturally if `"von_mises_stress"` is missing, rather than silently returning zero.
 
 ---
 
@@ -363,23 +371,31 @@ Communication is via `multiprocessing.Queue`. The worker loop runs inside the ch
 
 ## Reward Composition
 
-Rewards are individual functions composed via YAML config. Old format was `"success:2.0|stress:0.001|dist_to_obj:1.0|lift:1.0|"`. New format:
+Rewards are individual components composed via YAML config and summed by `CompositeReward`. Available components: `stress`, `dist_to_obj`, `dist_to_goal`, `lift`, `placement`.
+
+**Success is not a reward component.** It is handled at the task level: `BaseTask.compute_reward` calls `is_success` and adds `success.astype(float) * success_scale` on top of the shaped reward. This keeps the sim/task boundary clean — reward components only see raw physics state.
 
 ```yaml
 # configs/tasks/single_lift.yaml
+lift_height: 0.15
+hold_steps: 30
+object_name: "tofu"
+success_scale: 2.0          # sparse bonus — lives here, not in rewards block
+
 rewards:
-  success: {scale: 2.0}
-  stress: {scale: 0.001, cap: 14000.0, divisor: 6000.0, mean_weight: 0.2, top10_weight: 0.8}
+  stress:    {scale: 0.001, cap: 14000.0, divisor: 6000.0, mean_weight: 0.2, top10_weight: 0.8}
   dist_to_obj: {scale: 1.0, decay: 20.0}
-  lift: {scale: 1.0, grasp_gate_dist: 0.079}
+  lift:      {scale: 1.0, grasp_gate_dist: 0.079}
 ```
 
-The stress reward math (preserve from old code):
+The stress reward math (preserved from old code):
 ```
 combined = mean_stress * 0.2 + top10_median_stress * 0.8
 capped = clip(combined, 0, 14000)
 reward = -(capped^2 / 6000) * scale
 ```
+
+`StressReward` requires `sim_feedback.extra["von_mises_stress"]` — only include it in tasks that use soft-body objects.
 
 ---
 
@@ -434,17 +450,34 @@ Steps marked ✅ are complete and tested. Steps marked (GPU) require Genesis ins
 | 9 | Genesis process | `envs/genesis_process.py` | Yes |
 | 10 | Scene builder | `scenes/scene_builder.py` + `scenes/fixtures.py` | Yes |
 | 11 | Sim robot | `robot/xarm7_sim.py` | Yes |
-| 12 | Sim feedback | `envs/sim_feedback.py` | No |
-| 13 | First task | `tasks/base_task.py` + `tasks/single_lift.py` | No |
-| 14 | Rewards | `rewards/` | No |
+| ✅ 12 | Sim feedback | `envs/sim_feedback.py` | No |
+| ✅ 13 | First task | `tasks/base_task.py` + `tasks/single_lift.py` | No |
+| ✅ 14 | Rewards | `rewards/` | No |
 | 15 | Sim env | `envs/sim_backend.py` + `envs/policy_env.py` | Yes |
-| 16 | RL wrapper | `wrappers/rsl_rl_wrapper.py` | No |
+| ✅ 16 | RL wrapper | `wrappers/rsl_rl_wrapper.py` + `wrappers/flatten_obs_wrapper.py` | No |
 | 17 | Real backend | `envs/real_backend.py` + `robot/xarm7_real.py` | No (needs hardware) |
 
 ---
 
 ## Testing
 
-- `test_perception_pipeline.py`: feed synthetic RawObs through PerceptionPipeline, verify output shapes and types match obs_space
-- `test_scene_builder.py`: build a SceneSpec, verify it produces a valid Genesis scene (integration test, needs GPU)
-- `test_env_lifecycle.py`: create PolicyEnv with SimBackend, run reset → step → step → reset cycle, verify no crashes or shape mismatches
+All tests live in `gentle_manip/tests/` and run with `python -m pytest gentle_manip/tests/ -q`.
+
+Existing test files (159 passing, 1 skipped — torch tests skip without GPU):
+
+| File | What it covers |
+|------|----------------|
+| `test_raw_obs.py` | RawObs construction and field shapes |
+| `test_obs_config.py` | ObsConfig YAML loading and validation |
+| `test_depth_to_pointcloud.py` | Pinhole backprojection math |
+| `test_pointcloud_ops.py` | Crop, subsample, voxelize; includes vectorisation benchmarks |
+| `test_perception_pipeline.py` | PerceptionPipeline end-to-end with synthetic RawObs |
+| `test_action_pipeline.py` | ActionPipeline scaling, clipping, space construction |
+| `test_scene_spec.py` | SceneSpec / ObjectEntry / CameraEntry dataclass validation |
+| `test_rewards.py` | All reward components + CompositeReward + build_reward_fn |
+| `test_tasks.py` | SingleLiftTask scene_spec, is_success hold logic, compute_reward |
+| `test_wrappers.py` | FlattenObsWrapper; RslRlVecEnvWrapper (skipped without torch) |
+
+Still needed (GPU):
+- `test_scene_builder.py`: build a SceneSpec → verify valid Genesis scene
+- `test_env_lifecycle.py`: PolicyEnv with SimBackend, reset → step → step → reset cycle

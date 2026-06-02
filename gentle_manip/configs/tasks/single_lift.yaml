@@ -1,0 +1,18 @@
+lift_height: 0.15    # metres above initial object z to qualify as "lifted"
+hold_steps: 30       # consecutive steps at height required for success (~3 s at 10 Hz)
+object_name: "tofu"
+success_scale: 2.0
+
+rewards:
+  stress:
+    scale: 0.001
+    cap: 14000.0
+    divisor: 6000.0
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 1.0
+    decay: 20.0
+  lift:
+    scale: 1.0
+    grasp_gate_dist: 0.079
