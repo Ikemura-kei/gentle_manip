@@ -1,0 +1,27 @@
+[project]
+name = "gentle-manip"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    # Simulation
+    "genesis-world",
+    # Core
+    "numpy",
+    "gymnasium",
+    # Visualization
+    "matplotlib",
+    # Testing
+    "pytest",
+]
+
+[tool.uv.sources]
+genesis-world = { path = "third_party/genesis", editable = true }
+
+[tool.uv]
+constraint-dependencies = [
+    "pymeshlab<2025",  # 2025.x requires manylinux_2_35; older wheels support manylinux_2_31
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

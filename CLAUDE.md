@@ -14,7 +14,7 @@ For old implementation, check:
 * https://github.com/Ikemura-kei/gentle_manipulation — real-robot only (no sim); source of calibrated camera extrinsics, XArm7 control parameters, and point cloud pipeline details
 ---
 
-If anything was installed for running the modules, please add them into requirements.txt if not present yet.
+If anything was installed for running the modules, please add them into `pyproject.toml` under `[project] dependencies` if not present yet.
 
 ## Architecture — The Big Picture
 
@@ -42,17 +42,15 @@ third_party/
 └── genesis/    # Genesis physics engine (fork: https://github.com/Ikemura-kei/Genesis_fork)
 ```
 
-After cloning, initialise with:
+After cloning, initialise and install with:
 ```bash
 git submodule update --init --recursive
+uv sync
 ```
 
-Install Genesis in editable mode so the rest of the codebase can `import genesis` normally:
-```bash
-pip install -e third_party/genesis
-```
+`uv sync` installs all dependencies including Genesis from the local submodule in editable mode (`pyproject.toml` maps `genesis-world` → `third_party/genesis`). Never `pip install genesis` from PyPI — always use the fork in `third_party/genesis`.
 
-Never `pip install genesis` from PyPI — always use the fork in `third_party/genesis`.
+Run scripts with `uv run python scripts/train.py` (or any other entry point).
 
 ---
 
