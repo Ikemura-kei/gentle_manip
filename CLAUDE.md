@@ -476,7 +476,8 @@ Steps marked ✅ are complete and tested. Steps marked (GPU) require Genesis ins
 | ✅ 12 | Sim feedback | `envs/sim_feedback.py` | No |
 | ✅ 13 | First task | `tasks/base_task.py` + `tasks/single_lift.py` | No |
 | ✅ 14 | Rewards | `rewards/` | No |
-| 15 | Sim env | `envs/sim_backend.py` + `envs/policy_env.py` | Yes |
+| ✅ 15a | Policy env (shared seam) | `envs/policy_env.py` | No |
+| 15b | Sim backend | `envs/sim_backend.py` | Yes |
 | ✅ 16 | RL wrapper | `wrappers/rsl_rl_wrapper.py` + `wrappers/flatten_obs_wrapper.py` | No |
 | 17 | Real backend | `envs/real_backend.py` + `robot/xarm7_real.py` | No (needs hardware) |
 
@@ -486,7 +487,7 @@ Steps marked ✅ are complete and tested. Steps marked (GPU) require Genesis ins
 
 All tests live in `gentle_manip/tests/` and run with `python -m pytest gentle_manip/tests/ -q`.
 
-Existing test files (159 passing, 1 skipped — torch tests skip without GPU):
+Existing test files (171 passing, 1 skipped — torch tests skip without GPU):
 
 | File | What it covers |
 |------|----------------|
@@ -500,6 +501,7 @@ Existing test files (159 passing, 1 skipped — torch tests skip without GPU):
 | `test_rewards.py` | All reward components + CompositeReward + build_reward_fn |
 | `test_tasks.py` | SingleLiftTask scene_spec, is_success hold logic, compute_reward |
 | `test_wrappers.py` | FlattenObsWrapper; RslRlVecEnvWrapper (skipped without torch) |
+| `test_policy_env.py` | PolicyEnv with a MockBackend: spaces, reset/step shapes, action scaling, fixed-horizon auto-reset, reward path, task=None real-deploy mode |
 
 Still needed (GPU):
 - `test_scene_builder.py`: build a SceneSpec → verify valid Genesis scene
