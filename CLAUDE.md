@@ -48,9 +48,34 @@ git submodule update --init --recursive
 uv sync
 ```
 
-`uv sync` installs all dependencies including Genesis from the local submodule in editable mode (`pyproject.toml` maps `genesis-world` → `third_party/genesis`). Never `pip install genesis` from PyPI — always use the fork in `third_party/genesis`.
+`uv sync` installs all dependencies including Genesis from the local submodule in editable mode (Genesis lives in the default `sim` dependency-group; `pyproject.toml` maps `genesis-world` → `third_party/genesis`). Never `pip install genesis` from PyPI — always use the fork in `third_party/genesis`.
 
 Run scripts with `uv run python scripts/train.py` (or any other entry point).
+
+**torch is installed manually** (platform-specific CUDA build, kept out of `pyproject.toml`):
+```bash
+uv pip install "torch==2.5.1+cu121" --index-url https://download.pytorch.org/whl/cu121
+```
+A bare `uv sync` will remove it — reinstall after syncing. (cu121 chosen to avoid the
+`pypi.nvidia.com` nvjitlink wheel-split issue on the lab box.)
+
+### Two environments (sim/training vs real deployment)
+
+Genesis (newest) requires Python 3.12, but the L515 camera needs
+`pyrealsense2==2.54.2.5684`, which only ships cp310/cp311 wheels. These can't
+coexist in one interpreter, so there are **two uv environments**:
+
+| Env | Python | Purpose | Install |
+|-----|--------|---------|---------|
+| repo root | 3.12 | sim, training, tests (genesis + torch) | `uv sync` |
+| `deploy/` | 3.11 | real-robot deployment (genesis-free; hardware SDKs) | `uv sync --directory deploy` |
+
+The `deploy/` env depends on `gentle-manip[real]` — the genesis-free core plus
+`pyrealsense2` + `xArm-Python-SDK`. Genesis is never pulled in (it's a `sim`
+dependency-group, not installed for a path dependency), which enforces the
+"real side of the RawObs boundary is genesis-free" rule at the dependency level.
+Run deployment code with `uv run --directory deploy python <script>`. (torch, if a
+trained policy is loaded, is installed manually in this env too.)
 
 ---
 
@@ -103,6 +128,7 @@ gentle_manip/
 │   ├── policy_env.py                   #   PolicyEnv: shared Gym wrapper
 │   ├── sim_backend.py                  #   Genesis → RawObs adapter
 │   ├── real_backend.py                 #   XArm SDK + RealSense → RawObs adapter
+│   ├── realsense_camera.py             #   RealSense device wrapper (lazy pyrealsense2, one per camera)
 │   ├── genesis_process.py              #   Subprocess isolation (memory-leak fix)
 │   └── sim_feedback.py                 #   SimFeedback dataclass (stress, particle pos)
 │
@@ -150,6 +176,7 @@ gentle_manip/
 │   ├── train.py
 │   ├── evaluate.py
 │   ├── deploy_real.py
+│   ├── smoke_real.py                   #   Gated step-by-step real hardware bring-up (--phase 0..5)
 │   ├── collect_demos.py
 │   ├── visualize.py
 │   └── check_parity.py
@@ -477,7 +504,7 @@ Steps marked ✅ are complete and tested. Steps marked (GPU) require Genesis ins
 | ✅ 15a | Policy env (shared seam) | `envs/policy_env.py` | No |
 | 15b | Sim backend | `envs/sim_backend.py` | Yes |
 | ✅ 16 | RL wrapper | `wrappers/rsl_rl_wrapper.py` + `wrappers/flatten_obs_wrapper.py` | No |
-| 17 | Real backend | `envs/real_backend.py` + `robot/xarm7_real.py` | No (needs hardware) |
+| ✅ 17 | Real backend | `envs/real_backend.py` + `robot/xarm7_real.py` + `envs/realsense_camera.py` | Mock tests + live hardware smoke test (all 5 phases) passed |
 
 ---
 
@@ -485,7 +512,7 @@ Steps marked ✅ are complete and tested. Steps marked (GPU) require Genesis ins
 
 All tests live in `gentle_manip/tests/` and run with `python -m pytest gentle_manip/tests/ -q`.
 
-Existing test files (171 passing, 1 skipped — torch tests skip without GPU):
+Existing test files (206 passing; torch tests run here since the dev box has a GPU + torch):
 
 | File | What it covers |
 |------|----------------|
@@ -500,6 +527,8 @@ Existing test files (171 passing, 1 skipped — torch tests skip without GPU):
 | `test_tasks.py` | SingleLiftTask scene_spec, is_success hold logic, compute_reward |
 | `test_wrappers.py` | FlattenObsWrapper; RslRlVecEnvWrapper (skipped without torch) |
 | `test_policy_env.py` | PolicyEnv with a MockBackend: spaces, reset/step shapes, action scaling, fixed-horizon auto-reset, reward path, task=None real-deploy mode |
+| `test_xarm7_real.py` | XArm7Real with a fake XArmAPI: quat↔rotvec, TCP-offset round-trip, EE pose mm conversion, connect mode sequence, gripper clip, joint read |
+| `test_real_backend.py` | RealBackend with fake robot+camera: RawObs contract, cam_ext extrinsic, delta accumulation + EE_BOUNDS/gripper clipping, sim_feedback=None |
 
 Still needed (GPU):
 - `test_scene_builder.py`: build a SceneSpec → verify valid Genesis scene

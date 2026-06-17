@@ -1,0 +1,35 @@
+# Real lab deployment config — consumed by RealBackend / XArm7Real.
+# Values under robot.* override the real-only defaults in robot/xarm7_config.py.
+
+robot:
+  ip: '192.168.1.241'            # TODO: set the XArm7 controller IP
+  # Optional overrides (else fall back to xarm7_config.py real-only defaults):
+  # default_ee_pose: [0.3, 0.0, 0.3, 3.1416, 0.0, 0.0]   # x,y,z (m), rx,ry,rz (rad rotvec)
+  # default_gripper_width: 0.08                            # meters (open)
+  servo_speed_mm_s: 60
+  servo_mvacc: 50
+
+cameras:
+  cam_ext:                       # Intel RealSense L515, world-fixed
+    type: l515
+    serial: "f1120484"
+    width: 640
+    height: 480
+    depth_min: 0.1
+    depth_max: 0.85
+    # world_T_cam: [...]         # optional 4x4 override; else uses WORLD_T_CAM_EXT
+    #                            # TODO: recalibrate for the new rig
+
+  # ── Future hardware (not on the current rig) ───────────────────────────────
+  # cam_wrist:                   # Intel RealSense D405, wrist-mounted (dynamic extrinsic)
+  #   type: d405
+  #   serial: "230322271104"
+  #   width: 640
+  #   height: 480
+  #   depth_min: 0.1
+  #   depth_max: 0.6
+  #   # extrinsic computed as world_T_ee @ EE_T_CAM_WRIST each step
+
+# tactile:                       # GelSight Mini (real-only); absent on the current rig
+#   tactile_left:  {serial: "..."}
+#   tactile_right: {serial: "..."}

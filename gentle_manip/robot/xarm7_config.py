@@ -55,14 +55,44 @@ DEFAULT_JOINT_ANGLES = [
 
 # TODO: confirm home pose with real hardware testing
 # [x, y, z (m), rx, ry, rz (rad, axis-angle / rotvec)]
-DEFAULT_EE_POSE = [0.3, 0.0, 0.3, 3.1416, 0.0, 0.0]
+DEFAULT_EE_POSE = [0.45, 0.0, 0.2, 3.1416, 0.0, 0.0]
 
 # TODO: confirm open width with real gripper
 DEFAULT_GRIPPER_WIDTH = 0.08   # meters
 
-# Fixed transform from EE link to wrist camera optical frame (calibrated once via AprilTag)
-# world_T_cam_wrist = world_T_ee @ EE_T_CAM_WRIST  (RealBackend updates each step)
-# TODO: replace with calibrated values before real deployment
+# Gripper width (meters) → XArm SDK gripper position units.
+# The standard XArm parallel gripper takes set_gripper_position(pos) with pos in
+# [0, 850] (≈ 0–85 mm opening). So 1 m ≈ 10000 units.
+# TODO: confirm scale + max opening on the actual gripper.
+GRIPPER_WIDTH_TO_POS = 10000.0   # units per meter
+GRIPPER_POS_MAX = 850.0          # SDK units at full open
+
+# ── TCP offset ────────────────────────────────────────────────────────────────
+# The XArm SDK reports/accepts a different TCP than "our" TCP definition.
+# The API TCP is 0.13 m below "our" TCP along the tool Z-axis.
+# Convert targets "our" TCP → API TCP before every set_servo_cartesian_aa call:
+#   T_api = T_ours @ inv(offset)    (offset is a pure translation in the tool frame)
+TCP_API_TO_TCP_OURS_OFFSET = [0.0, 0.0, 0.0]   # meters, tool frame
+
+# ── Servo motion params (set_servo_cartesian_aa) ──────────────────────────────
+SERVO_SPEED_MM_S = 60     # passed to set_servo_cartesian_aa(speed=)
+SERVO_MVACC      = 500    # passed to set_servo_cartesian_aa(mvacc=)
+
+# ── Camera extrinsics ─────────────────────────────────────────────────────────
+# L515 (external, world-fixed) — static, calibrated once via AprilTag.
+# TODO: recalibrate WORLD_T_CAM_EXT for the new single-camera rig (value below is
+#       carried over from the old reference repo). Overridable via real_lab.yaml.
+WORLD_T_CAM_EXT = [
+    [     0.02100114,     -0.01457584,     -0.99967320,      0.98910661],
+    [     0.99974256,     -0.00828403,      0.02112338,     -0.00034108],
+    [    -0.00858922,     -0.99985945,      0.01439812,      0.09825304],
+    [     0.00000000,      0.00000000,      0.00000000,      1.00000000],
+]
+
+# Fixed transform from EE link to wrist camera optical frame (calibrated once via AprilTag).
+# NOT used by the current rig (no wrist camera) — kept for future use:
+#   world_T_cam_wrist = world_T_ee @ EE_T_CAM_WRIST   (RealBackend would update each step)
+# TODO: replace with calibrated values if a wrist camera is added.
 EE_T_CAM_WRIST = [
     [1.0, 0.0, 0.0, 0.0],
     [0.0, 1.0, 0.0, 0.0],

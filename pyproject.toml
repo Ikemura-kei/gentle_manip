@@ -2,22 +2,39 @@
 name = "gentle-manip"
 version = "0.1.0"
 requires-python = ">=3.10"
+# Core deps are genesis-free and platform-agnostic — these alone are enough to
+# run the real side of the RawObs boundary (perception, actions, real backend).
 dependencies = [
-    # Simulation
-    "genesis-world",
-    # Core
     "numpy",
     "gymnasium",
-    # Visualization
+    "scipy",   # rotation math in the real backend
+    "pyyaml",  # YAML config loading
     "matplotlib",
-    # Testing
-    "pytest",
 ]
+
+[project.optional-dependencies]
+# Real-robot hardware SDKs (the `real` extra). Pulled by the separate 3.11 deploy
+# env (deploy/), genesis-free. pyrealsense2 is pinned: 2.54.2.5684 is the last
+# release line that supports the discontinued Intel RealSense L515 (cam_ext) and
+# only ships cp310/cp311 wheels — hence the deploy env is Python 3.11, not 3.12.
+real = [
+    "pyrealsense2==2.54.2.5684",
+    "xArm-Python-SDK",
+    "opencv-python>=4.8",
+]
+
+[dependency-groups]
+# Genesis lives in a default group (not a core dep) so the deploy env can install
+# gentle-manip[real] without dragging in genesis. `uv sync` still installs it by
+# default — see [tool.uv] default-groups — so the sim/dev workflow is unchanged.
+sim = ["genesis-world"]
+dev = ["pytest"]
 
 [tool.uv.sources]
 genesis-world = { path = "third_party/genesis", editable = true }
 
 [tool.uv]
+default-groups = ["sim", "dev"]
 constraint-dependencies = [
     "pymeshlab<2025",  # 2025.x requires manylinux_2_35; older wheels support manylinux_2_31
 ]

@@ -1,0 +1,28 @@
+# Real-robot deployment environment.
+#
+# Separate from the main project because the L515 camera needs
+# pyrealsense2==2.54.2.5684, which only ships cp310/cp311 wheels — so this env is
+# Python 3.11, while the main sim/training env is 3.12.
+#
+# It depends on gentle-manip[real]: the genesis-free core + the hardware SDKs.
+# Genesis is NOT pulled in (it lives in the main project's `sim` dependency-group,
+# which is not installed for a path dependency). gentle_manip's real-side modules
+# (envs.real_backend, robot.xarm7_real, envs.realsense_camera, perception/*,
+# actions/*) import cleanly without genesis.
+#
+# Setup:   uv sync --directory deploy
+# Run:     uv run --directory deploy python <script>
+#
+# NOTE: torch (for running a trained policy) is platform-specific and installed
+# manually here too, same as the main env — it is not a declared dependency.
+
+[project]
+name = "gentle-manip-deploy"
+version = "0.1.0"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "gentle-manip[real]",
+]
+
+[tool.uv.sources]
+gentle-manip = { path = "..", editable = true }

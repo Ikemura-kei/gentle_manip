@@ -700,22 +700,42 @@ name = "gentle-manip"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "genesis-world" },
     { name = "gymnasium" },
     { name = "matplotlib" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+
+[package.optional-dependencies]
+real = [
+    { name = "pyrealsense2" },
+    { name = "xarm-python-sdk" },
+]
+
+[package.dev-dependencies]
+dev = [
     { name = "pytest" },
+]
+sim = [
+    { name = "genesis-world" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "genesis-world", editable = "third_party/genesis" },
     { name = "gymnasium" },
     { name = "matplotlib" },
     { name = "numpy" },
-    { name = "pytest" },
+    { name = "pyrealsense2", marker = "extra == 'real'", specifier = "==2.54.2.5684" },
+    { name = "scipy" },
+    { name = "xarm-python-sdk", marker = "extra == 'real'" },
 ]
+provides-extras = ["real"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest" }]
+sim = [{ name = "genesis-world", editable = "third_party/genesis" }]
 
 [[package]]
 name = "glfw"
@@ -1894,6 +1914,17 @@ wheels = [
 ]
 
 [[package]]
+name = "pyrealsense2"
+version = "2.54.2.5684"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/23/50/bda4d82d30e7823dff62b167bcd19af018fe741a94b5b5445857efb40d84/pyrealsense2-2.54.2.5684-cp310-cp310-manylinux1_x86_64.whl", hash = "sha256:c49ac2ca7550b896670bc94113e2e13c672cba6e5ca8aa646dcb3c8f9545a552", size = 13330757, upload-time = "2023-09-28T08:32:07.73Z" },
+    { url = "https://files.pythonhosted.org/packages/4e/43/424e8bcf3c7b662056c7ae77b1d6d00c27c825d2aca37744ecb4775483e1/pyrealsense2-2.54.2.5684-cp310-cp310-win_amd64.whl", hash = "sha256:21ea9db6f80b425d6435dfc78add39620749107069a4d20d66a191df614f5622", size = 5613955, upload-time = "2023-09-28T08:32:12.497Z" },
+    { url = "https://files.pythonhosted.org/packages/36/e7/18006b545e91af7eeed882ecfbcefa3a5d16bb842ca6106ce3d01c166a16/pyrealsense2-2.54.2.5684-cp311-cp311-manylinux1_x86_64.whl", hash = "sha256:95953633b97306742e689706d5bfc2fef7f848fde10ce49d080d26ff4b4d0483", size = 13335561, upload-time = "2023-09-28T08:32:15.65Z" },
+    { url = "https://files.pythonhosted.org/packages/68/de/794e449aff0faf8f38f9731e7ef78a088aec7d18926508d77e8563e28a88/pyrealsense2-2.54.2.5684-cp311-cp311-win_amd64.whl", hash = "sha256:8b7036c43f332ddf116d200ff4fcdee2b69f845b7dad55415764e6b90c40723a", size = 5613883, upload-time = "2023-09-28T08:32:18.719Z" },
+]
+
+[[package]]
 name = "pysplashsurf"
 version = "0.14.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2674,6 +2705,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/62/b2/12fc318d3563481fe01482dd8e925d38e83b62d64291ed16ab0b6d836a91/xacro-2.1.1.tar.gz", hash = "sha256:3e7adf33cdd90d9fbe8ca0d07d9118acf770a2ad8bf575977019a5c8a60d4d1b", size = 104752, upload-time = "2025-08-28T18:21:20.397Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/93/6b/3fcfd8589d0e319f5fb56f105acbe791198fd36bb54469a91fbe49d828c4/xacro-2.1.1-py3-none-any.whl", hash = "sha256:c3b330ebd984a3bce6d6482e0047eae5c5333fedd49b30b9b6df863a086b35f7", size = 27087, upload-time = "2025-08-28T18:21:19.165Z" },
+]
+
+[[package]]
+name = "xarm-python-sdk"
+version = "1.18.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e3/f1/5dcf5ed5bfd009b226a9656c1401df1782f7f86c7292696bb753366c9267/xarm_python_sdk-1.18.4.tar.gz", hash = "sha256:75acad469c106e1cb7074762015980372564e88a6d62b64ebaea1c7c580332d5", size = 230108, upload-time = "2026-05-21T04:08:48.871Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0f/25/ad2814469965e765dcf86c12276505a8aadd3d00c387aed82519f6c45434/xarm_python_sdk-1.18.4-py3-none-any.whl", hash = "sha256:943ce66308bc49619386d6eaf428a2783bcd202c1fbe3fe79de87d5f89647989", size = 193152, upload-time = "2026-05-21T04:08:47.281Z" },
 ]
 
 [[package]]
