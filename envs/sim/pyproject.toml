@@ -1,0 +1,36 @@
+# Simulation / training / tests environment (Python 3.12): Genesis + torch.
+#
+# Depends on gentle-manip[sim] — the shared core plus the genesis fork. This is
+# the env that runs the sim backend, RL/DP3 training, and the test suite.
+#
+# Setup:   uv sync --project envs/sim
+# Run:     uv run --project envs/sim python <script>
+# Tests:   uv run --project envs/sim python -m pytest gentle_manip/tests/ -q
+#
+# NOTE: torch is platform-specific (CUDA build) and installed manually after
+# syncing — it is not a declared dependency. On the lab box:
+#   uv pip install --project envs/sim "torch==2.5.1+cu121" --index-url https://download.pytorch.org/whl/cu121
+# Genesis imports torch at import time, so it must be present to run sim/training.
+
+[project]
+name = "gentle-manip-sim"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+# genesis-world is listed directly (not via a gentle-manip extra) so the fork
+# source below applies — uv only honours [tool.uv.sources] for a project's DIRECT
+# dependencies, not transitive ones. genesis is purely an envs/sim concern; the
+# gentle-manip library itself never declares it (that's what keeps deploy clean).
+dependencies = [
+    "gentle-manip",
+    "genesis-world",
+    "pytest",
+]
+
+[tool.uv.sources]
+gentle-manip = { path = "../..", editable = true }
+genesis-world = { path = "../../third_party/genesis", editable = true }
+
+[tool.uv]
+constraint-dependencies = [
+    "pymeshlab<2025",  # 2025.x requires manylinux_2_35; older wheels support manylinux_2_31
+]

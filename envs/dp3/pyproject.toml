@@ -1,0 +1,41 @@
+# DP3 training / dataset conversion environment.
+#
+# Separate from the repo-root sim env and envs/deploy because DP3 has its own
+# older Hydra/diffusers/zarr stack and CUDA-sensitive torch/PyTorch3D needs.
+#
+# Setup:   uv sync --project envs/dp3
+# Run:     uv run --project envs/dp3 python <script>
+#
+# Torch, torchvision, and pytorch3d are platform-specific. Install the CUDA
+# build that matches the lab machine after syncing, for example:
+#   uv pip --project envs/dp3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+#   uv pip --project envs/dp3 install -e third_party/DP3/third_party/pytorch3d_simplified
+
+[project]
+name = "gentle-manip-dp3"
+version = "0.1.0"
+requires-python = ">=3.8,<3.11"
+dependencies = [
+    "zarr<3",
+    "numcodecs",
+    "hydra-core==1.2.0",
+    "omegaconf",
+    "diffusers==0.11.1",
+    "huggingface-hub<0.14",
+    "dill==0.3.5.1",
+    "einops==0.4.1",
+    "numba>=0.57",
+    "wandb",
+    "termcolor",
+    "tqdm",
+    "matplotlib",
+    "imageio",
+    "moviepy",
+    "av",
+    "gpustat",
+    "ipdb",
+]
+
+[tool.uv.sources]
+gentle-manip = { path = "../..", editable = true }
+diffusion-policy-3d = { path = "../../third_party/DP3/3D-Diffusion-Policy", editable = true }

@@ -22,7 +22,7 @@ from gentle_manip.demos.teleop_spacemouse import SpaceMouseTeleop
 # normalized [-1,1] raw_action — the same thing a policy outputs — so it flows
 # through the env's ActionPipeline, and recorded obs are exactly what a policy
 # will see. Runs in the 3.11 deploy env:
-#   uv run --directory deploy python -m gentle_manip.demos.record ...
+#   uv run --project envs/deploy python -m gentle_manip.demos.record ...
 
 _PKG = Path(gentle_manip.__file__).parent
 
@@ -232,7 +232,7 @@ def _load_yaml(path: Path) -> dict:
 
 
 def _resolve_config(path: Path) -> Path:
-    """Find a config path regardless of cwd (the deploy env runs from deploy/).
+    """Find a config path regardless of cwd.
 
     Tries the path as given, then relative to the repo root, so repo-root-relative
     args like 'gentle_manip/configs/obs/state_ee_only.yaml' work from anywhere.

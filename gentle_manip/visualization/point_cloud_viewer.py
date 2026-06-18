@@ -15,7 +15,7 @@ from gentle_manip.robot import xarm7_config as cfg
 # static WORLD_T_CAM_EXT), the workspace crop box (red wireframe), and the base
 # frame axes, so you can position the camera/objects and read off good crop
 # bounds. Runs in the 3.11 deploy env:
-#   uv run --directory deploy python -m gentle_manip.visualization.point_cloud_viewer
+#   uv run --project envs/deploy python -m gentle_manip.visualization.point_cloud_viewer
 #
 # open3d / pyrealsense2 are imported lazily (the `real` extra).
 

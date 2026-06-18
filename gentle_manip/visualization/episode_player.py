@@ -18,7 +18,7 @@ from scipy.spatial.transform import Rotation
 #   Q/ESC  quit
 #
 # Runs in the 3.11 deploy env (needs open3d + a display):
-#   uv run --directory deploy python -m gentle_manip.visualization.episode_player <pickle>
+#   uv run --project envs/deploy python -m gentle_manip.visualization.episode_player <pickle>
 
 
 def _R_from_quat_wxyz(q):

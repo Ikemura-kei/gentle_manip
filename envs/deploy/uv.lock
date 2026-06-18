@@ -255,7 +255,7 @@ wheels = [
 [[package]]
 name = "gentle-manip"
 version = "0.1.0"
-source = { editable = "../" }
+source = { editable = "../../" }
 dependencies = [
     { name = "gymnasium" },
     { name = "matplotlib" },
@@ -290,10 +290,6 @@ requires-dist = [
 ]
 provides-extras = ["real"]
 
-[package.metadata.requires-dev]
-dev = [{ name = "pytest" }]
-sim = [{ name = "genesis-world", editable = "../third_party/genesis" }]
-
 [[package]]
 name = "gentle-manip-deploy"
 version = "0.1.0"
@@ -303,7 +299,7 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "gentle-manip", extras = ["real"], editable = "../" }]
+requires-dist = [{ name = "gentle-manip", extras = ["real"], editable = "../../" }]
 
 [[package]]
 name = "gymnasium"

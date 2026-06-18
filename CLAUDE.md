@@ -45,47 +45,71 @@ third_party/
 After cloning, initialise and install with:
 ```bash
 git submodule update --init --recursive
-uv sync
+uv sync --project envs/sim
 ```
 
-`uv sync` installs all dependencies including Genesis from the local submodule in editable mode (Genesis lives in the default `sim` dependency-group; `pyproject.toml` maps `genesis-world` → `third_party/genesis`). Never `pip install genesis` from PyPI — always use the fork in `third_party/genesis`.
+The repo-root `pyproject.toml` is the **shared library definition only** — it is
+not synced into an environment itself. The per-Python environments live under
+`envs/` (sim, deploy, dp3); each depends on `gentle-manip[...]` and is run with
+`uv run --project envs/<name> …` (always `--project`, never `--directory`, so the
+cwd stays at the repo root — see the deploy note below). `uv sync --project envs/sim`
+installs Genesis from the local submodule in editable mode — `envs/sim` depends on
+the genesis fork **directly** (`[tool.uv.sources] genesis-world → ../../third_party/genesis`);
+the `gentle-manip` library never declares genesis, which is what keeps the real side
+genesis-free. (Direct, not via a `gentle-manip` extra, because uv only honours
+`[tool.uv.sources]` for a project's direct deps, not transitive ones.) Never
+`pip install genesis` from PyPI — always use the fork in `third_party/genesis`.
 
-Run scripts with `uv run python scripts/train.py` (or any other entry point).
+Run sim/training code with `uv run --project envs/sim python scripts/train.py`.
 
-**torch is installed manually** (platform-specific CUDA build, kept out of `pyproject.toml`):
+**torch is installed manually** (platform-specific CUDA build, kept out of every
+`pyproject.toml`):
 ```bash
-uv pip install "torch==2.5.1+cu121" --index-url https://download.pytorch.org/whl/cu121
+uv pip install --project envs/sim "torch==2.5.1+cu121" --index-url https://download.pytorch.org/whl/cu121
 ```
-A bare `uv sync` will remove it — reinstall after syncing. (cu121 chosen to avoid the
-`pypi.nvidia.com` nvjitlink wheel-split issue on the lab box.)
+A bare `uv sync --project envs/sim` will remove it — reinstall after syncing. (cu121 chosen to avoid the
+`pypi.nvidia.com` nvjitlink wheel-split issue on the lab box.) Genesis imports torch
+at import time, so sim/training needs it present.
 
-### Two environments (sim/training vs real deployment)
+### Multiple uv environments
 
 Genesis (newest) requires Python 3.12, but the L515 camera needs
 `pyrealsense2==2.54.2.5684`, which only ships cp310/cp311 wheels. These can't
-coexist in one interpreter, so there are **two uv environments**:
+coexist in one interpreter. DP3 also carries an older Hydra/diffusers/zarr stack,
+so each environment is its own thin project under `envs/`, depending on the shared
+`gentle-manip` library at the repo root:
 
 | Env | Python | Purpose | Install |
 |-----|--------|---------|---------|
-| repo root | 3.12 | sim, training, tests (genesis + torch) | `uv sync` |
-| `deploy/` | 3.11 | real-robot deployment (genesis-free; hardware SDKs) | `uv sync --project deploy` |
+| `envs/sim/` | 3.12 | sim, training, tests (genesis + torch) | `uv sync --project envs/sim` |
+| `envs/deploy/` | 3.11 | real-robot deployment (genesis-free; hardware SDKs) | `uv sync --project envs/deploy` |
+| `envs/dp3/` | 3.10 | DP3 training, evaluation, zarr conversion | `uv sync --project envs/dp3` |
 
-The `deploy/` env depends on `gentle-manip[real]` — the genesis-free core plus
+Run the test suite with
+`uv run --project envs/sim python -m pytest gentle_manip/tests/ -q`.
+
+The `envs/deploy/` env depends on `gentle-manip[real]` — the genesis-free core plus
 `pyrealsense2` + `xArm-Python-SDK` (+ `pyspacemouse`, `pygame` for teleop demo
-collection; `open3d` for the point-cloud viewer). Genesis is never pulled in (it's a `sim` dependency-group, not
-installed for a path dependency), which enforces the "real side of the RawObs
-boundary is genesis-free" rule at the dependency level. Run deployment code with
-`uv run --project deploy python <script>` (always `--project`, never `--directory`:
-`--project` uses deploy's env but **keeps the cwd at the repo root**, so relative
-output paths like `dataset/demos/` land under the project root, not `deploy/`).
-(torch, if a trained policy is loaded, is installed manually in this env too.)
+collection; `open3d` for the point-cloud viewer). Genesis is never pulled in (the
+`gentle-manip` library doesn't declare it at all — only `envs/sim` depends on the
+fork directly), which enforces the "real side of the RawObs boundary is genesis-free"
+rule at the dependency level. Run deployment code
+with `uv run --project envs/deploy python <script>` (always `--project`, never
+`--directory`: `--project` uses the deploy env but **keeps the cwd at the repo root**,
+so relative output paths like `dataset/demos/` land under the project root, not
+`envs/deploy/`). (torch, if a trained policy is loaded, is installed manually here too.)
+
+The `envs/dp3/` env depends on the editable local DP3 checkout under
+`third_party/DP3/3D-Diffusion-Policy` and the editable `gentle-manip` package.
+Torch/torchvision and the simplified PyTorch3D extension are installed manually
+there as CUDA/platform-specific packages, as noted in `envs/dp3/pyproject.toml`.
 
 **System prereqs for teleop (demo collection):** `pygame` needs a display on the
 robot host. SpaceMouse mode also needs `libhidapi` + a udev rule giving hidraw
 access to the 3Dconnexion device (else run as root); keyboard mode needs neither.
 Collect demos with:
 ```bash
-uv run --project deploy python -m gentle_manip.demos.record \
+uv run --project envs/deploy python -m gentle_manip.demos.record \
   --obs-config gentle_manip/configs/obs/state_ee_only.yaml \
   --task-name <name> --input keyboard --i-have-cleared-the-workspace
 ```

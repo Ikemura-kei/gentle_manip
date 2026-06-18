@@ -18,8 +18,8 @@ eye-in-hand             — D405 is wrist-mounted, board is fixed in the workspa
 
 Usage
 -----
-    uv run --directory deploy python gentle_manip/diagnostics/calibration.py
-    uv run --directory deploy python gentle_manip/diagnostics/calibration.py \\
+    uv run --project envs/deploy python gentle_manip/diagnostics/calibration.py
+    uv run --project envs/deploy python gentle_manip/diagnostics/calibration.py \\
         --mode eye-in-hand --cam-serial 230322271104
 """
 

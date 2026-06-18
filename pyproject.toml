@@ -12,11 +12,15 @@ dependencies = [
     "matplotlib",
 ]
 
+# This is the shared LIBRARY definition — it is not synced into an environment
+# itself. The per-Python environments live under envs/ (sim, deploy, dp3); each
+# depends on `gentle-manip` (+ extras) and is run with `uv run --project envs/<name>`.
+# Genesis is NOT declared here at all — envs/sim depends on the genesis fork
+# directly, which is what keeps the real side (envs/deploy) genesis-free.
 [project.optional-dependencies]
-# Real-robot hardware SDKs (the `real` extra). Pulled by the separate 3.11 deploy
-# env (deploy/), genesis-free. pyrealsense2 is pinned: 2.54.2.5684 is the last
-# release line that supports the discontinued Intel RealSense L515 (cam_ext) and
-# only ships cp310/cp311 wheels — hence the deploy env is Python 3.11, not 3.12.
+# Real-robot hardware SDKs. Pulled by the 3.11 envs/deploy. pyrealsense2 is
+# pinned: 2.54.2.5684 is the last line supporting the discontinued L515 (cam_ext)
+# and only ships cp310/cp311 wheels — hence envs/deploy is Python 3.11, not 3.12.
 real = [
     "pyrealsense2==2.54.2.5684",
     "xArm-Python-SDK",
@@ -24,22 +28,6 @@ real = [
     "pyspacemouse",   # teleop input (wraps hidapi; needs libhidapi + a hidraw udev rule)
     "pygame",         # episode-control keyboard window for demo collection
     "open3d",         # live point-cloud viewer (crop tuning)
-]
-
-[dependency-groups]
-# Genesis lives in a default group (not a core dep) so the deploy env can install
-# gentle-manip[real] without dragging in genesis. `uv sync` still installs it by
-# default — see [tool.uv] default-groups — so the sim/dev workflow is unchanged.
-sim = ["genesis-world"]
-dev = ["pytest"]
-
-[tool.uv.sources]
-genesis-world = { path = "third_party/genesis", editable = true }
-
-[tool.uv]
-default-groups = ["sim", "dev"]
-constraint-dependencies = [
-    "pymeshlab<2025",  # 2025.x requires manylinux_2_35; older wheels support manylinux_2_31
 ]
 
 [build-system]

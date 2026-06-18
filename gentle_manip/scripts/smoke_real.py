@@ -2,8 +2,8 @@
 
 Run in the deploy (3.11) env, one phase at a time:
 
-    uv run --directory deploy python -m gentle_manip.scripts.smoke_real --phase 0
-    uv run --directory deploy python -m gentle_manip.scripts.smoke_real --phase 1
+    uv run --project envs/deploy python -m gentle_manip.scripts.smoke_real --phase 0
+    uv run --project envs/deploy python -m gentle_manip.scripts.smoke_real --phase 1
     ...
 
 Phases form a safety ladder — each adds exactly one new risk:
