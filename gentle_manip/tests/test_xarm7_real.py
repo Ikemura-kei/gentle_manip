@@ -24,6 +24,8 @@ class FakeAPI:
         self._last_aa = [400.0, 0.0, 300.0, np.pi, 0.0, 0.0]   # mm + rad, API frame
         self._gripper_pos = 0.0
 
+    def clean_warn(self): self.calls.append(("clean_warn", None))
+    def clean_error(self): self.calls.append(("clean_error", None))
     def motion_enable(self, enable=True): self.calls.append(("motion_enable", enable))
     def set_mode(self, m): self.calls.append(("set_mode", m))
     def set_state(self, s): self.calls.append(("set_state", s))

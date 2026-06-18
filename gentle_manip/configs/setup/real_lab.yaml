@@ -6,7 +6,7 @@ robot:
   # Optional overrides (else fall back to xarm7_config.py real-only defaults):
   # default_ee_pose: [0.3, 0.0, 0.3, 3.1416, 0.0, 0.0]   # x,y,z (m), rx,ry,rz (rad rotvec)
   # default_gripper_width: 0.08                            # meters (open)
-  servo_speed_mm_s: 60
+  servo_speed_mm_s: 50
   servo_mvacc: 50
 
 cameras:

@@ -92,6 +92,11 @@ class XArm7Real:
             from xarm.wrapper import XArmAPI
             self._api = XArmAPI(self.ip)
 
+        # Clear any latched error/warning first (e.g. after an e-stop, collision,
+        # or idle fault) — otherwise motion_enable reports "not ready to move".
+        self._api.clean_warn()
+        self._api.clean_error()
+
         self._require_ok(self._api.motion_enable(enable=True), "motion_enable")
         self._require_ok(self._api.set_mode(0), "set_mode(0)")     # position mode
         self._require_ok(self._api.set_state(0), "set_state(0)")

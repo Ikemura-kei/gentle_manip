@@ -26,11 +26,11 @@ JOINT_NAMES = [
 EE_LINK = 'xarm_gripper_base_link'
 
 # Cartesian workspace limits in world frame (meters)
-EE_BOUNDS_MIN = [0.26, -0.225, 0.1715]
-EE_BOUNDS_MAX = [0.59,  0.225, 0.460]
+EE_BOUNDS_MIN = [0.26, -0.225, 0.003]
+EE_BOUNDS_MAX = [0.59,  0.225, 0.50]
 
 # Default action scales: 6D delta pose (x,y,z meters; roll,pitch,yaw radians) + 1D gripper (meters)
-DEFAULT_ACTION_SCALES = [0.0052, 0.0052, 0.006, 0.001, 0.001, 0.001, 0.05]
+DEFAULT_ACTION_SCALES = [0.003, 0.003, 0.004, 0.001, 0.001, 0.001, 0.04]
 
 # ── Sim only ──────────────────────────────────────────────────────────────────
 # Override via configs/setup/sim_default.yaml → robot.kp / robot.kv /

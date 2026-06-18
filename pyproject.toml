@@ -21,6 +21,9 @@ real = [
     "pyrealsense2==2.54.2.5684",
     "xArm-Python-SDK",
     "opencv-python>=4.8",
+    "pyspacemouse",   # teleop input (wraps hidapi; needs libhidapi + a hidraw udev rule)
+    "pygame",         # episode-control keyboard window for demo collection
+    "open3d",         # live point-cloud viewer (crop tuning)
 ]
 
 [dependency-groups]

@@ -1,0 +1,12 @@
+# Single external L515 (cam_ext) point cloud — the current real rig has no wrist
+# camera. ee_pos / ee_quat / gripper_width are always included on top of this.
+include_joint_pos: false
+include_joint_vel: false
+
+point_cloud:
+  cameras: ["cam_ext"]
+  # Workspace crop in the robot base frame (meters). Starting point from the
+  # reference rig — tighten to your scene after a first capture (view the cloud).
+  crop_min: [0.2, -0.215, 0.004]
+  crop_max: [0.71,   0.215,  0.45]
+  max_points: 1024        # random subsample target; raise toward 1500 for more detail

@@ -68,14 +68,31 @@ coexist in one interpreter, so there are **two uv environments**:
 | Env | Python | Purpose | Install |
 |-----|--------|---------|---------|
 | repo root | 3.12 | sim, training, tests (genesis + torch) | `uv sync` |
-| `deploy/` | 3.11 | real-robot deployment (genesis-free; hardware SDKs) | `uv sync --directory deploy` |
+| `deploy/` | 3.11 | real-robot deployment (genesis-free; hardware SDKs) | `uv sync --project deploy` |
 
 The `deploy/` env depends on `gentle-manip[real]` — the genesis-free core plus
-`pyrealsense2` + `xArm-Python-SDK`. Genesis is never pulled in (it's a `sim`
-dependency-group, not installed for a path dependency), which enforces the
-"real side of the RawObs boundary is genesis-free" rule at the dependency level.
-Run deployment code with `uv run --directory deploy python <script>`. (torch, if a
-trained policy is loaded, is installed manually in this env too.)
+`pyrealsense2` + `xArm-Python-SDK` (+ `pyspacemouse`, `pygame` for teleop demo
+collection; `open3d` for the point-cloud viewer). Genesis is never pulled in (it's a `sim` dependency-group, not
+installed for a path dependency), which enforces the "real side of the RawObs
+boundary is genesis-free" rule at the dependency level. Run deployment code with
+`uv run --project deploy python <script>` (always `--project`, never `--directory`:
+`--project` uses deploy's env but **keeps the cwd at the repo root**, so relative
+output paths like `dataset/demos/` land under the project root, not `deploy/`).
+(torch, if a trained policy is loaded, is installed manually in this env too.)
+
+**System prereqs for teleop (demo collection):** `pygame` needs a display on the
+robot host. SpaceMouse mode also needs `libhidapi` + a udev rule giving hidraw
+access to the 3Dconnexion device (else run as root); keyboard mode needs neither.
+Collect demos with:
+```bash
+uv run --project deploy python -m gentle_manip.demos.record \
+  --obs-config gentle_manip/configs/obs/state_ee_only.yaml \
+  --task-name <name> --input keyboard --i-have-cleared-the-workspace
+```
+`--input keyboard` (W/S A/D Up/Dn move, L/R R/F Q/E rotate, O/P grip, SPACE save,
+BKSP discard, ESC quit) or `--input spacemouse` (default). Both produce the same
+normalized `[-1,1]` action through the same `ActionPipeline`. Episode keys
+(SPACE/BACKSPACE/ESC) are identical across both modes.
 
 ---
 
@@ -147,17 +164,20 @@ gentle_manip/
 │   ├── evaluate.py                     #   Run N episodes, aggregate metrics
 │   └── metrics.py                      #   Success rate, stress metrics, gentleness rubric
 │
-├── demos/                              # Demo collection (for DP3)
-│   ├── teleop_keyboard.py
-│   ├── teleop_spacemouse.py
-│   └── record.py                       #   Record transitions (point clouds + actions)
+├── demos/                              # Demo collection (for DP3) — runs in the 3.11 deploy env
+│   ├── teleop_spacemouse.py            #   SpaceMouseTeleop: device state → normalized [-1,1] action
+│   ├── teleop_keyboard.py              #   KeyboardTeleop: pygame held-keys → action + episode keys (both interfaces)
+│   ├── keyboard_pygame.py              #   PygameKeyboard: SPACE=save / BACKSPACE=discard / ESC=quit (spacemouse mode)
+│   └── record.py                       #   DemoRecorder + CLI (--input spacemouse|keyboard): teleop → PolicyEnv → (obs,action) episodes (pickle)
 │
 ├── diagnostics/
 │   ├── parity_check.py                 #   Compare sim/real obs spaces, replay trajectories
 │   └── calibration.py                  #   Camera extrinsics from AprilTags
 │
 ├── visualization/
-│   ├── point_cloud_viewer.py           #   Open3D viewer (separate process)
+│   ├── point_cloud_viewer.py           #   Open3D LIVE cam_ext viewer + crop box (crop tuning; deploy env)
+│   ├── episode_player.py               #   Open3D interactive demo playback (point cloud video + EE/gripper; SPACE/F/D/N/B keys)
+│   ├── visualize_demo.py               #   Static per-episode summary PNGs (point cloud + EE path + gripper/action)
 │   └── video_recorder.py
 │
 ├── wrappers/
@@ -167,7 +187,7 @@ gentle_manip/
 │
 ├── configs/
 │   ├── tasks/                          #   Per-task YAML
-│   ├── obs/                            #   state_ee_only.yaml, state_joint_only.yaml, point_cloud_2cam.yaml, voxel.yaml, tactile_imitation.yaml
+│   ├── obs/                            #   state_ee_only.yaml, state_joint_only.yaml, point_cloud_1cam.yaml (real rig), point_cloud_2cam.yaml, voxel.yaml, tactile_imitation.yaml
 │   ├── action/                         #   delta_pose_delta_gripper.yaml
 │   ├── dr/                             #   mild.yaml, aggressive.yaml
 │   └── setup/                          #   sim_default.yaml, real_lab.yaml
@@ -512,7 +532,7 @@ Steps marked ✅ are complete and tested. Steps marked (GPU) require Genesis ins
 
 All tests live in `gentle_manip/tests/` and run with `python -m pytest gentle_manip/tests/ -q`.
 
-Existing test files (206 passing; torch tests run here since the dev box has a GPU + torch):
+Existing test files (227 passing; torch tests run here since the dev box has a GPU + torch):
 
 | File | What it covers |
 |------|----------------|
@@ -529,6 +549,8 @@ Existing test files (206 passing; torch tests run here since the dev box has a G
 | `test_policy_env.py` | PolicyEnv with a MockBackend: spaces, reset/step shapes, action scaling, fixed-horizon auto-reset, reward path, task=None real-deploy mode |
 | `test_xarm7_real.py` | XArm7Real with a fake XArmAPI: quat↔rotvec, TCP-offset round-trip, EE pose mm conversion, connect mode sequence, gripper clip, joint read |
 | `test_real_backend.py` | RealBackend with fake robot+camera: RawObs contract, cam_ext extrinsic, delta accumulation + EE_BOUNDS/gripper clipping, sim_feedback=None |
+| `test_demo_recorder.py` | SpaceMouse mapping (fake device: X/Y negation, deadzone, gripper buttons, clip) + DemoRecorder with mock env/teleop/keyboard: episode save/discard, (obs,action) alignment, pickle schema |
+| `test_teleop_keyboard.py` | KeyboardTeleop with fake pygame: per-axis key mapping, opposite-key cancel, clip, episode edge events, idempotent open/close |
 
 Still needed (GPU):
 - `test_scene_builder.py`: build a SceneSpec → verify valid Genesis scene

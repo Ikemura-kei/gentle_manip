@@ -27,3 +27,7 @@ htmlcov/
 
 # OS
 .DS_Store
+
+# Collected demo datasets (large point-cloud pickles + summary PNGs).
+# Keep small calibration artifacts (dataset/camera_calibration/) tracked.
+dataset/demos/
