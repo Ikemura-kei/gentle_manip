@@ -25,6 +25,11 @@ dependencies = [
     "gentle-manip",
     "genesis-world",
     "pytest",
+    "numpy",
+    "gymnasium",
+    "scipy",   # rotation math in the real backend
+    "pyyaml",  # YAML config loading
+    "matplotlib",
 ]
 
 [tool.uv.sources]

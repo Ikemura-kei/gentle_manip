@@ -257,7 +257,7 @@ wheels = [
 
 [[package]]
 name = "genesis-world"
-version = "1.0.0"
+version = "1.1.2"
 source = { editable = "../../third_party/genesis" }
 dependencies = [
     { name = "coacd" },
@@ -338,7 +338,7 @@ requires-dist = [
     { name = "pytest-print", marker = "extra == 'dev'" },
     { name = "pytest-timeout", marker = "extra == 'dev'" },
     { name = "pytest-xdist", marker = "extra == 'dev'" },
-    { name = "quadrants", specifier = "==0.8.0" },
+    { name = "quadrants", specifier = "==1.0.2" },
     { name = "rtree" },
     { name = "scikit-image" },
     { name = "scipy", marker = "extra == 'dev'" },
@@ -398,14 +398,24 @@ source = { virtual = "." }
 dependencies = [
     { name = "genesis-world" },
     { name = "gentle-manip" },
+    { name = "gymnasium" },
+    { name = "matplotlib" },
+    { name = "numpy" },
     { name = "pytest" },
+    { name = "pyyaml" },
+    { name = "scipy" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "genesis-world", editable = "../../third_party/genesis" },
     { name = "gentle-manip", editable = "../../" },
+    { name = "gymnasium" },
+    { name = "matplotlib" },
+    { name = "numpy" },
     { name = "pytest" },
+    { name = "pyyaml" },
+    { name = "scipy" },
 ]
 
 [[package]]
@@ -1061,7 +1071,7 @@ wheels = [
 
 [[package]]
 name = "quadrants"
-version = "0.8.0"
+version = "1.0.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cffi" },
@@ -1073,10 +1083,10 @@ dependencies = [
     { name = "setuptools" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6d/69/728f33e16e8612de22f3e95d6291bce6f22131067c897d3b5eb7ea1706bf/quadrants-0.8.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:07e223958f51c75cabe4631b5446db0ec22fa9f9818a80c69581a8893db090dd", size = 30430357, upload-time = "2026-05-16T13:21:52.452Z" },
-    { url = "https://files.pythonhosted.org/packages/cf/f7/f1b0ad69914a336f78d6f6d2d6658875f21b5060ebf80f29e847e3d2c442/quadrants-0.8.0-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_34_aarch64.whl", hash = "sha256:a979c495027d74f080563bd8bc1978fabdc23881d52b284516b3b658950034d3", size = 44981280, upload-time = "2026-05-16T13:55:39.155Z" },
-    { url = "https://files.pythonhosted.org/packages/05/c1/f3a8de448bfdef42507d82b97264b2f5c0383067ba10ec438d13a84243fe/quadrants-0.8.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:6ee51b7299882dd78bdc04ce2385566dbcbb59bcf0b2ce0951af7a1ddfe51a40", size = 48082021, upload-time = "2026-05-16T13:55:42.327Z" },
-    { url = "https://files.pythonhosted.org/packages/3c/f7/b6bd12453bde9a73d49a2579aa5c0ac57dbadd45acec704f704d8958429f/quadrants-0.8.0-cp312-cp312-win_amd64.whl", hash = "sha256:897d654ac56ab087aabe43058a4ab5970460604e3a2129f52850d32ff97b3162", size = 55617168, upload-time = "2026-05-16T12:53:50.483Z" },
+    { url = "https://files.pythonhosted.org/packages/91/aa/63180297f0bcd11f1a0e83d46977747f095f8d3444b6689a642fd93475fe/quadrants-1.0.2-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:cb02ed33ce13d784890e097aed7d46e847341e0d5918bec61404537a9d5a1305", size = 30505796, upload-time = "2026-06-04T02:42:59.251Z" },
+    { url = "https://files.pythonhosted.org/packages/46/72/1bd4b6cccbd20101541c2b5a3d81538ccaad52209ac67da7ef33d32044c7/quadrants-1.0.2-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_34_aarch64.whl", hash = "sha256:e703cc8b4c6a29864f1d936c44c6e75c23b5c0da05b4b137ef71ba39c62d1b5d", size = 45042090, upload-time = "2026-06-04T02:59:37.891Z" },
+    { url = "https://files.pythonhosted.org/packages/57/1d/99b5070e4624bb5aa6ed63338d246641b6262dae1efa1c0762c1371f775f/quadrants-1.0.2-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:85e6d9103efcc145c31a1c9496a906f60121346ee219908de86d7e63d787d110", size = 48136824, upload-time = "2026-06-04T02:59:37.291Z" },
+    { url = "https://files.pythonhosted.org/packages/91/8d/58e8f91851c01fcdf427cb2b33c837d8e023c0494e9a8adcc93cd17fc767/quadrants-1.0.2-cp312-cp312-win_amd64.whl", hash = "sha256:cf020b02ef6ab4acc526a02fe06c010ac9fe8c97a93e6b3c56e6010ed53a38af", size = 55669735, upload-time = "2026-06-04T02:17:40.479Z" },
 ]
 
 [[package]]
