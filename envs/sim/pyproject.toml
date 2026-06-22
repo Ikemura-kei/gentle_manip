@@ -7,10 +7,11 @@
 # Run:     uv run --project envs/sim python <script>
 # Tests:   uv run --project envs/sim python -m pytest gentle_manip/tests/ -q
 #
-# NOTE: torch is platform-specific (CUDA build) and installed manually after
-# syncing — it is not a declared dependency. On the lab box:
-#   uv pip install --python envs/sim/.venv/bin/python "torch==2.5.1+cu121" --index-url https://download.pytorch.org/whl/cu121
-# (uv pip targets the env via --python, NOT --project; --project does not redirect it.)
+# torch is pinned below to a cu126 build (this lab box) via a dedicated index, so
+# `uv sync` installs it and it stays in the lock. genesis 1.1.2 wants torch>=2.8.
+# >>> DIFFERENT HARDWARE: change the torch/torchvision/torchaudio versions AND the
+#     cu126 URL in [[tool.uv.index]] to match your GPU/driver (see
+#     https://pytorch.org/get-started/previous-versions/ for compatible triples). <<<
 # Genesis imports torch at import time, so it must be present to run sim/training.
 
 [project]
@@ -30,11 +31,24 @@ dependencies = [
     "scipy",   # rotation math in the real backend
     "pyyaml",  # YAML config loading
     "matplotlib",
+    # torch — cu126 for this lab box (see header note to change for your HW).
+    "torch==2.8.0",
+    "torchvision==0.23.0",
+    "torchaudio==2.8.0",
 ]
+
+[[tool.uv.index]]
+# Change this URL to match your CUDA (e.g. .../cu121, .../cpu) — see header note.
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true   # only the torch* packages below resolve from here, not all deps
 
 [tool.uv.sources]
 gentle-manip = { path = "../..", editable = true }
 genesis-world = { path = "../../third_party/genesis", editable = true }
+torch = { index = "pytorch-cu126" }
+torchvision = { index = "pytorch-cu126" }
+torchaudio = { index = "pytorch-cu126" }
 
 [tool.uv]
 constraint-dependencies = [
