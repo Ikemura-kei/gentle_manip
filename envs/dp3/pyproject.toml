@@ -6,25 +6,49 @@
 # Setup:   uv sync --project envs/dp3
 # Run:     uv run --project envs/dp3 python <script>
 #
-# Torch, torchvision, and pytorch3d are platform-specific. Install the CUDA
-# build that matches the lab machine after syncing, for example:
-#   uv pip --project envs/dp3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-#   uv pip --project envs/dp3 install -e third_party/DP3/third_party/pytorch3d_simplified
+# Torch is pinned below to a CUDA 12.1 build (this lab box) via a dedicated index,
+# so it lives in uv.lock and survives `uv add` / `uv sync` instead of being wiped
+# like a manually pip-installed build would be.
+#
+# >>> LATER USERS / DIFFERENT HARDWARE: change the torch/torchvision/torchaudio
+#     versions in [dependencies] AND the cu121 URL in [[tool.uv.index]] to match
+#     your GPU + driver. Use a compatible torch/vision/audio triple from
+#     https://pytorch.org/get-started/previous-versions/ . <<<
+#
+# PyTorch3D compiles against torch, so it can't go through `uv add` (isolated
+# build has no torch). After syncing, install it with build isolation OFF:
+#   uv pip install --python envs/dp3/.venv/bin/python --no-build-isolation -e third_party/DP3/third_party/pytorch3d_simplified
+# (uv pip targets the env via --python, NOT --project; --project does not redirect it.)
 
 [project]
 name = "gentle-manip-dp3"
 version = "0.1.0"
 requires-python = ">=3.8,<3.11"
 dependencies = [
-    "zarr<3",
+    # Torch — cu121 for this lab box (see the header note to change for your HW).
+    "torch==2.4.1",
+    "torchvision==0.19.1",
+    "torchaudio==2.4.1",
+    # The DP3 package itself (editable, from the submodule) — replaces the
+    # `cd 3D-Diffusion-Policy && pip install -e .` step in DP3's INSTALL.md.
+    # Bare setup.py (no install_requires); the real deps are listed below.
+    "diffusion-policy-3d",
+    # gentle_manip runtime deps (the shared lib is imported from source via
+    # sys.path in deploy_real.py, not installed here — so list its deps directly).
+    # numpy + matplotlib are already present above.
+    "scipy",
+    "gymnasium",
+    "pyyaml",
+    # DP3 stack (versions per DP3 INSTALL.md)
+    "zarr==2.12.0",
     "numcodecs",
     "hydra-core==1.2.0",
     "omegaconf",
     "diffusers==0.11.1",
-    "huggingface-hub<0.14",
+    "huggingface-hub<0.14",   # diffusers 0.11.1 needs cached_download (removed in 0.14+)
     "dill==0.3.5.1",
     "einops==0.4.1",
-    "numba>=0.57",
+    "numba==0.56.4",          # caps numpy<1.24 — matches the tested 3.8 stack
     "wandb",
     "termcolor",
     "tqdm",
@@ -34,8 +58,22 @@ dependencies = [
     "av",
     "gpustat",
     "ipdb",
+    # Hardware SDKs — this env also deploys the trained policy on the real XArm7
+    # (one process, no IPC). pyrealsense2 2.54.2.5684 (last L515 version) has a
+    # cp38 wheel, so it coexists with the DP3 stack here. See scripts/deploy_real.py.
+    "pyrealsense2==2.54.2.5684",
+    "xArm-Python-SDK",
 ]
+
+[[tool.uv.index]]
+# Change this URL to match your CUDA (e.g. .../cu118, .../cpu) — see header note.
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true   # only the torch* packages below resolve from here, not all deps
 
 [tool.uv.sources]
 gentle-manip = { path = "../..", editable = true }
 diffusion-policy-3d = { path = "../../third_party/DP3/3D-Diffusion-Policy", editable = true }
+torch = { index = "pytorch-cu121" }
+torchvision = { index = "pytorch-cu121" }
+torchaudio = { index = "pytorch-cu121" }

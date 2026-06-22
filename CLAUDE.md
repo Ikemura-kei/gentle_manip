@@ -65,8 +65,10 @@ Run sim/training code with `uv run --project envs/sim python scripts/train.py`.
 **torch is installed manually** (platform-specific CUDA build, kept out of every
 `pyproject.toml`):
 ```bash
-uv pip install --project envs/sim "torch==2.5.1+cu121" --index-url https://download.pytorch.org/whl/cu121
+uv pip install --python envs/sim/.venv/bin/python "torch==2.5.1+cu121" --index-url https://download.pytorch.org/whl/cu121
 ```
+(`uv pip` targets the env via `--python <venv>/bin/python`, **not** `--project` — `--project`
+selects a project for `uv sync`/`uv run` but does not redirect `uv pip`'s install target.)
 A bare `uv sync --project envs/sim` will remove it — reinstall after syncing. (cu121 chosen to avoid the
 `pypi.nvidia.com` nvjitlink wheel-split issue on the lab box.) Genesis imports torch
 at import time, so sim/training needs it present.
@@ -83,7 +85,7 @@ so each environment is its own thin project under `envs/`, depending on the shar
 |-----|--------|---------|---------|
 | `envs/sim/` | 3.12 | sim, training, tests (genesis + torch) | `uv sync --project envs/sim` |
 | `envs/deploy/` | 3.11 | real-robot deployment (genesis-free; hardware SDKs) | `uv sync --project envs/deploy` |
-| `envs/dp3/` | 3.10 | DP3 training, evaluation, zarr conversion | `uv sync --project envs/dp3` |
+| `envs/dp3/` | 3.8 | DP3 training, evaluation, zarr conversion | `uv sync --project envs/dp3` |
 
 Run the test suite with
 `uv run --project envs/sim python -m pytest gentle_manip/tests/ -q`.

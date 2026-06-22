@@ -9,7 +9,8 @@
 #
 # NOTE: torch is platform-specific (CUDA build) and installed manually after
 # syncing — it is not a declared dependency. On the lab box:
-#   uv pip install --project envs/sim "torch==2.5.1+cu121" --index-url https://download.pytorch.org/whl/cu121
+#   uv pip install --python envs/sim/.venv/bin/python "torch==2.5.1+cu121" --index-url https://download.pytorch.org/whl/cu121
+# (uv pip targets the env via --python, NOT --project; --project does not redirect it.)
 # Genesis imports torch at import time, so it must be present to run sim/training.
 
 [project]
