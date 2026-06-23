@@ -37,10 +37,12 @@ POSE_DR_XY = 0.1                            # per-env object x/y jitter (meters)
 DOWN_QUAT = np.array([0.0, 1.0, 0.0, 0.0])   # gripper pointing down
 PRE_Z, GRASP_Z = 0.33, 0.183                  # EE heights (xarm_gripper_base_link)
 
-# With env_separate_rigid=True each env is rendered at its own local origin, so
-# neighbours are not visible. We keep a small spacing only for the viewer layout.
-ENV_SPACING = 2.5
-DEPTH_CROP = 0.95                              # workspace depth crop (meters)
+# Env spacing must be large enough that a neighbouring env's MPM object (which
+# is rendered in every env because MPM static/dynamic nodes are env_shared=True)
+# falls outside the depth crop. The original per-env camera script used the same
+# rule: DEPTH_CROP = 0.8 * ENV_SPACING.
+ENV_SPACING = 3.0
+DEPTH_CROP = 0.8 * ENV_SPACING                 # workspace depth crop (meters)
 DEPTH_VIEW_SCALE = 0.5                         # shrink the live depth window
 
 # cam_ext pose in the *env-local* frame (same relative pose for every env).
@@ -178,54 +180,46 @@ def main():
         if cam_wrist is not None:
             cam_wrist.move_to_attach()
 
-    def _strip_rigid_offsets(ctx):
-        """Replicate the RasterizerCameraSensor offset-stripping hack.
+    def _shift_camera_to_envs(cam):
+        """Temporarily add env offsets to a batched camera's transform.
 
-        With env_separate_rigid=True, rigid geometry poses have env offsets baked
-        in, but the scene-camera path does not strip them before rendering. This
-        makes the arm visible only in env 0. Subtract the offsets temporarily,
-        render, then restore.
+        With env_separate_rigid=True, Genesis stores geometry (rigid + MPM) at
+        world positions that include envs_offset, but the scene camera transform
+        is kept in the env-local frame. This makes rigid bodies invisible outside
+        env 0. The internal RasterizerCameraSensor strips offsets from rigid
+        geometry; we instead move the camera to each env's world offset, which
+        works for both rigid and MPM geometry.
+
+        Returns the original camera transform so it can be restored.
         """
-        if not ctx.env_separate_rigid:
-            return {}
-        envs_offset = ctx.scene.envs_offset
-        if (envs_offset == 0).all():
-            return {}
-        saved = {}
-        for node_uid, node in ctx.rigid_nodes.items():
-            primitive = node.mesh.primitives[0]
-            poses = primitive.poses
-            if poses is not None and len(poses) > 1:
-                saved[node_uid] = poses.copy()
-                poses[:, :3, 3] -= envs_offset[ctx.rendered_envs_idx]
-                buf_id = ctx._scene.get_buffer_id(node, "model")
-                if buf_id >= 0:
-                    ctx.jit.update_buffer(buf_id, poses.transpose((0, 2, 1)))
-        return saved
+        if not cam._is_batched:
+            return None
+        ctx = scene.visualizer.context
+        orig = cam._transform.clone()
+        cam._transform[..., :3, 3] += ctx.scene.envs_offset[ctx.rendered_envs_idx]
+        scene.visualizer.rasterizer.update_camera(cam)
+        return orig
 
-    def _restore_rigid_offsets(ctx, saved):
-        for node_uid, poses in saved.items():
-            node = ctx.rigid_nodes[node_uid]
-            node.mesh.primitives[0].poses = poses
-            buf_id = ctx._scene.get_buffer_id(node, "model")
-            if buf_id >= 0:
-                ctx.jit.update_buffer(buf_id, poses.transpose((0, 2, 1)))
+    def _restore_camera_transform(cam, orig):
+        if orig is None:
+            return
+        cam._transform[:] = orig
+        scene.visualizer.rasterizer.update_camera(cam)
 
     def render_batched_depth(cam):
         """Render one camera for all envs. Returns (B, H, W) float32 depth."""
         update_cameras()
         ctx = scene.visualizer.context
-        # Update visual state (MPM skinning, rigid poses, etc.) before stripping.
+        # Update visual state before shifting the camera.
         ctx.update(force_render=True)
-        saved = _strip_rigid_offsets(ctx)
+        orig_transform = _shift_camera_to_envs(cam)
         try:
-            # Bypass cam.render() so the context is not re-updated (which would
-            # restore the offsets we just stripped).
+            # Bypass cam.render() so the camera transform is not overwritten.
             _, depth, *_ = scene.visualizer.rasterizer.render_camera(
                 cam, rgb=False, depth=True
             )
         finally:
-            _restore_rigid_offsets(ctx, saved)
+            _restore_camera_transform(cam, orig_transform)
         return _np(depth).astype(np.float32)
 
     def camera_obs(cam, name):

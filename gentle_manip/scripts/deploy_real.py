@@ -155,6 +155,57 @@ def _wait_for_start(keys: "KeyPoller") -> None:
         time.sleep(0.02)
 
 
+def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float) -> None:
+    """Receding-horizon deploy loop shared by real and sim deployment.
+
+    env: PolicyEnv-like — reset()->obs dict, step(action)->(obs, ...). policy:
+    DP3PolicyAdapter. Re-plans every policy.n_action_steps; k starts, SPACE re-homes,
+    q quits. Owns env.close() on exit.
+    """
+    period = 1.0 / rate if rate > 0 else 0.0
+    steps = 0
+    try:
+        with KeyPoller() as keys:
+            controls = ("k = start   SPACE = reset episode (re-home)   q = quit"
+                        if keys.enabled else "(stdin not a tty — manual keys disabled)")
+            print(f"deploying up to {max_steps} steps at {rate:.0f} Hz "
+                  f"(re-plan every {policy.n_action_steps}).  {controls}")
+            obs = env.reset()                                       # homes the robot
+            policy.reset(obs)
+            _wait_for_start(keys)                                   # hold until 'k'
+            while steps < max_steps:
+                chunk = policy.predict()                            # (n_action_steps, 7)
+                reset_now = False
+                for action in chunk:
+                    key = keys.poll()
+                    if key in (" ", "r"):
+                        print("  manual reset — re-homing")
+                        reset_now = True
+                        break
+                    if key in ("q", "\x1b"):                        # q or ESC
+                        raise KeyboardInterrupt
+                    if steps >= max_steps:
+                        break
+                    t0 = time.perf_counter()
+                    obs = env.step(action[None, :].astype(np.float32))[0]
+                    policy.push(obs)
+                    steps += 1
+                    if period > 0:
+                        dt = time.perf_counter() - t0
+                        if dt < period:
+                            time.sleep(period - dt)
+                if reset_now:                                      # abandon chunk, re-home, fresh budget
+                    obs = env.reset()
+                    policy.reset(obs)
+                    steps = 0
+                    _wait_for_start(keys)                          # hold until 'k' again
+        print(f"done — executed {steps} steps")
+    except KeyboardInterrupt:
+        print("\ninterrupted — stopping (arm holds position)", file=sys.stderr)
+    finally:
+        env.close()
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Deploy a trained DP3 policy on the real XArm7")
     p.add_argument("--ckpt", type=Path, required=True)
@@ -177,48 +228,7 @@ def main() -> None:
     env = PolicyEnv(backend, obs_config, action_config, task=None, max_episode_steps=10 ** 9)
     policy = DP3PolicyAdapter(str(args.ckpt), device=args.device)
 
-    period = 1.0 / args.rate if args.rate > 0 else 0.0
-    steps = 0
-    try:
-        with KeyPoller() as keys:
-            controls = ("k = start   SPACE = reset episode (re-home)   q = quit"
-                        if keys.enabled else "(stdin not a tty — manual keys disabled)")
-            print(f"deploying up to {args.max_steps} steps at {args.rate:.0f} Hz "
-                  f"(re-plan every {policy.n_action_steps}).  {controls}")
-            obs = env.reset()                                       # homes the robot
-            policy.reset(obs)
-            _wait_for_start(keys)                                   # hold until 'k'
-            while steps < args.max_steps:
-                chunk = policy.predict()                            # (n_action_steps, 7)
-                reset_now = False
-                for action in chunk:
-                    key = keys.poll()
-                    if key in (" ", "r"):
-                        print("  manual reset — re-homing")
-                        reset_now = True
-                        break
-                    if key in ("q", "\x1b"):                        # q or ESC
-                        raise KeyboardInterrupt
-                    if steps >= args.max_steps:
-                        break
-                    t0 = time.perf_counter()
-                    obs = env.step(action[None, :].astype(np.float32))[0]
-                    policy.push(obs)
-                    steps += 1
-                    if period > 0:
-                        dt = time.perf_counter() - t0
-                        if dt < period:
-                            time.sleep(period - dt)
-                if reset_now:                                      # abandon chunk, re-home, fresh budget
-                    obs = env.reset()
-                    policy.reset(obs)
-                    steps = 0
-                    _wait_for_start(keys)                          # hold until 'k' again
-        print(f"done — executed {steps} steps")
-    except KeyboardInterrupt:
-        print("\ninterrupted — stopping (arm holds position)", file=sys.stderr)
-    finally:
-        env.close()
+    run_deploy_loop(env, policy, args.max_steps, args.rate)
 
 
 if __name__ == "__main__":

@@ -31,6 +31,10 @@ OBJECT_MAP: dict[str, ObjectDef] = {
     "tofu":    ObjectDef("tofu", MATERIALS["tofu"]),
     "gelatin": ObjectDef("gelatin", MATERIALS["gelatin"]),
     "sponge":  ObjectDef("sponge", MATERIALS["sponge"]),
+    # 3 cm cube matching the real red cube the DP3 policy was trained on; rests on
+    # the table (half-extent 0.015 -> center z ~0.015 after settling).
+    "red_cube": ObjectDef("red_cube", MATERIALS["red_cube"],
+                          size=(0.03, 0.03, 0.03), default_pos=(0.46, 0.025, 0.02)),
 }
 
 

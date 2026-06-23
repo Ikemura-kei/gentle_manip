@@ -29,4 +29,7 @@ MATERIALS: dict[str, Material] = {
     "tofu":    Material(youngs_modulus=4e3, poisson_ratio=0.3, density=1050.0, von_mises_yield_stress=2e4),
     "gelatin": Material(youngs_modulus=8e3, poisson_ratio=0.35, density=1100.0, von_mises_yield_stress=3e4),
     "sponge":  Material(youngs_modulus=2e3, poisson_ratio=0.2, density=300.0, von_mises_yield_stress=1e4),
+    # Firm, near-rigid block to stand in for a real red cube (stiff + high yield so
+    # it barely deforms). TODO: confirm the real cube's stiffness/mass.
+    "red_cube": Material(youngs_modulus=3e4, poisson_ratio=0.3, density=1050.0, von_mises_yield_stress=8e4),
 }
