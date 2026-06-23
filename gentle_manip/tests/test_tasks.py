@@ -76,11 +76,11 @@ def test_scene_spec_has_table():
     assert "table" in fixtures
 
 
-def test_scene_spec_has_both_cameras():
+def test_scene_spec_has_ext_camera():
+    # Single external camera matches the real rig (no wrist cam).
     task = make_task()
     names = {c.name for c in task.scene_spec.cameras}
-    assert "cam_wrist" in names
-    assert "cam_ext" in names
+    assert names == {"cam_ext"}
 
 
 # ── is_success ────────────────────────────────────────────────────────────────

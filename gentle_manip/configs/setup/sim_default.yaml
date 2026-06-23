@@ -1,0 +1,19 @@
+# Sim setup defaults. Overrides here are merged over the sim constants in
+# robot/xarm7_config.py (KP/KV/DEFAULT_JOINT_ANGLES/DEFAULT_GRIPPER_WIDTH) and
+# the SimBackend/GenesisWorker defaults. Loaded with yaml.safe_load.
+
+robot:
+  # Uncomment to override the xarm7_config sim defaults per experiment:
+  # kp: [...]            # 13 PD position gains (7 arm + 6 gripper)
+  # kv: [...]            # 13 PD velocity gains
+  # default_joint_angles: [...]   # 13 reset joint angles
+  default_gripper_width: 0.08      # nominal open width (m); policy gripper dim in [0, this]
+  # tcp_offset: [0.0, 0.0, 0.171]  # tool-frame gripper_base_link -> fingertip TCP (m);
+                                   # see xarm7_config.SIM_TCP_OFFSET. Uncomment to override.
+
+sim:
+  coup_friction: 4.0      # rigid<->MPM coupling friction (gripper grip strength)
+  settle_steps: 30        # sim steps after a reset to let the object settle
+
+dr:
+  pose_dr_xy: 0.0         # per-env object x/y jitter half-range (m); 0 = homogeneous

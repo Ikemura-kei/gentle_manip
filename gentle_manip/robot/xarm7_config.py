@@ -29,6 +29,13 @@ EE_LINK = 'xarm_gripper_base_link'
 EE_BOUNDS_MIN = [0.26, -0.225, 0.003]
 EE_BOUNDS_MAX = [0.59,  0.225, 0.50]
 
+# Home TCP (fingertip) pose, in "our TCP" convention — SHARED so sim and real reset
+# to the same Cartesian pose. [x, y, z (m), rx, ry, rz (rad, axis-angle / rotvec)].
+# Real homes here in Cartesian servo mode; sim seeds DEFAULT_JOINT_ANGLES then
+# servos the TCP to this pose. Override via real_lab.yaml / sim_default.yaml.
+# TODO: confirm home pose with real hardware testing.
+DEFAULT_EE_POSE = [0.45, 0.0, 0.2, 3.1416, 0.0, 0.0]
+
 # Default action scales: 6D delta pose (x,y,z meters; roll,pitch,yaw radians) + 1D gripper (meters)
 DEFAULT_ACTION_SCALES = [0.003, 0.003, 0.004, 0.001, 0.001, 0.001, 0.04]
 
@@ -43,9 +50,30 @@ KV = [600]  * 7 + [1000]   * 6
 # Links to keep when building URDF scene (others are merged for sim performance)
 LINKS_TO_KEEP = ['xarm_gripper_base_link']
 
-# TODO: confirm reset pose once URDF and scene layout are finalised
+# Gripper width (m) <-> gripper joint angle (rad) calibration for sim. The URDF
+# gripper joints run [0 (open) .. 0.85 (closed)]; we map the policy's gripper
+# width [0 .. DEFAULT_GRIPPER_WIDTH] linearly onto that range, for both command
+# and read-back, so sim reports the same [0, open] convention as the real SDK.
+# TODO: refine against free-space finger-link distance / hardware once available.
+GRIPPER_JOINT_OPEN = 0.0
+GRIPPER_JOINT_CLOSED = 0.85
+GRIPPER_FINGER_LINKS = ('left_finger', 'right_finger')   # for a physical width check
+
+# TCP convention: "our TCP" is the fingertip of a fully-closed gripper (the frame
+# the policy/obs/EE_BOUNDS speak, matching the real robot). The Genesis EE link is
+# `xarm_gripper_base_link`, which sits this far back along the tool +z axis, so
+# XArm7Sim shifts it by SIM_TCP_OFFSET when reading state and undoes it before IK.
+# Calibrated in sim by pressing a closed fingertip onto the table (z=0, rigid):
+# the baselink settles at z=0.171, so that is the gripper_base_link -> fingertip
+# distance. Overridable via sim_default.yaml; re-measure against the real fingertip.
+SIM_TCP_OFFSET = [0.0, 0.0, 0.171]   # meters, tool frame (gripper_base_link -> fingertip)
+
+# Sim reset seed. The arm angles were recorded at the shared home pose
+# (DEFAULT_EE_POSE) so the seed already matches the home — reset_to_home barely has
+# to move the arm before holding there. (Gripper part is used by the standalone dev
+# script; reset_to_home opens the gripper via GRIPPER_JOINT_OPEN regardless.)
 DEFAULT_JOINT_ANGLES = [
-    -0.4855, -0.2911, 0.4102, 1.1810, 0.1153, 1.4493, -0.1005,  # arm (7)
+    -0.4943, -0.0623, 0.4846, 1.0172, 0.0340, 1.0765, -0.0268,  # arm (7) — at DEFAULT_EE_POSE
      0.27, 0.27, 0.27, 0.27, 0.27, 0.27,                         # gripper (6)
 ]
 
@@ -53,9 +81,7 @@ DEFAULT_JOINT_ANGLES = [
 # Override via configs/setup/real_lab.yaml → robot.default_ee_pose /
 # robot.default_gripper_width
 
-# TODO: confirm home pose with real hardware testing
-# [x, y, z (m), rx, ry, rz (rad, axis-angle / rotvec)]
-DEFAULT_EE_POSE = [0.45, 0.0, 0.2, 3.1416, 0.0, 0.0]
+# DEFAULT_EE_POSE moved to the Shared section (sim + real reset to the same pose).
 
 # TODO: confirm open width with real gripper
 DEFAULT_GRIPPER_WIDTH = 0.08   # meters

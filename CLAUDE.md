@@ -493,6 +493,54 @@ reward = -(capped^2 / 6000) * scale
 
 ---
 
+## Domain Randomization & Data Augmentation (planned — not yet implemented)
+
+Roadmap for closing the sim2real gap. Two distinct mechanisms, kept separate:
+
+- **Domain randomization (DR)** — varies the *physics/scene* at reset/build time so the
+  policy sees a distribution of worlds. Lives in `domain_randomization/` (`dr_config.py`
+  = what to randomize + ranges; `presets.py` = "mild"/"aggressive"); applied by the sim
+  backend (`SimBackend`/`GenesisWorker`). Real side is never randomized.
+- **Data augmentation** — perturbs the *observation/action signal* (sim AND, where
+  sensible, real-imitation data). Belongs in the shared `PerceptionPipeline` /
+  `ActionPipeline` so sim and real apply identical transforms.
+
+### DR knobs to add
+Cheap (per-reset, no scene rebuild — change physics state / per-env params only):
+- **Initial robot pose** — jitter `DEFAULT_EE_POSE` / seed joints per env at reset.
+- **Object pose** — already plumbed (`ObjectEntry.pose_range`, per-env particle shift in
+  `GenesisWorker.reset`); wire it through `dr_config` ranges. Remember to move the grasp
+  target with it (the dev prototype already does).
+- **Object material** — E, ν, ρ, von Mises yield. NOTE: MPM material params are **global
+  per scene in Genesis, not per-env** (confirmed while building the backend). So material
+  DR requires a **scene rebuild** → use `GenesisProcess.restart(new_spec)` (the kill+respawn
+  path exists for exactly this). Batch episodes by material to amortize the rebuild cost.
+- **Coupling friction** (`coup_friction`) — gripper↔object grip strength; currently a
+  `build_scene` arg. Also a rebuild (set at entity creation) unless made settable.
+
+Expensive / "crazier" (rebuild, and they change sim *fidelity* — randomize cautiously,
+they shift the dynamics, not just appearance):
+- **Object size / shape** — box extents, or swapping meshes once real scanned meshes exist.
+- **sim_substeps / mpm_grid_density** — robustness to integration resolution; rebuild, and
+  watch that the grasp still succeeds across the range (low grid density may leak/penetrate).
+
+### Augmentation knobs to add
+- **Point-cloud noise** — per-point Gaussian jitter, random dropout, small per-cloud
+  rigid offset; apply in `PerceptionPipeline` after backprojection, before subsample.
+- **Other observation noise** — ee_pos/quat/gripper_width/joint Gaussian noise (sensor
+  noise model); depth noise before unprojection.
+- **Action execution noise** — small Gaussian on the scaled command before the backend
+  applies it (models imperfect servoing); slight, in `ActionPipeline` or the backend seam.
+- **Quaternion sign-flip** — randomly negate `ee_quat` (q and −q are the same orientation,
+  double cover) so the policy is agnostic to representation sign. Apply in
+  `PerceptionPipeline` wherever a quaternion enters the obs; do it consistently per sample.
+
+Design rules: DR config is declarative YAML (`configs/dr/*.yaml`); augmentation is part of
+the shared pipelines so it can't silently diverge between sim and real; anything needing a
+Genesis rebuild goes through `GenesisProcess.restart`, not an in-place mutation.
+
+---
+
 ## Old Code Reference
 
 This project is a restructured version of two existing repos:

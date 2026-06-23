@@ -26,21 +26,25 @@ class SingleLiftTask(BaseTask):
 
     @property
     def scene_spec(self) -> SceneSpec:
+        # Sim params + camera are the values validated in the dev prototype
+        # (examples/gs_sim_backend_dev.py): the grasp reproduces only with this
+        # dt/substeps/mpm_bounds/grid_density. One external camera matches the real
+        # single-camera rig (cam_ext at the calibrated WORLD_T_CAM_EXT pose).
         return SceneSpec(
             objects=[ObjectEntry(name=self.object_name)],
             fixtures=[FixtureEntry(fixture_type="table")],
             cameras=[
                 CameraEntry(
-                    name="cam_wrist",
-                    pos=(0.55, 0.0, 0.35),
-                    lookat=(0.4, 0.0, 0.1),
-                ),
-                CameraEntry(
                     name="cam_ext",
-                    pos=(1.0, -0.5, 0.5),
-                    lookat=(0.4, 0.0, 0.1),
+                    pos=(0.98910661, -0.00034108, 0.09825304),
+                    lookat=(0.0, 0.0, 0.09825304),
+                    fov=60.0,
                 ),
             ],
+            sim_dt=1.0 / 30.0,
+            sim_substeps=80,
+            mpm_bounds=((0.25, -0.15, -0.012), (0.75, 0.15, 0.32)),
+            mpm_grid_density=300.0,
         )
 
     def reset(self, sim_feedback: SimFeedback) -> None:
