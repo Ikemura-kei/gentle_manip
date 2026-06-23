@@ -51,6 +51,14 @@ class XArm7Sim:
         self.gripper_open_width = float(
             overrides.get("default_gripper_width", cfg.DEFAULT_GRIPPER_WIDTH)
         )
+        # Width<->joint lookup: normalize the measured finger separation to
+        # [0, gripper_open_width] (captures the linkage nonlinearity). _gw_joint is
+        # increasing (open->closed); _gw_width is the matching width, decreasing.
+        cq = np.asarray(cfg.GRIPPER_CALIB_JOINT, dtype=np.float64)
+        sep = np.asarray(cfg.GRIPPER_CALIB_SEP, dtype=np.float64)
+        frac = (sep - sep[-1]) / (sep[0] - sep[-1])        # 1 at open .. 0 at closed
+        self._gw_joint = cq
+        self._gw_width = frac * self.gripper_open_width
         # Tool-frame offset from the Genesis EE link (gripper_base_link) to "our TCP"
         # (fingertip). State is reported at, and targets are commanded in, the TCP
         # frame so sim matches the real robot's TCP convention.
@@ -65,15 +73,14 @@ class XArm7Sim:
         xyzw = Rotation.from_rotvec(home[3:6]).as_quat()
         self.home_quat = np.array([xyzw[3], xyzw[0], xyzw[1], xyzw[2]], dtype=np.float64)  # wxyz
 
-    # ── gripper width <-> joint calibration (shared by command + read-back) ─────
+    # ── gripper width <-> joint calibration (measured lookup; shared cmd + read) ─
     def _width_to_joint(self, width: np.ndarray) -> np.ndarray:
-        frac = 1.0 - np.clip(width, 0.0, self.gripper_open_width) / self.gripper_open_width
-        return cfg.GRIPPER_JOINT_OPEN + frac * (cfg.GRIPPER_JOINT_CLOSED - cfg.GRIPPER_JOINT_OPEN)
+        width = np.clip(width, 0.0, self.gripper_open_width)
+        # width decreases with joint angle, so reverse to give np.interp increasing xp.
+        return np.interp(width, self._gw_width[::-1], self._gw_joint[::-1])
 
     def _joint_to_width(self, q_drive: np.ndarray) -> np.ndarray:
-        span = cfg.GRIPPER_JOINT_CLOSED - cfg.GRIPPER_JOINT_OPEN
-        frac = (q_drive - cfg.GRIPPER_JOINT_OPEN) / span
-        return np.clip(1.0 - frac, 0.0, 1.0) * self.gripper_open_width
+        return np.interp(q_drive, self._gw_joint, self._gw_width)
 
     # ── TCP offset (gripper_base_link <-> fingertip), both batched (B, ...) ──────
     @staticmethod

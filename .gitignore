@@ -1,6 +1,9 @@
 # Vendored binary tool (not an asset; the sim uses the .urdf only)
 gentle_manip/assets/xarm/lc_soft_enable_wide_grip/urdf-viz
 
+# Generated figures from example scripts (point-cloud viz, calibration sweeps)
+examples/*.png
+
 # Python
 __pycache__/
 *.py[cod]

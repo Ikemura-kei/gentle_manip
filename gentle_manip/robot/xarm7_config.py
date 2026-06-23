@@ -50,14 +50,25 @@ KV = [600]  * 7 + [1000]   * 6
 # Links to keep when building URDF scene (others are merged for sim performance)
 LINKS_TO_KEEP = ['xarm_gripper_base_link']
 
-# Gripper width (m) <-> gripper joint angle (rad) calibration for sim. The URDF
-# gripper joints run [0 (open) .. 0.85 (closed)]; we map the policy's gripper
-# width [0 .. DEFAULT_GRIPPER_WIDTH] linearly onto that range, for both command
-# and read-back, so sim reports the same [0, open] convention as the real SDK.
-# TODO: refine against free-space finger-link distance / hardware once available.
-GRIPPER_JOINT_OPEN = 0.0
-GRIPPER_JOINT_CLOSED = 0.85
-GRIPPER_FINGER_LINKS = ('left_finger', 'right_finger')   # for a physical width check
+# Gripper width (m) <-> joint angle (rad) calibration for sim. The four-bar gripper
+# linkage makes finger separation a (mildly) nonlinear function of the drive angle,
+# so we calibrate from a measured sweep instead of assuming linear. XArm7Sim
+# normalizes the measured separation to [0 .. DEFAULT_GRIPPER_WIDTH] and interpolates
+# both directions, so sim reports the same [0, open] convention as the real SDK while
+# capturing the linkage curvature (linear was within 2.4%; this removes that residual).
+# TODO: re-measure against the real gripper to confirm the absolute open width.
+GRIPPER_JOINT_OPEN = 0.0        # joint angle at fully open (reset_to_home uses this)
+GRIPPER_JOINT_CLOSED = 0.85     # joint angle at the URDF close limit
+GRIPPER_FINGER_LINKS = ('left_finger', 'right_finger')
+
+# Measured sim sweep: drive angle (rad) -> finger-link separation (m), with all 6
+# gripper joints commanded equal (matches XArm7Sim.apply_target). Monotonic; used as
+# a 1-D interpolation table for the width<->angle map.
+GRIPPER_CALIB_JOINT = [0.00, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40,
+                       0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85]
+GRIPPER_CALIB_SEP = [0.1409, 0.1366, 0.1322, 0.1276, 0.1228, 0.1179, 0.1129,
+                     0.1078, 0.1026, 0.0973, 0.0919, 0.0865, 0.0811, 0.0756,
+                     0.0701, 0.0646, 0.0591, 0.0536]
 
 # TCP convention: "our TCP" is the fingertip of a fully-closed gripper (the frame
 # the policy/obs/EE_BOUNDS speak, matching the real robot). The Genesis EE link is
