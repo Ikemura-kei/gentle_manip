@@ -126,6 +126,23 @@ def main():
         fig.savefig(fpath, dpi=110, bbox_inches="tight"); plt.close(fig)
         print(f"  saved {fpath}", flush=True)
 
+        # Separate multi-step point-cloud figure: real vs sim at 5 snapshots.
+        snaps = sorted(set([0, T // 4, T // 2, 3 * T // 4, T - 1]))
+        figp = plt.figure(figsize=(11, 4 * len(snaps)))
+        for r, t in enumerate(snaps):
+            for c, (tag, pc) in enumerate([("real", re_pc[t]), ("sim", sim[t]["point_cloud"][0])]):
+                v = _valid(pc)
+                a = figp.add_subplot(len(snaps), 2, r * 2 + c + 1, projection="3d")
+                a.scatter(v[:, 0], v[:, 1], v[:, 2], s=2, c=v[:, 2], cmap="viridis", alpha=0.5)
+                a.set_title(f"{tag}  t={t}  ({len(v)} pts)")
+                a.set_xlim(0.2, 0.71); a.set_ylim(-0.215, 0.215); a.set_zlim(0, 0.45)
+                a.view_init(20, -60)
+        figp.suptitle(f"episode {ep_idx} (fov={fov}) — point cloud: real (L515) vs sim (rendered)")
+        figp.tight_layout()
+        ppath = out / f"traj_{ep_idx:02d}_pointcloud.png"
+        figp.savefig(ppath, dpi=110, bbox_inches="tight"); plt.close(figp)
+        print(f"  saved {ppath}", flush=True)
+
     env.close()
     print("\n=== summary (fov={}) ===".format(fov), flush=True)
     for ep_idx, ee_err, zoff in summary:

@@ -43,11 +43,12 @@ so sim saw a wider cone. We swept fov and measured the per-step cloud zmean vs r
 
 Narrowing the fov shrinks the offset monotonically; **`fov=49`** (VFOV 49°, HFOV ≈63°)
 is the value now set in `SingleLiftTask.scene_spec`. Caveat: that is *narrower* than the
-L515's nominal 55°, so it is partly **compensating** for the next gap rather than being
-physically exact. The residual is attributed to the **camera extrinsic**: sim places
-cam_ext by pos/lookat (approximate) rather than the exact calibrated `WORLD_T_CAM_EXT` —
-a ~2° orientation error is ~3 cm at 1 m. The principled fix is to set the sim camera to
-the real L515's measured **intrinsics K + extrinsic**; that is the next step.
+L515's nominal 55°, so it is partly **compensating** for the residual rather than being
+physically exact. The sim cam_ext pose (pos/lookat) and the calibrated `WORLD_T_CAM_EXT`
+are nearly identical, so the residual is **not** the extrinsic — it is more likely the
+**gripper-mesh appearance** (the URDF gripper silhouette differs from what the L515 sees)
+plus the clean-vs-noisy rendering. The principled fix is matching the real L515's measured
+**intrinsics K** and, ultimately, point-cloud noise augmentation at DP3 training time.
 
 ### Multi-trajectory validation (`figures/eval_fov49/`, fov=49)
 
@@ -98,8 +99,11 @@ uv run --project envs/sim python examples/sim2real_diagnose/replay_demo_in_sim.p
 - `replay_demo_in_sim.py` — the open-loop replay diagnostic.
 - `figures/{before_fov60,after_fov55,after_fov50}/` — single-episode (ep 0) fov sweep;
   state is identical across all (control is fov-independent), only the cloud changes.
-- `figures/eval_fov49/traj_NN.png` — 5 random trajectories at the chosen `fov=49`
-  (combined per-trajectory figures; cube placed at each demo's grasp).
+- `figures/eval_fov49/traj_NN.png` — combined per-trajectory figure (ee_pos x/y/z +
+  gripper + cloud zmean(t) + real-vs-sim cloud overlay at the grasp), 5 random
+  trajectories at `fov=49`; cube placed at each demo's grasp.
+- `figures/eval_fov49/traj_NN_pointcloud.png` — multi-step real-vs-sim point clouds
+  (5 snapshots: t=0, T/4, T/2, 3T/4, T-1) for the same trajectories.
 - `figures/gripper_curve.png` — gripper joint↔width calibration sweep (near-linear, 2.4%).
 - `figures/sim_pointcloud_sanity.png` — standalone sim cloud sanity check.
 - Related tool: `gentle_manip/scripts/inspect_demo.py` (run via `-m`).
