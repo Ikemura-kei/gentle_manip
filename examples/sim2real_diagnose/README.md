@@ -41,14 +41,31 @@ so sim saw a wider cone. We swept fov and measured the per-step cloud zmean vs r
 | t=279| 0.272 | 0.292 (+0.020) | 0.278 (+0.006) | 0.260 (**−0.012**) |
 | mean &#124;offset&#124; | | 0.031 | 0.021 | **0.011** |
 
-`fov=50` (VFOV 50°, HFOV ≈64°) gives the closest match and is the value now set in
-`SingleLiftTask.scene_spec`; control is unchanged at every fov (`replay_state.png`).
-Caveat: 50° is *narrower* than the L515's nominal 55°, so it is partly **compensating**
-for the next gap rather than being physically exact. The residual (largest mid-grasp,
-t=140) is attributed to the **camera extrinsic**: sim places cam_ext by pos/lookat
-(approximate) rather than the exact calibrated `WORLD_T_CAM_EXT` — a ~2° orientation
-error is ~3 cm at 1 m. The principled fix is to set the sim camera to the real L515's
-measured **intrinsics K + extrinsic**; that is the next step.
+Narrowing the fov shrinks the offset monotonically; **`fov=49`** (VFOV 49°, HFOV ≈63°)
+is the value now set in `SingleLiftTask.scene_spec`. Caveat: that is *narrower* than the
+L515's nominal 55°, so it is partly **compensating** for the next gap rather than being
+physically exact. The residual is attributed to the **camera extrinsic**: sim places
+cam_ext by pos/lookat (approximate) rather than the exact calibrated `WORLD_T_CAM_EXT` —
+a ~2° orientation error is ~3 cm at 1 m. The principled fix is to set the sim camera to
+the real L515's measured **intrinsics K + extrinsic**; that is the next step.
+
+### Multi-trajectory validation (`figures/eval_fov49/`, fov=49)
+
+To confirm this isn't cherry-picked from one episode, 5 random trajectories were replayed
+(cube placed at each demo's grasp location so the cloud compare is fair):
+
+| ep | ee_err x,y,z (mm) | cloud zmean offset (mm) |
+|----|-------------------|-------------------------|
+| 13 | 2.4, 0.7, 2.5 | 12.1 |
+| 15 | 2.2, 1.0, 2.2 | 10.3 |
+| 24 | 2.5, 0.7, 2.2 | 10.3 |
+| 29 | 2.2, 0.4, 2.3 | 10.9 |
+| 39 | 2.3, 1.0, 2.2 | 10.6 |
+
+Control holds at **~2–3 mm across all five** diverse grasps (cube x∈[0.38,0.53]); the
+perception gap is a consistent **~10–12 mm** cloud-height offset — the extrinsic +
+sensor-noise residual. Each `traj_NN.png` shows ee_pos x/y/z + gripper + cloud zmean(t)
+and a real-vs-sim cloud overlay at the grasp.
 
 ## Suspected causes → fixes (impact order)
 
@@ -70,18 +87,19 @@ measured **intrinsics K + extrinsic**; that is the next step.
 uv run --project envs/sim python -m gentle_manip.scripts.inspect_demo \
     --demo dataset/demos/red_cube/26-06-18-jcd.pkl
 
-# open-loop action replay (saves <prefix>_state.png and <prefix>_pointcloud.png):
+# open-loop replay of N random trajectories (one figure each in --out-dir):
 uv run --project envs/sim python examples/sim2real_diagnose/replay_demo_in_sim.py \
-    --demo dataset/demos/red_cube/26-06-18-jcd.pkl --episode 0
+    --demo dataset/demos/red_cube/26-06-18-jcd.pkl --n-episodes 5 \
+    --out-dir examples/sim2real_diagnose/figures/eval_fov49
 ```
 
 ## Files
 
 - `replay_demo_in_sim.py` — the open-loop replay diagnostic.
-- `figures/before_fov60/` — replay state + point cloud with the original `fov=60`.
-- `figures/after_fov55/`  — same at `fov=55` (offset reduced).
-- `figures/after_fov50/`  — same at `fov=50` (best match; the chosen value). State is
-  identical across all three (control is fov-independent); only the cloud changes.
+- `figures/{before_fov60,after_fov55,after_fov50}/` — single-episode (ep 0) fov sweep;
+  state is identical across all (control is fov-independent), only the cloud changes.
+- `figures/eval_fov49/traj_NN.png` — 5 random trajectories at the chosen `fov=49`
+  (combined per-trajectory figures; cube placed at each demo's grasp).
 - `figures/gripper_curve.png` — gripper joint↔width calibration sweep (near-linear, 2.4%).
 - `figures/sim_pointcloud_sanity.png` — standalone sim cloud sanity check.
 - Related tool: `gentle_manip/scripts/inspect_demo.py` (run via `-m`).

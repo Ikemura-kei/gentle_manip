@@ -38,11 +38,11 @@ class SingleLiftTask(BaseTask):
                     name="cam_ext",
                     pos=(0.98910661, -0.00034108, 0.09825304),
                     lookat=(0.0, 0.0, 0.09825304),
-                    # Genesis fov is VERTICAL: fov=50 -> VFOV 50, HFOV ~64 at 640x480.
-                    # fov=60 was ~5 deg wider than the L515 (~55x70) and gave a larger
-                    # cloud offset; narrowing reduced it (see examples/sim2real_diagnose).
+                    # Genesis fov is VERTICAL: fov=49 -> VFOV 49, HFOV ~63 at 640x480.
+                    # fov=60 was wider than the L515 (~55x70) and gave a larger cloud
+                    # offset; narrowing minimizes it (see examples/sim2real_diagnose).
                     # TODO: set to the real L515's measured intrinsics for exactness.
-                    fov=50.0,
+                    fov=49.0,
                 ),
             ],
             sim_dt=1.0 / 30.0,

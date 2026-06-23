@@ -65,9 +65,12 @@ class SimBackend:
         self._last_state: Optional[dict] = None
 
     # ── Backend protocol ──────────────────────────────────────────────────────
-    def reset(self, **kwargs) -> RawObs:
-        object_dxy = None
-        if self._pose_dr_xy > 0:
+    def reset(self, object_dxy=None, **kwargs) -> RawObs:
+        # Explicit object_dxy (num_envs, 2) places the object at a chosen offset from
+        # its default pose (e.g. to match a recorded demo's cube); otherwise pose-DR.
+        if object_dxy is not None:
+            object_dxy = np.asarray(object_dxy, dtype=np.float32).reshape(self.num_envs, 2)
+        elif self._pose_dr_xy > 0:
             object_dxy = self._rng.uniform(
                 -self._pose_dr_xy, self._pose_dr_xy, size=(self.num_envs, 2)
             ).astype(np.float32)

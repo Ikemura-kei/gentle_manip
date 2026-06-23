@@ -1,15 +1,19 @@
-"""Open-loop sim2real diagnostic: replay a real demo's ACTIONS on the sim and
+"""Open-loop sim2real diagnostic: replay recorded demo ACTIONS on the sim and
 compare the resulting observations to what was recorded on the real robot.
 
 Same actions in -> if the robot-state trajectory (ee_pos/quat/gripper) diverges,
-the gap is in control (IK / bounds / scaling / dynamics); if it matches but the
-point cloud looks different, the gap is in perception (clean sim depth vs noisy
-L515) — which is what makes a real-trained policy behave differently in sim.
+the gap is control (IK / bounds / scaling / dynamics); if it matches but the point
+cloud differs, the gap is perception (clean sim depth vs noisy L515) — which is what
+makes a real-trained policy behave differently in sim.
 
-Saves two figures: robot-state-vs-time and point-cloud side-by-side at a few steps.
+Runs N trajectories (random or explicit) in one Genesis build, placing the sim cube
+at each demo's grasp location (estimated from the lowest fingertip point) so the
+cloud comparison is fair. Emits one figure per trajectory: ee_pos x/y/z + gripper +
+point-cloud zmean(t), plus a real-vs-sim cloud overlay at the grasp.
 
     uv run --project envs/sim python examples/sim2real_diagnose/replay_demo_in_sim.py \
-        --demo dataset/demos/red_cube/26-06-18-jcd.pkl --episode 0
+        --demo dataset/demos/red_cube/26-06-18-jcd.pkl --n-episodes 5 \
+        --out-dir examples/sim2real_diagnose/figures/eval_fov49
 """
 import os
 os.environ.setdefault("MUJOCO_GL", "egl")
@@ -24,14 +28,20 @@ import yaml
 _CFG = Path(__file__).resolve().parents[2] / "gentle_manip" / "configs"
 
 
+def _valid(pc):
+    return pc[~np.all(pc == 0, axis=1)]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--demo", type=Path, required=True)
-    ap.add_argument("--episode", type=int, default=0)
+    ap.add_argument("--n-episodes", type=int, default=5)
+    ap.add_argument("--episodes", default="", help="comma-sep explicit indices (overrides --n-episodes)")
+    ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--object", default="red_cube")
-    ap.add_argument("--max-steps", type=int, default=0, help="0 = whole episode")
     ap.add_argument("--obs", default="point_cloud_1cam")
-    ap.add_argument("--out-prefix", default="replay")
+    ap.add_argument("--max-steps", type=int, default=0, help="0 = whole episode")
+    ap.add_argument("--out-dir", default="traj_eval")
     ap.add_argument("--show", action="store_true")
     args = ap.parse_args()
 
@@ -41,83 +51,85 @@ def main():
     import matplotlib.pyplot as plt
 
     from gentle_manip.actions.action_config import ActionConfig
+    from gentle_manip.assets.registry import get_object_def
     from gentle_manip.envs.policy_env import PolicyEnv
     from gentle_manip.envs.sim_backend import SimBackend
     from gentle_manip.perception.obs_config import ObsConfig
     from gentle_manip.tasks.single_lift import SingleLiftTask
 
-    ep = pickle.load(open(args.demo, "rb"))["episodes"][args.episode]
-    real = ep["observations"]
-    actions = ep["actions"].astype(np.float32)                 # (T, 7) raw [-1,1]
-    T = len(actions) if args.max_steps <= 0 else min(args.max_steps, len(actions))
-    print(f"episode {args.episode}: {len(actions)} frames, replaying {T}", flush=True)
+    eps = pickle.load(open(args.demo, "rb"))["episodes"]
+    if args.episodes.strip():
+        picks = [int(x) for x in args.episodes.split(",")]
+    else:
+        rng = np.random.default_rng(args.seed)
+        picks = sorted(rng.choice(len(eps), size=min(args.n_episodes, len(eps)), replace=False).tolist())
+    print(f"episodes: {picks}  (of {len(eps)})", flush=True)
 
     obs_cfg = ObsConfig.from_dict(yaml.safe_load((_CFG / "obs" / f"{args.obs}.yaml").read_text()))
     act_cfg = ActionConfig.from_dict(
         yaml.safe_load((_CFG / "action" / "delta_pose_delta_gripper.yaml").read_text()))
     task = SingleLiftTask({"object_name": args.object})
+    default_xy = np.array(get_object_def(args.object).default_pos[:2], dtype=np.float32)
+    fov = task.scene_spec.cameras[0].fov
+
     backend = SimBackend(task.scene_spec, 1, config={"sim": {"settle_steps": 20}}, use_subprocess=False)
     env = PolicyEnv(backend, obs_cfg, act_cfg, task=None, max_episode_steps=10 ** 9)
+    out = Path(args.out_dir); out.mkdir(parents=True, exist_ok=True)
 
-    # sim[t] aligned with real obs[t]: reset -> sim[0]; step(action[t]) -> sim[t+1].
-    sim = [env.reset()]
-    for t in range(T - 1):
-        sim.append(env.step(actions[t][None, :])[0])
+    summary = []
+    for ep_idx in picks:
+        ep = eps[ep_idx]
+        actions = ep["actions"].astype(np.float32)
+        T = len(actions) if args.max_steps <= 0 else min(args.max_steps, len(actions))
+        re_ee, re_gw = ep["observations"]["ee_pos"][:T], ep["observations"]["gripper_width"][:T, 0]
+        re_pc = ep["observations"]["point_cloud"]
+
+        # Cube xy ~ fingertip at the lowest point of the real trajectory (the grasp).
+        grasp_t = int(np.argmin(re_ee[:, 2]))
+        cube_xy = re_ee[grasp_t, :2]
+        obs = env.reset(object_dxy=(cube_xy - default_xy)[None, :])
+        sim = [obs]
+        for t in range(T - 1):
+            sim.append(env.step(actions[t][None, :])[0])
+
+        sim_ee = np.stack([o["ee_pos"][0] for o in sim])
+        sim_gw = np.array([o["gripper_width"][0, 0] for o in sim])
+        re_zm = np.array([_valid(re_pc[t])[:, 2].mean() if len(_valid(re_pc[t])) else 0 for t in range(T)])
+        sim_zm = np.array([_valid(sim[t]["point_cloud"][0])[:, 2].mean() for t in range(T)])
+        ee_err, zoff = np.abs(sim_ee - re_ee).mean(0), float(np.abs(sim_zm - re_zm).mean())
+        summary.append((ep_idx, ee_err, zoff))
+        print(f"ep {ep_idx}: T={T} cube_xy={cube_xy.round(3)} "
+              f"ee_err(mm)={(ee_err*1000).round(1)} cloud_zoff(mm)={zoff*1000:.1f}", flush=True)
+
+        ts = np.arange(T)
+        fig = plt.figure(figsize=(15, 8))
+        for i, lbl in enumerate("xyz"):
+            ax = fig.add_subplot(2, 3, i + 1)
+            ax.plot(ts, re_ee[:, i], label="real", lw=2); ax.plot(ts, sim_ee[:, i], "--", label="sim", lw=2)
+            ax.set_title(f"ee_pos {lbl} (m)"); ax.grid(alpha=0.3); ax.legend(fontsize=8)
+        ax = fig.add_subplot(2, 3, 4)
+        ax.plot(ts, re_gw, label="real", lw=2); ax.plot(ts, sim_gw, "--", label="sim", lw=2)
+        ax.set_title("gripper_width (m)"); ax.grid(alpha=0.3); ax.legend(fontsize=8)
+        ax = fig.add_subplot(2, 3, 5)
+        ax.plot(ts, re_zm, label="real", lw=2); ax.plot(ts, sim_zm, "--", label="sim", lw=2)
+        ax.set_title("point-cloud zmean(t) (m)"); ax.grid(alpha=0.3); ax.legend(fontsize=8)
+        a3 = fig.add_subplot(2, 3, 6, projection="3d")
+        rp, sp = _valid(re_pc[grasp_t]), _valid(sim[grasp_t]["point_cloud"][0])
+        a3.scatter(rp[:, 0], rp[:, 1], rp[:, 2], s=2, c="tab:blue", alpha=0.4, label="real")
+        a3.scatter(sp[:, 0], sp[:, 1], sp[:, 2], s=2, c="tab:red", alpha=0.4, label="sim")
+        a3.set_title(f"cloud overlay @ grasp (t={grasp_t})"); a3.legend(fontsize=8)
+        a3.set_xlim(0.2, 0.71); a3.set_ylim(-0.215, 0.215); a3.set_zlim(0, 0.45); a3.view_init(20, -60)
+        fig.suptitle(f"episode {ep_idx} (fov={fov}) — ee err {(ee_err*1000).round(1)} mm | "
+                     f"cloud zmean offset {zoff*1000:.1f} mm")
+        fig.tight_layout()
+        fpath = out / f"traj_{ep_idx:02d}.png"
+        fig.savefig(fpath, dpi=110, bbox_inches="tight"); plt.close(fig)
+        print(f"  saved {fpath}", flush=True)
+
     env.close()
-
-    sim_ee = np.stack([o["ee_pos"][0] for o in sim])           # (T, 3)
-    sim_gw = np.array([o["gripper_width"][0, 0] for o in sim])  # (T,)
-    sim_qw = np.array([o["ee_quat"][0, 0] for o in sim])        # (T,) w
-    re_ee, re_gw = real["ee_pos"][:T], real["gripper_width"][:T, 0]
-    re_qw = real["ee_quat"][:T, 0]
-
-    print(f"  ee_pos mean|sim-real|: {np.abs(sim_ee - re_ee).mean(0).round(4)} m (x,y,z)", flush=True)
-    print(f"  gripper mean|sim-real|: {np.abs(sim_gw - re_gw).mean():.4f} m", flush=True)
-
-    def _cstats(pc):
-        v = pc[~np.all(pc == 0, axis=1)]
-        h, _ = np.histogram(v[:, 2], [0, 0.02, 0.05, 0.1, 0.2, 0.5])
-        return len(v), v[:, 2].mean(), h.tolist()
-    print("\n=== point cloud z-hist (real vs sim) bins[<.02,<.05,<.1,<.2,<.5] ===", flush=True)
-    for t in (0, T // 2, T - 1):
-        rn, rm, rh = _cstats(real["point_cloud"][t])
-        sn, sm, sh = _cstats(sim[t]["point_cloud"][0])
-        print(f"  t={t:3d}: real n={rn} zmean={rm:.3f} {rh}", flush=True)
-        print(f"          sim  n={sn} zmean={sm:.3f} {sh}", flush=True)
-
-    # ── figure 1: robot state vs time ──
-    ts = np.arange(T)
-    fig, ax = plt.subplots(2, 3, figsize=(15, 7))
-    for i, lbl in enumerate("xyz"):
-        ax[0, i].plot(ts, re_ee[:, i], label="real", lw=2)
-        ax[0, i].plot(ts, sim_ee[:, i], "--", label="sim", lw=2)
-        ax[0, i].set_title(f"ee_pos {lbl}"); ax[0, i].grid(alpha=0.3); ax[0, i].legend()
-    ax[1, 0].plot(ts, re_gw, label="real", lw=2); ax[1, 0].plot(ts, sim_gw, "--", label="sim", lw=2)
-    ax[1, 0].set_title("gripper_width"); ax[1, 0].grid(alpha=0.3); ax[1, 0].legend()
-    ax[1, 1].plot(ts, re_qw, label="real", lw=2); ax[1, 1].plot(ts, sim_qw, "--", label="sim", lw=2)
-    ax[1, 1].set_title("ee_quat w"); ax[1, 1].grid(alpha=0.3); ax[1, 1].legend()
-    ax[1, 2].axis("off")
-    fig.suptitle(f"open-loop action replay — episode {args.episode} (real vs sim)")
-    fig.tight_layout()
-    f1 = f"{args.out_prefix}_state.png"; fig.savefig(f1, dpi=110, bbox_inches="tight")
-    print(f"saved {f1}", flush=True)
-
-    # ── figure 2: point cloud real vs sim at a few steps ──
-    steps = [0, T // 2, T - 1]
-    fig2 = plt.figure(figsize=(13, 14))
-    for r, t in enumerate(steps):
-        for c, (tag, pc) in enumerate([("real", real["point_cloud"][t]),
-                                       ("sim", sim[t]["point_cloud"][0])]):
-            pc = pc[~np.all(pc == 0, axis=1)]
-            a3 = fig2.add_subplot(len(steps), 2, r * 2 + c + 1, projection="3d")
-            a3.scatter(pc[:, 0], pc[:, 1], pc[:, 2], s=2, c=pc[:, 2], cmap="viridis", alpha=0.5)
-            a3.set_title(f"{tag}  t={t}  ({pc.shape[0]} pts)")
-            a3.set_xlim(0.2, 0.71); a3.set_ylim(-0.215, 0.215); a3.set_zlim(0, 0.45)
-            a3.view_init(elev=20, azim=-60)
-    fig2.suptitle(f"point cloud: real (L515) vs sim (rendered) — episode {args.episode}")
-    fig2.tight_layout()
-    f2 = f"{args.out_prefix}_pointcloud.png"; fig2.savefig(f2, dpi=110, bbox_inches="tight")
-    print(f"saved {f2}", flush=True)
+    print("\n=== summary (fov={}) ===".format(fov), flush=True)
+    for ep_idx, ee_err, zoff in summary:
+        print(f"  ep {ep_idx:2d}: ee_err {(ee_err*1000).round(1)} mm | cloud_zoff {zoff*1000:5.1f} mm", flush=True)
     if args.show:
         plt.show()
 
