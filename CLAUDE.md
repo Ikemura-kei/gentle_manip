@@ -501,22 +501,38 @@ Roadmap for closing the sim2real gap. Two distinct mechanisms, kept separate:
   policy sees a distribution of worlds. Lives in `domain_randomization/` (`dr_config.py`
   = what to randomize + ranges; `presets.py` = "mild"/"aggressive"); applied by the sim
   backend (`SimBackend`/`GenesisWorker`). Real side is never randomized.
-- **Data augmentation** — perturbs the *observation/action signal* (sim AND, where
-  sensible, real-imitation data). Belongs in the shared `PerceptionPipeline` /
-  `ActionPipeline` so sim and real apply identical transforms.
+- **Data augmentation** — perturbs the *observation/action signal*. IMPLEMENTED as a
+  **sim-only `PolicyEnv(augmentation=...)` param** (`perception/augmentation.py`,
+  `configs/augmentation/*.yaml`) — NOT the shared pipeline, so a real deployment can't
+  silently inherit noise. Two categories:
+    - *Domain-match (sim-only):* point-cloud jitter/dropout/offset — real camera already
+      has this, so add to sim only, never to real.
+    - *Robustness (shared, at training/collection time only — NOT live deployment):*
+      ee_quat / ee_pos jitter, quat sign-flip. Inject into data from both sources so the
+      policy tolerates representation/measurement variation.
+  KEY FINDING (`examples/sim2real_diagnose`): the real-trained DP3 policy stalled in sim
+  purely because real demos have *exactly* clean quaternions while sim has ~1e-3 IK noise
+  — confirmed with the `quat_snap` probe. **TODO (i), deferred until the next DP3 retrain:**
+  add quat (+ small ee_pos) jitter to the **DP3 training dataloader** (`RealXArm7Dataset`)
+  so a clean-real-trained policy tolerates sim's quaternion noise. (`quat_snap` is kept
+  only as the evidence/probe, not for production.)
 
-### DR knobs to add
-Cheap (per-reset, no scene rebuild — change physics state / per-env params only):
-- **Initial robot pose** — jitter `DEFAULT_EE_POSE` / seed joints per env at reset.
-- **Object pose** — already plumbed (`ObjectEntry.pose_range`, per-env particle shift in
-  `GenesisWorker.reset`); wire it through `dr_config` ranges. Remember to move the grasp
-  target with it (the dev prototype already does).
-- **Object material** — E, ν, ρ, von Mises yield. NOTE: MPM material params are **global
-  per scene in Genesis, not per-env** (confirmed while building the backend). So material
-  DR requires a **scene rebuild** → use `GenesisProcess.restart(new_spec)` (the kill+respawn
-  path exists for exactly this). Batch episodes by material to amortize the rebuild cost.
-- **Coupling friction** (`coup_friction`) — gripper↔object grip strength; currently a
-  `build_scene` arg. Also a rebuild (set at entity creation) unless made settable.
+### DR knobs — status
+
+IMPLEMENTED (`domain_randomization/{dr_config.py,presets.py}`, `configs/dr/{mild,aggressive}.yaml`,
+applied by `SimBackend` with its own RNG):
+- **Object pose** (per-reset, cheap) — `DRConfig.object_pos_xy` → per-env `object_dxy`
+  sampled in `SimBackend.reset()` (the worker shifts the object particles).
+- **Object material E/ν/ρ + coupling friction** (per-scene) — `SimBackend.randomize_scene()`
+  samples them and **rebuilds via `GenesisProcess.restart(new_spec, coup_friction=...)`**
+  (MPM material is global per scene). Call every N episodes, not every reset.
+
+TODO:
+- **Initial robot pose** — jitter `DEFAULT_EE_POSE` / seed joints per env at reset (needs
+  a per-env home offset threaded through `XArm7Sim.reset_to_home`).
+- **Object von Mises yield** — in `DRConfig` but not yet applied: `ObjectEntry` has no yield
+  field, so `scene_builder` reads it from the registry material. Add an `ObjectEntry` yield
+  override to randomize it.
 
 Expensive / "crazier" (rebuild, and they change sim *fidelity* — randomize cautiously,
 they shift the dynamics, not just appearance):

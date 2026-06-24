@@ -97,10 +97,17 @@ class GenesisProcess:
             self._proc = None
             self._cmd_q = self._res_q = None
 
-    def restart(self, new_spec: Optional[SceneSpec] = None) -> None:
-        """Kill + respawn — the only way to change global material params (E/nu/rho)."""
+    def restart(self, new_spec: Optional[SceneSpec] = None, **worker_kwarg_updates: Any) -> None:
+        """Kill + respawn — the only way to change global material params (E/nu/rho).
+
+        new_spec swaps the scene (e.g. randomized object material on the ObjectEntry);
+        worker_kwarg_updates overrides build kwargs like coup_friction (None is ignored).
+        """
         if new_spec is not None:
             self._kwargs["spec"] = new_spec
+        for k, v in worker_kwarg_updates.items():
+            if v is not None:
+                self._kwargs[k] = v
         self.stop()
         self.start()
 

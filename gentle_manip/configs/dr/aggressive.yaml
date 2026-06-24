@@ -1,0 +1,9 @@
+# Aggressive domain randomization (sim-only). Wider material spread + larger pose
+# jitter; re-center material ranges per object. Material/friction need a rebuild.
+object_pos_xy: 0.06          # half-range (m): per-env object x/y jitter
+
+object_E: [1.0e3, 1.5e4]     # Young's modulus (Pa)
+object_nu: [0.2, 0.45]       # Poisson ratio
+object_rho: [300.0, 1500.0]  # density (kg/m^3)
+object_yield: [1.0e4, 4.0e4] # von Mises yield (Pa)
+coup_friction: [2.5, 6.0]    # rigid<->MPM coupling friction

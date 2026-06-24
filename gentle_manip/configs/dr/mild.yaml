@@ -1,0 +1,8 @@
+# Mild domain randomization (sim-only). Ranges centered on the soft tofu baseline;
+# re-center the material ranges for a stiffer object. Per-reset: object pose. Per-scene
+# (needs a GenesisProcess.restart): material + coupling friction.
+object_pos_xy: 0.03          # half-range (m): per-env object x/y jitter
+
+object_E: [3.0e3, 6.0e3]     # Young's modulus (Pa)
+object_rho: [900.0, 1200.0]  # density (kg/m^3)
+coup_friction: [3.5, 4.5]    # rigid<->MPM coupling friction

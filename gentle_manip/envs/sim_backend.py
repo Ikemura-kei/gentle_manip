@@ -14,6 +14,7 @@ from typing import Optional
 import numpy as np
 from scipy.spatial.transform import Rotation
 
+from gentle_manip.domain_randomization.dr_config import DRConfig
 from gentle_manip.envs.genesis_process import GenesisProcess
 from gentle_manip.envs.raw_obs import RawObs
 from gentle_manip.envs.sim_feedback import SimFeedback
@@ -36,12 +37,14 @@ class SimBackend:
 
         robot_overrides = config.get("robot", {})
         sim_cfg = config.get("sim", {})
-        self._pose_dr_xy = float(config.get("dr", {}).get("pose_dr_xy", 0.0))
+        self._dr = DRConfig.from_dict(config.get("dr"))         # sim-only domain randomization
         self._gripper_max = float(
             robot_overrides.get("default_gripper_width", cfg.DEFAULT_GRIPPER_WIDTH)
         )
         self._rng = np.random.default_rng(config.get("seed", 0))
 
+        # Kept for per-scene DR (material/friction) — rebuilt via process.restart().
+        self._spec = spec
         worker_kwargs = dict(
             settle_steps=int(sim_cfg.get("settle_steps", 30)),
             coup_friction=float(sim_cfg.get("coup_friction", 4.0)),
@@ -67,13 +70,11 @@ class SimBackend:
     # ── Backend protocol ──────────────────────────────────────────────────────
     def reset(self, object_dxy=None, **kwargs) -> RawObs:
         # Explicit object_dxy (num_envs, 2) places the object at a chosen offset from
-        # its default pose (e.g. to match a recorded demo's cube); otherwise pose-DR.
+        # its default pose (e.g. to match a recorded demo's cube); otherwise per-reset DR.
         if object_dxy is not None:
             object_dxy = np.asarray(object_dxy, dtype=np.float32).reshape(self.num_envs, 2)
-        elif self._pose_dr_xy > 0:
-            object_dxy = self._rng.uniform(
-                -self._pose_dr_xy, self._pose_dr_xy, size=(self.num_envs, 2)
-            ).astype(np.float32)
+        else:
+            object_dxy = self._dr.sample_object_dxy(self._rng, self.num_envs)
 
         state = self.process.reset(object_dxy)
         self._last_state = state
@@ -83,6 +84,35 @@ class SimBackend:
         self._target_quat = state["ee_quat"].astype(np.float64).copy()
         self._target_gripper = state["gripper_width"].astype(np.float64).copy()
         return self._build_raw_obs(state)
+
+    def randomize_scene(self) -> RawObs:
+        """Sample per-scene DR (object material + coupling friction) and REBUILD the
+        scene via restart (MPM material is global per scene). Expensive — call every N
+        episodes, not every reset. Returns the reset obs of the new scene; a plain
+        reset() if no scene DR is configured.
+        """
+        if not self._dr.has_scene_dr():
+            return self.reset()
+        if not hasattr(self.process, "restart"):
+            raise RuntimeError("scene DR needs the subprocess backend (use_subprocess=True)")
+        params = self._dr.sample_scene(self._rng)
+        self._spec = self._spec_with_material(params)
+        self.process.restart(self._spec, coup_friction=params.get("coup_friction"))
+        return self.reset()
+
+    def _spec_with_material(self, params: dict) -> SceneSpec:
+        """A copy of the base spec with the first object's E/nu/rho overridden."""
+        import dataclasses
+        objects = list(self._spec.objects)
+        if objects:
+            o = objects[0]
+            objects[0] = dataclasses.replace(
+                o,
+                youngs_modulus=params.get("E", o.youngs_modulus),
+                poisson_ratio=params.get("nu", o.poisson_ratio),
+                density=params.get("rho", o.density),
+            )
+        return dataclasses.replace(self._spec, objects=objects)
 
     def step(self, scaled_action: np.ndarray) -> RawObs:
         action = np.asarray(scaled_action, dtype=np.float64).reshape(self.num_envs, -1)
