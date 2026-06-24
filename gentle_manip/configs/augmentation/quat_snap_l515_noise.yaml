@@ -1,0 +1,13 @@
+# Combined sim-only augmentation: clean the quaternion AND noise the point cloud.
+#  - quat_snap removes the OOD quaternion noise that stalled the real-trained policy.
+#  - pc_* pushes the clean sim cloud toward the noisy L515 distribution, to test
+#    robustness to the remaining perception gap.
+# Real deployment never uses this (it goes through PolicyEnv's sim-only augmentation arg).
+quat_snap: true
+quat_snap_eps: 0.05
+
+pc_jitter_std: 0.002     # per-point Gaussian (m) ~ L515 depth noise at ~0.5 m
+pc_dropout: 0.0         # fraction of points replaced by duplicates (missing returns)
+pc_offset_std: 0.0       # per-cloud rigid offset (m); 0 = off
+
+seed: 0

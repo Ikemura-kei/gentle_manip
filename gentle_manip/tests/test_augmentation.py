@@ -69,6 +69,21 @@ def test_ee_pos_and_gripper_noise():
     assert (out["gripper_width"] >= 0).all()                     # clipped non-negative
 
 
+def test_quat_snap_cleans_near_axis_aligned():
+    # sim-like noisy down quaternion -> snapped to exactly [0, 1, 0, 0].
+    obs = {"ee_quat": np.array([[-0.0008, 0.9999, 0.0008, -0.003]], np.float32)}
+    out = ObsAugmentor(AugmentationConfig(quat_snap=True, quat_snap_eps=0.05))(obs)
+    assert np.allclose(out["ee_quat"], [[0.0, 1.0, 0.0, 0.0]], atol=1e-6)
+
+
+def test_quat_snap_leaves_real_rotations_alone():
+    # a genuinely rotated quat (45 deg about x) is not near {-1,0,1}, so it's kept.
+    a = np.pi / 8                                              # 22.5 deg -> 45 deg rotation
+    q = np.array([[np.cos(a), np.sin(a), 0.0, 0.0]], np.float32)  # exactly unit
+    out = ObsAugmentor(AugmentationConfig(quat_snap=True, quat_snap_eps=0.05))({"ee_quat": q.copy()})
+    assert np.allclose(out["ee_quat"], q, atol=1e-5)
+
+
 def test_quat_sign_flip_negates_some():
     obs = _obs(N=200)
     out = ObsAugmentor(AugmentationConfig(quat_sign_flip=True, seed=1))(obs)

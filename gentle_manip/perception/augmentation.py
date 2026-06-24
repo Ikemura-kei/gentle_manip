@@ -31,12 +31,18 @@ class AugmentationConfig:
     joint_std: float = 0.0         # rad (joint_pos / joint_vel)
     # representation
     quat_sign_flip: bool = False   # randomly negate ee_quat (q == -q double cover)
+    # Cleaning (not noise): snap ee_quat elements within eps of {-1,0,1} to those
+    # exact values, then renormalize — makes sim's quaternion as clean as the real
+    # demos (which are axis-aligned and noise-free). Only valid when the orientation
+    # stays near axis-aligned (e.g. gripper pointing straight down).
+    quat_snap: bool = False
+    quat_snap_eps: float = 0.05
     seed: int = 0
 
     def is_noop(self) -> bool:
         return not (self.pc_jitter_std or self.pc_dropout or self.pc_offset_std
                     or self.ee_pos_std or self.ee_quat_std or self.gripper_std
-                    or self.joint_std or self.quat_sign_flip)
+                    or self.joint_std or self.quat_sign_flip or self.quat_snap)
 
     @classmethod
     def from_dict(cls, d: dict) -> "AugmentationConfig":
@@ -57,7 +63,7 @@ class ObsAugmentor:
             obs["point_cloud"] = self._point_cloud(obs["point_cloud"])
         if "ee_pos" in obs and c.ee_pos_std:
             obs["ee_pos"] = (obs["ee_pos"] + self._n(obs["ee_pos"].shape, c.ee_pos_std)).astype(np.float32)
-        if "ee_quat" in obs and (c.ee_quat_std or c.quat_sign_flip):
+        if "ee_quat" in obs and (c.ee_quat_std or c.quat_sign_flip or c.quat_snap):
             obs["ee_quat"] = self._quat(obs["ee_quat"])
         if "gripper_width" in obs and c.gripper_std:
             gw = obs["gripper_width"] + self._n(obs["gripper_width"].shape, c.gripper_std)
@@ -90,6 +96,11 @@ class ObsAugmentor:
     def _quat(self, q: np.ndarray) -> np.ndarray:
         c = self.cfg
         q = q.astype(np.float32).copy()                         # (N, 4) wxyz
+        if c.quat_snap:                                         # clean toward axis-aligned
+            snapped = np.round(q)                              # nearest of {-1, 0, 1}
+            near = np.abs(q - snapped) < c.quat_snap_eps
+            q = np.where(near, snapped, q).astype(np.float32)
+            q /= np.linalg.norm(q, axis=1, keepdims=True) + 1e-8
         if c.ee_quat_std > 0:
             q = q + self._n(q.shape, c.ee_quat_std)
             q /= np.linalg.norm(q, axis=1, keepdims=True) + 1e-8

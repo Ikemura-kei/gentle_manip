@@ -68,6 +68,26 @@ perception gap is a consistent **~10–12 mm** cloud-height offset — the extri
 sensor-noise residual. Each `traj_NN.png` shows ee_pos x/y/z + gripper + cloud zmean(t)
 and a real-vs-sim cloud overlay at the grasp.
 
+### RESOLVED: the stall was the quaternion, not the cloud (`figures/eval_quatsnap/`)
+
+The v2 diagnostic (`replay_demo_in_sim_v2.py`) added quaternion comparison and found the
+real demos are **perfectly axis-aligned** (`ee_quat ≈ [0,1,0,0]`, exactly), while sim's
+IK/PD leaves **~1e-3 noise** in every quaternion element (~0.1–0.5° angular diff). The
+DP3 policy, trained only on the clean real quaternions, treated that tiny noise as
+out-of-distribution and **stalled mid-approach**.
+
+Confirmed with a temporary `quat_snap` filter (snap sim `ee_quat` elements within ε of
+{−1,0,1} to exact, then renormalize → quat angular diff = 0.00° in all 5 trajectories):
+with it on, **the policy gets past the stall point**. Adding L515-like point-cloud noise
+on top performed *better with little or no noise* — strong noise hurts.
+
+**Lessons (to be argued / confirmed):**
+1. The robust fix is **quaternion noise augmentation at DP3 training time** — train on
+   slightly-jittered quaternions so the policy tolerates the ~1e-3 difference from both
+   real *and* sim (rather than forcing sim to be exactly clean). `quat_snap` is kept only
+   as the evidence/probe that located the problem; not intended for production use.
+2. Point-cloud augmentation should be **mild** — too-strong cloud noise degraded the policy.
+
 ## Suspected causes → fixes (impact order)
 
 1. **Sensor-noise gap** (clean sim vs noisy L515) — add point-cloud jitter + random

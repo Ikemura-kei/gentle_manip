@@ -1,0 +1,9 @@
+# Sim-only HYPOTHESIS TEST: the real demos have perfectly clean (axis-aligned)
+# quaternions, but the sim IK/PD produces tiny quaternion noise (~1e-3). This snaps
+# the sim ee_quat to its clean form so it matches the real distribution — to test
+# whether that small noise is what makes the real-trained policy struggle in sim.
+# No point-cloud noise here, to isolate the quaternion effect.
+quat_snap: true
+quat_snap_eps: 0.05      # snap elements within this of {-1, 0, 1}; valid while the
+                         # gripper orientation stays near axis-aligned (pointing down)
+seed: 0

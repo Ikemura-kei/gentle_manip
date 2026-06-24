@@ -52,6 +52,8 @@ def main():
     ap.add_argument("--object", default="red_cube")
     ap.add_argument("--object-type", default="soft", choices=("soft", "rigid"))
     ap.add_argument("--obs", default="point_cloud_1cam")
+    ap.add_argument("--augmentation", type=Path, default=None,
+                    help="sim-only obs augmentation config (e.g. configs/augmentation/quat_snap.yaml)")
     ap.add_argument("--max-steps", type=int, default=0, help="0 = whole episode")
     ap.add_argument("--out-dir", default="traj_eval_v2")
     ap.add_argument("--show", action="store_true")
@@ -66,6 +68,7 @@ def main():
     from gentle_manip.assets.registry import get_object_def
     from gentle_manip.envs.policy_env import PolicyEnv
     from gentle_manip.envs.sim_backend import SimBackend
+    from gentle_manip.perception.augmentation import AugmentationConfig
     from gentle_manip.perception.obs_config import ObsConfig
     from gentle_manip.tasks.single_lift import SingleLiftTask
 
@@ -80,12 +83,17 @@ def main():
     obs_cfg = ObsConfig.from_dict(yaml.safe_load((_CFG / "obs" / f"{args.obs}.yaml").read_text()))
     act_cfg = ActionConfig.from_dict(
         yaml.safe_load((_CFG / "action" / "delta_pose_delta_gripper.yaml").read_text()))
+    aug_cfg = None
+    if args.augmentation is not None:
+        aug_path = args.augmentation if args.augmentation.is_file() else _CFG.parent / args.augmentation
+        aug_cfg = AugmentationConfig.from_dict(yaml.safe_load(aug_path.read_text()))
+        print(f"augmentation: {aug_cfg}", flush=True)
     task = SingleLiftTask({"object_name": args.object, "object_type": args.object_type})
     default_xy = np.array(get_object_def(args.object).default_pos[:2], dtype=np.float32)
     fov = task.scene_spec.cameras[0].fov
 
     backend = SimBackend(task.scene_spec, 1, config={"sim": {"settle_steps": 20}}, use_subprocess=False)
-    env = PolicyEnv(backend, obs_cfg, act_cfg, task=None, max_episode_steps=10 ** 9)
+    env = PolicyEnv(backend, obs_cfg, act_cfg, task=None, max_episode_steps=10 ** 9, augmentation=aug_cfg)
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
