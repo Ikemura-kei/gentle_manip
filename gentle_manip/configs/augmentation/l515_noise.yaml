@@ -1,0 +1,14 @@
+# Sim-only observation augmentation: push the clean sim point cloud toward the noisy
+# L515 distribution. Passed to a SIM PolicyEnv (sim_server / sim training) via the
+# augmentation arg — the real deployment never uses it (the real camera is already
+# noisy). Tune to the real sensor.
+pc_jitter_std: 0.005     # per-point Gaussian (m) ~ L515 depth noise at ~0.5 m
+pc_dropout: 0.05         # fraction of points replaced by duplicates (missing returns)
+pc_offset_std: 0.0       # per-cloud rigid offset (m); 0 = off
+# Low-dim state left clean here (sim agent_pos is already accurate). Enable for
+# robust sim training:
+# ee_pos_std: 0.0
+# ee_quat_std: 0.0
+# gripper_std: 0.0
+# quat_sign_flip: false
+seed: 0

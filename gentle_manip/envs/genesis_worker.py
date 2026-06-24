@@ -61,13 +61,22 @@ class GenesisWorker:
         self.handle.scene.reset()
         self.robot.reset_to_home()
 
-        for obj, base in zip(self.handle.objects, self.handle.object_base_particles):
-            if object_dxy is not None:
-                shift = np.zeros((self.num_envs, 1, 3), dtype=np.float32)
-                shift[:, 0, :2] = np.asarray(object_dxy, dtype=np.float32)
-                obj.set_particles_pos(base + shift)
+        for obj, otype, base_particles, base_pose in zip(
+            self.handle.objects, self.handle.object_types,
+            self.handle.object_base_particles, self.handle.object_base_pose,
+        ):
+            if otype == "rigid":
+                base_pos, base_quat = base_pose
+                shift = np.zeros((self.num_envs, 3), dtype=np.float32)
+                if object_dxy is not None:
+                    shift[:, :2] = np.asarray(object_dxy, dtype=np.float32)
+                obj.set_pos(base_pos + shift, zero_velocity=True)
+                obj.set_quat(base_quat, zero_velocity=True)
             else:
-                obj.set_particles_pos(base)
+                shift = np.zeros((self.num_envs, 1, 3), dtype=np.float32)
+                if object_dxy is not None:
+                    shift[:, 0, :2] = np.asarray(object_dxy, dtype=np.float32)
+                obj.set_particles_pos(base_particles + shift)
 
         for _ in range(self.settle_steps):
             self.handle.scene.step()
@@ -110,10 +119,17 @@ class GenesisWorker:
         # Representative object → SimFeedback fields. particle_positions are large
         # and unused by the reward components, so we don't ship them every step.
         obj = self.handle.objects[0]
-        st = obj.get_state()
-        particle_pos = _np(st.pos)                                   # (B, n_p, 3)
-        state["object_center"] = particle_pos.mean(axis=1).astype(np.float32)   # (B, 3)
-        state["von_mises_stress"] = _np(st.von_mises).astype(np.float32)        # (B, n_p)
+        if self.handle.object_types[0] == "rigid":
+            # Rigid solver has no particles/stress; object_center is the entity's
+            # base-link position. von_mises_stress is None — SimBackend omits the
+            # key entirely so stress-reward KeyErrors propagate, per CLAUDE.md.
+            state["object_center"] = _np(obj.get_pos()).astype(np.float32)      # (B, 3)
+            state["von_mises_stress"] = None
+        else:
+            st = obj.get_state()
+            particle_pos = _np(st.pos)                                   # (B, n_p, 3)
+            state["object_center"] = particle_pos.mean(axis=1).astype(np.float32)   # (B, 3)
+            state["von_mises_stress"] = _np(st.von_mises).astype(np.float32)        # (B, n_p)
 
         state["depth_images"] = depth_images
         state["camera_intrinsics"] = intrinsics

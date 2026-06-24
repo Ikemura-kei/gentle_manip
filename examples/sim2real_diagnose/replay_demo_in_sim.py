@@ -39,6 +39,7 @@ def main():
     ap.add_argument("--episodes", default="", help="comma-sep explicit indices (overrides --n-episodes)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--object", default="red_cube")
+    ap.add_argument("--object-type", default="soft", choices=("soft", "rigid"))
     ap.add_argument("--obs", default="point_cloud_1cam")
     ap.add_argument("--max-steps", type=int, default=0, help="0 = whole episode")
     ap.add_argument("--out-dir", default="traj_eval")
@@ -68,7 +69,7 @@ def main():
     obs_cfg = ObsConfig.from_dict(yaml.safe_load((_CFG / "obs" / f"{args.obs}.yaml").read_text()))
     act_cfg = ActionConfig.from_dict(
         yaml.safe_load((_CFG / "action" / "delta_pose_delta_gripper.yaml").read_text()))
-    task = SingleLiftTask({"object_name": args.object})
+    task = SingleLiftTask({"object_name": args.object, "object_type": args.object_type})
     default_xy = np.array(get_object_def(args.object).default_pos[:2], dtype=np.float32)
     fov = task.scene_spec.cameras[0].fov
 

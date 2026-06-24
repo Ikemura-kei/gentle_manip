@@ -20,7 +20,7 @@ import os
 import sys
 import argparse
 from pathlib import Path
-
+import torch
 import numpy as np
 import genesis as gs
 
@@ -196,7 +196,12 @@ def main():
             return None
         ctx = scene.visualizer.context
         orig = cam._transform.clone()
-        cam._transform[..., :3, 3] += ctx.scene.envs_offset[ctx.rendered_envs_idx]
+        offsets = torch.as_tensor(
+            ctx.scene.envs_offset[ctx.rendered_envs_idx],
+            dtype=cam._transform.dtype,
+            device=cam._transform.device,
+        )
+        cam._transform[..., :3, 3] += offsets
         scene.visualizer.rasterizer.update_camera(cam)
         return orig
 
@@ -227,22 +232,21 @@ def main():
 
         depth:       (B, H, W)
         K:           (3, 3)   (shared across envs)
-        world_T_cam: (4, 4)   (world_T_cam)
-
-        NOTE: depth_to_pointcloud expects a single shared (4, 4) world_T_cam.
-        This helper assumes the camera pose is shared across envs (true for the
-        unbound cam_ext). A wrist-mounted camera has a per-env pose and needs a
-        different conversion path.
+        world_T_cam: (B, 4, 4) — per-env because the camera is shifted to each
+                     env's world offset during rendering.
         """
         depth = render_batched_depth(cam)                       # (B, H, W)
         K = np.asarray(cam.intrinsics, dtype=np.float32)        # (3, 3)
-        # Genesis cam.extrinsics is cam_T_world (OpenCV convention). For a
-        # batched unbound camera it is (B, 4, 4) with identical entries; invert
-        # to get world_T_cam and take the shared (4, 4) matrix.
+        # Genesis cam.extrinsics is cam_T_world (OpenCV convention). The camera
+        # was rendered with env offsets added to its translation; mirror that in
+        # world_T_cam so the point cloud lands in the correct world frame.
+        ctx = scene.visualizer.context
         extr = np.asarray(cam.extrinsics, dtype=np.float32)
         if extr.ndim == 3:
             extr = extr[0]
-        world_T_cam = np.linalg.inv(extr)
+        world_T_cam = np.tile(np.linalg.inv(extr)[None], (B, 1, 1))
+        if cam._is_batched:
+            world_T_cam[:, :3, 3] += ctx.scene.envs_offset[ctx.rendered_envs_idx]
         return depth, K, world_T_cam
 
     def _colorize(d, cv2):

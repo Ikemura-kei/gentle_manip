@@ -7,6 +7,7 @@ import gymnasium
 
 from gentle_manip.envs.raw_obs import RawObs
 from gentle_manip.envs.sim_feedback import SimFeedback
+from gentle_manip.perception.augmentation import AugmentationConfig, build_augmentor
 from gentle_manip.perception.obs_config import ObsConfig
 from gentle_manip.perception.pipeline import PerceptionPipeline
 from gentle_manip.actions.action_config import ActionConfig
@@ -84,6 +85,7 @@ class PolicyEnv:
         max_episode_steps: int = 200,
         rgb_shape: Optional[tuple[int, int]] = None,
         tactile_shape: Optional[tuple[int, int]] = None,
+        augmentation: Optional[AugmentationConfig] = None,
     ) -> None:
         if max_episode_steps <= 0:
             raise ValueError(f"max_episode_steps must be > 0, got {max_episode_steps}")
@@ -94,6 +96,9 @@ class PolicyEnv:
 
         self.perception = PerceptionPipeline(obs_config)
         self.action_pipeline = ActionPipeline(action_config)
+        # Sim-only stochastic obs augmentation — set by sim experiments to close the
+        # sim2real gap; left None for real deployment (the camera is already noisy).
+        self._augmentor = build_augmentor(augmentation)
 
         self.observation_space = self.perception.build_obs_space(rgb_shape, tactile_shape)
         self.action_space = self.action_pipeline.build_action_space()
@@ -108,7 +113,14 @@ class PolicyEnv:
 
     def reset(self, **kwargs) -> dict:
         """Reset all envs and return the initial observation dict."""
-        return self.perception.process(self._do_reset(**kwargs))
+        return self._observe(self._do_reset(**kwargs))
+
+    def _observe(self, raw: RawObs) -> dict:
+        """RawObs -> obs dict, with sim-only augmentation applied if configured."""
+        obs = self.perception.process(raw)
+        if self._augmentor is not None:
+            obs = self._augmentor(obs)
+        return obs
 
     def step(
         self, raw_action: np.ndarray
@@ -137,7 +149,7 @@ class PolicyEnv:
         if timeout:
             raw = self._do_reset()
 
-        obs = self.perception.process(raw)
+        obs = self._observe(raw)
         infos = [
             {"success": bool(success[i]), "time_out": bool(timeout)}
             for i in range(self.num_envs)

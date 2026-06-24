@@ -117,11 +117,12 @@ class SimBackend:
         if self._last_state is None:
             return None
         s = self._last_state
+        extra = {} if s["von_mises_stress"] is None else {"von_mises_stress": s["von_mises_stress"]}
         return SimFeedback(
             ee_pos=s["ee_pos"],
             gripper_width=s["gripper_width"],
             object_center=s["object_center"],
-            extra={"von_mises_stress": s["von_mises_stress"]},
+            extra=extra,
         )
 
     def close(self) -> None:

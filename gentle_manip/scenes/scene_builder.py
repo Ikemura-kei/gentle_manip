@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import genesis as gs
@@ -29,15 +29,23 @@ _URDF = Path(__file__).resolve().parents[1] / "assets" / "xarm" / "xarm7_with_gr
 ENV_SPACING = 2.5
 
 
+def _to_np(x: Any) -> np.ndarray:
+    return x.detach().cpu().numpy() if hasattr(x, "detach") else np.asarray(x)
+
+
 @dataclass
 class BuiltScene:
     scene: Any
     robot: Any                                   # RigidEntity (XArm7 URDF)
-    objects: List[Any]                           # MPM soft-body entities
+    objects: List[Any]                           # soft (MPM) and/or rigid entities
+    object_types: List[str]                      # "soft" | "rigid", parallel to objects
     cameras: Dict[str, List[Any]]                # cam name -> [per-env genesis cameras]
     num_envs: int
     spec: SceneSpec
-    object_base_particles: List[np.ndarray] = field(default_factory=list)  # (B, n_p, 3) per object
+    # Built-state cache for per-env reset repositioning (pose-DR): exactly one of
+    # the two entries per object is populated, matching its object_type.
+    object_base_particles: List[Optional[np.ndarray]] = field(default_factory=list)  # soft: (B, n_p, 3)
+    object_base_pose: List[Optional[Tuple[np.ndarray, np.ndarray]]] = field(default_factory=list)  # rigid: (pos, quat)
 
 
 def build_scene(
@@ -88,22 +96,31 @@ def build_scene(
     add_fixtures(scene, spec.fixtures)
 
     objects: List[Any] = []
+    object_types: List[str] = []
     for entry in spec.objects:
         odef = get_object_def(entry.name)
         mat = odef.material
-        E = entry.youngs_modulus if entry.youngs_modulus is not None else mat.youngs_modulus
-        nu = entry.poisson_ratio if entry.poisson_ratio is not None else mat.poisson_ratio
         rho = entry.density if entry.density is not None else mat.density
         size = tuple(s * entry.scale for s in odef.size)
-        objects.append(
-            scene.add_entity(
+        if entry.object_type == "rigid":
+            # No von_mises_stress (rigid solver, no particles) — SimFeedback simply
+            # omits the key for this object; see genesis_worker.read_state.
+            ent = scene.add_entity(
+                material=gs.materials.Rigid(rho=rho, coup_friction=coup_friction),
+                morph=gs.morphs.Box(size=size, pos=odef.default_pos, euler=(0, 0, 0)),
+            )
+        else:
+            E = entry.youngs_modulus if entry.youngs_modulus is not None else mat.youngs_modulus
+            nu = entry.poisson_ratio if entry.poisson_ratio is not None else mat.poisson_ratio
+            ent = scene.add_entity(
                 material=gs.materials.MPM.ElastoPlastic(
                     E=E, nu=nu, von_mises_yield_stress=mat.von_mises_yield_stress, rho=rho
                 ),
                 morph=gs.morphs.Box(size=size, pos=odef.default_pos, euler=(0, 0, 0)),
                 surface=gs.surfaces.Default(vis_mode="particle"),
             )
-        )
+        objects.append(ent)
+        object_types.append(entry.object_type)
 
     cameras: Dict[str, List[Any]] = {}
     for cam in spec.cameras:
@@ -117,15 +134,19 @@ def build_scene(
     scene.build(n_envs=num_envs, env_spacing=(env_spacing, env_spacing),
                 center_envs_at_origin=False)
 
-    # Cache each object's built particle positions so the worker can re-place them
-    # per env on reset (pose-DR) without rebuilding the scene.
-    base_particles = [
-        (o.get_particles_pos().detach().cpu().numpy() if hasattr(o.get_particles_pos(), "detach")
-         else np.asarray(o.get_particles_pos()))
-        for o in objects
-    ]
+    # Cache each object's built state so the worker can re-place it per env on
+    # reset (pose-DR) without rebuilding the scene.
+    base_particles: List[Optional[np.ndarray]] = []
+    base_pose: List[Optional[Tuple[np.ndarray, np.ndarray]]] = []
+    for o, otype in zip(objects, object_types):
+        if otype == "rigid":
+            base_particles.append(None)
+            base_pose.append((_to_np(o.get_pos()), _to_np(o.get_quat())))
+        else:
+            base_particles.append(_to_np(o.get_particles_pos()))
+            base_pose.append(None)
 
     return BuiltScene(
-        scene=scene, robot=robot, objects=objects, cameras=cameras,
-        num_envs=num_envs, spec=spec, object_base_particles=base_particles,
+        scene=scene, robot=robot, objects=objects, object_types=object_types, cameras=cameras,
+        num_envs=num_envs, spec=spec, object_base_particles=base_particles, object_base_pose=base_pose,
     )

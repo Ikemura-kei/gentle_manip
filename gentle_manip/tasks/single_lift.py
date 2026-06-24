@@ -20,6 +20,7 @@ class SingleLiftTask(BaseTask):
         self.lift_height: float = float(task_cfg.get("lift_height", 0.15))
         self.hold_steps: int = int(task_cfg.get("hold_steps", 30))
         self.object_name: str = str(task_cfg.get("object_name", "tofu"))
+        self.object_type: str = str(task_cfg.get("object_type", "soft"))  # "soft" | "rigid"
 
         self._initial_z: np.ndarray | None = None
         self._success_counter: np.ndarray | None = None
@@ -31,18 +32,20 @@ class SingleLiftTask(BaseTask):
         # dt/substeps/mpm_bounds/grid_density. One external camera matches the real
         # single-camera rig (cam_ext at the calibrated WORLD_T_CAM_EXT pose).
         return SceneSpec(
-            objects=[ObjectEntry(name=self.object_name)],
+            objects=[ObjectEntry(name=self.object_name, object_type=self.object_type)],
             fixtures=[FixtureEntry(fixture_type="table")],
             cameras=[
                 CameraEntry(
                     name="cam_ext",
-                    pos=(0.98910661, -0.00034108, 0.09825304),
-                    lookat=(0.0, 0.0, 0.09825304),
+                    # pos=(0.98910661, -0.00034108, 0.09825304),
+                    # lookat=(0.0, 0.0, 0.09825304),
+                    pos=(0.98910661, -0.00034108,  0.09825304),
+                    lookat=(-0.01056659, 0.0207823,  0.11265116),
                     # Genesis fov is VERTICAL: fov=49 -> VFOV 49, HFOV ~63 at 640x480.
                     # fov=60 was wider than the L515 (~55x70) and gave a larger cloud
                     # offset; narrowing minimizes it (see examples/sim2real_diagnose).
                     # TODO: set to the real L515's measured intrinsics for exactness.
-                    fov=49.0,
+                    fov=46.0,
                 ),
             ],
             sim_dt=1.0 / 30.0,

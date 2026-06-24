@@ -19,7 +19,8 @@ def depth_to_pointcloud(
     Args:
         depth:       (num_envs, H, W) float32, depth in meters.
         intrinsics:  (3, 3) camera intrinsic matrix K — shared across envs.
-        extrinsics:  (4, 4) world_T_cam — shared across envs.
+        extrinsics:  (4, 4) world_T_cam shared across envs, or (num_envs, 4, 4)
+                     for per-env extrinsics.
         depth_min:   discard pixels below this depth (near-plane / invalid zeros).
         depth_max:   discard pixels above this depth (out-of-range / inf).
         vectorized:  if True, process all envs in one numpy operation (faster for
@@ -67,9 +68,13 @@ def _depth_to_pointcloud_batched(
     pts_cam = np.stack([x_c, y_c, d], axis=-1)
 
     # Transform to world frame
-    R = extrinsics[:3, :3]
-    t = extrinsics[:3, 3]
-    pts_world = pts_cam @ R.T + t   # (num_envs, H*W, 3)
+    if extrinsics.ndim == 2:
+        R = extrinsics[None, :3, :3]  # (1, 3, 3)
+        t = extrinsics[None, :3, 3]   # (1, 3)
+    else:
+        R = extrinsics[:, :3, :3]     # (num_envs, 3, 3)
+        t = extrinsics[:, :3, 3]      # (num_envs, 3)
+    pts_world = np.einsum("bij,bnj->bni", R, pts_cam) + t[:, None, :]
     pts_world[~valid] = 0.0
 
     return pts_world.astype(np.float32), valid
@@ -103,7 +108,13 @@ def _depth_to_pointcloud_loop(
         x_c = (us - cx) * d / fx
         y_c = (vs - cy) * d / fy
         pts_cam = np.stack([x_c, y_c, d], axis=-1)   # (H*W, 3)
-        pts_world = pts_cam @ R.T + t
+        if extrinsics.ndim == 3:
+            R_i = extrinsics[i, :3, :3]
+            t_i = extrinsics[i, :3, 3]
+        else:
+            R_i = R
+            t_i = t
+        pts_world = pts_cam @ R_i.T + t_i
         pts_world[~valid] = 0.0
         all_pts[i] = pts_world.astype(np.float32)
         all_valid[i] = valid

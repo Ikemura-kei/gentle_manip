@@ -30,9 +30,14 @@ from gentle_manip.envs.rpc import SimEnvClient                                  
 from gentle_manip.scripts.deploy_real import DP3PolicyAdapter, run_deploy_loop   # noqa: E402
 
 
-def _spawn_sim_server(port: int, object_name: str, no_viewer: bool) -> subprocess.Popen:
+def _spawn_sim_server(port, object_name, object_type, no_viewer, obs_config, augmentation) -> subprocess.Popen:
     cmd = ["uv", "run", "--project", "envs/sim", "python", "-m",
-           "gentle_manip.scripts.sim_server", "--port", str(port), "--object", object_name]
+           "gentle_manip.scripts.sim_server", "--port", str(port),
+           "--object", object_name, "--object-type", object_type]
+    if obs_config:
+        cmd += ["--obs-config", str(obs_config)]
+    if augmentation:
+        cmd += ["--augmentation", str(augmentation)]
     if no_viewer:
         cmd.append("--no-viewer")
     print(f"launching sim server (Genesis build takes ~2 min): {' '.join(cmd)}", file=sys.stderr)
@@ -44,6 +49,11 @@ def main() -> None:
     p.add_argument("--ckpt", type=Path, required=True)
     p.add_argument("--port", type=int, default=5560)
     p.add_argument("--object", default="red_cube")
+    p.add_argument("--object-type", default="soft", choices=("soft", "rigid"))
+    p.add_argument("--obs-config", type=Path, default=None,
+                   help="obs config for the sim server (default: clean point_cloud_1cam)")
+    p.add_argument("--augmentation", type=Path, default=None,
+                   help="sim-only obs augmentation (e.g. configs/augmentation/l515_noise.yaml)")
     p.add_argument("--max-steps", type=int, default=10000)
     p.add_argument("--rate", type=float, default=30.0, help="control rate (Hz)")
     p.add_argument("--device", default="cuda:0")
@@ -52,7 +62,8 @@ def main() -> None:
                    help="connect to an already-running sim server instead of spawning one")
     args = p.parse_args()
 
-    server = None if args.no_spawn else _spawn_sim_server(args.port, args.object, args.no_viewer)
+    server = None if args.no_spawn else _spawn_sim_server(
+        args.port, args.object, args.object_type, args.no_viewer, args.obs_config, args.augmentation)
     try:
         env = SimEnvClient(port=args.port)               # retries until the server binds (~2 min)
         policy = DP3PolicyAdapter(str(args.ckpt), device=args.device)
