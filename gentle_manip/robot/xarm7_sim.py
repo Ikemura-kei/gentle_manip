@@ -27,7 +27,8 @@ def _np(x) -> np.ndarray:
 class XArm7Sim:
     num_envs: int
 
-    def __init__(self, robot_entity, num_envs: int, overrides: Optional[dict] = None) -> None:
+    def __init__(self, robot_entity, num_envs: int, overrides: Optional[dict] = None,
+                 rigid_grasp: bool = False) -> None:
         overrides = overrides or {}
         self.robot = robot_entity
         self.num_envs = int(num_envs)
@@ -39,8 +40,28 @@ class XArm7Sim:
 
         kp = np.array(overrides.get("kp", cfg.KP), dtype=np.float32)
         kv = np.array(overrides.get("kv", cfg.KV), dtype=np.float32)
+        if rigid_grasp:
+            # Rigid object present: swap the 6 gripper joints to the softer, tuned
+            # gains so the fingers settle on the box instead of driving through it
+            # (the inner knuckles, dof_idx 9 & 12, get an even softer KP). Soft/MPM
+            # keeps the original stiff gripper (its grasp is unchanged).
+            kp[7:] = cfg.GRIPPER_KP_RIGID
+            kp[[9, 12]] = cfg.GRIPPER_KP_RIGID_INNER
+            kv[7:] = cfg.GRIPPER_KV_RIGID
         self.robot.set_dofs_kp(kp, self.dof_idx)
         self.robot.set_dofs_kv(kv, self.dof_idx)
+
+        # Cap the gripper PD force so the fingers settle on contact instead of driving
+        # through a rigid object — rigid grasp only (soft/MPM doesn't interpenetrate,
+        # so it keeps the URDF default and its grasp is untouched).
+        flim_gen = float(overrides.get("gripper_force_limit", cfg.GRIPPER_FORCE_LIMIT))
+        flim_inner = float(overrides.get("gripper_force_limit_inner", cfg.GRIPPER_FORCE_LIMIT_INNER))
+        if rigid_grasp and flim_gen > 0:
+            # grip dof order: [drive(L-out), L-fing, L-inn, R-out, R-fing, R-inn].
+            # Softer cap on the inner knuckles (indices 2, 5) so they comply.
+            flim = np.full(len(self.grip_dofs), flim_gen, dtype=np.float32)
+            flim[[2, 5]] = flim_inner
+            self.robot.set_dofs_force_range(-flim, flim, self.grip_dofs)
 
         self.ee = robot_entity.get_link(cfg.EE_LINK)
 

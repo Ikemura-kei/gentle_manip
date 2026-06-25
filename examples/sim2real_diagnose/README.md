@@ -70,7 +70,7 @@ and a real-vs-sim cloud overlay at the grasp.
 
 ### RESOLVED: the stall was the quaternion, not the cloud (`figures/eval_quatsnap/`)
 
-The v2 diagnostic (`replay_demo_in_sim_v2.py`) added quaternion comparison and found the
+Adding quaternion comparison to the diagnostic (`replay_demo_in_sim.py`) found the
 real demos are **perfectly axis-aligned** (`ee_quat ≈ [0,1,0,0]`, exactly), while sim's
 IK/PD leaves **~1e-3 noise** in every quaternion element (~0.1–0.5° angular diff). The
 DP3 policy, trained only on the clean real quaternions, treated that tiny noise as

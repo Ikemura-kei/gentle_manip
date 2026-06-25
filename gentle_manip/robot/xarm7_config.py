@@ -43,9 +43,25 @@ DEFAULT_ACTION_SCALES = [0.003, 0.003, 0.004, 0.001, 0.001, 0.001, 0.04]
 # Override via configs/setup/sim_default.yaml → robot.kp / robot.kv /
 # robot.default_joint_angles
 
-# TODO: confirm KP/KV after URDF inertia tuning
-KP = [8000] * 7 + [2000] * 6   # arm joints, then gripper joints
-KV = [600]  * 7 + [100]   * 6
+# TODO: confirm KP/KV after URDF inertia tuning.
+# These are the SOFT/MPM gripper gains — the original pre-rigid values the soft-body
+# grasp was validated with. A gripper this stiff grasps deformables fine but drives
+# straight through a rigid box, so XArm7Sim swaps in the RIGID gripper gains + force
+# cap below whenever the scene contains a rigid object (the arm gains are unchanged).
+KP = [8000] * 7 + [100000] * 6   # arm joints, then gripper joints (SOFT/MPM)
+KV = [600]  * 7 + [1000]   * 6
+
+# Rigid-grasp gripper overrides — applied to the 6 gripper joints only, and only when
+# a rigid object is present. Tuned with the grasp tuner so the fingers settle on the
+# cube surface instead of penetrating; the force cap bounds the PD push on contact.
+GRIPPER_KP_RIGID = 10200.0         # outer/drive + finger joints
+GRIPPER_KP_RIGID_INNER = 5000.0    # inner knuckles — softer, like the inner force cap
+GRIPPER_KV_RIGID = 600.0
+# Grip-dof force-range caps (N·m, rigid grasp only). The inner knuckles are the
+# parallel support links of the four-bar — a softer cap there lets them comply
+# instead of fighting the grasp, which grips the cube more cleanly.
+GRIPPER_FORCE_LIMIT = 15.0         # outer/drive + finger joints
+GRIPPER_FORCE_LIMIT_INNER = 4.5    # inner knuckle joints (left/right_inner_knuckle)
 
 # Links to keep when building URDF scene (others are merged for sim performance)
 LINKS_TO_KEEP = ['xarm_gripper_base_link']

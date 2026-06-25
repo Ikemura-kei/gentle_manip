@@ -39,6 +39,7 @@ class GenesisWorker:
         settle_steps: int = 30,
         coup_friction: float = 4.0,
         constraint_timeconst: float = 0.01,
+        noslip_iterations: int = 3,
         show_fps: bool = True,
         robot_overrides: Optional[dict] = None,
     ) -> None:
@@ -49,9 +50,12 @@ class GenesisWorker:
         self.handle = build_scene(
             spec, num_envs, show_viewer=show_viewer,
             coup_friction=coup_friction, constraint_timeconst=constraint_timeconst,
-            show_fps=show_fps, robot_overrides=robot_overrides,
+            noslip_iterations=noslip_iterations, show_fps=show_fps,
+            robot_overrides=robot_overrides,
         )
-        self.robot = XArm7Sim(self.handle.robot, num_envs, overrides=robot_overrides)
+        rigid_grasp = any(t == "rigid" for t in self.handle.object_types)
+        self.robot = XArm7Sim(self.handle.robot, num_envs, overrides=robot_overrides,
+                              rigid_grasp=rigid_grasp)
 
     # ── lifecycle ───────────────────────────────────────────────────────────────
     def reset(self, object_dxy: Optional[np.ndarray] = None) -> dict:

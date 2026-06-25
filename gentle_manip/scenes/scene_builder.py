@@ -56,8 +56,8 @@ def build_scene(
     env_spacing: float = ENV_SPACING,
     coup_friction: float = 4.0,
     constraint_timeconst: float = 0.01,
-    noslip_iterations: int = 5,
-    rigid_friction: float = 1.0,
+    noslip_iterations: int = 3,
+    rigid_friction: float = 0.7,
     show_fps: bool = True,
     robot_overrides: Optional[dict] = None,
 ) -> BuiltScene:
@@ -73,7 +73,7 @@ def build_scene(
     # drift through). Both are only needed with a rigid object in the scene: noslip is
     # experimental and slows the sim, MPM/soft objects don't interpenetrate, and the
     # friction only matters for the finger<->object rigid pair. So gate on that. Note:
-    # rigid_friction must stay moderate (~1.0) — too high reintroduces the penetration.
+    # rigid_friction must stay moderate (~0.7) — too high reintroduces the penetration.
     has_rigid = any(o.object_type == "rigid" for o in spec.objects)
     noslip = noslip_iterations if has_rigid else 0
 

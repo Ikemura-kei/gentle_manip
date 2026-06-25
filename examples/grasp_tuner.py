@@ -15,29 +15,34 @@ A results table prints at the end. Needs a display.
 ================================ EDIT ME ================================="""
 
 # Which knob to sweep, and over what range. One of:
-#   runtime (one build, fast):   "friction", "flim", "grip_close", "depth",
-#                                "kp_outer", "kp_finger", "kp_inner"
-#   rebuild (one build per step): "tc" (constraint_timeconst), "substeps"
-SWEEP_PARAM = "flim"
-SWEEP_MIN = 15
-SWEEP_MAX = 50
-SWEEP_STEPS = 5
-SWEEP_LOG = True          # True: geometric spacing (good for kp/flim); False: linear
+#   runtime (one build, fast):   "friction", "flim", "flim_inner", "grip_close",
+#                                "depth", "kp_outer", "kp_finger", "kp_inner"
+#   rebuild (one build per step): "tc" (constraint_timeconst), "substeps",
+#                                "noslip_iterations"
+SWEEP_PARAM = "friction"
+SWEEP_MIN = 0.7
+SWEEP_MAX = 5.0
+SWEEP_STEPS = 20
+SWEEP_LOG = False         # True: geometric spacing (good for kp/flim); False: linear
 
 # Held constant for every grasp in the sweep (the swept one is overridden).
+# Defaults below mirror the production sim path (cfg.KP gripper=100000, no force
+# limit, build friction=1.0, noslip=5) so tuning starts from what we actually run.
 FIXED = {
     "object": "red_cube",
     "object_type": "rigid",     # "rigid" | "soft"
     "friction": 1.0,            # rigid<->rigid friction [0.01, 5]; set on robot AND object
-    "flim": 1.0,               # grip dof force range (<=0 keeps URDF default)
+    "flim": 15.0,                # grip force range, outer+finger (<=0 keeps URDF default)
+    "flim_inner": 5.0,           # grip force range, inner knuckles only (softer = cleaner)
     # Gripper KP per linkage role (each shared by the symmetric left+right joints).
     # All 6 joints share one target angle (mimic emulation); only the stiffness differs.
-    "kp_outer": 10000.0,         # outer/drive knuckles (drive_joint, right_outer_knuckle)
-    "kp_finger": 10000.0,        # finger joints at the pads (left/right_finger_joint)
-    "kp_inner": 10000.0,         # inner knuckles (left/right_inner_knuckle_joint)
-    "grip_close": 0.02,          # close-target width (0 = full close = worst-case penetration)
+    "kp_outer": 10200.0,       # outer/drive knuckles (drive_joint, right_outer_knuckle)
+    "kp_finger": 10200.0,      # finger joints at the pads (left/right_finger_joint)
+    "kp_inner": 5000.0,       # inner knuckles (left/right_inner_knuckle_joint)
+    "grip_close": 0.027,         # close-target width (0 = full close = worst-case penetration)
     "depth": 0.006,             # fingertip z at the bottom of the descent
-    "tc": 0.0001,                 # constraint_timeconst (contact stiffness)
+    "tc": 0.01,                 # constraint_timeconst (contact stiffness)
+    "noslip_iterations": 3,     # genesis noslip post-pass (production default; keeps the hold)
     "substeps": None,           # None = scene default (6); finer => tc floor 2*dt/substeps drops
 }
 CLOSE_RAMP_STEPS = 15           # ramp the gripper open->target over this many steps (slow close)
@@ -61,7 +66,7 @@ from gentle_manip.robot.xarm7_sim import _np
 from gentle_manip.tasks.single_lift import SingleLiftTask
 
 DOWN = np.array([[0.0, 1.0, 0.0, 0.0]], np.float32)   # gripper pointing down (wxyz)
-REBUILD_PARAMS = {"tc", "substeps"}
+REBUILD_PARAMS = {"tc", "substeps", "noslip_iterations"}
 
 
 def sweep_values():
@@ -80,7 +85,8 @@ def build(params, show_fps):
         spec = dataclasses.replace(spec, sim_substeps=int(params["substeps"]))
     # Gripper KP is set per linkage-role at runtime (below); build uses cfg defaults.
     w = GenesisWorker(spec, 1, settle_steps=40, show_viewer=True,
-                      constraint_timeconst=float(params["tc"]), show_fps=show_fps)
+                      constraint_timeconst=float(params["tc"]),
+                      noslip_iterations=int(params["noslip_iterations"]), show_fps=show_fps)
     return w
 
 
@@ -136,7 +142,11 @@ def main():
                 except Exception as e:
                     print(f"set_friction failed: {e}")
             if float(params["flim"]) > 0:
-                robot.set_dofs_force_range(np.full(n, -params["flim"]), np.full(n, params["flim"]), grip)
+                # grip dof order [drive(L-out), L-fing, L-inn, R-out, R-fing, R-inn];
+                # softer cap on the inner knuckles (indices 2, 5).
+                flim = np.full(n, float(params["flim"]), np.float32)
+                flim[[2, 5]] = float(params["flim_inner"])
+                robot.set_dofs_force_range(-flim, flim, grip)
             # Per-role gripper KP (grip dof order = [drive(L-out), L-fing, L-inn,
             # R-out, R-fing, R-inn]); each role shared by its symmetric L/R pair.
             for role, idx in (("kp_outer", (0, 3)), ("kp_finger", (1, 4)), ("kp_inner", (2, 5))):
