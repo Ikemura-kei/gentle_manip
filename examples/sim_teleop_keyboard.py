@@ -47,10 +47,11 @@ def main():
                     help="obs config name in configs/obs/ (state_ee_only is snappiest; "
                          "point_cloud_1cam also renders the camera each step)")
     ap.add_argument("--object", default="tofu", help="object name in OBJECT_MAP")
+    ap.add_argument("--object-type", default="soft", choices=("soft", "rigid"))
     ap.add_argument("--rate", type=float, default=30.0, help="control loop Hz")
     args = ap.parse_args()
 
-    task = SingleLiftTask({"object_name": args.object})
+    task = SingleLiftTask({"object_name": args.object, "object_type": args.object_type})
     obs_cfg = ObsConfig.from_dict(yaml.safe_load((_CFG / "obs" / f"{args.obs}.yaml").read_text()))
     act_cfg = ActionConfig.from_dict(
         yaml.safe_load((_CFG / "action" / "delta_pose_delta_gripper.yaml").read_text())

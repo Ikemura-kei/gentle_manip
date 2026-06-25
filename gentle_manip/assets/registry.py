@@ -35,6 +35,12 @@ OBJECT_MAP: dict[str, ObjectDef] = {
     # the table (half-extent 0.015 -> center z ~0.015 after settling).
     "red_cube": ObjectDef("red_cube", MATERIALS["red_cube"],
                           size=(0.03, 0.03, 0.03), default_pos=(0.47, 0.011, 0.02)),
+    # Gripper-width calibration cubes (use as rigid): known sizes spread across x so
+    # all four fit in one scene; spawn z = half-extent so they rest on the table.
+    "cal_cube_6": ObjectDef("cal_cube_6", MATERIALS["red_cube"], size=(0.06, 0.06, 0.06), default_pos=(0.34, 0.0, 0.035)),
+    "cal_cube_5": ObjectDef("cal_cube_5", MATERIALS["red_cube"], size=(0.05, 0.05, 0.05), default_pos=(0.42, 0.0, 0.030)),
+    "cal_cube_4": ObjectDef("cal_cube_4", MATERIALS["red_cube"], size=(0.04, 0.04, 0.04), default_pos=(0.50, 0.0, 0.025)),
+    "cal_cube_3": ObjectDef("cal_cube_3", MATERIALS["red_cube"], size=(0.03, 0.03, 0.03), default_pos=(0.58, 0.0, 0.020)),
 }
 
 

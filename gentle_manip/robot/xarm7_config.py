@@ -44,20 +44,26 @@ DEFAULT_ACTION_SCALES = [0.003, 0.003, 0.004, 0.001, 0.001, 0.001, 0.04]
 # robot.default_joint_angles
 
 # TODO: confirm KP/KV after URDF inertia tuning
-KP = [8000] * 7 + [100000] * 6   # arm joints, then gripper joints
-KV = [600]  * 7 + [1000]   * 6
+KP = [8000] * 7 + [2000] * 6   # arm joints, then gripper joints
+KV = [600]  * 7 + [100]   * 6
 
 # Links to keep when building URDF scene (others are merged for sim performance)
 LINKS_TO_KEEP = ['xarm_gripper_base_link']
 
-# Gripper width (m) <-> joint angle (rad) calibration for sim. The four-bar gripper
-# linkage makes finger separation a (mildly) nonlinear function of the drive angle,
-# so we calibrate from a measured sweep instead of assuming linear. XArm7Sim
-# normalizes the measured separation to [0 .. DEFAULT_GRIPPER_WIDTH] and interpolates
-# both directions, so sim reports the same [0, open] convention as the real SDK while
-# capturing the linkage curvature (linear was within 2.4%; this removes that residual).
-# TODO: re-measure against the real gripper to confirm the absolute open width.
-GRIPPER_JOINT_OPEN = 0.0        # joint angle at fully open (reset_to_home uses this)
+# Gripper width (m) <-> joint angle (rad) calibration for sim. Two stages, so the
+# sim's reported gripper_width matches what the real XArm SDK reports for the same
+# physical pad gap:
+#   1. drive angle -> finger-link separation (GRIPPER_CALIB_SEP sweep), then
+#      pad_gap = link_sep - GRIPPER_PAD_OFFSET. The pad inner faces sit a CONSTANT
+#      0.052 m inside the link origins across the whole range (measured from the
+#      finger-link AABB inner faces; the offset is flat to <0.1 mm, i.e. a pure
+#      subtraction, not a scale). pad_gap is the true physical gap that contacts an
+#      object, so a clean 3 cm clamp gives pad_gap = 0.03.
+#   2. pad_gap (physical) -> gw via the REAL gripper calibration below, so sim reads
+#      the same value the real SDK would (the real command/readback isn't 1:1).
+# XArm7Sim builds a single drive-angle -> gw lookup from these and interpolates both
+# directions, keeping the command and observation sides self-consistent.
+GRIPPER_JOINT_OPEN = 0.0        # joint angle at fully open (reset_to_home seed)
 GRIPPER_JOINT_CLOSED = 0.85     # joint angle at the URDF close limit
 GRIPPER_FINGER_LINKS = ('left_finger', 'right_finger')
 
@@ -69,6 +75,16 @@ GRIPPER_CALIB_JOINT = [0.00, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40,
 GRIPPER_CALIB_SEP = [0.1409, 0.1366, 0.1322, 0.1276, 0.1228, 0.1179, 0.1129,
                      0.1078, 0.1026, 0.0973, 0.0919, 0.0865, 0.0811, 0.0756,
                      0.0701, 0.0646, 0.0591, 0.0536]
+# Finger-link origin -> pad inner face: pad_gap = link_sep - this. Measured from the
+# left/right finger collision AABB inner-y faces over the full joint sweep; constant.
+GRIPPER_PAD_OFFSET = 0.052
+
+# Real gripper calibration (examples/reality_gripper_width_calibration.txt): physical
+# pad gap (m) -> gw the XArm SDK reports. The SDK reads ~1-2.5 mm under the true gap
+# mid-range and ~1:1 at the open end. Anchored at (0, 0) for a fully-closed gap and
+# extended 1:1 past the measured 0.07 (where the offset has already vanished).
+GRIPPER_REAL_PHYS = [0.0, 0.01, 0.02, 0.03, 0.04,  0.05,   0.06,  0.07, 0.12]
+GRIPPER_REAL_GW   = [0.0, 0.009, 0.018, 0.029, 0.0375, 0.0475, 0.058, 0.07, 0.12]
 
 # TCP convention: "our TCP" is the fingertip of a fully-closed gripper (the frame
 # the policy/obs/EE_BOUNDS speak, matching the real robot). The Genesis EE link is

@@ -55,6 +55,10 @@ def build_scene(
     show_viewer: bool = False,
     env_spacing: float = ENV_SPACING,
     coup_friction: float = 4.0,
+    constraint_timeconst: float = 0.01,
+    noslip_iterations: int = 5,
+    rigid_friction: float = 1.0,
+    show_fps: bool = True,
     robot_overrides: Optional[dict] = None,
 ) -> BuiltScene:
     """Translate ``spec`` into a built Genesis scene with ``num_envs`` envs.
@@ -64,15 +68,27 @@ def build_scene(
     spec.validate()
     robot_overrides = robot_overrides or {}
 
+    # The noslip solver pass + a moderate rigid<->rigid friction are what stop the
+    # gripper interpenetrating a RIGID object (the main solver alone lets the contact
+    # drift through). Both are only needed with a rigid object in the scene: noslip is
+    # experimental and slows the sim, MPM/soft objects don't interpenetrate, and the
+    # friction only matters for the finger<->object rigid pair. So gate on that. Note:
+    # rigid_friction must stay moderate (~1.0) — too high reintroduces the penetration.
+    has_rigid = any(o.object_type == "rigid" for o in spec.objects)
+    noslip = noslip_iterations if has_rigid else 0
+
     (lo, hi) = spec.mpm_bounds
     scene = gs.Scene(
         sim_options=gs.options.SimOptions(dt=spec.sim_dt, substeps=spec.sim_substeps),
+        profiling_options=gs.options.ProfilingOptions(show_FPS=show_fps),
         mpm_options=gs.options.MPMOptions(
             lower_bound=tuple(lo), upper_bound=tuple(hi), grid_density=spec.mpm_grid_density
         ),
         rigid_options=gs.options.RigidOptions(
             enable_joint_limit=True, enable_collision=True, enable_self_collision=True,
-            gravity=(0.0, 0.0, -9.81), box_box_detection=True, constraint_timeconst=0.01,
+            gravity=(0.0, 0.0, -9.81), box_box_detection=True,
+            constraint_timeconst=constraint_timeconst,
+            noslip_iterations=noslip,        # 0 unless a rigid object is present
         ),
         viewer_options=gs.options.ViewerOptions(
             camera_pos=(1.8, -1.2, 1.4), camera_lookat=(0.45, 0.0, 0.15), camera_fov=35,
@@ -91,7 +107,11 @@ def build_scene(
             file=str(_URDF), fixed=True, merge_fixed_links=True,
             links_to_keep=cfg.LINKS_TO_KEEP, pos=(0.0, 0.0, 0.0),
         ),
-        material=gs.materials.Rigid(coup_friction=coup_friction),
+        # Finger<->object friction matters only against a rigid object; leave it at the
+        # genesis default for all-soft scenes so their behaviour is unchanged.
+        material=gs.materials.Rigid(
+            coup_friction=coup_friction, friction=rigid_friction if has_rigid else None
+        ),
     )
     add_fixtures(scene, spec.fixtures)
 
@@ -106,7 +126,9 @@ def build_scene(
             # No von_mises_stress (rigid solver, no particles) — SimFeedback simply
             # omits the key for this object; see genesis_worker.read_state.
             ent = scene.add_entity(
-                material=gs.materials.Rigid(rho=rho, coup_friction=coup_friction),
+                material=gs.materials.Rigid(
+                    rho=rho, coup_friction=coup_friction, friction=rigid_friction
+                ),
                 morph=gs.morphs.Box(size=size, pos=odef.default_pos, euler=(0, 0, 0)),
             )
         else:

@@ -38,6 +38,8 @@ class GenesisWorker:
         show_viewer: bool = False,
         settle_steps: int = 30,
         coup_friction: float = 4.0,
+        constraint_timeconst: float = 0.01,
+        show_fps: bool = True,
         robot_overrides: Optional[dict] = None,
     ) -> None:
         self.num_envs = int(num_envs)
@@ -46,7 +48,8 @@ class GenesisWorker:
         _init_genesis()
         self.handle = build_scene(
             spec, num_envs, show_viewer=show_viewer,
-            coup_friction=coup_friction, robot_overrides=robot_overrides,
+            coup_friction=coup_friction, constraint_timeconst=constraint_timeconst,
+            show_fps=show_fps, robot_overrides=robot_overrides,
         )
         self.robot = XArm7Sim(self.handle.robot, num_envs, overrides=robot_overrides)
 

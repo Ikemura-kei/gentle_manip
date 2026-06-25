@@ -51,14 +51,17 @@ class XArm7Sim:
         self.gripper_open_width = float(
             overrides.get("default_gripper_width", cfg.DEFAULT_GRIPPER_WIDTH)
         )
-        # Width<->joint lookup: normalize the measured finger separation to
-        # [0, gripper_open_width] (captures the linkage nonlinearity). _gw_joint is
-        # increasing (open->closed); _gw_width is the matching width, decreasing.
+        # Width<->joint lookup, calibrated so sim's reported width matches the real
+        # SDK: drive angle -> link separation -> physical pad gap (constant offset) ->
+        # real gw. _gw_joint is increasing (open->closed); _gw_width is the matching
+        # gw, decreasing. See xarm7_config GRIPPER_* comments.
         cq = np.asarray(cfg.GRIPPER_CALIB_JOINT, dtype=np.float64)
         sep = np.asarray(cfg.GRIPPER_CALIB_SEP, dtype=np.float64)
-        frac = (sep - sep[-1]) / (sep[0] - sep[-1])        # 1 at open .. 0 at closed
+        pad_gap = sep - cfg.GRIPPER_PAD_OFFSET             # true physical pad gap (m)
         self._gw_joint = cq
-        self._gw_width = frac * self.gripper_open_width
+        self._gw_width = np.interp(
+            pad_gap, cfg.GRIPPER_REAL_PHYS, cfg.GRIPPER_REAL_GW
+        )  # physical -> real SDK gw
         # Tool-frame offset from the Genesis EE link (gripper_base_link) to "our TCP"
         # (fingertip). State is reported at, and targets are commanded in, the TCP
         # frame so sim matches the real robot's TCP convention.
@@ -80,7 +83,11 @@ class XArm7Sim:
         return np.interp(width, self._gw_width[::-1], self._gw_joint[::-1])
 
     def _joint_to_width(self, q_drive: np.ndarray) -> np.ndarray:
-        return np.interp(q_drive, self._gw_joint, self._gw_width)
+        # Clip to the real's open range: the sim can open slightly wider than the
+        # real (pad_gap up to ~0.089), but the SDK never reads above the open width.
+        return np.clip(
+            np.interp(q_drive, self._gw_joint, self._gw_width), 0.0, self.gripper_open_width
+        )
 
     # ── TCP offset (gripper_base_link <-> fingertip), both batched (B, ...) ──────
     @staticmethod

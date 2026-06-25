@@ -24,7 +24,7 @@ CAPTION = "trans W/S A/D Up/Dn  rot L/R R/F Q/E  grip O/P  SPACE save  BKSP disc
 
 DEFAULT_MOVE_SPEED = 0.5
 DEFAULT_ROT_SPEED = 1.0
-DEFAULT_GRIPPER_VALUE = 0.1
+DEFAULT_GRIPPER_VALUE = 0.05
 
 
 class KeyboardTeleop:
