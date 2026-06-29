@@ -123,17 +123,22 @@ class XArm7Sim:
         return np.asarray(pos_tcp, dtype=np.float64) - self._rot(quat_wxyz).apply(self._tcp_offset)
 
     # ── lifecycle ───────────────────────────────────────────────────────────────
-    def reset_to_home(self) -> None:
+    def reset_to_home(self, home_offset: Optional[np.ndarray] = None) -> None:
         """Reset to home: seed DEFAULT_JOINT_ANGLES (good IK seed + instant gripper
         open), then servo the TCP to the shared Cartesian home (DEFAULT_EE_POSE) so
         sim and real start at the same fingertip pose. The worker's settle loop runs
-        the steps that drive the arm onto the commanded pose."""
+        the steps that drive the arm onto the commanded pose.
+
+        home_offset: optional (num_envs, 3) per-env (dx, dy, dz) jitter on the home EE
+        position (sim-only DR — initial arm pose randomization)."""
         arm = np.tile(self.default_joint_angles[:7][None], (self.num_envs, 1))
         grip = np.full((self.num_envs, len(self.grip_dofs)), cfg.GRIPPER_JOINT_OPEN, dtype=np.float32)
         self.robot.set_dofs_position(arm, self.arm_dofs)
         self.robot.set_dofs_position(grip, self.grip_dofs)
 
         home_pos = np.tile(self.home_pos[None], (self.num_envs, 1))
+        if home_offset is not None:
+            home_pos = home_pos + np.asarray(home_offset, dtype=np.float64).reshape(self.num_envs, 3)
         home_quat = np.tile(self.home_quat[None], (self.num_envs, 1))
         gripper_open = np.full(self.num_envs, self.gripper_open_width, dtype=np.float32)
         self.apply_target(home_pos, home_quat, gripper_open)      # servo to Cartesian home

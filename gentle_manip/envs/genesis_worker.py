@@ -58,15 +58,17 @@ class GenesisWorker:
                               rigid_grasp=rigid_grasp)
 
     # ── lifecycle ───────────────────────────────────────────────────────────────
-    def reset(self, object_dxy: Optional[np.ndarray] = None) -> dict:
+    def reset(self, object_dxy: Optional[np.ndarray] = None,
+              home_offset: Optional[np.ndarray] = None) -> dict:
         """Reset to the built state, re-home the arm, (optionally) pose-DR each
         env's object, settle, and return the initial state.
 
-        object_dxy: (num_envs, 2) per-env (dx, dy) object jitter, or None for the
-        deterministic homogeneous reset.
+        object_dxy:   (num_envs, 2) per-env (dx, dy) object jitter, or None.
+        home_offset:  (num_envs, 3) per-env (dx, dy, dz) jitter on the reset home EE
+                      position (sim-only DR), or None for the shared home pose.
         """
         self.handle.scene.reset()
-        self.robot.reset_to_home()
+        self.robot.reset_to_home(home_offset)
 
         for obj, otype, base_particles, base_pose in zip(
             self.handle.objects, self.handle.object_types,

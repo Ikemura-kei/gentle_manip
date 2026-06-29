@@ -3,6 +3,11 @@
 include_joint_pos: false
 include_joint_vel: false
 
+# Tiny inherent ee_quat noise (shared sim+real), renormalized — so the quaternion is
+# never an exact constant (avoids the clean-quaternion sim2real stall). std on the quat
+# elements; ~0.003 ≈ 0.2 deg (kept small — too much noise hurts too).
+quat_noise_std: 0.003
+
 point_cloud:
   cameras: ["cam_ext"]
   # Workspace crop in the robot base frame (meters). Starting point from the

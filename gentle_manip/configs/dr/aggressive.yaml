@@ -1,6 +1,7 @@
 # Aggressive domain randomization (sim-only). Wider material spread + larger pose
 # jitter; re-center material ranges per object. Material/friction need a rebuild.
 object_pos_xy: 0.06          # half-range (m): per-env object x/y jitter
+robot_init_pos_xyz: 0.03     # std (m): per-env Gaussian jitter on the reset home EE xyz
 
 object_E: [1.0e3, 1.5e4]     # Young's modulus (Pa)
 object_nu: [0.2, 0.45]       # Poisson ratio

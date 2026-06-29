@@ -47,6 +47,12 @@ class ObsConfig:
     include_joint_pos: bool = False
     include_joint_vel: bool = False
 
+    # Small inherent quaternion noise, applied in PerceptionPipeline to ee_quat and
+    # renormalized — SHARED across sim and real (unlike the sim-only PolicyEnv
+    # augmentation). Keeps ee_quat from ever being an exact constant so a policy
+    # never overfits one clean quaternion. 0.0 disables it.
+    quat_noise_std: float = 0.0
+
     point_cloud: Optional[PointCloudConfig] = None
     voxel: Optional[VoxelConfig] = None
     images: Optional[ImageConfig] = None
@@ -90,6 +96,7 @@ class ObsConfig:
         cfg = cls(
             include_joint_pos=d.get("include_joint_pos", False),
             include_joint_vel=d.get("include_joint_vel", False),
+            quat_noise_std=d.get("quat_noise_std", 0.0),
             point_cloud=pc,
             voxel=voxel,
             images=images,

@@ -44,7 +44,7 @@ def _worker_loop(cmd_q: "mp.Queue", res_q: "mp.Queue", kwargs: dict) -> None:
             return
         try:
             if cmd == "reset":
-                result = worker.reset(object_dxy=payload)
+                result = worker.reset(**payload)
             elif cmd == "step":
                 result = worker.step(*payload)
             else:
@@ -112,8 +112,9 @@ class GenesisProcess:
         self.start()
 
     # ── commands ────────────────────────────────────────────────────────────────
-    def reset(self, object_dxy: Optional[np.ndarray] = None) -> dict:
-        return self._call("reset", object_dxy)
+    def reset(self, object_dxy: Optional[np.ndarray] = None,
+              home_offset: Optional[np.ndarray] = None) -> dict:
+        return self._call("reset", {"object_dxy": object_dxy, "home_offset": home_offset})
 
     def step(self, target_pos: np.ndarray, target_quat: np.ndarray, target_gripper: np.ndarray) -> dict:
         return self._call("step", (target_pos, target_quat, target_gripper))

@@ -68,7 +68,7 @@ class SimBackend:
         self._last_state: Optional[dict] = None
 
     # ── Backend protocol ──────────────────────────────────────────────────────
-    def reset(self, object_dxy=None, **kwargs) -> RawObs:
+    def reset(self, object_dxy=None, home_offset=None, **kwargs) -> RawObs:
         # Explicit object_dxy (num_envs, 2) places the object at a chosen offset from
         # its default pose (e.g. to match a recorded demo's cube); otherwise per-reset DR.
         if object_dxy is not None:
@@ -76,7 +76,13 @@ class SimBackend:
         else:
             object_dxy = self._dr.sample_object_dxy(self._rng, self.num_envs)
 
-        state = self.process.reset(object_dxy)
+        # Per-env reset home-pose jitter (sim-only DR), unless explicitly provided.
+        if home_offset is not None:
+            home_offset = np.asarray(home_offset, dtype=np.float32).reshape(self.num_envs, 3)
+        else:
+            home_offset = self._dr.sample_home_offset(self._rng, self.num_envs)
+
+        state = self.process.reset(object_dxy, home_offset)
         self._last_state = state
         # Seed targets from the actual reset pose so the first deltas are relative
         # to where the arm really is.

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Optional
+
 import numpy as np
 import gymnasium
 from gymnasium.spaces import Box, Dict
@@ -28,9 +30,12 @@ class PerceptionPipeline:
         obs_space = pipeline.build_obs_space()        # gymnasium.spaces.Dict
     """
 
-    def __init__(self, obs_config: ObsConfig) -> None:
+    def __init__(self, obs_config: ObsConfig, rng_seed: Optional[int] = None) -> None:
         obs_config.validate()
         self.cfg = obs_config
+        # RNG for the small inherent quat noise (shared sim+real). Entropy-seeded by
+        # default so the noise genuinely varies; pass rng_seed for reproducibility.
+        self._rng = np.random.default_rng(rng_seed)
 
     # ── Main entry point ──────────────────────────────────────────────────────
 
@@ -50,6 +55,14 @@ class PerceptionPipeline:
         obs["ee_pos"]        = raw.ee_pos.astype(np.float32)         # (N, 3)
         obs["ee_quat"]       = raw.ee_quat.astype(np.float32)        # (N, 4)
         obs["gripper_width"] = raw.gripper_width[:, np.newaxis].astype(np.float32)  # (N, 1)
+
+        # Inherent quaternion noise (shared sim+real): add a tiny Gaussian and
+        # renormalize so ee_quat is never an exact constant.
+        if self.cfg.quat_noise_std > 0:
+            q = obs["ee_quat"] + self._rng.normal(
+                0.0, self.cfg.quat_noise_std, obs["ee_quat"].shape
+            ).astype(np.float32)
+            obs["ee_quat"] = (q / (np.linalg.norm(q, axis=1, keepdims=True) + 1e-8)).astype(np.float32)
 
         if self.cfg.include_joint_pos and raw.joint_pos is not None:
             obs["joint_pos"] = raw.joint_pos.astype(np.float32)      # (N, 7)
