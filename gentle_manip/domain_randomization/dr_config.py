@@ -23,7 +23,7 @@ _Range = Tuple[float, float]
 class DRConfig:
     # ── per-reset (no rebuild) ────────────────────────────────────────────────
     object_pos_xy: float = 0.0          # half-range (m); per-env uniform object x/y jitter
-    robot_init_pos_xyz: float = 0.0     # std (m); per-env Gaussian jitter on the reset home EE xyz
+    robot_init_pos_xyz: float = 0.0     # half-range (m); per-env uniform jitter on the reset home EE xyz
 
     # ── per-scene (rebuild via GenesisProcess.restart) ────────────────────────
     object_E: Optional[_Range] = None       # Young's modulus (Pa)
@@ -66,10 +66,12 @@ class DRConfig:
         return rng.uniform(-self.object_pos_xy, self.object_pos_xy, (num_envs, 2)).astype(np.float32)
 
     def sample_home_offset(self, rng: np.random.Generator, num_envs: int) -> Optional[np.ndarray]:
-        """Per-env (dx, dy, dz) Gaussian offset for the reset home EE pose, or None."""
+        """Per-env (dx, dy, dz) uniform offset (+/- half-range) for the reset home EE
+        pose, or None if disabled."""
         if self.robot_init_pos_xyz <= 0:
             return None
-        return rng.normal(0.0, self.robot_init_pos_xyz, (num_envs, 3)).astype(np.float32)
+        v = self.robot_init_pos_xyz
+        return rng.uniform(-v, v, (num_envs, 3)).astype(np.float32)
 
     def sample_scene(self, rng: np.random.Generator) -> Dict[str, float]:
         """Sample the per-scene params that are randomized (single value each — material

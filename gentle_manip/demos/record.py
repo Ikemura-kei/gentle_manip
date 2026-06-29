@@ -39,12 +39,21 @@ class DemoRecorder:
     def __init__(self, env, teleop, keyboard, task_name: str,
                  out_dir: Path, rate_hz: float = 20.0,
                  idle_threshold: float = 1e-3, keep_trailing_idle: int = 5,
-                 max_interior_idle: int = 3) -> None:
+                 max_interior_idle: int = 3, action_noise_std: float = 0.0,
+                 dataset_path: Optional[Path] = None) -> None:
         self.env = env
         self.teleop = teleop
         self.keyboard = keyboard
         self.task_name = task_name
         self.out_dir = Path(out_dir)
+        # Gaussian noise (std, in normalized action units) added to the demonstrator's
+        # POSE deltas (not gripper) each step — recorded and executed alike, so the demos
+        # carry action variation for more robust training. 0.0 disables it.
+        self.action_noise_std = float(action_noise_std)
+        self._rng = np.random.default_rng()
+        # Explicit output file (e.g. <run_dir>/data.pkl) overrides the default
+        # <out_dir>/<task>/YY-MM-DD-xyz.pkl naming when the caller owns the run dir.
+        self._dataset_path_override = Path(dataset_path) if dataset_path else None
         self.rate_hz = float(rate_hz)
         # Idle trim (online, at save time), per consecutive idle run:
         #   leading run  → drop entirely (don't teach "wait before starting")
@@ -91,6 +100,13 @@ class DemoRecorder:
                     continue
 
                 action = np.asarray(self.teleop.get_action(), dtype=np.float32)
+                if self.action_noise_std > 0:
+                    # Noise on the pose deltas only (all but the last/gripper dim),
+                    # clipped back to the [-1, 1] action range.
+                    action[:-1] = np.clip(
+                        action[:-1] + self._rng.normal(0.0, self.action_noise_std, action.shape[0] - 1),
+                        -1.0, 1.0,
+                    ).astype(np.float32)
                 obs = self._step_and_record(obs, action)
 
                 self._rate_limit(t0, period)
@@ -178,8 +194,13 @@ class DemoRecorder:
     # ── Output ────────────────────────────────────────────────────────────────
 
     def _dataset_path(self) -> Path:
-        """Pick a short unique session filename once: <out>/<task>/YY-MM-DD-xyz.pkl."""
+        """The session output file. Either the caller-supplied dataset_path (e.g.
+        <run_dir>/data.pkl), or a short unique <out>/<task>/YY-MM-DD-xyz.pkl."""
         if self._path is None:
+            if self._dataset_path_override is not None:
+                self._dataset_path_override.parent.mkdir(parents=True, exist_ok=True)
+                self._path = self._dataset_path_override
+                return self._path
             out = self.out_dir / self.task_name
             out.mkdir(parents=True, exist_ok=True)
             date = datetime.now().strftime("%y-%m-%d")
