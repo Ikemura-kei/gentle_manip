@@ -128,12 +128,23 @@ def main() -> None:
                                 gripper_value=cfg["gripper_value"])
         controls = "W/S A/D Up/Dn move, L/R R/F Q/E rotate, O/P grip, SPACE save, BACKSPACE discard, ESC quit."
 
+    # Optional: record the external camera (cam_ext) RGB for the first N episodes as a
+    # quality-check video, written to <run_dir>/videos/ep_NNN.mp4.
+    frame_fn = video_dir = None
+    if cfg.get("record_video"):
+        from gentle_manip.robot.xarm7_sim import _np
+        cam = next(iter(backend.process.handle.cameras.values()))[0]   # in-process worker
+        frame_fn = lambda: _np(cam.render(rgb=True, depth=False)[0])
+        video_dir = run_dir
+
     recorder = DemoRecorder(
         env=env, teleop=driver, keyboard=driver, task_name=cfg["task_name"],
         out_dir=run_dir, rate_hz=cfg["rate"], dataset_path=run_dir / "data.pkl",
         idle_threshold=cfg["idle_threshold"], keep_trailing_idle=cfg["keep_trailing_idle"],
         max_interior_idle=cfg["max_interior_idle"],
         action_noise_std=cfg.get("action_noise_std", 0.0),
+        frame_fn=frame_fn, video_dir=video_dir, video_fps=cfg.get("video_fps", cfg["rate"]),
+        video_episodes=cfg.get("video_episodes", 0),
     )
     print(f"collecting '{cfg['task_name']}' in sim ({mode}) -> {run_dir}\n"
           f"  obs={cfg['obs_config']} dr={cfg.get('dr') or 'off'} aug={cfg.get('augmentation') or 'off'}\n"

@@ -40,12 +40,21 @@ class DemoRecorder:
                  out_dir: Path, rate_hz: float = 20.0,
                  idle_threshold: float = 1e-3, keep_trailing_idle: int = 5,
                  max_interior_idle: int = 3, action_noise_std: float = 0.0,
-                 dataset_path: Optional[Path] = None) -> None:
+                 dataset_path: Optional[Path] = None, frame_fn=None,
+                 video_dir: Optional[Path] = None, video_fps: int = 20,
+                 video_episodes: int = 0) -> None:
         self.env = env
         self.teleop = teleop
         self.keyboard = keyboard
         self.task_name = task_name
         self.out_dir = Path(out_dir)
+        # Optional RGB video: frame_fn() returns an (H, W, 3) uint8 frame; one mp4 is
+        # written per episode for the first `video_episodes` saved (a quality check).
+        self.frame_fn = frame_fn
+        self.video_dir = Path(video_dir) if video_dir else None
+        self.video_fps = int(video_fps)
+        self.video_episodes = int(video_episodes)
+        self._frames: list = []
         # Gaussian noise (std, in normalized action units) added to the demonstrator's
         # POSE deltas (not gripper) each step — recorded and executed alike, so the demos
         # carry action variation for more robust training. 0.0 disables it.
@@ -91,13 +100,18 @@ class DemoRecorder:
                 if SAVE in events:
                     n = self._save_episode()
                     print(f"  saved episode {len(self.episodes)} ({n} steps) → {self._path}")
+                    self._flush_video()
                     obs = self.env.reset()
                     continue
                 if DISCARD in events:
                     self._discard_episode()
                     print("  discarded episode")
+                    self._frames = []
                     obs = self.env.reset()
                     continue
+
+                if self.frame_fn is not None and len(self.episodes) < self.video_episodes:
+                    self._frames.append(np.asarray(self.frame_fn(), dtype=np.uint8))
 
                 action = np.asarray(self.teleop.get_action(), dtype=np.float32)
                 if self.action_noise_std > 0:
@@ -114,6 +128,18 @@ class DemoRecorder:
             self.teleop.close()
             self.keyboard.close()
             self.env.close()
+
+    def _flush_video(self) -> None:
+        """Write the captured frames of the just-saved episode to an mp4."""
+        if not self._frames:
+            return
+        import imageio.v2 as imageio
+        vdir = (self.video_dir or self.out_dir) / "videos"
+        vdir.mkdir(parents=True, exist_ok=True)
+        path = vdir / f"ep_{len(self.episodes):03d}.mp4"
+        imageio.mimsave(str(path), self._frames, fps=self.video_fps, macro_block_size=1)
+        print(f"  saved video → {path}")
+        self._frames = []
 
     def _step_and_record(self, obs, action: np.ndarray):
         """Record (obs_t, action_t), advance the env, return the next obs."""

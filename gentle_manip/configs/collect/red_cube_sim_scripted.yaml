@@ -18,6 +18,9 @@ out_dir: dataset/demos
 input: scripted                 # keyboard (human) | scripted (automatic)
 n_episodes: 50                  # scripted: number of demos to collect
 show_viewer: false              # scripted runs headless by default; true to watch
+record_video: true              # save cam_ext RGB mp4 for the first video_episodes (quality check)
+video_episodes: 5               # how many episodes to record (-> <run_dir>/videos/ep_NNN.mp4)
+video_fps: 30
 
 # ── loop / motion ────────────────────────────────────────────────────────────
 rate: 30.0                      # control rate (Hz); also sets the hold duration in steps
