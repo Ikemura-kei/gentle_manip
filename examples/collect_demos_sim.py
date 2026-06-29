@@ -100,26 +100,44 @@ def main() -> None:
     action_config = ActionConfig.from_dict(act_d)
     aug = AugmentationConfig.from_dict(aug_d) if aug_d else None
 
+    # "keyboard" (human teleop, viewer) or "scripted" (automatic, headless by default).
+    mode = cfg.get("input", "keyboard")
+    show_viewer = cfg.get("show_viewer", mode == "keyboard")
+
     task = SingleLiftTask({"object_name": cfg["object"], "object_type": cfg["object_type"]})
     backend = SimBackend(
-        task.scene_spec, num_envs=1, use_subprocess=False, show_viewer=True,
+        task.scene_spec, num_envs=1, use_subprocess=False, show_viewer=show_viewer,
         config={"sim": {"settle_steps": cfg["settle_steps"]}, "dr": dr_d},
     )
     env = PolicyEnv(backend, obs_config, action_config, task=None,
                     max_episode_steps=10 ** 9, augmentation=aug)
 
-    kb = KeyboardTeleop(move_speed=cfg["speed"], rot_speed=cfg["speed"],
-                        gripper_value=cfg["gripper_value"])
+    if mode == "scripted":
+        from gentle_manip.demos.scripted_policy import ScriptedLiftDemonstrator
+        sc = cfg.get("scripted", {})
+        driver = ScriptedLiftDemonstrator(
+            backend, action_config.scales, n_episodes=cfg["n_episodes"], rate_hz=cfg["rate"],
+            lift_height=sc.get("lift_height", 0.2), hold_seconds=sc.get("hold_seconds", 2.0),
+            approach_height=sc.get("approach_height", 0.12), grasp_z=sc.get("grasp_z", 0.006),
+            grasp_gw=sc.get("grasp_gw", 0.030), grasp_firm_steps=sc.get("grasp_firm_steps", 1),
+            gripper_close=cfg["gripper_value"], speed_cap=cfg["speed"],
+        )
+        controls = f"scripted x{cfg['n_episodes']} (auto save/discard/quit)"
+    else:
+        driver = KeyboardTeleop(move_speed=cfg["speed"], rot_speed=cfg["speed"],
+                                gripper_value=cfg["gripper_value"])
+        controls = "W/S A/D Up/Dn move, L/R R/F Q/E rotate, O/P grip, SPACE save, BACKSPACE discard, ESC quit."
+
     recorder = DemoRecorder(
-        env=env, teleop=kb, keyboard=kb, task_name=cfg["task_name"],
+        env=env, teleop=driver, keyboard=driver, task_name=cfg["task_name"],
         out_dir=run_dir, rate_hz=cfg["rate"], dataset_path=run_dir / "data.pkl",
         idle_threshold=cfg["idle_threshold"], keep_trailing_idle=cfg["keep_trailing_idle"],
         max_interior_idle=cfg["max_interior_idle"],
         action_noise_std=cfg.get("action_noise_std", 0.0),
     )
-    print(f"collecting '{cfg['task_name']}' in sim -> {run_dir}\n"
+    print(f"collecting '{cfg['task_name']}' in sim ({mode}) -> {run_dir}\n"
           f"  obs={cfg['obs_config']} dr={cfg.get('dr') or 'off'} aug={cfg.get('augmentation') or 'off'}\n"
-          "  W/S A/D Up/Dn move, L/R R/F Q/E rotate, O/P grip, SPACE save, BACKSPACE discard, ESC quit.")
+          f"  {controls}")
     recorder.run()
 
 
