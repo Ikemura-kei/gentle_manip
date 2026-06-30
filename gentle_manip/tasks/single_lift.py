@@ -22,6 +22,14 @@ class SingleLiftTask(BaseTask):
         self.object_name: str = str(task_cfg.get("object_name", "tofu"))
         self.object_type: str = str(task_cfg.get("object_type", "soft"))  # "soft" | "rigid"
 
+        # MPM sim params — configurable so a stiff soft body (mushroom) can raise
+        # substeps for CFL stability without touching the rigid-cube defaults. The
+        # mushroom uses "Config C" (see materials.py / CLAUDE.md): substeps=210,
+        # mpm_grid_density=250 at E=0.3 MPa.
+        self.sim_substeps: int = int(task_cfg.get("sim_substeps", 80))
+        self.mpm_grid_density: float = float(task_cfg.get("mpm_grid_density", 300.0))
+        self.cam_fov: float = float(task_cfg.get("cam_fov", 46.0))
+
         self._initial_z: np.ndarray | None = None
         self._success_counter: np.ndarray | None = None
 
@@ -45,13 +53,13 @@ class SingleLiftTask(BaseTask):
                     # fov=60 was wider than the L515 (~55x70) and gave a larger cloud
                     # offset; narrowing minimizes it (see examples/sim2real_diagnose).
                     # TODO: set to the real L515's measured intrinsics for exactness.
-                    fov=46.0,
+                    fov=self.cam_fov,
                 ),
             ],
             sim_dt=1.0 / 30.0,
-            sim_substeps=80,
+            sim_substeps=self.sim_substeps,
             mpm_bounds=((0.25, -0.15, -0.012), (0.75, 0.15, 0.32)),
-            mpm_grid_density=300.0,
+            mpm_grid_density=self.mpm_grid_density,
         )
 
     def reset(self, sim_feedback: SimFeedback) -> None:

@@ -122,6 +122,13 @@ def build_scene(
         mat = odef.material
         rho = entry.density if entry.density is not None else mat.density
         size = tuple(s * entry.scale for s in odef.size)
+        # Scanned mesh (in meters; scale=entry.scale, default 1.0) when mesh_path is
+        # set, else a primitive box. Same morph drives rigid or MPM material below.
+        if odef.mesh_path is not None:
+            morph = gs.morphs.Mesh(file=odef.mesh_path, pos=odef.default_pos,
+                                   scale=entry.scale, euler=(0, 0, 0))
+        else:
+            morph = gs.morphs.Box(size=size, pos=odef.default_pos, euler=(0, 0, 0))
         if entry.object_type == "rigid":
             # No von_mises_stress (rigid solver, no particles) — SimFeedback simply
             # omits the key for this object; see genesis_worker.read_state.
@@ -129,7 +136,7 @@ def build_scene(
                 material=gs.materials.Rigid(
                     rho=rho, coup_friction=coup_friction, friction=rigid_friction
                 ),
-                morph=gs.morphs.Box(size=size, pos=odef.default_pos, euler=(0, 0, 0)),
+                morph=morph,
             )
         else:
             E = entry.youngs_modulus if entry.youngs_modulus is not None else mat.youngs_modulus
@@ -138,7 +145,7 @@ def build_scene(
                 material=gs.materials.MPM.ElastoPlastic(
                     E=E, nu=nu, von_mises_yield_stress=mat.von_mises_yield_stress, rho=rho
                 ),
-                morph=gs.morphs.Box(size=size, pos=odef.default_pos, euler=(0, 0, 0)),
+                morph=morph,
                 surface=gs.surfaces.Default(vis_mode="particle"),
             )
         objects.append(ent)

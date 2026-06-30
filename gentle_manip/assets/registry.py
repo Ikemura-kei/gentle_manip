@@ -1,8 +1,9 @@
 """Object registry: name -> ObjectDef (geometry + default material).
 
-OBJECT_MAP is the single source of truth for what each object name spawns. For
-the MVP every object is a primitive MPM box (no meshes yet — assets/meshes/objects
-is empty); a mesh_path field is reserved for when real scanned meshes are added.
+OBJECT_MAP is the single source of truth for what each object name spawns. Objects
+are either a primitive MPM/rigid box (mesh_path=None) or a scanned mesh (mesh_path
+set -> Genesis loads gs.morphs.Mesh). Scanned meshes live in assets/objects/ and are
+stored in METERS, so no scale conversion is needed at the call site.
 
 SceneBuilder reads OBJECT_MAP to turn a SceneSpec ObjectEntry (which may override
 E/nu/rho/scale/pose) into Genesis morph + material calls.
@@ -10,9 +11,12 @@ E/nu/rho/scale/pose) into Genesis morph + material calls.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional, Tuple
 
 from gentle_manip.assets.materials import MATERIALS, Material
+
+_OBJ_DIR = Path(__file__).resolve().parent / "objects"
 
 
 @dataclass(frozen=True)
@@ -41,6 +45,13 @@ OBJECT_MAP: dict[str, ObjectDef] = {
     "cal_cube_5": ObjectDef("cal_cube_5", MATERIALS["red_cube"], size=(0.05, 0.05, 0.05), default_pos=(0.42, 0.0, 0.030)),
     "cal_cube_4": ObjectDef("cal_cube_4", MATERIALS["red_cube"], size=(0.04, 0.04, 0.04), default_pos=(0.50, 0.0, 0.025)),
     "cal_cube_3": ObjectDef("cal_cube_3", MATERIALS["red_cube"], size=(0.03, 0.03, 0.03), default_pos=(0.58, 0.0, 0.020)),
+    # Real scanned edible mushroom (assets/objects/mushroom.obj, in meters: ~3.3 x 3.2
+    # x 3.5 cm). Soft MPM body; rests on the table (mesh bottom at z=-0.0148, so
+    # default_pos z=0.016 puts it just above the surface). size is informational only
+    # (ignored for meshes). Material is the soft-end "Config C" (see materials.py).
+    "mushroom": ObjectDef("mushroom", MATERIALS["mushroom"], object_type="soft",
+                          size=(0.033, 0.032, 0.035), default_pos=(0.47, 0.011, 0.016),
+                          mesh_path=str(_OBJ_DIR / "mushroom.obj")),
 }
 
 

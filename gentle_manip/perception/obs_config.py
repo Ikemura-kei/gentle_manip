@@ -44,6 +44,17 @@ class TactileConfig:
 
 
 @dataclass
+class PrivilegedConfig:
+    """SIM-ONLY privileged observations for a state-based RL *teacher* (distilled to a
+    deployable point-cloud student later). Computed by PolicyEnv from SimFeedback —
+    NOT the shared PerceptionPipeline — so real deployment can never produce them.
+    Requires a task (sim). The student/real obs config must NOT set privileged."""
+    object_pos: bool = False     # SimFeedback.object_center (num_envs, 3) — true object pose
+    object_vel: bool = False     # finite-diff object velocity (num_envs, 3)
+    stress: bool = False         # normalized von Mises [mean/yield, top10/yield] (num_envs, 2)
+
+
+@dataclass
 class ObsConfig:
     """
     Declares which modalities PerceptionPipeline includes in the output obs dict.
@@ -69,6 +80,13 @@ class ObsConfig:
     voxel: Optional[VoxelConfig] = None
     images: Optional[ImageConfig] = None
     tactile: Optional[TactileConfig] = None
+    privileged: Optional[PrivilegedConfig] = None   # sim teacher only (see PrivilegedConfig)
+
+    def needs_cameras(self) -> bool:
+        """True if any modality requires camera rendering. Lets the sim backend skip
+        the (expensive) per-env depth render when a state-based obs config doesn't use
+        it — observation-only, so it never changes the physics/dynamics."""
+        return self.point_cloud is not None or self.voxel is not None or self.images is not None
 
     def validate(self) -> None:
         if self.point_cloud is not None and self.voxel is not None:
@@ -111,6 +129,15 @@ class ObsConfig:
         if "tactile" in d:
             tactile = TactileConfig(sensors=d["tactile"]["sensors"])
 
+        privileged = None
+        if "privileged" in d:
+            pv = d["privileged"] or {}
+            privileged = PrivilegedConfig(
+                object_pos=bool(pv.get("object_pos", False)),
+                object_vel=bool(pv.get("object_vel", False)),
+                stress=bool(pv.get("stress", False)),
+            )
+
         cfg = cls(
             include_joint_pos=d.get("include_joint_pos", False),
             include_joint_vel=d.get("include_joint_vel", False),
@@ -119,6 +146,7 @@ class ObsConfig:
             voxel=voxel,
             images=images,
             tactile=tactile,
+            privileged=privileged,
         )
         cfg.validate()
         return cfg

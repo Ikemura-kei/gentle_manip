@@ -4,6 +4,7 @@ from typing import Any, Optional, Protocol, runtime_checkable
 
 import numpy as np
 import gymnasium
+from gymnasium.spaces import Box, Dict
 
 from gentle_manip.envs.raw_obs import RawObs
 from gentle_manip.envs.sim_feedback import SimFeedback
@@ -100,7 +101,35 @@ class PolicyEnv:
         # sim2real gap; left None for real deployment (the camera is already noisy).
         self._augmentor = build_augmentor(augmentation)
 
-        self.observation_space = self.perception.build_obs_space(rgb_shape, tactile_shape)
+        # Sim-only privileged obs for a state-based RL teacher (PrivilegedConfig):
+        # object pose / velocity / normalized stress, computed here from SimFeedback
+        # (NOT the shared pipeline), so real/student obs can never contain them.
+        self._priv = obs_config.privileged
+        self._prev_obj_center: Optional[np.ndarray] = None
+        self._yield_stress = getattr(task, "object_yield_stress", None) if task is not None else None
+        if self._priv is not None:
+            if task is None:
+                raise ValueError(
+                    "ObsConfig.privileged requires a task (sim only) — it is computed from "
+                    "SimFeedback, so it must not be in a real/student (point-cloud) obs config."
+                )
+            if self._priv.stress and not self._yield_stress:
+                raise ValueError(
+                    "privileged.stress needs the object's von Mises yield; the task's object "
+                    "has none (rigid?). Use a soft object, or drop privileged.stress."
+                )
+
+        space = self.perception.build_obs_space(rgb_shape, tactile_shape)
+        if self._priv is not None:
+            extra = {}
+            if self._priv.object_pos:
+                extra["priv_object_pos"] = Box(-np.inf, np.inf, (3,), np.float32)
+            if self._priv.object_vel:
+                extra["priv_object_vel"] = Box(-np.inf, np.inf, (3,), np.float32)
+            if self._priv.stress:
+                extra["priv_stress"] = Box(0.0, np.inf, (2,), np.float32)
+            space = Dict({**space.spaces, **extra})
+        self.observation_space = space
         self.action_space = self.action_pipeline.build_action_space()
 
         self._episode_step = 0
@@ -113,13 +142,17 @@ class PolicyEnv:
 
     def reset(self, **kwargs) -> dict:
         """Reset all envs and return the initial observation dict."""
-        return self._observe(self._do_reset(**kwargs))
+        raw = self._do_reset(**kwargs)
+        return self._observe(raw, self._sim_feedback())
 
-    def _observe(self, raw: RawObs) -> dict:
-        """RawObs -> obs dict, with sim-only augmentation applied if configured."""
+    def _observe(self, raw: RawObs, sim_feedback: Optional[SimFeedback] = None) -> dict:
+        """RawObs -> obs dict: shared perception + sim-only augmentation, plus
+        sim-only privileged fields (from SimFeedback) for the state teacher."""
         obs = self.perception.process(raw)
         if self._augmentor is not None:
             obs = self._augmentor(obs)
+        if self._priv is not None and sim_feedback is not None:
+            obs.update(self._privileged_obs(sim_feedback))
         return obs
 
     def step(
@@ -140,7 +173,8 @@ class PolicyEnv:
         raw = self.backend.step(scaled)
         self._episode_step += 1
 
-        rewards, success = self._compute_reward(raw)
+        sim_feedback = self._sim_feedback()
+        rewards, success = self._compute_reward(raw, sim_feedback)
 
         timeout = self._episode_step >= self.max_episode_steps
         dones = np.full(self.num_envs, timeout, dtype=bool)
@@ -148,8 +182,9 @@ class PolicyEnv:
         # Whole-batch auto-reset at the horizon; obs reflects the fresh state.
         if timeout:
             raw = self._do_reset()
+            sim_feedback = self._sim_feedback()
 
-        obs = self._observe(raw)
+        obs = self._observe(raw, sim_feedback)
         infos = [
             {"success": bool(success[i]), "time_out": bool(timeout)}
             for i in range(self.num_envs)
@@ -176,17 +211,51 @@ class PolicyEnv:
     def _do_reset(self, **kwargs) -> RawObs:
         """Reset the backend and (if present) the task baselines; reset counter."""
         raw = self.backend.reset(**kwargs)
+        self._prev_obj_center = None          # privileged object_vel restarts at 0
         if self.task is not None:
             self.task.reset(self._require_sim_feedback())
         self._episode_step = 0
         return raw
 
-    def _compute_reward(self, raw: RawObs) -> tuple[np.ndarray, np.ndarray]:
+    def _sim_feedback(self) -> Optional[SimFeedback]:
+        """Fetch SimFeedback once per step when the task (reward) or privileged obs
+        need it; None otherwise (e.g. real deployment, no privileged)."""
+        if self.task is None and self._priv is None:
+            return None
+        return self.backend.get_sim_feedback()
+
+    def _compute_reward(
+        self, raw: RawObs, sim_feedback: Optional[SimFeedback]
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Reward + success for the current step, or zeros when task is None."""
         if self.task is None:
             zeros = np.zeros(self.num_envs, dtype=np.float32)
             return zeros, np.zeros(self.num_envs, dtype=bool)
-        return self.task.compute_reward(self._require_sim_feedback(), raw)
+        if sim_feedback is None:
+            raise RuntimeError(
+                "Backend returned no SimFeedback but a task is set. Reward computation "
+                "requires sim feedback — run with task=None for real deployment."
+            )
+        return self.task.compute_reward(sim_feedback, raw)
+
+    def _privileged_obs(self, sf: SimFeedback) -> dict:
+        """Sim-only privileged fields from SimFeedback (state-teacher obs)."""
+        out = {}
+        oc = np.asarray(sf.object_center, dtype=np.float32)        # (N, 3) true object pose
+        if self._priv.object_pos:
+            out["priv_object_pos"] = oc
+        if self._priv.object_vel:
+            vel = np.zeros_like(oc) if self._prev_obj_center is None else (oc - self._prev_obj_center)
+            out["priv_object_vel"] = vel.astype(np.float32)        # per-step displacement
+            self._prev_obj_center = oc
+        if self._priv.stress:
+            stress = sf.extra["von_mises_stress"]                  # (N, n_particles)
+            mean_s = np.mean(stress, axis=-1)
+            k = max(1, int(stress.shape[-1] * 0.1))
+            top10 = np.median(np.partition(stress, -k, axis=-1)[..., -k:], axis=-1)
+            out["priv_stress"] = (np.stack([mean_s, top10], axis=-1)
+                                  / self._yield_stress).astype(np.float32)   # (N, 2) fraction of yield
+        return out
 
     def _require_sim_feedback(self) -> SimFeedback:
         sf = self.backend.get_sim_feedback()

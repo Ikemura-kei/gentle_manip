@@ -34,13 +34,18 @@ class CompositeReward:
         return total
 
 
-def build_reward_fn(config: dict) -> CompositeReward:
+def build_reward_fn(config: dict, material_yield_stress: float | None = None) -> CompositeReward:
     """Build a CompositeReward from a YAML rewards dict.
 
     Example config:
-        stress:    {scale: 0.001, cap: 14000.0, ...}
+        stress:    {scale: 1.0, cap: 1.5, ...}   # normalized by yield (preferred)
         dist_to_obj: {scale: 1.0, decay: 20.0}
         lift:      {scale: 1.0, grasp_gate_dist: 0.079}
+
+    ``material_yield_stress`` (the object's von Mises yield, from the registry) is
+    injected into the ``stress`` component as ``yield_stress`` so its penalty is a
+    material-agnostic fraction of the bruising threshold — the YAML doesn't hardcode
+    it. An explicit ``yield_stress`` in the YAML takes precedence.
     """
     components = []
     for name, params in config.items():
@@ -48,5 +53,8 @@ def build_reward_fn(config: dict) -> CompositeReward:
             raise ValueError(
                 f"Unknown reward component {name!r}. Available: {sorted(_REWARD_MAP)}"
             )
+        params = dict(params)
+        if name == "stress" and material_yield_stress is not None and "yield_stress" not in params:
+            params["yield_stress"] = material_yield_stress
         components.append(_REWARD_MAP[name](**params))
     return CompositeReward(components)

@@ -23,7 +23,22 @@ class BaseTask(ABC):
 
     def __init__(self, task_cfg: dict) -> None:
         self.success_scale = float(task_cfg.get("success_scale", 2.0))
-        self._reward_fn: CompositeReward = build_reward_fn(task_cfg.get("rewards", {}))
+        # If the task names a single object, give the stress reward that object's
+        # yield stress so its penalty normalizes to the bruising threshold (the
+        # YAML stays material-agnostic). Pure-python registry lookup, no genesis.
+        yield_stress = None
+        name = task_cfg.get("object_name")
+        if name:
+            try:
+                from gentle_manip.assets.registry import get_object_def
+                yield_stress = get_object_def(name).material.von_mises_yield_stress
+            except KeyError:
+                pass
+        # Exposed so PolicyEnv can normalize the privileged stress obs by the same yield.
+        self.object_yield_stress = yield_stress
+        self._reward_fn: CompositeReward = build_reward_fn(
+            task_cfg.get("rewards", {}), material_yield_stress=yield_stress
+        )
 
     @property
     @abstractmethod

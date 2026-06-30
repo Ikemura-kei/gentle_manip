@@ -387,6 +387,8 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "gymnasium" },
+    { name = "imageio", marker = "extra == 'real'" },
+    { name = "imageio-ffmpeg", marker = "extra == 'real'" },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "open3d", marker = "extra == 'real'" },

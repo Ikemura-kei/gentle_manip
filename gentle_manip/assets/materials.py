@@ -32,4 +32,12 @@ MATERIALS: dict[str, Material] = {
     # Firm, near-rigid block to stand in for a real red cube (stiff + high yield so
     # it barely deforms). TODO: confirm the real cube's stiffness/mass.
     "red_cube": Material(youngs_modulus=3e4, poisson_ratio=0.3, density=1050.0, von_mises_yield_stress=8e4),
+    # Real edible mushroom (Agaricus bisporus): soft viscoelastic tissue, real range
+    # E 0.3-3.0 MPa, nu 0.3-0.5, yield 40-80 kPa. We use the SOFT END (E=0.3 MPa) on
+    # purpose: explicit MPM is CFL-limited (substeps ~ sqrt(E)), and 0.3 MPa is ~1.7x
+    # cheaper than 1 MPa while still realistic — the "Config C" chosen from the
+    # examples/mushroom_soft_dev.py sweep (see CLAUDE.md "Soft-body mushroom"). yield
+    # 4e4 / E 3e5 -> ~13% yield strain, so it bruises under a firm grasp (the regime
+    # the gentle-manipulation stress reward targets). TODO: calibrate to a real mushroom.
+    "mushroom": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=1000.0, von_mises_yield_stress=4e4),
 }

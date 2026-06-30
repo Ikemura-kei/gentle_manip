@@ -586,6 +586,44 @@ Genesis rebuild goes through `GenesisProcess.restart`, not an in-place mutation.
 
 ---
 
+## Soft-body objects (scanned meshes) & MPM stability/speed
+
+Scanned object meshes live in `assets/objects/` **in METERS** (so `scale=1.0`, no unit
+conversion at the call site — convert source mm scans once, on import). An `ObjectDef`
+with `mesh_path` set spawns `gs.morphs.Mesh(file=…, scale=entry.scale)` instead of a
+`Box` (`scene_builder.py`); the same morph drives a rigid or MPM material. First real
+object: `assets/objects/mushroom.obj` (Agaricus bisporus, ~3.3×3.2×3.5 cm), registry
+name `"mushroom"`, soft MPM, von-Mises stress feedback live (validated end-to-end:
+robot + table + mushroom builds, settles, reports `(1, n_particles)` stress).
+
+**Explicit MPM is CFL-limited — there is no implicit solver.** Two facts set the cost:
+`substeps ∝ √E` (stiffer ⇒ smaller stable dt) and `particles ∝ grid_density³`, while
+stable `substeps ∝ grid_density` — so **total cost ∝ grid_density⁴** (halving it ≈ 16×
+faster). A soft body **dropped from height blows up**; spawn it resting on the plane.
+
+**Mushroom material/stability sweep** (`examples/mushroom_soft_dev.py`, mesh in m, 1 env,
+render excluded). Real Agaricus values: E 0.3–3.0 MPa, ν 0.3–0.5, yield 40–80 kPa.
+
+| cfg | E | grid_density | substeps | particles | steps/s |
+|-----|------|------|------|------|------|
+| A | 0.9 MPa | 180 | 250 | 317 | 12.2 |
+| B | 0.9 MPa | 250 | 350 | 842 | 8.6 |
+| **C ✅** | **0.3 MPa** | **250** | **210** | **842** | **14.8** |
+| D | 0.9 MPa | 300 | 430 | 1451 | 7.1 |
+
+**Decision — Config C:** use the **soft end E=0.3 MPa** (still realistic) — ~1.7× fewer
+substeps than 0.9 MPa, which buys a finer grid that's *both* faster *and* higher-fidelity
+than the coarse-stiff baseline (C beats A on both axes). The `"mushroom"` material preset
+is therefore `E=3e5, ν=0.35, yield=4e4` (≈13% yield strain → bruises under a firm grasp,
+the regime the stress reward targets). `configs/tasks/mushroom_lift.yaml` sets
+`sim_substeps=210, mpm_grid_density=250`; `SingleLiftTask` now reads `sim_substeps /
+mpm_grid_density / cam_fov` from the task cfg (defaults = the rigid-cube values, unchanged).
+For training throughput the **point-cloud render** (per env/step) is expected to dominate,
+not this MPM, so the physics has headroom once envs are parallelized. The mushroom_lift
+stress-reward `cap/divisor` are still the tofu values — TODO: re-tune to the ~40 kPa yield.
+
+---
+
 ## Old Code Reference
 
 This project is a restructured version of two existing repos:

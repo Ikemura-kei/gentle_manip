@@ -1,0 +1,30 @@
+# Lift a real scanned mushroom (soft MPM body). The point of this task is GENTLE
+# manipulation: lift it without bruising, i.e. keep von Mises stress under the ~40 kPa
+# yield. Uses the soft-body "Config C" sim params (see materials.py / CLAUDE.md).
+lift_height: 0.10        # m above initial z to count as lifted (small, soft object)
+hold_steps: 30           # consecutive steps held at height for success
+object_name: "mushroom"
+object_type: "soft"      # MPM -> has von_mises_stress for the stress reward
+
+# Config C (from examples/mushroom_soft_dev.py sweep): E=0.3 MPa needs ~210 substeps
+# for CFL stability at grid_density 250 (~840 particles, ~15 physics steps/s, 1 env).
+sim_substeps: 210
+mpm_grid_density: 250
+
+success_scale: 2.0
+
+rewards:
+  # Gentleness: penalty = -(von_mises / yield)^2 * scale. yield (~40 kPa) is
+  # auto-injected from the mushroom material, so cap is a FRACTION of yield
+  # (1.0 = bruising onset) — no per-object stress retuning needed.
+  stress:
+    scale: 1.0
+    cap: 1.5
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 1.0
+    decay: 20.0
+  lift:
+    scale: 1.0
+    grasp_gate_dist: 0.079

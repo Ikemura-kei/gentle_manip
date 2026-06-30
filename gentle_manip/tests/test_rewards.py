@@ -64,6 +64,26 @@ def test_stress_capped():
     np.testing.assert_allclose(out, expected, rtol=1e-4)
 
 
+def test_stress_normalized_by_yield():
+    # Normalized mode: reward = -(min(stress/yield, cap))^2 * scale.
+    # stress=20000, yield=40000 -> frac 0.5 -> -(0.5^2)*scale.
+    r = StressReward(yield_stress=40000.0, cap=1.5, scale=2.0, mean_weight=1.0, top10_weight=0.0)
+    fb = make_feedback(stress_value=20000.0)
+    out = r(fb, make_raw_obs())
+    np.testing.assert_allclose(out, -(0.5 ** 2) * 2.0, rtol=1e-4)
+    # Above yield, clamps at cap (fraction): stress=999999 -> frac capped to 1.5.
+    fb_hi = make_feedback(stress_value=999999.0)
+    out_hi = r(fb_hi, make_raw_obs())
+    np.testing.assert_allclose(out_hi, -(1.5 ** 2) * 2.0, rtol=1e-4)
+
+
+def test_stress_build_reward_injects_yield():
+    # build_reward_fn should inject the material yield into the stress component.
+    from gentle_manip.rewards import build_reward_fn
+    fn = build_reward_fn({"stress": {"scale": 1.0, "cap": 1.5}}, material_yield_stress=40000.0)
+    assert fn.components[0].yield_stress == 40000.0
+
+
 def test_stress_missing_key_raises():
     r = StressReward()
     fb = SimFeedback(

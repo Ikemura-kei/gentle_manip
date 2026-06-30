@@ -5,10 +5,12 @@ object_type: "soft"  # "soft" (MPM) | "rigid" — rigid has no von_mises_stress;
 success_scale: 2.0
 
 rewards:
+  # Gentleness: penalty = -(von_mises / yield)^2 * scale. yield is auto-injected from
+  # the object's material, so cap is a FRACTION of yield (1.0 = bruising onset) and
+  # this block is material-agnostic.
   stress:
-    scale: 0.001
-    cap: 14000.0
-    divisor: 6000.0
+    scale: 1.0
+    cap: 1.5
     mean_weight: 0.2
     top10_weight: 0.8
   dist_to_obj:

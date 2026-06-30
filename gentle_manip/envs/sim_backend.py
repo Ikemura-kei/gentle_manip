@@ -31,9 +31,19 @@ class SimBackend:
         *,
         use_subprocess: bool = True,
         show_viewer: bool = False,
+        render_cameras: bool = True,
     ) -> None:
         config = config or {}
         self.num_envs = int(num_envs)
+
+        # State-based teacher: drop scene cameras so the worker skips the (expensive)
+        # per-env depth render. Observation-only — does NOT touch the physics, so the
+        # dynamics (and an off-policy replay buffer) stay consistent. Callers set this
+        # from ObsConfig.needs_cameras().
+        if not render_cameras and spec.cameras:
+            import dataclasses
+            spec = dataclasses.replace(spec, cameras=[])
+        self.render_cameras = bool(render_cameras)
 
         robot_overrides = config.get("robot", {})
         sim_cfg = config.get("sim", {})
