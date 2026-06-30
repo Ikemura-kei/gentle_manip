@@ -84,8 +84,16 @@ so each environment is its own thin project under `envs/`, depending on the shar
 | Env | Python | Purpose | Install |
 |-----|--------|---------|---------|
 | `envs/sim/` | 3.12 | sim, training, tests (genesis + torch) | `uv sync --project envs/sim` |
-| `envs/deploy/` | 3.11 | real-robot deployment (genesis-free; hardware SDKs) | `uv sync --project envs/deploy` |
-| `envs/dp3/` | 3.8 | DP3 training, evaluation, zarr conversion | `uv sync --project envs/dp3` |
+| `envs/deploy/` | 3.11 | teleop demo collection (pygame/pyspacemouse + hardware SDKs; genesis-free); viz (open3d/imageio) | `uv sync --project envs/deploy` |
+| `envs/dp3/` | 3.8 | DP3 training/eval/zarr **and real policy deployment** — unified: DP3+torch+pytorch3d AND the hardware SDKs (pyrealsense2+xArm), so `deploy_real.py` runs the policy+RealBackend in one process | `uv sync --project envs/dp3` |
+
+**Which env runs what (real side):** the DP3 policy + real hardware coexist in `envs/dp3`
+(3.8) — `pyrealsense2==2.54.2.5684` ships a cp38 wheel, so `scripts/deploy_real.py` runs
+closed-loop with no IPC. `envs/deploy` (3.11) is for **teleop demo collection** (`demos/record.py`
+needs pygame/pyspacemouse) and the Open3D/imageio visualizers. In-loop **sim eval during DP3
+training** bridges the 3.8↔3.12 gap over a socket (`envs/rpc.py`): the trainer's env_runner
+(`SimXArm7Runner` in the DP3 fork) spawns `scripts/sim_server.py` (3.12, genesis) and drives it.
+Offline sim eval of a checkpoint: `scripts/eval_sim.py` (multi-env, fixed-seed, video).
 
 Run the test suite with
 `uv run --project envs/sim python -m pytest gentle_manip/tests/ -q`.
@@ -418,11 +426,32 @@ Controls which modalities `PerceptionPipeline` includes. Loaded from `configs/ob
 class ObsConfig:
     include_joint_pos: bool = False
     include_joint_vel: bool = False
-    point_cloud: Optional[PointCloudConfig] = None  # cameras, crop_min/max, max_points
+    point_cloud: Optional[PointCloudConfig] = None  # cameras, crop_min/max, max_points, + filters
     voxel:       Optional[VoxelConfig]      = None  # cameras, voxel_size, crop_min/max
     images:      Optional[ImageConfig]      = None  # which RGB cameras to pass through
     tactile:     Optional[TactileConfig]    = None  # GelSight Mini sensors (real only)
+    quat_noise_std: float = 0.0                     # tiny shared sim+real ee_quat jitter (renormalized)
 ```
+
+**Point-cloud quality filters** (`perception/pointcloud_ops.py`, config-gated in
+`PointCloudConfig`, applied in the shared pipeline AFTER crop, BEFORE subsample so the
+freed budget is reallocated):
+- `outlier_removal` (`remove_outliers_voxel`): drop points whose voxel holds
+  `< min_neighbors` valid points — removes L515 flying-pixel/edge artifacts. **Real-only
+  by nature** (sim is clean → no-op), so enabling it only in a real config is the legit
+  mirror of the sim-only augmentation. Took real success 65%→95%.
+- `object_focus` (`focus_object`): keep points that are low (`z < z_lo`) OR near the EE
+  (`< r_ee`), dropping the robot-arm body (~80% of every cloud). **NOT real-only** — the
+  arm is geometry present in BOTH sim and real, so this must be applied to both and
+  RETRAINED (config `point_cloud_1cam_filtered.yaml` is staged for that re-collect+retrain;
+  `point_cloud_1cam_outlier.yaml` is the real-deploy denoise-only config for the existing
+  checkpoint).
+
+Diagnostic: `examples/sim2real_diagnose/replay_demo_in_sim.py` replays a recorded real
+demo's actions in sim and compares every obs channel (ee/quat/gripper/point-cloud), with
+optional side-by-side real|sim cloud videos — the tool that localized both gaps above.
+`scripts/deploy_real.py --record` saves a real run in the demo schema for this comparison;
+`demos/record.py --show-pointcloud` shows the processed cloud live (LiveCloudViewer).
 
 ### ActionConfig (`actions/action_config.py`)
 
@@ -493,7 +522,7 @@ reward = -(capped^2 / 6000) * scale
 
 ---
 
-## Domain Randomization & Data Augmentation (planned — not yet implemented)
+## Domain Randomization & Data Augmentation (largely implemented)
 
 Roadmap for closing the sim2real gap. Two distinct mechanisms, kept separate:
 
@@ -510,12 +539,12 @@ Roadmap for closing the sim2real gap. Two distinct mechanisms, kept separate:
     - *Robustness (shared, at training/collection time only — NOT live deployment):*
       ee_quat / ee_pos jitter, quat sign-flip. Inject into data from both sources so the
       policy tolerates representation/measurement variation.
-  KEY FINDING (`examples/sim2real_diagnose`): the real-trained DP3 policy stalled in sim
-  purely because real demos have *exactly* clean quaternions while sim has ~1e-3 IK noise
-  — confirmed with the `quat_snap` probe. **TODO (i), deferred until the next DP3 retrain:**
-  add quat (+ small ee_pos) jitter to the **DP3 training dataloader** (`RealXArm7Dataset`)
-  so a clean-real-trained policy tolerates sim's quaternion noise. (`quat_snap` is kept
-  only as the evidence/probe, not for production.)
+  The clean-vs-noisy quaternion mismatch is now handled inherently by `ObsConfig.quat_noise_std`
+  (a tiny shared sim+real ee_quat jitter, renormalized, applied in `PerceptionPipeline`), so
+  neither source ever sees an exactly-constant quaternion. The separate **quaternion sign-flip**
+  (real reports −q vs sim's +q) — the actual cause of the real-deploy stall — is resolved by
+  sign canonicalization in the shared pipeline (see Conventions). The old `quat_snap` probe and
+  the DP3-dataloader-jitter idea are superseded by these two pipeline fixes.
 
 ### DR knobs — status
 
@@ -582,7 +611,7 @@ Key files from old code and where they map:
 ## Conventions
 
 - **Units**: meters, radians, seconds everywhere. No mm. (The XArm SDK uses mm/deg internally; `xarm7_real.py` is the only place that converts.)
-- **Quaternion order**: (w, x, y, z) — enforce this at the RawObs boundary. The reference real-robot repo had an unresolved quaternion sign-flip issue; test this explicitly when first running real deployment.
+- **Quaternion order**: (w, x, y, z) — enforce this at the RawObs boundary. **Quaternion sign-flip (RESOLVED 2026-06-30):** the real XArm reports `ee_quat` with the opposite sign from sim for the same pose (sim x≈+1, real x≈−1). q and −q are the same rotation but distinct policy inputs, so an unfiltered real deploy stalled (descended, ignoring the object). Fixed by **canonicalizing the quaternion sign in the shared `PerceptionPipeline`** (make the largest-magnitude component positive) — a no-op for sim, flips real to match, so a sim-trained policy works with no retrain.
 - **Camera names**: must match between SceneSpec (sim) and real_lab.yaml (real). Use `"cam_wrist"` and `"cam_ext"`. Tactile sensor names: `"tactile_left"`, `"tactile_right"`.
 - **World frame**: robot base at origin, z-up.
 - **Config**: plain YAML files loaded with yaml.safe_load or yacs. No Hydra.
@@ -622,7 +651,7 @@ Steps marked ✅ are complete and tested. Steps marked (GPU) require Genesis ins
 
 All tests live in `gentle_manip/tests/` and run with `python -m pytest gentle_manip/tests/ -q`.
 
-Existing test files (227 passing; torch tests run here since the dev box has a GPU + torch):
+Existing test files (262 passing, 1 skipped; torch tests run here since the dev box has a GPU + torch):
 
 | File | What it covers |
 |------|----------------|

@@ -28,6 +28,8 @@ real = [
     "pyspacemouse",   # teleop input (wraps hidapi; needs libhidapi + a hidraw udev rule)
     "pygame",         # episode-control keyboard window for demo collection
     "open3d",         # live point-cloud viewer (crop tuning)
+    "imageio",        # demo/episode video export (mp4)
+    "imageio-ffmpeg", # ffmpeg backend for imageio mp4 encoding
 ]
 
 [build-system]

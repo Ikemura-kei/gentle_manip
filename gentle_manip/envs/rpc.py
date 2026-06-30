@@ -62,12 +62,17 @@ def recv_msg(conn: socket.socket) -> Tuple[Dict[str, Any], Dict[str, np.ndarray]
 
 
 # ── server: drive any PolicyEnv-like object over the socket ────────────────────
-def serve_env(env, host: str = "127.0.0.1", port: int = 5555, ready_msg: str = "SIM_SERVER_READY") -> None:
+def serve_env(env, host: str = "127.0.0.1", port: int = 5555, ready_msg: str = "SIM_SERVER_READY",
+              frame_fn=None, video_dir=None, video_episodes: int = 0) -> None:
     """Serve reset/step/close requests for ``env`` until the client disconnects.
 
     ``env`` must expose reset()->obs dict and step(action)->(obs, reward, done, info),
     matching PolicyEnv. Prints ``ready_msg`` once the port is bound (so a launcher
     can wait for it).
+
+    If frame_fn is given, an mp4 of frame_fn() (an (H,W,3) uint8) is written per
+    episode (reset = boundary) for the first ``video_episodes`` episodes, into
+    ``video_dir`` — for offline eval visualisation.
     """
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -75,16 +80,38 @@ def serve_env(env, host: str = "127.0.0.1", port: int = 5555, ready_msg: str = "
     srv.listen(1)
     print(ready_msg, flush=True)
     conn, _ = srv.accept()
+
+    vframes: list = []
+    vep = [0]   # episodes started (reset count)
+
+    def flush_video():
+        if vframes and video_dir is not None:
+            import imageio.v2 as imageio
+            from pathlib import Path
+            Path(video_dir).mkdir(parents=True, exist_ok=True)
+            out = str(Path(video_dir) / f"ep_{vep[0]:03d}.mp4")
+            imageio.mimsave(out, vframes, fps=30, macro_block_size=1)
+            print(f"  saved video {out} ({len(vframes)} frames)", flush=True)
+        vframes.clear()
+
     try:
         while True:
             header, arrays = recv_msg(conn)
             cmd = header.get("cmd")
             if cmd == "close":
                 break
+            elif cmd == "reseed":
+                if hasattr(env, "reseed"):
+                    env.reseed(int(header["seed"]))
+                send_msg(conn, {"ok": True}, {})
             elif cmd == "reset":
+                flush_video()              # save the episode just finished
+                vep[0] += 1
                 send_msg(conn, {"ok": True}, _as_arrays(env.reset()))
             elif cmd == "step":
                 obs, reward, done, info = env.step(arrays["action"])
+                if frame_fn is not None and vep[0] <= video_episodes:
+                    vframes.append(np.asarray(frame_fn(), dtype=np.uint8))
                 send_msg(conn, {
                     "ok": True,
                     "reward": [float(x) for x in np.asarray(reward).ravel()],
@@ -96,6 +123,7 @@ def serve_env(env, host: str = "127.0.0.1", port: int = 5555, ready_msg: str = "
     except (ConnectionError, OSError):
         pass
     finally:
+        flush_video()                      # save the last episode
         conn.close()
         srv.close()
         env.close()
@@ -127,6 +155,10 @@ class SimEnvClient:
                 last = e
                 time.sleep(0.5)
         raise ConnectionError(f"could not connect to sim server at {host}:{port}: {last}")
+
+    def reseed(self, seed: int) -> None:
+        send_msg(self.conn, {"cmd": "reseed", "seed": int(seed)}, {})
+        recv_msg(self.conn)
 
     def reset(self) -> Dict[str, np.ndarray]:
         send_msg(self.conn, {"cmd": "reset"}, {})

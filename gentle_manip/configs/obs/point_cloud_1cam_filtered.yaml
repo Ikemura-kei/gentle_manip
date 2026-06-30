@@ -1,0 +1,33 @@
+# Single external L515 (cam_ext) point cloud WITH cloud-quality filters on — for the
+# next data-collection + retrain iteration. Identical rig to point_cloud_1cam.yaml,
+# plus two shared (sim+real) filters applied after crop, before subsample:
+#   - outlier_removal: drops L515 flying-pixel / edge-boundary artifacts (sparse voxels)
+#   - object_focus:    drops the robot-arm body so the 1024-point budget concentrates
+#                      on the table + object + grasp region (keep low-z OR near-EE)
+# NOTE: this changes the cloud distribution vs point_cloud_1cam.yaml, so a policy
+# trained on this config must be both COLLECTED and TRAINED with it (and the matching
+# sim demos re-collected with it too). Not compatible with the old (unfiltered) ckpt.
+include_joint_pos: false
+include_joint_vel: false
+
+quat_noise_std: 0.003
+
+point_cloud:
+  cameras: ["cam_ext"]
+  crop_min: [0.2, -0.215, 0.004]
+  crop_max: [0.71,   0.215,  0.45]
+  max_points: 1024
+
+  # Density outlier removal — drop points whose voxel (edge voxel_size m) holds
+  # fewer than min_neighbors valid points. Tune voxel_size up / min_neighbors up to
+  # remove more aggressively. ~no-op on the clean sim cloud.
+  outlier_removal:
+    voxel_size: 0.01
+    min_neighbors: 19
+
+  # Object focus — keep points that are low (z < z_lo, table+object) OR near the EE
+  # (within r_ee, gripper + grasped/lifted object); drop the arm body. Validated on
+  # run5 to preserve the object 100% across home/grasp/lift.
+  object_focus:
+    z_lo: 0.12
+    r_ee: 0.13

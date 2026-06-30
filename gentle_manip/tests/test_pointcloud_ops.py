@@ -5,9 +5,40 @@ import pytest
 
 from gentle_manip.perception.pointcloud_ops import (
     crop_pointcloud,
+    focus_object,
     pointcloud_to_voxel_grid,
+    remove_outliers_voxel,
     subsample_pointcloud,
 )
+
+
+def test_remove_outliers_voxel_drops_isolated_points():
+    # Dense cluster (every point shares a voxel) + two isolated floaters.
+    blob = np.full((20, 3), 0.40, dtype=np.float32)
+    floaters = np.array([[0.90, 0.90, 0.90], [0.10, -0.10, 0.30]], dtype=np.float32)
+    pts = np.concatenate([blob, floaters])[None]            # (1, 22, 3)
+    valid = np.ones((1, 22), dtype=bool)
+    _, out = remove_outliers_voxel(pts, valid, voxel_size=0.01, min_neighbors=3)
+    assert out[0, :20].all()          # the dense cluster survives
+    assert not out[0, 20:].any()      # both floaters dropped
+    # min_neighbors=1 is a no-op
+    _, noop = remove_outliers_voxel(pts, valid, voxel_size=0.01, min_neighbors=1)
+    assert noop.all()
+
+
+def test_focus_object_keeps_low_or_near_ee_drops_arm():
+    ee = np.array([[0.45, 0.0, 0.20]], dtype=np.float32)
+    low = [0.50, 0.0, 0.03]           # low z (table/object) -> keep
+    near = [0.46, 0.0, 0.22]          # near EE -> keep
+    arm = [0.30, 0.10, 0.40]          # high + far (arm body) -> drop
+    pts = np.array([[low, near, arm]], dtype=np.float32)    # (1, 3, 3)
+    valid = np.ones((1, 3), dtype=bool)
+    _, out = focus_object(pts, valid, ee, z_lo=0.12, r_ee=0.13)
+    assert out[0].tolist() == [True, True, False]
+    # already-invalid points stay invalid (mask is ANDed, never revived)
+    valid[0, 0] = False
+    _, out2 = focus_object(pts, valid, ee, z_lo=0.12, r_ee=0.13)
+    assert out2[0].tolist() == [False, True, False]
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

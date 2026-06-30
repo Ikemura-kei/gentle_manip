@@ -155,15 +155,77 @@ def _wait_for_start(keys: "KeyPoller") -> None:
         time.sleep(0.02)
 
 
-def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float) -> None:
+def _pc_health(obs: dict) -> str:
+    """One-line health check of the policy's point-cloud input — the cube-position
+    signal. An empty/odd-range cloud is the usual cause of cube-agnostic motion."""
+    if "point_cloud" not in obs:
+        return "point_cloud: NOT in obs"
+    pc = np.asarray(obs["point_cloud"])[0]                     # (P, 3), squeeze num_envs
+    nz = pc[np.any(pc != 0.0, axis=1)]
+    if len(nz) == 0:
+        return "point_cloud: EMPTY (0 nonzero pts) — crop/extrinsic/scale mismatch?"
+    c, lo, hi = nz.mean(0), nz.min(0), nz.max(0)
+    return (f"point_cloud: {len(nz)}/{len(pc)} nonzero  "
+            f"centroid=({c[0]:.3f},{c[1]:.3f},{c[2]:.3f})  "
+            f"x[{lo[0]:.2f},{hi[0]:.2f}] y[{lo[1]:.2f},{hi[1]:.2f}] z[{lo[2]:.2f},{hi[2]:.2f}]")
+
+
+def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float,
+                    pose_scale: float = 1.0, record_path: "Path | None" = None) -> None:
     """Receding-horizon deploy loop shared by real and sim deployment.
 
     env: PolicyEnv-like — reset()->obs dict, step(action)->(obs, ...). policy:
     DP3PolicyAdapter. Re-plans every policy.n_action_steps; k starts, SPACE re-homes,
     q quits. Owns env.close() on exit.
+
+    pose_scale (<1) shrinks the 6 delta-pose dims of every command for slower, gentler
+    motion (gripper dim is left at full range so grasps still close). The policy
+    re-plans from the actual state each chunk, so it still converges — just slower.
+
+    record_path: if set, save each (obs seen, action taken) step into the SAME pickle
+    schema as recorded demos ({"episodes": [{"observations": {k: (T,...)}, "actions":
+    (T,7)}]}), so visualize_demo / episode_player render real runs identically to sim
+    demos — for sim2real obs comparison (esp. the point cloud).
     """
     period = 1.0 / rate if rate > 0 else 0.0
     steps = 0
+    record = record_path is not None
+    episodes: list = []
+    obs_buf: list = []
+    act_buf: list = []
+
+    def _flush_episode() -> None:
+        if not act_buf:
+            return
+        ep_obs = {k: np.stack([o[k] for o in obs_buf]) for k in obs_buf[0]}
+        episodes.append({"observations": ep_obs, "actions": np.stack(act_buf)})
+        obs_buf.clear()
+        act_buf.clear()
+
+    def _save() -> None:
+        if not record:
+            return
+        import pickle
+        from datetime import datetime, timezone
+        _flush_episode()
+        if not episodes:
+            return
+        record_path.parent.mkdir(parents=True, exist_ok=True)
+        dataset = {
+            "meta": {                                  # same schema as recorded demos
+                "task": "real_deploy",
+                "source": "deploy_real",
+                "obs_keys": sorted(episodes[0]["observations"].keys()),
+                "action_dim": int(episodes[0]["actions"].shape[1]),
+                "rate_hz": rate,
+                "created": datetime.now(timezone.utc).isoformat(),
+            },
+            "episodes": episodes,
+        }
+        with open(record_path, "wb") as f:
+            pickle.dump(dataset, f)
+        print(f"  saved {len(episodes)} real episode(s) → {record_path}")
+
     try:
         with KeyPoller() as keys:
             controls = ("k = start   SPACE = reset episode (re-home)   q = quit"
@@ -172,9 +234,13 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
                   f"(re-plan every {policy.n_action_steps}).  {controls}")
             obs = env.reset()                                       # homes the robot
             policy.reset(obs)
+            print("  " + _pc_health(obs))                           # cube-signal sanity at home
             _wait_for_start(keys)                                   # hold until 'k'
             while steps < max_steps:
                 chunk = policy.predict()                            # (n_action_steps, 7)
+                if pose_scale != 1.0:
+                    chunk = chunk.copy()
+                    chunk[:, :6] *= pose_scale                      # slow pose; keep gripper full-range
                 reset_now = False
                 for action in chunk:
                     key = keys.poll()
@@ -186,6 +252,9 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
                         raise KeyboardInterrupt
                     if steps >= max_steps:
                         break
+                    if record:                                     # obs the policy acted on + action taken
+                        obs_buf.append({k: np.asarray(v)[0].copy() for k, v in obs.items()})
+                        act_buf.append(np.asarray(action, dtype=np.float32).copy())
                     t0 = time.perf_counter()
                     obs = env.step(action[None, :].astype(np.float32))[0]
                     policy.push(obs)
@@ -195,14 +264,17 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
                         if dt < period:
                             time.sleep(period - dt)
                 if reset_now:                                      # abandon chunk, re-home, fresh budget
+                    _flush_episode()                               # close the recorded episode
                     obs = env.reset()
                     policy.reset(obs)
+                    print("  " + _pc_health(obs))
                     steps = 0
                     _wait_for_start(keys)                          # hold until 'k' again
         print(f"done — executed {steps} steps")
     except KeyboardInterrupt:
         print("\ninterrupted — stopping (arm holds position)", file=sys.stderr)
     finally:
+        _save()
         env.close()
 
 
@@ -214,7 +286,15 @@ def main() -> None:
     p.add_argument("--action-config", type=Path,
                    default=_PKG / "configs" / "action" / "delta_pose_delta_gripper.yaml")
     p.add_argument("--max-steps", type=int, default=200)
-    p.add_argument("--rate", type=float, default=10.0, help="control rate (Hz)")
+    p.add_argument("--rate", type=float, default=30.0, help="control rate (Hz)")
+    p.add_argument("--pose-scale", type=float, default=1.0,
+                   help="multiply the 6 delta-pose dims of every command (e.g. 0.5 = "
+                        "half-speed, gentler motion; gripper unaffected). Match this to "
+                        "the value you eval with in sim.")
+    p.add_argument("--record", type=Path, default=None,
+                   help="save (obs, action) per step to this pickle in the demo schema, so "
+                        "visualize_demo / episode_player can compare the real run against "
+                        "sim demos (esp. the point cloud). e.g. dataset/real_deploy/run1.pkl")
     p.add_argument("--device", default="cuda:0")
     args = p.parse_args()
 
@@ -228,7 +308,8 @@ def main() -> None:
     env = PolicyEnv(backend, obs_config, action_config, task=None, max_episode_steps=10 ** 9)
     policy = DP3PolicyAdapter(str(args.ckpt), device=args.device)
 
-    run_deploy_loop(env, policy, args.max_steps, args.rate)
+    run_deploy_loop(env, policy, args.max_steps, args.rate, pose_scale=args.pose_scale,
+                    record_path=args.record)
 
 
 if __name__ == "__main__":

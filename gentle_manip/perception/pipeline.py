@@ -11,6 +11,8 @@ from gentle_manip.perception.obs_config import ObsConfig
 from gentle_manip.perception.depth_to_pointcloud import depth_to_pointcloud
 from gentle_manip.perception.pointcloud_ops import (
     crop_pointcloud,
+    remove_outliers_voxel,
+    focus_object,
     subsample_pointcloud,
     pointcloud_to_voxel_grid,
 )
@@ -64,6 +66,18 @@ class PerceptionPipeline:
             ).astype(np.float32)
             obs["ee_quat"] = (q / (np.linalg.norm(q, axis=1, keepdims=True) + 1e-8)).astype(np.float32)
 
+        # Canonicalize quaternion sign (double-cover): q and -q are the SAME rotation
+        # but distinct input vectors to the policy. The real XArm reports the opposite
+        # sign from sim for the same pose (sim x≈+1, real x≈-1) — without this the policy
+        # sees an out-of-distribution ee_quat every step and fails. Make the
+        # largest-magnitude component positive: a no-op for sim (already canonical),
+        # and it flips real to match. Shared so sim/real can't diverge.
+        q = obs["ee_quat"]
+        dom = np.argmax(np.abs(q), axis=1)                            # (N,) dominant axis
+        sign = np.sign(q[np.arange(q.shape[0]), dom]).astype(np.float32)
+        sign[sign == 0.0] = 1.0
+        obs["ee_quat"] = (q * sign[:, np.newaxis]).astype(np.float32)
+
         if self.cfg.include_joint_pos and raw.joint_pos is not None:
             obs["joint_pos"] = raw.joint_pos.astype(np.float32)      # (N, 7)
 
@@ -79,6 +93,20 @@ class PerceptionPipeline:
                 self.cfg.point_cloud.crop_min,
                 self.cfg.point_cloud.crop_max,
             )
+            # Optional cloud-quality filters (shared sim+real), AFTER crop and BEFORE
+            # subsample so the freed budget is reallocated to what's kept.
+            if self.cfg.point_cloud.outlier_voxel_size is not None:
+                pts, valid = remove_outliers_voxel(
+                    pts, valid,
+                    self.cfg.point_cloud.outlier_voxel_size,
+                    self.cfg.point_cloud.outlier_min_neighbors,
+                )
+            if self.cfg.point_cloud.focus_z_lo is not None:
+                pts, valid = focus_object(
+                    pts, valid, raw.ee_pos,
+                    self.cfg.point_cloud.focus_z_lo,
+                    self.cfg.point_cloud.focus_r_ee,
+                )
             obs["point_cloud"] = subsample_pointcloud(
                 pts, valid, self.cfg.point_cloud.max_points
             )                                                         # (N, max_points, 3)

@@ -25,5 +25,5 @@ action_noise_std: 0.01          # Gaussian noise (norm. action units) on POSE de
 
 # ── idle trim (at save time) ─────────────────────────────────────────────────
 idle_threshold: 0.001
-keep_trailing_idle: 5
+keep_trailing_idle: 30
 max_interior_idle: 3

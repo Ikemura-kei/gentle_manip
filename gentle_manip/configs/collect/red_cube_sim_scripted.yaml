@@ -19,7 +19,7 @@ input: scripted                 # keyboard (human) | scripted (automatic)
 n_episodes: 50                  # scripted: number of demos to collect
 show_viewer: false              # scripted runs headless by default; true to watch
 record_video: true              # save cam_ext RGB mp4 for the first video_episodes (quality check)
-video_episodes: 5               # how many episodes to record (-> <run_dir>/videos/ep_NNN.mp4)
+video_episodes: 50               # how many episodes to record (-> <run_dir>/videos/ep_NNN.mp4)
 video_fps: 30
 
 # ── loop / motion ────────────────────────────────────────────────────────────
@@ -27,7 +27,7 @@ rate: 30.0                      # control rate (Hz); also sets the hold duration
 speed: 0.5                      # scripted: per-step pose speed cap (normalized action)
 gripper_value: 0.05             # scripted: gripper close delta
 settle_steps: 40
-action_noise_std: 0.01          # Gaussian noise (norm. action units) on POSE deltas only
+action_noise_std: 0.03          # Gaussian noise (norm. action units) on POSE deltas only
 
 # ── scripted state machine (the task: lift to lift_height, hold hold_seconds) ──
 scripted:

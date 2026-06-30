@@ -65,6 +65,11 @@ def main():
                     help="output dir; default: figures/<timestamp>/ (config.yaml inside "
                          "records what varied, so the dir name need not encode it)")
     ap.add_argument("--show", action="store_true")
+    ap.add_argument("--video", action="store_true",
+                    help="also render a side-by-side (real|sim) rolling point-cloud mp4 per episode")
+    ap.add_argument("--video-episodes", type=int, default=2,
+                    help="how many of the selected episodes to render a cloud video for")
+    ap.add_argument("--video-fps", type=int, default=15)
     args = ap.parse_args()
 
     import matplotlib
@@ -138,6 +143,7 @@ def main():
     print(f"  saved {out / 'config.yaml'}", flush=True)
 
     summary = []
+    videos_made = 0
     for ep_idx in picks:
         ep = eps[ep_idx]
         actions = ep["actions"].astype(np.float32)
@@ -283,6 +289,36 @@ def main():
         figp.savefig(ppath, dpi=110, bbox_inches="tight")
         plt.close(figp)
         print(f"  saved {ppath}", flush=True)
+
+        # Side-by-side rolling point-cloud video (real | sim), one frame per step.
+        # Reuses one figure (clear+redraw) for speed; same view/limits/colormap so
+        # the same absolute height maps to the same colour in both panels.
+        if args.video and videos_made < args.video_episodes:
+            import imageio.v2 as imageio
+            figv = plt.figure(figsize=(12, 5.5))
+            axr = figv.add_subplot(1, 2, 1, projection="3d")
+            axs = figv.add_subplot(1, 2, 2, projection="3d")
+            frames = []
+            for t in range(T):
+                for ax, tag, pc in [(axr, "real (L515)", re_pc[t]),
+                                    (axs, "sim (rendered)", sim[t]["point_cloud"][0])]:
+                    ax.clear()
+                    v = _valid(pc)
+                    ax.scatter(v[:, 0], v[:, 1], v[:, 2], s=2, c=v[:, 2], cmap="viridis",
+                               vmin=0.0, vmax=0.45, alpha=0.5)
+                    ax.set_xlim(0.2, 0.71)
+                    ax.set_ylim(-0.215, 0.215)
+                    ax.set_zlim(0, 0.45)
+                    ax.view_init(30, -60)
+                    ax.set_title(f"{tag}  t={t}  ({len(v)} pts)")
+                figv.suptitle(f"episode {ep_idx} (fov={fov}) — point cloud roll: real vs sim")
+                figv.canvas.draw()
+                frames.append(np.asarray(figv.canvas.buffer_rgba())[..., :3].copy())
+            plt.close(figv)
+            vpath = out / f"traj_{ep_idx:02d}_cloud_video.mp4"
+            imageio.mimsave(str(vpath), frames, fps=args.video_fps, macro_block_size=1)
+            print(f"  saved {vpath} ({len(frames)} frames)", flush=True)
+            videos_made += 1
 
     env.close()
     print("\n=== summary (fov={}) ===".format(fov), flush=True)

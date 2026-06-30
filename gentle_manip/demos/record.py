@@ -42,11 +42,14 @@ class DemoRecorder:
                  max_interior_idle: int = 3, action_noise_std: float = 0.0,
                  dataset_path: Optional[Path] = None, frame_fn=None,
                  video_dir: Optional[Path] = None, video_fps: int = 20,
-                 video_episodes: int = 0) -> None:
+                 video_episodes: int = 0, cloud_viewer=None) -> None:
         self.env = env
         self.teleop = teleop
         self.keyboard = keyboard
         self.task_name = task_name
+        # Optional live Open3D view of the PROCESSED cloud (LiveCloudViewer); fed
+        # obs["point_cloud"] each step so you watch what the policy will see.
+        self.cloud_viewer = cloud_viewer
         self.out_dir = Path(out_dir)
         # Optional RGB video: frame_fn() returns an (H, W, 3) uint8 frame; one mp4 is
         # written per episode for the first `video_episodes` saved (a quality check).
@@ -123,10 +126,15 @@ class DemoRecorder:
                     ).astype(np.float32)
                 obs = self._step_and_record(obs, action)
 
+                if self.cloud_viewer is not None and "point_cloud" in obs:
+                    self.cloud_viewer.update(obs["point_cloud"][0])
+
                 self._rate_limit(t0, period)
         finally:
             self.teleop.close()
             self.keyboard.close()
+            if self.cloud_viewer is not None:
+                self.cloud_viewer.close()
             self.env.close()
 
     def _flush_video(self) -> None:
@@ -304,7 +312,7 @@ def main() -> None:
     p.add_argument("--input", choices=["spacemouse", "keyboard"], default="spacemouse",
                    help="teleop device")
     p.add_argument("--out-dir", type=Path, default=Path("dataset") / "demos")
-    p.add_argument("--rate", type=float, default=20.0, help="control rate (Hz)")
+    p.add_argument("--rate", type=float, default=30.0, help="control rate (Hz)")
     p.add_argument("--speed", type=float, default=0.55,
                    help="teleop motion magnitude in [0,1] (lower = slower); "
                         "per-step delta = speed * action-scale")
@@ -316,6 +324,9 @@ def main() -> None:
                    help="max trailing idle frames to keep (so the policy learns to stop)")
     p.add_argument("--max-interior-idle", type=int, default=3,
                    help="max frames to keep in a mid-episode idle run (collapses long pauses)")
+    p.add_argument("--show-pointcloud", action="store_true",
+                   help="open a live Open3D window of the PROCESSED cloud (crop+filters) "
+                        "as you teleop — visualize online instead of collecting to inspect")
     args = p.parse_args()
 
     print("note: the robot moves under teleop — keep the e-stop in reach.", file=sys.stderr)
@@ -344,6 +355,17 @@ def main() -> None:
         teleop = SpaceMouseTeleop(scale=args.speed, gripper_value=args.gripper_value)
         keyboard = PygameKeyboard()
 
+    cloud_viewer = None
+    if args.show_pointcloud:
+        if obs_config.point_cloud is None:
+            print("--show-pointcloud ignored: obs config has no point_cloud", file=sys.stderr)
+        else:
+            from gentle_manip.visualization.live_cloud_viewer import LiveCloudViewer
+            cloud_viewer = LiveCloudViewer(
+                crop_min=obs_config.point_cloud.crop_min,
+                crop_max=obs_config.point_cloud.crop_max,
+            )
+
     recorder = DemoRecorder(
         env=env,
         teleop=teleop,
@@ -354,6 +376,7 @@ def main() -> None:
         idle_threshold=args.idle_threshold,
         keep_trailing_idle=args.keep_trailing_idle,
         max_interior_idle=args.max_interior_idle,
+        cloud_viewer=cloud_viewer,
     )
     recorder.run()
     recorder.write()

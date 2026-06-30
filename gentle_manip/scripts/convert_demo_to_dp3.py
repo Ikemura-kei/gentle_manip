@@ -12,6 +12,20 @@ import numpy as np
 DEFAULT_AGENT_POS_KEYS = ("ee_pos", "ee_quat", "gripper_width")
 
 
+class _NumpyCompatUnpickler(pickle.Unpickler):
+    """Read pickles written by numpy 2.x in a numpy 1.x env (and vice-versa).
+
+    Sim demos are pickled in envs/sim (numpy 2.x, which uses the ``numpy._core``
+    module path), but conversion runs in envs/dp3 (numpy 1.x, ``numpy.core``). Map
+    the module path so array reconstruction resolves in either numpy.
+    """
+
+    def find_class(self, module, name):
+        if module.startswith("numpy._core"):
+            module = "numpy.core" + module[len("numpy._core"):]
+        return super().find_class(module, name)
+
+
 def _iter_pickles(inputs: Sequence[Path]) -> list[Path]:
     paths: list[Path] = []
     for path in inputs:
@@ -97,7 +111,7 @@ def _load_episodes(paths: Sequence[Path]) -> tuple[list[dict], dict]:
     metas: list[dict] = []
     for path in paths:
         with open(path, "rb") as f:
-            data = pickle.load(f)
+            data = _NumpyCompatUnpickler(f).load()
         if not isinstance(data, dict) or "episodes" not in data:
             raise ValueError(f"{path} is not a gentle_manip demo pickle")
         episodes.extend(data["episodes"])
@@ -214,9 +228,9 @@ def convert_pickles_to_dp3(
         chunk_length=chunk_length,
         attrs=attrs,
     )
-    return {key: (arr.shape, str(arr.dtype)) for key, arr in arrays.items()} | {
-        "episode_ends": (episode_ends.shape, str(episode_ends.dtype))
-    }
+    summary = {key: (arr.shape, str(arr.dtype)) for key, arr in arrays.items()}
+    summary["episode_ends"] = (episode_ends.shape, str(episode_ends.dtype))
+    return summary
 
 
 def main() -> None:

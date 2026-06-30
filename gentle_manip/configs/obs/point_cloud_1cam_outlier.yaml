@@ -1,0 +1,28 @@
+# Real-deploy obs config for testing the EXISTING (unfiltered-sim-trained) policy
+# with real-only flying-pixel/edge denoising — NO object_focus.
+#
+# Identical to point_cloud_1cam.yaml (the config the 65% checkpoint was trained with)
+# plus outlier_removal only. Rationale: the L515's edge/flying-pixel artifacts are
+# noise sim never had (l515_noise augmentation adds per-point jitter, not edge
+# clusters), so removing them from real makes real match the training distribution.
+# object_focus is deliberately OFF: the arm IS present in the sim training clouds, so
+# stripping it from real only would create a mismatch and hurt the existing policy.
+# (object_focus belongs in the shared filtered config for a re-collect + retrain.)
+include_joint_pos: false
+include_joint_vel: false
+
+quat_noise_std: 0.003
+
+point_cloud:
+  cameras: ["cam_ext"]
+  crop_min: [0.2, -0.215, 0.004]
+  crop_max: [0.71,   0.215,  0.45]
+  max_points: 1024
+
+  # Real-only flying-pixel / edge denoiser (no-op on clean sim). Same params you
+  # tuned live in point_cloud_1cam_filtered.yaml.
+  outlier_removal:
+    voxel_size: 0.01
+    min_neighbors: 23
+  # object_focus intentionally omitted — keep the arm so the cloud matches what the
+  # existing checkpoint was trained on.

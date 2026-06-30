@@ -32,6 +32,78 @@ def crop_pointcloud(
     return points, valid & in_box
 
 
+def remove_outliers_voxel(
+    points: np.ndarray,
+    valid: np.ndarray,
+    voxel_size: float,
+    min_neighbors: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Density-based outlier removal: mask out points whose voxel (edge ``voxel_size``)
+    holds fewer than ``min_neighbors`` valid points. Cheap O(M) per env via
+    ``np.unique`` over integer voxel indices — no kNN — and removes the isolated
+    flying-pixel / depth-edge artifacts the L515 produces at object boundaries.
+
+    Shared sim+real: sim clouds are dense and clean, so it is ~a no-op there; it
+    only bites on the noisy real cloud, keeping the two distributions matched.
+
+    Args:
+        points:        (num_envs, M, 3) float32.
+        valid:         (num_envs, M) bool.
+        voxel_size:    voxel edge length (meters).
+        min_neighbors: minimum valid points sharing a voxel to survive (incl. self;
+                       so 1 is a no-op, 2 = "needs at least one neighbour").
+
+    Returns:
+        points:  unchanged (sparse points are masked, not moved).
+        valid:   updated (num_envs, M) bool.
+    """
+    out = valid.copy()
+    for i in range(points.shape[0]):
+        idx = np.where(out[i])[0]
+        if idx.size == 0:
+            continue
+        vox = np.floor(points[i, idx] / voxel_size).astype(np.int64)      # (Ni, 3)
+        _, inv, counts = np.unique(vox, axis=0, return_inverse=True, return_counts=True)
+        sparse = counts[np.ravel(inv)] < min_neighbors                    # (Ni,)
+        out[i, idx[sparse]] = False
+    return points, out
+
+
+def focus_object(
+    points: np.ndarray,
+    valid: np.ndarray,
+    ee_pos: np.ndarray,
+    z_lo: float,
+    r_ee: float,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Drop the robot-arm body so the downstream subsample budget concentrates on the
+    object instead of the (redundant) forearm/upper-arm.
+
+    Keep a point if it is either LOW (table + resting/grasped object, ``z < z_lo``)
+    OR NEAR the end-effector (gripper + grasped/lifted object, within ``r_ee`` of
+    ``ee_pos``); everything else — the arm body — is masked out. Adaptive: the
+    near-EE region tracks ``ee_pos`` each step, so a lifted object stays in via that
+    clause. Uses only points + ee_pos (both in RawObs), so it runs identically in
+    sim and real.
+
+    Args:
+        points: (num_envs, M, 3) float32.
+        valid:  (num_envs, M) bool.
+        ee_pos: (num_envs, 3) float32 — end-effector world position.
+        z_lo:   keep points below this height (meters).
+        r_ee:   keep points within this radius of the EE (meters).
+
+    Returns:
+        points:  unchanged.
+        valid:   updated (num_envs, M) bool.
+    """
+    low = points[..., 2] < z_lo                                            # (N, M)
+    near = np.linalg.norm(points - ee_pos[:, np.newaxis, :], axis=-1) < r_ee
+    return points, valid & (low | near)
+
+
 def subsample_pointcloud(
     points: np.ndarray,
     valid: np.ndarray,

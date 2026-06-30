@@ -11,6 +11,18 @@ class PointCloudConfig:
     crop_max: Tuple[float, float, float]    # workspace bounding box max (meters)
     max_points: int = 2048                  # subsample target after merge + crop
 
+    # Optional cloud-quality filters, applied (shared sim+real) AFTER crop and
+    # BEFORE subsample, so the freed budget is reallocated to what's kept. Both
+    # default off (None) — enable per obs config.
+    #   outlier_voxel_size: density outlier removal — drop points whose voxel holds
+    #     < outlier_min_neighbors valid points (removes L515 flying-pixel/edge noise).
+    #   focus_z_lo / focus_r_ee: object focus — keep only points that are low
+    #     (z < focus_z_lo) OR near the EE (within focus_r_ee), dropping the arm body.
+    outlier_voxel_size: Optional[float] = None
+    outlier_min_neighbors: int = 2
+    focus_z_lo: Optional[float] = None
+    focus_r_ee: float = 0.13
+
 
 @dataclass
 class VoxelConfig:
@@ -68,11 +80,17 @@ class ObsConfig:
         pc = None
         if "point_cloud" in d:
             pc_d = d["point_cloud"]
+            out_d = pc_d.get("outlier_removal") or {}
+            foc_d = pc_d.get("object_focus") or {}
             pc = PointCloudConfig(
                 cameras=pc_d["cameras"],
                 crop_min=tuple(pc_d["crop_min"]),
                 crop_max=tuple(pc_d["crop_max"]),
                 max_points=pc_d.get("max_points", 2048),
+                outlier_voxel_size=out_d.get("voxel_size"),
+                outlier_min_neighbors=out_d.get("min_neighbors", 2),
+                focus_z_lo=foc_d.get("z_lo"),
+                focus_r_ee=foc_d.get("r_ee", 0.13),
             )
 
         voxel = None

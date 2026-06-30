@@ -159,6 +159,18 @@ class PolicyEnv:
     def close(self) -> None:
         self.backend.close()
 
+    def reseed(self, seed: int) -> None:
+        """Reset the obs/DR RNGs to a fixed seed so the following sequence of resets is
+        reproducible — used by in-loop eval to run the SAME N scenarios (cube/arm
+        jitter + obs noise) every time, so the success curve is comparable across
+        epochs. No-op for RNGs a given backend/config doesn't have (e.g. real)."""
+        if hasattr(self.backend, "_rng"):
+            self.backend._rng = np.random.default_rng(seed)
+        if hasattr(self.perception, "_rng"):
+            self.perception._rng = np.random.default_rng(seed)
+        if self._augmentor is not None and hasattr(self._augmentor, "rng"):
+            self._augmentor.rng = np.random.default_rng(seed)
+
     # ── Internal helpers ──────────────────────────────────────────────────────
 
     def _do_reset(self, **kwargs) -> RawObs:
