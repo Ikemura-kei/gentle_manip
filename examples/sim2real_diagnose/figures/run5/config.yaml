@@ -1,0 +1,43 @@
+demo: dataset/real_deploy/run5.pkl
+episodes:
+- 9
+- 10
+- 0
+- 1
+- 2
+- 3
+- 4
+- 5
+- 6
+- 7
+- 8
+- 11
+- 12
+- 13
+- 14
+- 15
+- 16
+- 17
+- 18
+- 19
+seed: 0
+object: red_cube
+object_type: rigid
+obs_config: point_cloud_1cam
+augmentation: null
+augmentation_values: null
+max_steps: 0
+camera:
+  name: cam_ext
+  fov: 46.0
+  pos:
+  - 0.98910661
+  - -0.00034108
+  - 0.09825304
+  lookat:
+  - -0.01056659
+  - 0.0207823
+  - 0.11265116
+  resolution:
+  - 640
+  - 480
