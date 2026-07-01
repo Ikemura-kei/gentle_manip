@@ -1,0 +1,56 @@
+# HIL-SERL (JAX) environment for the SAC/RLPD state-based mushroom teacher.
+#
+# A THIRD stack alongside envs/sim (torch+genesis, 3.12) and envs/dp3 (torch, 3.8):
+# SERL is JAX/flax + tensorflow, Python 3.10. It never imports genesis — the genesis
+# sim runs in envs/sim (3.12) and is reached over the pure-python gentle_manip.envs.rpc
+# socket (imported via sys.path, NOT as a dependency, to avoid a gymnasium version
+# clash with SERL's pinned gymnasium==0.29.1).
+#
+# Setup:   uv sync --project envs/serl
+# Run learner/actor: uv run --project envs/serl python <script> --learner|--actor
+#
+# NOTE: jax[cuda12]==0.4.35 pulls the NVIDIA CUDA wheels from PyPI. If it fails on this
+# box's driver, fall back to the jax_cuda_releases find-links per the hil-serl README.
+[project]
+name = "gentle-manip-serl"
+version = "0.1.0"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+    "jax[cuda12]==0.4.35",
+    # Pin the nvcc wheel to a pre-namespace 12.6: jax 0.4.35's CUDA probe does
+    # pathlib.Path(nvidia.cuda_nvcc.__file__), and the 12.9 wheels are PEP-420
+    # namespace packages (__file__ is None) -> crash. 12.6.85 has a real __init__.py.
+    "nvidia-cuda-nvcc-cu12==12.6.85",
+    "serl-launcher",     # editable, from the submodule (tool.uv.sources below)
+    "agentlace",         # actor<->learner transport (git, tool.uv.sources below)
+    # serl_launcher/requirements.txt (JAX RL stack)
+    "flax>=0.8.0",
+    "distrax>=0.1.2",
+    "optax>=0.1.5",
+    "chex>=0.1.85",
+    "ml_collections>=0.1.0",
+    "tensorflow>=2.15.0",
+    "tensorflow_probability>=0.23.0",
+    "tf-keras",
+    "einops>=0.6.1",
+    "wandb>=0.12.14",
+    "absl-py>=0.12.0",
+    "gymnasium==0.29.1",
+    "gym>=0.26",
+    "opencv-python",
+    "lz4",
+    "pyzmq",
+    "imageio>=2.31.1",
+    "moviepy>=1.0.3",
+    "natsort",
+    # pynput dropped: it needs evdev (C ext, kernel headers) and is only for keyboard
+    # human-intervention / demo recording — the sim teacher doesn't use it.
+    "matplotlib",
+    "scipy==1.11.4",
+    "numpy>=1.24.3",
+    "tqdm>=4.60.0",
+]
+
+[tool.uv.sources]
+serl-launcher = { path = "../../third_party/hil-serl/serl_launcher", editable = true }
+agentlace = { git = "https://github.com/youliangtan/agentlace.git", rev = "cf2c337c5e3694cdbfc14831b239bd657bc4894d" }
