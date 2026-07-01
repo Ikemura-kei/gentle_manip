@@ -1,8 +1,12 @@
 # Lift a real scanned mushroom (soft MPM body). The point of this task is GENTLE
 # manipulation: lift it without bruising, i.e. keep von Mises stress under the ~40 kPa
 # yield. Uses the soft-body "Config C" sim params (see materials.py / CLAUDE.md).
-lift_height: 0.10        # m above initial z to count as lifted (small, soft object)
-hold_steps: 30           # consecutive steps held at height for success
+# Success = the object CENTER sits in an ABSOLUTE height band [0.175, 0.225] m (center
+# at ~20 cm +/- 2.5 cm), held for hold_steps. Absolute (not relative) so it's checkable
+# on the real robot with a ruler.
+success_z_min: 0.175
+success_z_max: 0.225
+hold_steps: 30           # consecutive steps in the band for success (~1 s at 30 Hz)
 object_name: "mushroom"
 object_type: "soft"      # MPM -> has von_mises_stress for the stress reward
 
@@ -14,17 +18,22 @@ mpm_grid_density: 250
 success_scale: 2.0
 
 rewards:
-  # Gentleness: penalty = -(von_mises / yield)^2 * scale. yield (~40 kPa) is
-  # auto-injected from the mushroom material, so cap is a FRACTION of yield
-  # (1.0 = bruising onset) — no per-object stress retuning needed.
+  # Gentleness: penalty = -(von_mises / yield)^2 * scale. yield (~40 kPa) auto-injected
+  # from the material, so cap is a FRACTION of yield (1.0 = bruising onset). scale=2.0
+  # (bumped from 1.0) so gentle beats bruising by ~1.5/step vs the +2/step success — a
+  # firmer gentleness incentive. TODO: confirm a gentle grasp can still succeed.
   stress:
-    scale: 1.0
+    scale: 2.0
     cap: 1.5
     mean_weight: 0.2
     top10_weight: 0.8
   dist_to_obj:
     scale: 1.0
     decay: 20.0
+  # Lift: rise normalized to [0,1] by lift_target (~rest->success-band rise) then *scale,
+  # so a fully-lifted object gives ~1.0 (a real gradient toward the success band), ~10x
+  # the old raw-metres term, with no runaway for over-lifting.
   lift:
     scale: 1.0
     grasp_gate_dist: 0.079
+    lift_target: 0.16

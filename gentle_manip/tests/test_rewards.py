@@ -237,3 +237,14 @@ def test_build_reward_fn_output_shape():
     out = fn(fb, make_raw_obs(num_envs=8))
     assert out.shape == (8,)
     assert out.dtype == np.float32
+
+
+def test_lift_target_normalization():
+    # Keep EE right at the object so the grasp gate stays open at any height.
+    r = LiftReward(scale=2.0, grasp_gate_dist=0.2, lift_target=0.16)
+    r.reset(make_feedback(num_envs=1, obj_z=0.02))
+    ee = lambda z: np.array([[0.4, 0.0, z]], dtype=np.float32)      # object is at (0.4, 0, z)
+    out = r(make_feedback(num_envs=1, obj_z=0.10), make_raw_obs(num_envs=1, ee_pos=ee(0.10)))
+    np.testing.assert_allclose(out, 0.5 * 2.0, rtol=1e-4)          # rise 0.08 / 0.16 * scale
+    hi = r(make_feedback(num_envs=1, obj_z=0.50), make_raw_obs(num_envs=1, ee_pos=ee(0.50)))
+    np.testing.assert_allclose(hi, 1.0 * 2.0, rtol=1e-4)           # over-lift clamps to 1.0

@@ -22,6 +22,14 @@ class SingleLiftTask(BaseTask):
         self.object_name: str = str(task_cfg.get("object_name", "tofu"))
         self.object_type: str = str(task_cfg.get("object_type", "soft"))  # "soft" | "rigid"
 
+        # Success: either an ABSOLUTE object-center z-band [min, max] (ruler-checkable on
+        # the real robot — the center must sit in this height window), or, if unset, the
+        # legacy RELATIVE "lifted lift_height above the initial z". Held hold_steps either way.
+        z_min = task_cfg.get("success_z_min")
+        z_max = task_cfg.get("success_z_max")
+        self.success_z_min = float(z_min) if z_min is not None else None
+        self.success_z_max = float(z_max) if z_max is not None else None
+
         # MPM sim params — configurable so a stiff soft body (mushroom) can raise
         # substeps for CFL stability without touching the rigid-cube defaults. The
         # mushroom uses "Config C" (see materials.py / CLAUDE.md): substeps=210,
@@ -73,6 +81,9 @@ class SingleLiftTask(BaseTask):
             return np.zeros(sim_feedback.object_center.shape[0], dtype=bool)
 
         obj_z = sim_feedback.object_center[:, 2]
-        lifted = obj_z > (self._initial_z + self.lift_height)
-        self._success_counter = np.where(lifted, self._success_counter + 1, 0)
+        if self.success_z_min is not None:
+            in_target = (obj_z >= self.success_z_min) & (obj_z <= self.success_z_max)  # absolute band
+        else:
+            in_target = obj_z > (self._initial_z + self.lift_height)                   # relative
+        self._success_counter = np.where(in_target, self._success_counter + 1, 0)
         return self._success_counter >= self.hold_steps
