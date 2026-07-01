@@ -39,6 +39,7 @@ class Experiment:
         self.augmentation = d.get("augmentation")               # config name (applied sim-only)
         self.superset_obs = ObsConfig.from_dict(_load("obs", d["obs"]))
         self._views = d.get("views", {})
+        self.rl = d.get("rl", {})                               # optional SAC/RLPD hyperparams
 
     @classmethod
     def load(cls, name_or_path) -> "Experiment":

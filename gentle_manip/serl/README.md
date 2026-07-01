@@ -48,16 +48,29 @@ uv run --project envs/serl python <train_entry> --learner --demo_path demos_serl
 uv run --project envs/serl python <train_entry> --actor  --ip localhost
 ```
 
-## Remaining work (the training entry)
-1. **`train_serl_mushroom.py`** — adapt `third_party/hil-serl/examples/train_rlpd.py`:
-   - drop the real-robot bits (reward classifier, SpacemouseIntervention, franka wrappers);
-   - env = `SERLObsWrapper(SimGymEnv(...))` (+ `ChunkingWrapper` if desired) — flattens the
-     dict obs to the `state` key;
-   - build a **state-based** SAC agent with `SACAgent.create(...)` + MLP actor/critic
-     (`serl_launcher.networks`) — no image encoders (`image_keys=None`); HIL-SERL only
-     ships pixel factories, so this is the one new bit of wiring;
-   - reuse the actor/learner loops + `MemoryEfficientReplayBufferDataStore` + demo loading.
-2. **Mushroom demos WITH reward** for RLPD: collect through the teacher env (the env's
-   reward is available each step) — e.g. drive the scripted lift policy through `SimGymEnv`
-   and dump episodes with a `rewards` array, then `convert_demos.py` → the SERL pickle.
-   (Our existing demos are red-cube + point-cloud obs + no reward, so not reusable as-is.)
+## Training (`train_serl.py`) — generic, experiment-driven
+`gentle_manip/serl/train_serl.py` is the one task-agnostic SAC/RLPD trainer (adapted from
+`train_rlpd.py`, stripped of reward-classifier / spacemouse / franka / learned-gripper).
+Everything comes from `Experiment` + `--view`; new task = new experiment YAML, no new code.
+
+The one new piece — a **state-based SAC agent** (HIL-SERL ships only pixel factories) —
+uses the standard idiom for pure state: obs `{"state": flat}`, `image_keys=("state",)`
+(passes the agent's pack/unpack check), and a `StateEncoder` returning `obs["state"]` into
+encoder-free MLP actor/critic. **Verified in envs/serl (no genesis needed):** the agent
+constructs, `sample_actions` returns a (7,) action, and `agent.update` runs gradient steps.
+
+Run (genesis teacher server in envs/sim, learner+actor in envs/serl):
+```bash
+uv run --project envs/sim  python -m gentle_manip.scripts.serl_sim_server --experiment mushroom_lift --view teacher --port 5566
+uv run --project envs/serl python -m gentle_manip.serl.train_serl --experiment mushroom_lift --view teacher --learner --demo-path demos_serl/mushroom.pkl
+uv run --project envs/serl python -m gentle_manip.serl.train_serl --experiment mushroom_lift --view teacher --actor  --port 5566
+```
+
+## Remaining
+1. **Mushroom demos WITH reward** for RLPD: collect through the teacher env (env reward is
+   available each step) — drive the scripted lift via `SimGymEnv` and dump episodes with a
+   `rewards` array, then `convert_demos.py` → the SERL pickle. (Existing demos are red-cube
+   + point-cloud + no reward, not reusable.)
+2. **End-to-end run:** actor/learner loops are adapted from train_rlpd but only unit-level
+   verified (agent build + train step); the full server↔actor↔learner run needs the demos
+   above — first shakedown will likely need small tweaks (agentlace ports, iterator shapes).
