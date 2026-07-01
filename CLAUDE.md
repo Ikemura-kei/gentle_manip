@@ -137,6 +137,19 @@ BKSP discard, ESC quit) or `--input spacemouse` (default). Both produce the same
 normalized `[-1,1]` action through the same `ActionPipeline`. Episode keys
 (SPACE/BACKSPACE/ESC) are identical across both modes.
 
+**Sim demo collection** (`examples/collect_demos_sim.py`, envs/sim, keyboard or scripted):
+config-driven, and **experiment-mode** ties it to the single-source-of-truth Experiment.
+```bash
+MUJOCO_GL=glfw uv run --project envs/sim python examples/collect_demos_sim.py \
+  --config gentle_manip/configs/collect/mushroom_teleop.yaml
+```
+An `experiment:` collect config records the **SUPERSET** obs (`collection_obs()` — state +
+privileged + point cloud) **and** the **per-step reward** (the env is built WITH the task).
+So **one demo set is dual-purpose**: keep the reward + a state view (`subset_demo`) for
+HIL-SERL RLPD, or drop the reward + take the point-cloud view for DP3 — same demonstrations,
+different obs. `DemoRecorder` now logs `episode["rewards"]` (0 when `task=None`, i.e. the
+legacy DP3-only path); reward-free consumers just ignore it.
+
 ---
 
 ## Directory Structure

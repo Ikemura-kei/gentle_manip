@@ -81,6 +81,7 @@ class DemoRecorder:
 
         self._obs_buf: List[Dict[str, np.ndarray]] = []
         self._act_buf: List[np.ndarray] = []
+        self._rew_buf: List[float] = []
         self.episodes: List[dict] = []
         self._path: Optional[Path] = None   # chosen lazily on the first saved episode
 
@@ -150,10 +151,15 @@ class DemoRecorder:
         self._frames = []
 
     def _step_and_record(self, obs, action: np.ndarray):
-        """Record (obs_t, action_t), advance the env, return the next obs."""
-        obs_next, _reward, _done, _info = self.env.step(action[None, :])
+        """Record (obs_t, action_t, reward_t), advance the env, return the next obs.
+
+        The env's per-step reward is logged too (0 when the env has task=None). This
+        makes a demo directly usable for reward-based RL (RLPD); reward-free consumers
+        (DP3) simply ignore the "rewards" array."""
+        obs_next, reward, _done, _info = self.env.step(action[None, :])
         self._obs_buf.append({k: np.asarray(v)[0] for k, v in obs.items()})  # drop num_envs
         self._act_buf.append(action.copy())
+        self._rew_buf.append(float(np.asarray(reward).ravel()[0]))
         return obs_next
 
     def _rate_limit(self, t0: float, period: float) -> None:
@@ -169,7 +175,7 @@ class DemoRecorder:
     # ── Episode buffer ────────────────────────────────────────────────────────
 
     def _save_episode(self) -> int:
-        obs_buf, act_buf = self._trim_idle(self._obs_buf, self._act_buf)
+        obs_buf, act_buf, rew_buf = self._trim_idle(self._obs_buf, self._act_buf, self._rew_buf)
         n = len(act_buf)
         if n == 0:
             self._clear()
@@ -177,12 +183,16 @@ class DemoRecorder:
         keys = obs_buf[0].keys()
         observations = {k: np.stack([o[k] for o in obs_buf]) for k in keys}
         actions = np.stack(act_buf)
-        self.episodes.append({"observations": observations, "actions": actions})
+        self.episodes.append({
+            "observations": observations,
+            "actions": actions,
+            "rewards": np.asarray(rew_buf, dtype=np.float32),   # per-step reward (0 if task=None)
+        })
         self._clear()
         self._flush()                          # persist immediately — crash-safe
         return n
 
-    def _trim_idle(self, obs_buf, act_buf):
+    def _trim_idle(self, obs_buf, act_buf, rew_buf):
         """Cap each consecutive idle run by position (leading/interior/trailing).
 
         Idle = full action norm <= idle_threshold. Keeps the first `cap` frames of
@@ -190,11 +200,11 @@ class DemoRecorder:
         trailing). idle_threshold <= 0 disables trimming.
         """
         if self.idle_threshold <= 0 or not act_buf:
-            return obs_buf, act_buf
+            return obs_buf, act_buf, rew_buf
         idle = np.linalg.norm(np.stack(act_buf), axis=1) <= self.idle_threshold
         T = len(act_buf)
         if idle.all():
-            return [], []                      # whole episode idle → nothing to keep
+            return [], [], []                  # whole episode idle → nothing to keep
 
         keep = np.ones(T, dtype=bool)
         i = 0
@@ -216,7 +226,8 @@ class DemoRecorder:
 
         obs_out = [o for o, k in zip(obs_buf, keep) if k]
         act_out = [a for a, k in zip(act_buf, keep) if k]
-        return obs_out, act_out
+        rew_out = [r for r, k in zip(rew_buf, keep) if k]
+        return obs_out, act_out, rew_out
 
     def _discard_episode(self) -> None:
         self._clear()
@@ -224,6 +235,7 @@ class DemoRecorder:
     def _clear(self) -> None:
         self._obs_buf = []
         self._act_buf = []
+        self._rew_buf = []
 
     # ── Output ────────────────────────────────────────────────────────────────
 
