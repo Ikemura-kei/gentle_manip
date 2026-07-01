@@ -21,6 +21,12 @@ returns obs["state"] into MLP actor/critic (encoder-free networks).
 """
 from __future__ import annotations
 
+import os
+# The genesis sim server, this learner, and the actor all share one GPU; jax otherwise
+# pre-grabs ~75% each -> OOM. Allocate on demand (the state MLPs are tiny). Set before jax.
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
+os.environ.setdefault("XLA_PYTHON_CLIENT_MEM_FRACTION", "0.3")
+
 import argparse
 import copy
 import pickle
@@ -126,7 +132,7 @@ def actor_loop(agent, data_store, env, cfg, sampling_rng, ip, port_agentlace):
             obs, _ = env.reset()
 
 
-def learner_loop(agent, replay_buffer, demo_buffer, cfg, sampling_rng):
+def learner_loop(agent, replay_buffer, demo_buffer, cfg, sampling_rng, wandb_logger=None):
     import jax
     import tqdm
     from agentlace.trainer import TrainerServer
@@ -144,9 +150,11 @@ def learner_loop(agent, replay_buffer, demo_buffer, cfg, sampling_rng):
     pbar.close()
     server.publish_network(agent.state.params)
 
+    # State (non-image) buffer: no pack_obs_and_next_obs (that's a memory-efficient
+    # image-buffer feature; the plain ReplayBuffer.sample() rejects it).
     half = cfg["batch_size"] // 2
-    replay_it = replay_buffer.get_iterator(sample_args={"batch_size": half, "pack_obs_and_next_obs": True})
-    demo_it = demo_buffer.get_iterator(sample_args={"batch_size": half, "pack_obs_and_next_obs": True})
+    replay_it = replay_buffer.get_iterator(sample_args={"batch_size": half})
+    demo_it = demo_buffer.get_iterator(sample_args={"batch_size": half})
     critic_only = frozenset({"critic"})
     all_nets = frozenset({"critic", "actor", "temperature"})
 
@@ -159,6 +167,14 @@ def learner_loop(agent, replay_buffer, demo_buffer, cfg, sampling_rng):
         if step % cfg["steps_per_update"] == 0:
             agent = jax.block_until_ready(agent)
             server.publish_network(agent.state.params)
+        if step % cfg["log_period"] == 0:
+            flat = {f"{k}/{kk}": float(vv) for k, v in info.items() if isinstance(v, dict)
+                    for kk, vv in v.items()}
+            flat.update({k: float(v) for k, v in info.items() if not isinstance(v, dict)})
+            print(f"[learner step {step}] " + " ".join(f"{k}={v:.3f}" for k, v in flat.items()
+                                                       if "loss" in k), flush=True)
+            if wandb_logger is not None:
+                wandb_logger.log(flat, step=step)
 
 
 def main():
@@ -173,6 +189,7 @@ def main():
     ap.add_argument("--demo-path", action="append", default=[], help="RLPD demo pickle(s) (learner)")
     ap.add_argument("--max-steps", type=int, default=None)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--wandb", action="store_true", help="log learner metrics to wandb")
     args = ap.parse_args()
     assert args.learner ^ args.actor, "pass exactly one of --learner / --actor"
 
@@ -183,6 +200,7 @@ def main():
     keys = exp.view_obs(args.view).obs_keys()
     rl = {"max_steps": 100_000, "random_steps": 300, "training_starts": 1000,
           "batch_size": 256, "discount": 0.97, "cta_ratio": 2, "steps_per_update": 10,
+          "log_period": 100,
           "replay_capacity": 200_000, "port_agentlace": args.port_agentlace, **exp.rl}
     if args.max_steps:
         rl["max_steps"] = args.max_steps
@@ -190,11 +208,14 @@ def main():
     action_dim = len(exp.action_config.scales)   # delta-pose (6) + gripper (1) = 7
 
     if args.actor:
+        from agentlace.data.data_store import QueuedDataStore
         env = SerlStateWrapper(SimGymEnv(port=args.port), keys=keys)
         sample_obs = env.observation_space.sample()
         sample_action = env.action_space.sample()
         agent = make_sac_state_agent(args.seed, sample_obs, sample_action, discount=rl["discount"])
-        data_store = ReplayBufferDataStore(env.observation_space, env.action_space, rl["replay_capacity"])
+        # Actor streams transitions to the learner -> a QueuedDataStore (implements
+        # get_latest_data); the learner side is the ReplayBufferDataStore.
+        data_store = QueuedDataStore(rl["replay_capacity"])
         _, sampling_rng = jax.random.split(jax.random.PRNGKey(args.seed))
         print(f"[actor] exp={exp.name} view={args.view} state_dim={sample_obs['state'].shape} "
               f"action_dim={sample_action.shape}", flush=True)
@@ -211,8 +232,12 @@ def main():
         n = _load_demos_into(demo_buffer, args.demo_path, keys)
         print(f"[learner] exp={exp.name} view={args.view} demos={n} state_dim={sample_obs['state'].shape}",
               flush=True)
+        wandb_logger = None
+        if args.wandb:
+            from serl_launcher.utils.launcher import make_wandb_logger
+            wandb_logger = make_wandb_logger(project="gentle-manip-serl", description=exp.name, debug=False)
         _, sampling_rng = jax.random.split(jax.random.PRNGKey(args.seed))
-        learner_loop(agent, replay_buffer, demo_buffer, rl, sampling_rng)
+        learner_loop(agent, replay_buffer, demo_buffer, rl, sampling_rng, wandb_logger=wandb_logger)
 
 
 def _flatten_transition(tr: dict, keys) -> dict:

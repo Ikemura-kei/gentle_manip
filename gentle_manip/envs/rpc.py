@@ -79,7 +79,6 @@ def serve_env(env, host: str = "127.0.0.1", port: int = 5555, ready_msg: str = "
     srv.bind((host, port))
     srv.listen(1)
     print(ready_msg, flush=True)
-    conn, _ = srv.accept()
 
     vframes: list = []
     vep = [0]   # episodes started (reset count)
@@ -94,37 +93,46 @@ def serve_env(env, host: str = "127.0.0.1", port: int = 5555, ready_msg: str = "
             print(f"  saved video {out} ({len(vframes)} frames)", flush=True)
         vframes.clear()
 
+    # Accept clients repeatedly: an RL actor may crash/restart mid-run, and a mere
+    # disconnect must NOT kill the (expensive) genesis env. Only an explicit "close"
+    # command shuts the server down.
+    shutdown = False
     try:
-        while True:
-            header, arrays = recv_msg(conn)
-            cmd = header.get("cmd")
-            if cmd == "close":
-                break
-            elif cmd == "reseed":
-                if hasattr(env, "reseed"):
-                    env.reseed(int(header["seed"]))
-                send_msg(conn, {"ok": True}, {})
-            elif cmd == "reset":
-                flush_video()              # save the episode just finished
-                vep[0] += 1
-                send_msg(conn, {"ok": True}, _as_arrays(env.reset()))
-            elif cmd == "step":
-                obs, reward, done, info = env.step(arrays["action"])
-                if frame_fn is not None and vep[0] <= video_episodes:
-                    vframes.append(np.asarray(frame_fn(), dtype=np.uint8))
-                send_msg(conn, {
-                    "ok": True,
-                    "reward": [float(x) for x in np.asarray(reward).ravel()],
-                    "done": bool(np.asarray(done).all()),
-                    "success": [bool(i.get("success", False)) for i in info],
-                }, _as_arrays(obs))
-            else:
-                send_msg(conn, {"ok": False, "error": f"unknown cmd {cmd!r}"}, {})
-    except (ConnectionError, OSError):
-        pass
+        while not shutdown:
+            conn, _ = srv.accept()
+            try:
+                while True:
+                    header, arrays = recv_msg(conn)
+                    cmd = header.get("cmd")
+                    if cmd == "close":
+                        shutdown = True
+                        break
+                    elif cmd == "reseed":
+                        if hasattr(env, "reseed"):
+                            env.reseed(int(header["seed"]))
+                        send_msg(conn, {"ok": True}, {})
+                    elif cmd == "reset":
+                        flush_video()              # save the episode just finished
+                        vep[0] += 1
+                        send_msg(conn, {"ok": True}, _as_arrays(env.reset()))
+                    elif cmd == "step":
+                        obs, reward, done, info = env.step(arrays["action"])
+                        if frame_fn is not None and vep[0] <= video_episodes:
+                            vframes.append(np.asarray(frame_fn(), dtype=np.uint8))
+                        send_msg(conn, {
+                            "ok": True,
+                            "reward": [float(x) for x in np.asarray(reward).ravel()],
+                            "done": bool(np.asarray(done).all()),
+                            "success": [bool(i.get("success", False)) for i in info],
+                        }, _as_arrays(obs))
+                    else:
+                        send_msg(conn, {"ok": False, "error": f"unknown cmd {cmd!r}"}, {})
+            except (ConnectionError, OSError):
+                print("  client disconnected; waiting for a new one", flush=True)
+            finally:
+                flush_video()
+                conn.close()
     finally:
-        flush_video()                      # save the last episode
-        conn.close()
         srv.close()
         env.close()
 

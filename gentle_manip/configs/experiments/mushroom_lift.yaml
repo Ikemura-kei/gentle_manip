@@ -12,3 +12,10 @@ views:
   teacher: [privileged]             # state + privileged (object pose/vel + normalized stress); no render
   student: [point_cloud]            # state + denoised point cloud (deployable); render on
   # ablations, same demos: e.g. teacher_no_stress would be a view listing privileged-minus-stress
+
+# SAC/RLPD hyperparams (train_serl.py reads these over its defaults).
+rl:
+  random_steps: 200                 # actor: uniform-random exploration before the policy
+  training_starts: 400              # learner: online transitions before gradient steps begin
+  batch_size: 256
+  discount: 0.97
