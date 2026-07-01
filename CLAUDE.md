@@ -39,8 +39,17 @@ Third-party libraries whose source may need modification live in `third_party/` 
 
 ```
 third_party/
-└── genesis/    # Genesis physics engine (fork: https://github.com/Ikemura-kei/Genesis_fork)
+├── genesis/    # Genesis physics engine (fork: https://github.com/Ikemura-kei/Genesis_fork)
+├── DP3/        # 3D Diffusion Policy (fork: Ikemura-kei/DP3_fork, branch gentle_manip)
+└── hil-serl/   # SERL/HIL-SERL sample-efficient RL (rail-berkeley) — for the SAC teacher
 ```
+
+**hil-serl** is **JAX-based** (jax 0.4.35 + flax, Python 3.10) — a separate stack from
+the torch/genesis envs, so it needs its own env (`envs/serl`, py3.10, jax). Use
+`serl_launcher.agents` (SAC / BC / RLPD-style demo-bootstrapped SAC) + its replay buffer
+as the RL trainer; **ignore `serl_robot_infra`** (real-robot infra — we have our own
+XArm7/RealBackend). Integration is a cross-version bridge: the genesis sim (`PolicyEnv`,
+3.12) ↔ the SERL learner (jax, 3.10), analogous to the `envs/rpc.py` sim↔DP3 socket.
 
 After cloning, initialise and install with:
 ```bash
