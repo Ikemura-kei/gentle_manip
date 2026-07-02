@@ -3,3 +3,5 @@
 # jittered cube position and a jittered initial arm pose, for demo diversity.
 object_pos_xy: 0.08          # half-range (m): per-env cube x/y jitter
 robot_init_pos_xyz: 0.02   # half-range (m): per-env uniform jitter on the reset home EE xyz
+object_yaw_deg: 180        # per-env object yaw ~ U(-180,180) about world z (full range)
+object_pitch_roll_deg: 15  # per-env object pitch & roll tilt ~ U(-15,15) deg

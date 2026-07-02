@@ -24,6 +24,8 @@ class DRConfig:
     # ── per-reset (no rebuild) ────────────────────────────────────────────────
     object_pos_xy: float = 0.0          # half-range (m); per-env uniform object x/y jitter
     robot_init_pos_xyz: float = 0.0     # half-range (m); per-env uniform jitter on the reset home EE xyz
+    object_yaw_deg: float = 0.0         # half-range (deg); per-env uniform object YAW (about world z). 180 = full
+    object_pitch_roll_deg: float = 0.0  # half-range (deg); per-env uniform object PITCH & ROLL tilt (small, e.g. 15)
 
     # ── per-scene (rebuild via GenesisProcess.restart) ────────────────────────
     object_E: Optional[_Range] = None       # Young's modulus (Pa)
@@ -37,7 +39,8 @@ class DRConfig:
     _SCENE_FIELDS = ("object_E", "object_nu", "object_rho", "object_yield", "coup_friction")
 
     def has_reset_dr(self) -> bool:
-        return self.object_pos_xy > 0 or self.robot_init_pos_xyz > 0
+        return (self.object_pos_xy > 0 or self.robot_init_pos_xyz > 0
+                or self.object_yaw_deg > 0 or self.object_pitch_roll_deg > 0)
 
     def has_scene_dr(self) -> bool:
         return any(getattr(self, f) is not None for f in self._SCENE_FIELDS)
@@ -64,6 +67,21 @@ class DRConfig:
         if self.object_pos_xy <= 0:
             return None
         return rng.uniform(-self.object_pos_xy, self.object_pos_xy, (num_envs, 2)).astype(np.float32)
+
+    def sample_object_euler(self, rng: np.random.Generator, num_envs: int) -> Optional[np.ndarray]:
+        """Per-env object orientation as (num_envs, 3) intrinsic XYZ euler (roll, pitch, yaw)
+        in RADIANS, or None if disabled. Yaw ~ U(+/- object_yaw_deg) about world z (full at
+        180); pitch & roll ~ U(+/- object_pitch_roll_deg) small tilts. Applied at the object's
+        resting center, so the object stays put but spawns rotated/tilted."""
+        if self.object_yaw_deg <= 0 and self.object_pitch_roll_deg <= 0:
+            return None
+        pr = np.deg2rad(self.object_pitch_roll_deg)
+        yaw = np.deg2rad(self.object_yaw_deg)
+        e = np.zeros((num_envs, 3), dtype=np.float32)
+        e[:, 0] = rng.uniform(-pr, pr, num_envs)    # roll  (about x)
+        e[:, 1] = rng.uniform(-pr, pr, num_envs)    # pitch (about y)
+        e[:, 2] = rng.uniform(-yaw, yaw, num_envs)  # yaw   (about z)
+        return e
 
     def sample_home_offset(self, rng: np.random.Generator, num_envs: int) -> Optional[np.ndarray]:
         """Per-env (dx, dy, dz) uniform offset (+/- half-range) for the reset home EE
