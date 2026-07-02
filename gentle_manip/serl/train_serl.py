@@ -161,6 +161,15 @@ def actor_loop(agent, data_store, client, keys, cfg, sampling_rng, ip, port_agen
                 next_observations={"state": next_state[j]}, rewards=float(reward[j]),
                 masks=1.0 - float(success[j]),           # bootstrap unless a true (success) terminal
                 dones=bool(success[j] or truncated)))
+        if step % 500 == 0:                              # diagnostic: is the policy approaching?
+            ee = np.asarray(obs["ee_pos"]); op = np.asarray(obs["priv_object_pos"])
+            d = float(np.linalg.norm(ee - op, axis=-1).mean())
+            sampling_rng, dk = jax.random.split(sampling_rng)
+            det = np.asarray(jax.device_get(agent.sample_actions(          # DETERMINISTIC (mean) action
+                observations=jax.device_put({"state": state}), seed=dk, argmax=True))).reshape(N, action_dim)
+            print(f"[actor diag step {step}] ee_obj_dist={d:.3f} stoch|act|={float(np.abs(actions).mean()):.3f} "
+                  f"DET|act|={float(np.abs(det).mean()):.3f} DET|pose|={float(np.abs(det[:, :6]).mean()):.3f} "
+                  f"return={float(running_return.mean()):.1f}", flush=True)
         obs = next_obs
         if truncated:                                    # synchronous reset of ALL envs
             tclient.request("send-stats", {"environment": {
