@@ -7,3 +7,6 @@
 [submodule "third_party/hil-serl"]
 	path = third_party/hil-serl
 	url = https://github.com/rail-berkeley/hil-serl.git
+[submodule "third_party/dppo"]
+	path = third_party/dppo
+	url = git@github.com:irom-lab/dppo.git
