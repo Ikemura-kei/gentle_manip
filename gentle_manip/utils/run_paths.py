@@ -62,3 +62,55 @@ def write_run_meta(dest: Path, **extras) -> None:
     meta = {"run_name": dest.name, "timestamp": datetime.now().isoformat(),
             "git_commit": _git_commit(), **extras}
     (dest / "run_meta.json").write_text(json.dumps(meta, indent=2, default=str))
+
+
+def write_experiment_md(dest: Path, *, algo: str, motivation: str = "", hypothesis: str = "",
+                        config: Optional[dict] = None, wandb: str = "", **misc) -> Path:
+    """Write a human-readable EXPERIMENT.md into the run dir at launch: commit, motivation,
+    hypothesis, key config, plus empty Observations / Final-summary sections for the agent OR
+    the user to fill during/after the run. Idempotent-ish: won't clobber an existing file (so
+    hand-edited notes survive a relaunch) — pass a fresh run dir for a fresh experiment."""
+    md = dest / "EXPERIMENT.md"
+    if md.exists():
+        return md
+    lines = [
+        f"# Experiment: {dest.name}", "",
+        f"- **Algorithm:** {algo}",
+        f"- **Started:** {datetime.now():%Y-%m-%d %H:%M:%S}",
+        f"- **Git commit:** `{_git_commit()}`",
+        f"- **Run dir:** `{dest}`",
+    ]
+    if wandb:
+        lines.append(f"- **wandb:** {wandb}")
+    for k, v in misc.items():
+        lines.append(f"- **{k}:** {v}")
+    lines += ["", "## Motivation", motivation or "_(why this run)_", "",
+              "## Hypothesis", hypothesis or "_(what we expect / are testing)_", ""]
+    if config:
+        lines += ["## Config (key knobs)", "```yaml"]
+        lines += [f"{k}: {v}" for k, v in config.items()]
+        lines += ["```", ""]
+    lines += ["## Observations (append during/after — agent + user)", "- ", "",
+              "## Final summary (fill when the run ends)",
+              "- duration:", "- learner steps:", "- replay buffer size at end:",
+              "- return / succeed:", "- verdict:", ""]
+    md.write_text("\n".join(lines))
+    return md
+
+
+def append_experiment_note(dest: Path, note: str, section: str = "Observations") -> None:
+    """Append a timestamped bullet under a section heading of EXPERIMENT.md (best-effort)."""
+    md = dest / "EXPERIMENT.md"
+    if not md.exists():
+        return
+    text = md.read_text()
+    bullet = f"- [{datetime.now():%H:%M}] {note}"
+    marker = f"## {section}"
+    if marker in text:                       # insert right after the section heading line
+        head, _, tail = text.partition(marker)
+        after_heading = tail.split("\n", 1)
+        rest = after_heading[1] if len(after_heading) > 1 else ""
+        text = head + marker + after_heading[0] + "\n" + bullet + "\n" + rest
+    else:
+        text += f"\n{bullet}\n"
+    md.write_text(text)

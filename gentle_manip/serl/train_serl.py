@@ -271,6 +271,8 @@ def main():
     ap.add_argument("--wandb", action="store_true", help="log learner metrics to wandb")
     ap.add_argument("--run-name", default=None, help="run id (also the wandb name + logs/serl/<task>/<run> dir); "
                                                      "pass the SAME to server + learner to share a dir")
+    ap.add_argument("--motivation", default="", help="why this run (written to EXPERIMENT.md)")
+    ap.add_argument("--hypothesis", default="", help="what we expect / are testing (EXPERIMENT.md)")
     args = ap.parse_args()
     assert args.learner ^ args.actor, "pass exactly one of --learner / --actor"
 
@@ -332,11 +334,15 @@ def main():
               flush=True)
 
         # Per-run output dir: logs/serl/<task>/<run_name>/{config,videos,checkpoints}.
-        from gentle_manip.utils.run_paths import make_run_name, run_dir, snapshot_experiment, write_run_meta
+        from gentle_manip.utils.run_paths import (make_run_name, run_dir, snapshot_experiment,
+                                                  write_run_meta, write_experiment_md)
         run_name = args.run_name or make_run_name(exp.name)
         rdir = run_dir("serl", exp.name, run_name)
         snapshot_experiment(exp, rdir)
         write_run_meta(rdir, algo="serl", view=args.view, demos=n, demo_paths=args.demo_path, rl=rl)
+        write_experiment_md(rdir, algo="serl", motivation=args.motivation, hypothesis=args.hypothesis,
+                            config={"experiment": exp.name, "view": args.view, "demos": n, **rl},
+                            wandb=f"gentle-manip-serl/{run_name}")
         print(f"[learner] run dir: {rdir}", flush=True)
 
         wandb_logger = None
