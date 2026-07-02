@@ -114,36 +114,62 @@ def make_sac_state_agent(seed, sample_obs, sample_action,
 
 
 # ── loops (simplified from train_rlpd) ─────────────────────────────────────────────
-def actor_loop(agent, data_store, env, cfg, sampling_rng, ip, port_agentlace):
+def _flatten_batch(obs: dict, keys) -> np.ndarray:
+    """Batched obs dict {k: (N, ...)} -> (N, state_dim) in fixed key order."""
+    return np.concatenate(
+        [np.asarray(obs[k], np.float32).reshape(np.asarray(obs[k]).shape[0], -1) for k in keys], axis=1)
+
+
+def actor_loop(agent, data_store, client, keys, cfg, sampling_rng, ip, port_agentlace, num_envs, action_dim):
+    """VECTORIZED actor: steps num_envs parallel genesis envs (over the rpc SimEnvClient),
+    inserts one transition per env each step, resets ALL envs synchronously at the horizon
+    (matching the proven codesign-dfom loop). More + more diverse data than a single env."""
     import jax
     from agentlace.trainer import TrainerClient
     from serl_launcher.utils.launcher import make_trainer_config
     import tqdm
 
-    client = TrainerClient("actor_env", ip, make_trainer_config(port_agentlace, port_agentlace + 1),
-                           data_stores={"actor_env": data_store}, wait_for_server=True, timeout_ms=3000)
-    client.recv_network_callback(lambda params: agent.replace(state=agent.state.replace(params=params)))
+    tclient = TrainerClient("actor_env", ip, make_trainer_config(port_agentlace, port_agentlace + 1),
+                            data_stores={"actor_env": data_store}, wait_for_server=True, timeout_ms=3000)
+    tclient.recv_network_callback(lambda params: agent.replace(state=agent.state.replace(params=params)))
 
-    obs, _ = env.reset()
-    running_return = 0.0
+    N, horizon = num_envs, cfg["max_episode_steps"]
+    obs = client.reset()                                 # dict of (N, ...)
+    running_return = np.zeros(N, dtype=np.float64)
+    ep_success = np.zeros(N, dtype=bool)
+    t = env_steps = 0
     for step in tqdm.tqdm(range(cfg["max_steps"]), desc="actor"):
-        if step < cfg["random_steps"]:
-            actions = env.action_space.sample()
+        state = _flatten_batch(obs, keys)                # (N, state_dim)
+        if env_steps < cfg["random_steps"]:              # uniform exploration to seed the buffer
+            actions = np.random.uniform(-1.0, 1.0, size=(N, action_dim)).astype(np.float32)
         else:
             sampling_rng, key = jax.random.split(sampling_rng)
-            actions = np.asarray(jax.device_get(
-                agent.sample_actions(observations=jax.device_put(obs), seed=key, argmax=False)))
-        next_obs, reward, terminated, truncated, info = env.step(actions)
+            actions = np.asarray(jax.device_get(agent.sample_actions(
+                observations=jax.device_put({"state": state}), seed=key, argmax=False))).reshape(N, action_dim)
+        next_obs, reward, _done, info = client.step(actions.astype(np.float32))
+        reward = np.asarray(reward, np.float32).reshape(N)
+        success = np.array([bool(i.get("success", False)) for i in info], dtype=bool)
         running_return += reward
-        data_store.insert(dict(observations=obs, actions=actions, next_observations=next_obs,
-                               rewards=reward, masks=1.0 - float(terminated), dones=terminated or truncated))
+        ep_success |= success
+        t += 1
+        env_steps += N
+        truncated = t >= horizon
+        next_state = _flatten_batch(next_obs, keys)
+        for j in range(N):                               # one transition per env
+            data_store.insert(dict(
+                observations={"state": state[j]}, actions=actions[j],
+                next_observations={"state": next_state[j]}, rewards=float(reward[j]),
+                masks=1.0 - float(success[j]),           # bootstrap unless a true (success) terminal
+                dones=bool(success[j] or truncated)))
         obs = next_obs
-        if terminated or truncated:
-            client.request("send-stats", {"environment": {"return": running_return,
-                                                          "succeed": float(info.get("succeed", 0.0))}})
-            running_return = 0.0
-            client.update()
-            obs, _ = env.reset()
+        if truncated:                                    # synchronous reset of ALL envs
+            tclient.request("send-stats", {"environment": {
+                "return": float(running_return.mean()), "succeed": float(ep_success.mean())}})
+            tclient.update()
+            running_return[:] = 0.0
+            ep_success[:] = False
+            t = 0
+            obs = client.reset()
 
 
 def learner_loop(agent, replay_buffer, demo_buffer, cfg, sampling_rng, wandb_logger=None, ckpt_dir=None):
@@ -253,9 +279,15 @@ def main():
 
     if args.actor:
         from agentlace.data.data_store import QueuedDataStore
-        env = SerlStateWrapper(SimGymEnv(port=args.port, max_episode_steps=rl["max_episode_steps"]), keys=keys)
-        sample_obs = env.observation_space.sample()
-        sample_action = env.action_space.sample()
+        from gentle_manip.envs.rpc import SimEnvClient
+        # Connect to the (possibly vectorized) genesis sim server and infer num_envs + state_dim
+        # from the reset obs, so the actor matches whatever --num-envs the server was launched with.
+        client = SimEnvClient(port=args.port)
+        obs0 = client.reset()
+        num_envs = int(np.asarray(obs0[keys[0]]).shape[0])
+        state_dim = int(_flatten_batch(obs0, keys).shape[1])
+        sample_obs = {"state": np.zeros(state_dim, np.float32)}
+        sample_action = np.zeros(action_dim, np.float32)
         agent = make_sac_state_agent(args.seed, sample_obs, sample_action, discount=rl["discount"],
                                      critic_lr=rl["critic_lr"], clip_grad_norm=rl["clip_grad_norm"],
                                      critic_ensemble_size=rl["critic_ensemble_size"],
@@ -264,9 +296,10 @@ def main():
         # get_latest_data); the learner side is the ReplayBufferDataStore.
         data_store = QueuedDataStore(rl["replay_capacity"])
         _, sampling_rng = jax.random.split(jax.random.PRNGKey(args.seed))
-        print(f"[actor] exp={exp.name} view={args.view} state_dim={sample_obs['state'].shape} "
-              f"action_dim={sample_action.shape}", flush=True)
-        actor_loop(agent, data_store, env, rl, sampling_rng, args.ip, rl["port_agentlace"])
+        print(f"[actor] exp={exp.name} view={args.view} num_envs={num_envs} state_dim={state_dim} "
+              f"action_dim={action_dim}", flush=True)
+        actor_loop(agent, data_store, client, keys, rl, sampling_rng, args.ip, rl["port_agentlace"],
+                   num_envs, action_dim)
     else:
         # Learner: no env (spaces built from the demos + config).
         assert args.demo_path, "learner needs --demo-path (RLPD demos)"
