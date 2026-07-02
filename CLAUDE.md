@@ -51,6 +51,16 @@ as the RL trainer; **ignore `serl_robot_infra`** (real-robot infra — we have o
 XArm7/RealBackend). Integration is a cross-version bridge: the genesis sim (`PolicyEnv`,
 3.12) ↔ the SERL learner (jax, 3.10), analogous to the `envs/rpc.py` sim↔DP3 socket.
 
+**⚠️ Before tuning RL hyperparameters, READ the proven configs first — don't guess.** Start
+from the library's example experiment configs (`third_party/hil-serl/examples/experiments/*/config.py`)
+and the prior projects (`codesign_genesis`, `codesign-dfom`, `gentle_manipulation`). Guessing
+SAC hyperparameters here cost many hours + several diverging runs (`critic_loss`→1e14) that a
+known config would have avoided. The working SoftBodyLift SAC config: REDQ critic ensemble
+(`critic_ensemble_size: 10`, `critic_subsample_size: 2`), deeper nets `[64,128,128,128,256]`,
+`backup_entropy: False`, `utd_ratio: 1`, `critic_actor_ratio: 4`, `steps_per_update: 30` — the
+ensemble + net depth are what keep Q-overestimation in check. Prefer these structural stabilizers
+over reward-scale / discount band-aids. (`train_serl.py` now defaults to this config.)
+
 After cloning, initialise and install with:
 ```bash
 git submodule update --init --recursive

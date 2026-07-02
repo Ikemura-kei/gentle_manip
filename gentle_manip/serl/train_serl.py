@@ -66,9 +66,15 @@ def flatten_state(obs: dict, keys) -> np.ndarray:
 
 
 # ── state-based SAC agent (mirror make_sac_pixel_agent, encoder-free) ──────────────
-def make_sac_state_agent(seed, sample_obs, sample_action, hidden_dims=(256, 256),
+def make_sac_state_agent(seed, sample_obs, sample_action,
+                         critic_hidden_dims=(64, 128, 128, 128, 256),
+                         actor_hidden_dims=(64, 128, 128, 128, 256),
+                         critic_ensemble_size=10, critic_subsample_size=2,
                          discount=0.97, target_entropy=None, critic_lr=3e-4,
                          actor_lr=3e-4, clip_grad_norm=1.0):
+    # Defaults are the proven config from the prior SoftBodyLift project: deeper nets,
+    # REDQ critic ensemble (10, subsample 2 -> strong overestimation control), backup_entropy
+    # False. These (esp. the ensemble + net depth) are what kept training stable there.
     import jax
     import flax.linen as nn
     from functools import partial
@@ -82,11 +88,12 @@ def make_sac_state_agent(seed, sample_obs, sample_action, hidden_dims=(256, 256)
         def __call__(self, observations, train=False, stop_gradient=False):
             return observations["state"]
 
-    net_kwargs = dict(hidden_dims=list(hidden_dims), activations=nn.tanh, use_layer_norm=True)
-    critic_backbone = ensemblize(partial(MLP, **net_kwargs), 2)(name="critic_ensemble")
+    critic_kwargs = dict(hidden_dims=list(critic_hidden_dims), activations=nn.tanh, use_layer_norm=True)
+    actor_kwargs = dict(hidden_dims=list(actor_hidden_dims), activations=nn.tanh, use_layer_norm=True)
+    critic_backbone = ensemblize(partial(MLP, **critic_kwargs), critic_ensemble_size)(name="critic_ensemble")
     critic_def = partial(Critic, encoder=StateEncoder(), network=critic_backbone)(name="critic")
     policy_def = Policy(
-        encoder=StateEncoder(), network=MLP(**net_kwargs), action_dim=sample_action.shape[-1],
+        encoder=StateEncoder(), network=MLP(**actor_kwargs), action_dim=sample_action.shape[-1],
         tanh_squash_distribution=True, std_parameterization="exp", std_min=1e-5, std_max=5,
         name="actor",
     )
@@ -95,7 +102,8 @@ def make_sac_state_agent(seed, sample_obs, sample_action, hidden_dims=(256, 256)
     return SACAgent.create(
         jax.random.PRNGKey(seed), sample_obs, sample_action,
         actor_def=policy_def, critic_def=critic_def, temperature_def=temperature_def,
-        discount=discount, backup_entropy=False, critic_ensemble_size=2,
+        discount=discount, backup_entropy=False,
+        critic_ensemble_size=critic_ensemble_size, critic_subsample_size=critic_subsample_size,
         target_entropy=target_entropy, image_keys=("state",),   # pass the pack/unpack check
         # clip_grad_norm bounds the Q-target feedback loop (the state teacher otherwise
         # lets critic_loss explode to ~1e14 under high UTD); see utd_ratio gate below.
@@ -235,10 +243,14 @@ def main():
 
     exp = Experiment.load(args.experiment)
     keys = exp.view_obs(args.view).obs_keys()
+    # Defaults = the proven prior-project config: utd_ratio 1, critic_actor_ratio (cta_ratio) 4,
+    # steps_per_update 30, replay 600k, REDQ ensemble 10/subsample 2 (in make_sac_state_agent).
     rl = {"max_steps": 2_000_000, "random_steps": 300, "training_starts": 1000,
-          "batch_size": 256, "discount": 0.97, "cta_ratio": 1, "steps_per_update": 10,
-          "log_period": 100, "utd_ratio": 4, "critic_lr": 3e-4, "clip_grad_norm": 1.0,
-          "replay_capacity": 200_000, "port_agentlace": args.port_agentlace, **exp.rl}
+          "batch_size": 256, "discount": 0.97, "cta_ratio": 4, "steps_per_update": 30,
+          "log_period": 50, "utd_ratio": 1, "critic_lr": 3e-4, "clip_grad_norm": 1.0,
+          "max_episode_steps": 150, "replay_capacity": 600_000,
+          "critic_ensemble_size": 10, "critic_subsample_size": 2,
+          "port_agentlace": args.port_agentlace, **exp.rl}
     if args.max_steps:
         rl["max_steps"] = args.max_steps
 
@@ -246,11 +258,13 @@ def main():
 
     if args.actor:
         from agentlace.data.data_store import QueuedDataStore
-        env = SerlStateWrapper(SimGymEnv(port=args.port), keys=keys)
+        env = SerlStateWrapper(SimGymEnv(port=args.port, max_episode_steps=rl["max_episode_steps"]), keys=keys)
         sample_obs = env.observation_space.sample()
         sample_action = env.action_space.sample()
         agent = make_sac_state_agent(args.seed, sample_obs, sample_action, discount=rl["discount"],
-                                     critic_lr=rl["critic_lr"], clip_grad_norm=rl["clip_grad_norm"])
+                                     critic_lr=rl["critic_lr"], clip_grad_norm=rl["clip_grad_norm"],
+                                     critic_ensemble_size=rl["critic_ensemble_size"],
+                                     critic_subsample_size=rl["critic_subsample_size"])
         # Actor streams transitions to the learner -> a QueuedDataStore (implements
         # get_latest_data); the learner side is the ReplayBufferDataStore.
         data_store = QueuedDataStore(rl["replay_capacity"])
@@ -265,7 +279,9 @@ def main():
         act_space = Box(-1.0, 1.0, (action_dim,), np.float32)
         sample_obs = obs_space.sample(); sample_action = act_space.sample()
         agent = make_sac_state_agent(args.seed, sample_obs, sample_action, discount=rl["discount"],
-                                     critic_lr=rl["critic_lr"], clip_grad_norm=rl["clip_grad_norm"])
+                                     critic_lr=rl["critic_lr"], clip_grad_norm=rl["clip_grad_norm"],
+                                     critic_ensemble_size=rl["critic_ensemble_size"],
+                                     critic_subsample_size=rl["critic_subsample_size"])
         replay_buffer = ReplayBufferDataStore(obs_space, act_space, rl["replay_capacity"])
         demo_buffer = ReplayBufferDataStore(obs_space, act_space, rl["replay_capacity"])
         n = _load_demos_into(demo_buffer, args.demo_path, keys)

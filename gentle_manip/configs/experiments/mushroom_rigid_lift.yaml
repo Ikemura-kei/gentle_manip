@@ -11,11 +11,15 @@ views:
   student: [point_cloud]            # state + denoised point cloud (deployable)
 
 # SERL-default-ish hyperparams (per user: test basic training with defaults, discount 0.99).
-# NOTE: reward is at standard scale here (not the soft task's ×0.1). If Q overestimates even
-# on this easy rigid object, the divergence is fundamental (not soft-specific); if it trains,
-# the soft object / dense-reward scale was the culprit.
+# RESULT of the SERL-defaults test: it LEARNED then diverged (return 44->82, then Q->26k,
+# critic_loss->8.5M) — so the dense-reward Q-overestimation is fundamental, not soft-specific.
+# discount 0.99->0.92 (Q-ceiling r/(1-γ): 100x -> 12.5x) paired with reward ×0.1 (task config).
 rl:
-  discount: 0.99
+  discount: 0.92
   random_steps: 300
   training_starts: 1000
   batch_size: 256
+  # Horizon must exceed the task length or the policy is truncated before it can hold in the
+  # success band for 30 steps (demos run to ~237 steps; the old 150 default made succeed=0
+  # impossible). 300 gives comfortable headroom. discount 0.92 caps Q regardless of length.
+  max_episode_steps: 300
