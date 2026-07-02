@@ -70,10 +70,15 @@ def episodes_to_transitions(episodes: list) -> list:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Sim demos -> HIL-SERL RLPD transitions")
     ap.add_argument("--demo", type=Path, required=True, help="recorded demo pickle (superset obs)")
-    ap.add_argument("--out", type=Path, required=True, help="output SERL transitions pickle")
+    ap.add_argument("--out", type=Path, default=None,
+                    help="output SERL transitions pickle (default: <demo_dir>/serl_<view>.pkl, "
+                         "unified under dataset/demos next to the raw data.pkl)")
     ap.add_argument("--experiment", default=None, help="subset to this experiment's --view first")
     ap.add_argument("--view", default="teacher", help="obs view to keep (with --experiment)")
     args = ap.parse_args()
+
+    if args.out is None:                       # keep converted demos beside the raw recording
+        args.out = args.demo.parent / f"serl_{args.view}.pkl"
 
     data = _load(args.demo)
     if args.experiment:

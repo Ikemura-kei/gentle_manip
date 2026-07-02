@@ -138,12 +138,14 @@ def actor_loop(agent, data_store, env, cfg, sampling_rng, ip, port_agentlace):
             obs, _ = env.reset()
 
 
-def learner_loop(agent, replay_buffer, demo_buffer, cfg, sampling_rng, wandb_logger=None):
+def learner_loop(agent, replay_buffer, demo_buffer, cfg, sampling_rng, wandb_logger=None, ckpt_dir=None):
     import jax
     import tqdm
     from agentlace.trainer import TrainerServer
     from serl_launcher.utils.launcher import make_trainer_config
     from serl_launcher.utils.train_utils import concat_batches
+    from flax.training import checkpoints as flax_ckpt
+    ckpt_period = cfg.get("ckpt_period", 10_000)
 
     # Capture the actor's per-episode return/success (sent via client.request("send-stats"))
     # so we can watch ACTUAL task performance, not just losses. Kept as "latest" and emitted
@@ -194,6 +196,8 @@ def learner_loop(agent, replay_buffer, demo_buffer, cfg, sampling_rng, wandb_log
         if step % cfg["steps_per_update"] == 0:
             agent = jax.block_until_ready(agent)
             server.publish_network(agent.state.params)
+        if ckpt_dir is not None and step > 0 and step % ckpt_period == 0:
+            flax_ckpt.save_checkpoint(str(ckpt_dir), agent.state, step=step, keep=5, overwrite=True)
         if step % cfg["log_period"] == 0:
             flat = {f"{k}/{kk}": float(vv) for k, v in info.items() if isinstance(v, dict)
                     for kk, vv in v.items()}
@@ -221,6 +225,8 @@ def main():
     ap.add_argument("--max-steps", type=int, default=None)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--wandb", action="store_true", help="log learner metrics to wandb")
+    ap.add_argument("--run-name", default=None, help="run id (also the wandb name + logs/serl/<task>/<run> dir); "
+                                                     "pass the SAME to server + learner to share a dir")
     args = ap.parse_args()
     assert args.learner ^ args.actor, "pass exactly one of --learner / --actor"
 
@@ -265,12 +271,30 @@ def main():
         n = _load_demos_into(demo_buffer, args.demo_path, keys)
         print(f"[learner] exp={exp.name} view={args.view} demos={n} state_dim={sample_obs['state'].shape}",
               flush=True)
+
+        # Per-run output dir: logs/serl/<task>/<run_name>/{config,videos,checkpoints}.
+        from gentle_manip.utils.run_paths import make_run_name, run_dir, snapshot_experiment, write_run_meta
+        run_name = args.run_name or make_run_name(exp.name)
+        rdir = run_dir("serl", exp.name, run_name)
+        snapshot_experiment(exp, rdir)
+        write_run_meta(rdir, algo="serl", view=args.view, demos=n, demo_paths=args.demo_path, rl=rl)
+        print(f"[learner] run dir: {rdir}", flush=True)
+
         wandb_logger = None
         if args.wandb:
-            from serl_launcher.utils.launcher import make_wandb_logger
-            wandb_logger = make_wandb_logger(project="gentle-manip-serl", description=exp.name, debug=False)
+            from serl_launcher.common.wandb import WandBLogger
+            wcfg = WandBLogger.get_default_config()
+            wcfg.project = "gentle-manip-serl"
+            wcfg.exp_descriptor = exp.name
+            # experiment_id = f"{exp_descriptor}_{unique_identifier}" -> make it == run_name.
+            wcfg.unique_identifier = (run_name[len(exp.name) + 1:]
+                                      if run_name.startswith(exp.name + "_") else run_name)
+            wcfg.tag = exp.name                                  # constructor reads config.tag
+            wandb_logger = WandBLogger(wandb_config=wcfg, variant={"rl": rl, "view": args.view},
+                                       wandb_output_dir=str(rdir), debug=False)
         _, sampling_rng = jax.random.split(jax.random.PRNGKey(args.seed))
-        learner_loop(agent, replay_buffer, demo_buffer, rl, sampling_rng, wandb_logger=wandb_logger)
+        learner_loop(agent, replay_buffer, demo_buffer, rl, sampling_rng, wandb_logger=wandb_logger,
+                     ckpt_dir=rdir / "checkpoints")
 
 
 def _flatten_transition(tr: dict, keys) -> dict:

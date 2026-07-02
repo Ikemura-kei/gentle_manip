@@ -33,6 +33,8 @@ class Experiment:
     def __init__(self, path: Path) -> None:
         d = yaml.safe_load(Path(path).read_text())
         self.name = Path(path).stem
+        self.path = Path(path)
+        self._raw = dict(d)                                     # for run-dir config snapshot
         self.task_cfg = _load("tasks", d["task"])
         self.action_config = ActionConfig.from_dict(_load("action", d["action"]))
         self.dr = _load("dr", d["dr"]) if d.get("dr") else {}

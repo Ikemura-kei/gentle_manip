@@ -40,5 +40,5 @@ htmlcov/
 # summary PNGs/MP4s). Keep small calibration artifacts (dataset/camera_calibration/) tracked.
 dataset/demos/
 dataset/real_deploy/
-demos_serl/
 dataset/serl_clips/
+logs/

@@ -22,8 +22,9 @@ def main() -> None:
     ap.add_argument("--experiment", default="mushroom_lift", help="configs/experiments/<name>.yaml")
     ap.add_argument("--view", default="teacher", help="obs view (e.g. teacher | student)")
     ap.add_argument("--settle-steps", type=int, default=40)
-    ap.add_argument("--clip-dir", default=None, help="dir for periodic RGB behaviour clips (mp4/episode)")
-    ap.add_argument("--clip-every", type=int, default=25, help="record 1 clip every N episodes (with --clip-dir)")
+    ap.add_argument("--clip-dir", default=None, help="dir for periodic RGB behaviour clips (overrides --run-name)")
+    ap.add_argument("--clip-every", type=int, default=25, help="record 1 clip every N episodes (with clips on)")
+    ap.add_argument("--run-name", default=None, help="share the learner's run: clips -> logs/serl/<task>/<run>/videos")
     args = ap.parse_args()
 
     os.environ.setdefault("MUJOCO_GL", "egl")
@@ -44,7 +45,12 @@ def main() -> None:
     # Periodic behaviour clips: keep ONE camera built (record_camera) even for a
     # state view, but don't depth-render it each step — frame_fn RGB-renders it only
     # for the episodes serve_env selects (every --clip-every).
-    record_clips = args.clip_dir is not None
+    # Clip dir: explicit --clip-dir wins; else --run-name -> logs/serl/<task>/<run>/videos.
+    clip_dir = args.clip_dir
+    if clip_dir is None and args.run_name:
+        from gentle_manip.utils.run_paths import run_dir
+        clip_dir = str(run_dir("serl", exp.name, args.run_name) / "videos")
+    record_clips = clip_dir is not None
     # num_envs=1 + max_episode_steps huge (no auto-reset — the SERL actor drives episodes).
     backend = SimBackend(task.scene_spec, num_envs=1, use_subprocess=False, show_viewer=False,
                          render_cameras=obs_cfg.needs_cameras(), record_camera=record_clips,
@@ -61,11 +67,11 @@ def main() -> None:
 
     print(f"serl sim server: exp={exp.name} view={args.view} object={task.object_name} "
           f"substeps={task.scene_spec.sim_substeps} render={obs_cfg.needs_cameras()} "
-          f"clips={'every %d ep -> %s' % (args.clip_every, args.clip_dir) if record_clips else 'off'} "
+          f"clips={'every %d ep -> %s' % (args.clip_every, clip_dir) if record_clips else 'off'} "
           f"obs={list(env.observation_space.spaces)} — serving on {args.host}:{args.port}",
           flush=True)
     serve_env(env, host=args.host, port=args.port, frame_fn=frame_fn,
-              video_dir=args.clip_dir, video_every=(args.clip_every if record_clips else 0))
+              video_dir=clip_dir, video_every=(args.clip_every if record_clips else 0))
 
 
 if __name__ == "__main__":
