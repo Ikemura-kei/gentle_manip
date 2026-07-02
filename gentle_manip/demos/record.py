@@ -42,7 +42,8 @@ class DemoRecorder:
                  max_interior_idle: int = 3, action_noise_std: float = 0.0,
                  dataset_path: Optional[Path] = None, frame_fn=None,
                  video_dir: Optional[Path] = None, video_fps: int = 20,
-                 video_episodes: int = 0, cloud_viewer=None) -> None:
+                 video_episodes: int = 0, video_failed_episodes: int = 0,
+                 cloud_viewer=None) -> None:
         self.env = env
         self.teleop = teleop
         self.keyboard = keyboard
@@ -57,6 +58,10 @@ class DemoRecorder:
         self.video_dir = Path(video_dir) if video_dir else None
         self.video_fps = int(video_fps)
         self.video_episodes = int(video_episodes)
+        # Also record the first N DISCARDED (failed) episodes as ep_FAILED_NNN.mp4 for
+        # diagnosis — otherwise a failed grasp leaves no trace to look at.
+        self.video_failed_episodes = int(video_failed_episodes)
+        self._failed_videos = 0
         self._frames: list = []
         # Gaussian noise (std, in normalized action units) added to the demonstrator's
         # POSE deltas (not gripper) each step — recorded and executed alike, so the demos
@@ -110,11 +115,16 @@ class DemoRecorder:
                 if DISCARD in events:
                     self._discard_episode()
                     print("  discarded episode")
+                    if self._failed_videos < self.video_failed_episodes:
+                        self._flush_video(label="FAILED", index=self._failed_videos)
+                        self._failed_videos += 1
                     self._frames = []
                     obs = self.env.reset()
                     continue
 
-                if self.frame_fn is not None and len(self.episodes) < self.video_episodes:
+                # Capture frames if EITHER budget (saved or failed) still has room.
+                if self.frame_fn is not None and (len(self.episodes) < self.video_episodes
+                                                  or self._failed_videos < self.video_failed_episodes):
                     self._frames.append(np.asarray(self.frame_fn(), dtype=np.uint8))
 
                 action = np.asarray(self.teleop.get_action(), dtype=np.float32)
@@ -138,16 +148,18 @@ class DemoRecorder:
                 self.cloud_viewer.close()
             self.env.close()
 
-    def _flush_video(self) -> None:
-        """Write the captured frames of the just-saved episode to an mp4."""
+    def _flush_video(self, label: str = "", index: Optional[int] = None) -> None:
+        """Write the captured frames of the just-ended episode to an mp4 (label = "" for a
+        saved episode, "FAILED" for a discarded one)."""
         if not self._frames:
             return
         import imageio.v2 as imageio
         vdir = (self.video_dir or self.out_dir) / "videos"
         vdir.mkdir(parents=True, exist_ok=True)
-        path = vdir / f"ep_{len(self.episodes):03d}.mp4"
-        imageio.mimsave(str(path), self._frames, fps=self.video_fps, macro_block_size=1)
-        print(f"  saved video → {path}")
+        idx = index if index is not None else len(self.episodes)
+        name = f"ep_{label}_{idx:03d}.mp4" if label else f"ep_{idx:03d}.mp4"
+        imageio.mimsave(str(vdir / name), self._frames, fps=self.video_fps, macro_block_size=1)
+        print(f"  saved video → {vdir / name}")
         self._frames = []
 
     def _step_and_record(self, obs, action: np.ndarray):

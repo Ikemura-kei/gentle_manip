@@ -72,7 +72,11 @@ class ScriptedLiftDemonstrator:
     def get_action(self) -> np.ndarray:
         ee, cube, gw = self._state()
         a = np.zeros(7, dtype=np.float64)
-        if self.grasp_xy is None:
+        # Track the object while approaching/descending — a rigid object rolls/settles after
+        # reset, so a target frozen at episode start goes stale and the grasp misses. Lock the
+        # xy only once we commit to closing (GRASP onward), so the fingers don't chase a moving
+        # target mid-grip.
+        if self.phase in (self.APPROACH, self.DESCEND) or self.grasp_xy is None:
             self.grasp_xy = cube[:2].copy()
         gx, gy = self.grasp_xy
 

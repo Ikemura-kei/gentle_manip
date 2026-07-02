@@ -1,0 +1,21 @@
+# RIGID mushroom experiment — fast debug + rigid->soft curriculum base.
+# Identical geometry to mushroom_lift (same mesh, camera, action, DR), material=rigid.
+task: mushroom_rigid_lift
+action: delta_pose_delta_gripper
+dr: sim_demo
+augmentation: l515_noise            # sim-only; teacher (no render) ignores it
+
+obs: mushroom_rigid_superset        # privileged has NO stress (rigid)
+views:
+  teacher: [privileged]             # state + object pose/vel (no stress)
+  student: [point_cloud]            # state + denoised point cloud (deployable)
+
+# SERL-default-ish hyperparams (per user: test basic training with defaults, discount 0.99).
+# NOTE: reward is at standard scale here (not the soft task's ×0.1). If Q overestimates even
+# on this easy rigid object, the divergence is fundamental (not soft-specific); if it trains,
+# the soft object / dense-reward scale was the culprit.
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 1000
+  batch_size: 256

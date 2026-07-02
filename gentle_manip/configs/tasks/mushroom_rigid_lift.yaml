@@ -1,0 +1,27 @@
+# RIGID mushroom lift — same mesh/geometry as mushroom_lift, but a Rigid material.
+# Purpose: fast debugging of basic training (no MPM CFL -> low substeps -> ~10x faster),
+# and the base policy for a rigid->soft curriculum (later finetune on the soft version).
+# No stress reward (rigid has no von Mises). Reward is at STANDARD scale (not the soft
+# task's ×0.1) with SERL-default discount 0.99 in the experiment — a clean test of whether
+# the basic pipeline trains on an easy object with default params.
+success_z_min: 0.175
+success_z_max: 0.225
+hold_steps: 30
+object_name: "mushroom"
+object_type: "rigid"     # <-- the only material difference from mushroom_lift
+
+# Rigid: no MPM CFL limit, so few substeps -> much faster than the soft mushroom's 210.
+sim_substeps: 20
+mpm_grid_density: 250    # unused (no MPM entity) but kept for SceneSpec
+
+success_scale: 2.0
+
+rewards:
+  # No stress term (rigid). Approach + lift + sparse success only.
+  dist_to_obj:
+    scale: 1.0
+    decay: 8.0
+  lift:
+    scale: 1.0
+    grasp_gate_dist: 0.079
+    lift_target: 0.16

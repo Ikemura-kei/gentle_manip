@@ -159,6 +159,7 @@ def main() -> None:
         action_noise_std=cfg.get("action_noise_std", 0.0),
         frame_fn=frame_fn, video_dir=video_dir, video_fps=cfg.get("video_fps", cfg["rate"]),
         video_episodes=cfg.get("video_episodes", 0),
+        video_failed_episodes=cfg.get("video_failed_episodes", 0),
     )
     src = f"experiment={cfg['experiment']}" if use_exp else f"obs={cfg.get('obs_config')}"
     print(f"collecting '{task_name}' in sim ({mode}) -> {run_dir}\n"
