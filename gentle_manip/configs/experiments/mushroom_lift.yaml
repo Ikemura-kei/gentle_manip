@@ -18,7 +18,8 @@ rl:
   random_steps: 200                 # actor: uniform-random exploration before the policy
   training_starts: 400              # learner: online transitions before gradient steps begin
   batch_size: 256
-  discount: 0.97
+  discount: 0.92                     # was 0.97: lower the Q-ceiling (r/(1-γ)) ~3x to curb
+                                      # SAC overestimation, with reward ×0.1 (task config)
   # Stability tune (2026-07-02): the UTD gate + grad-clip only SLOWED the Q-overestimation
   # (critic_loss crept 50->460, Q hit ~1150 >> the ~130 return ceiling). Halve the update
   # ratio and slow the critic to curb the bootstrap blow-up.
