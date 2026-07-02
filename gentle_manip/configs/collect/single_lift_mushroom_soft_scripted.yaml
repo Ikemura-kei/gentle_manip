@@ -1,3 +1,7 @@
+# [collect] Scripted (automatic) demo collection — soft mushroom. Records SUPERSET obs + per-step reward.
+# Used by: examples/collect_demos_sim.py
+# Status: active
+#
 # Automatic (scripted) demo collection for the mushroom lift — no human needed.
 # ScriptedLiftDemonstrator servos on PRIVILEGED sim state (approach -> descend -> grasp ->
 # lift to 0.2 m -> hold), saves on success (object lifted to lift_height), discards+retries

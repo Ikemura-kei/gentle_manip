@@ -1,3 +1,7 @@
+# [obs] 1-cam point cloud, real-deploy denoise-only (outlier removal) for the EXISTING checkpoint.
+# Used by: deploy_real.py
+# Status: active
+#
 # Real-deploy obs config for testing the EXISTING (unfiltered-sim-trained) policy
 # with real-only flying-pixel/edge denoising — NO object_focus.
 #

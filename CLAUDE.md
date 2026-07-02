@@ -685,7 +685,12 @@ Key files from old code and where they map:
 - **Quaternion order**: (w, x, y, z) — enforce this at the RawObs boundary. **Quaternion sign-flip (RESOLVED 2026-06-30):** the real XArm reports `ee_quat` with the opposite sign from sim for the same pose (sim x≈+1, real x≈−1). q and −q are the same rotation but distinct policy inputs, so an unfiltered real deploy stalled (descended, ignoring the object). Fixed by **canonicalizing the quaternion sign in the shared `PerceptionPipeline`** (make the largest-magnitude component positive) — a no-op for sim, flips real to match, so a sim-trained policy works with no retrain.
 - **Camera names**: must match between SceneSpec (sim) and real_lab.yaml (real). Use `"cam_wrist"` and `"cam_ext"`. Tactile sensor names: `"tactile_left"`, `"tactile_right"`.
 - **World frame**: robot base at origin, z-up.
-- **Config**: plain YAML files loaded with yaml.safe_load or yacs. No Hydra.
+- **Config**: plain YAML files loaded with yaml.safe_load or yacs. No Hydra. Configs are
+  organized by ROLE (tasks/obs/action/dr/augmentation are reusable leaves; experiments/ are
+  compositions; collect/ are recipes; setup/ is backend params) — see `configs/README.md` for
+  the full index (dir → purpose → consuming script) and the shared-experiment / SERL-vs-DP3
+  split. **Every config file starts with a 3-line header** — `# [<type>] <purpose>` /
+  `# Used by: <script(s)>` / `# Status: active|legacy|experimental` — keep it on any new config.
 - **No over-abstraction**: XArm7 is the only robot. Don't build multi-robot abstractions.
 - **Shared code first**: any observation or action processing must go through PerceptionPipeline / ActionPipeline. Never duplicate processing logic between sim and real.
 

@@ -1,3 +1,7 @@
+# [augmentation] One-off HYPOTHESIS TEST (superseded by the shared-pipeline quat sign fix).
+# Used by: (superseded)
+# Status: experimental
+#
 # Sim-only HYPOTHESIS TEST: the real demos have perfectly clean (axis-aligned)
 # quaternions, but the sim IK/PD produces tiny quaternion noise (~1e-3). This snaps
 # the sim ee_quat to its clean form so it matches the real distribution — to test

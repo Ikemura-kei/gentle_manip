@@ -1,3 +1,7 @@
+# [dr] Per-reset sim DR for single_lift: object xy + yaw/pitch-roll orientation + arm-home jitter (no scene rebuild).
+# Used by: experiments (dr:) -> demo collection + SERL/DPPO training
+# Status: active
+#
 # Per-reset DR for SIM demo collection (in-process, so reset-only — no per-scene
 # material DR, which would need a subprocess rebuild). Each episode starts from a
 # jittered cube position and a jittered initial arm pose, for demo diversity.

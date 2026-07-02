@@ -1,3 +1,7 @@
+# [task] Soft-MPM mushroom single-lift: object + reward (dist/lift/stress) + success band + sim dynamics.
+# Used by: experiments (task:) -> SERL teacher, DP3/DPPO, demo collection
+# Status: active
+#
 # Lift a real scanned mushroom (soft MPM body). The point of this task is GENTLE
 # manipulation: lift it without bruising, i.e. keep von Mises stress under the ~40 kPa
 # yield. Uses the soft-body "Config C" sim params (see materials.py / CLAUDE.md).

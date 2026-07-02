@@ -1,3 +1,7 @@
+# [task] Rigid mushroom single-lift (same mesh, Rigid material, no stress reward): fast debug + rigid->soft base.
+# Used by: experiments (task:) -> SERL, demo collection
+# Status: active
+#
 # RIGID mushroom lift — same mesh/geometry as mushroom_lift, but a Rigid material.
 # Purpose: fast debugging of basic training (no MPM CFL -> low substeps -> ~10x faster),
 # and the base policy for a rigid->soft curriculum (later finetune on the soft version).

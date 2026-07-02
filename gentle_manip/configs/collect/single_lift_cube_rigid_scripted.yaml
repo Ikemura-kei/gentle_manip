@@ -1,3 +1,7 @@
+# [collect] Scripted demo collection — rigid cube (legacy red_cube).
+# Used by: examples/collect_demos_sim.py
+# Status: legacy
+#
 # Scripted (automatic) sim demo collection for the red-cube lift task — drives
 # examples/collect_demos_sim.py with input=scripted: no teleop, runs headless, and
 # produces the same (obs, action) schema a human teleoperator would.

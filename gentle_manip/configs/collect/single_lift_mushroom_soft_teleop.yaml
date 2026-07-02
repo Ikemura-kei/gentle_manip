@@ -1,3 +1,7 @@
+# [collect] Teleop (keyboard) demo collection — soft mushroom.
+# Used by: examples/collect_demos_sim.py
+# Status: active
+#
 # Teleop demo collection for the mushroom lift — experiment-driven (single source of
 # truth). Records the SUPERSET obs (state + privileged + point cloud) AND the per-step
 # reward, so ONE demo set serves both:

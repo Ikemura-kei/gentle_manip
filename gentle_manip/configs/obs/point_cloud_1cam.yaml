@@ -1,3 +1,7 @@
+# [obs] Single external L515 point cloud — the deployable/DP3 observation (matches the real 1-cam rig).
+# Used by: experiments (student view) -> DP3 train + deploy_real.py
+# Status: active
+#
 # Single external L515 (cam_ext) point cloud — the current real rig has no wrist
 # camera. ee_pos / ee_quat / gripper_width are always included on top of this.
 include_joint_pos: false

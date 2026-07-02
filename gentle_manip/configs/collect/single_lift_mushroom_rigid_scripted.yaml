@@ -1,3 +1,7 @@
+# [collect] Scripted demo collection — rigid mushroom.
+# Used by: examples/collect_demos_sim.py
+# Status: active
+#
 # Automatic scripted demo collection for the RIGID mushroom. SERL recommends ~20 demos.
 # Records the SUPERSET obs (no stress) + reward at the rigid task's scale, so demos match
 # the training env exactly (no rescale needed).

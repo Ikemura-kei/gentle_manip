@@ -1,3 +1,7 @@
+# [augmentation] Sim-only obs augmentation: push the clean sim point cloud toward L515 sensor noise.
+# Used by: experiments (augmentation:) -> DP3/student SIM training
+# Status: active
+#
 # Sim-only observation augmentation: push the clean sim point cloud toward the noisy
 # L515 distribution. Passed to a SIM PolicyEnv (sim_server / sim training) via the
 # augmentation arg — the real deployment never uses it (the real camera is already

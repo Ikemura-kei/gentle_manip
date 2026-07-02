@@ -1,3 +1,7 @@
+# [obs] Minimal state: ee_pos + ee_quat + gripper_width.
+# Used by: simple RL / real teleop demo collection
+# Status: active
+#
 # ee_pos + ee_quat + gripper_width only (always included, no extras)
 include_joint_pos: false
 include_joint_vel: false

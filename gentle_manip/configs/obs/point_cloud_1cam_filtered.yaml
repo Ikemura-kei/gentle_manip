@@ -1,3 +1,7 @@
+# [obs] 1-cam point cloud WITH object_focus filter (drops the arm body) — staged for a re-collect+retrain.
+# Used by: DP3 (staged)
+# Status: experimental
+#
 # Single external L515 (cam_ext) point cloud WITH cloud-quality filters on — for the
 # next data-collection + retrain iteration. Identical rig to point_cloud_1cam.yaml,
 # plus two shared (sim+real) filters applied after crop, before subsample:

@@ -1,3 +1,7 @@
+# [obs] SUPERSET (record-everything) obs for SOFT objects: state + privileged (incl. stress) + point cloud. Object-agnostic.
+# Used by: experiments (obs:) demo collection; subviewed into teacher/student
+# Status: active
+#
 # SUPERSET obs for SOFT objects (OBJECT-AGNOSTIC — rig/workspace + modalities are the same
 # for any object; only `stress` is material-specific, hence the soft/rigid split). Records
 # (teacher = state+privileged, student = state+point_cloud, with/without stress, ...).

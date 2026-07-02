@@ -1,3 +1,7 @@
+# [action] 6D delta-pose + 1D delta-gripper; policy outputs in [-1,1] scaled to physical units.
+# Used by: experiments (action:) -> all training + deploy
+# Status: active
+#
 # 6D delta pose (x, y, z, roll, pitch, yaw) + 1D gripper
 # Policy outputs in [-1, 1]; scales convert to physical units.
 # Gripper scale shrunk 0.05 -> 0.005 (2026-07-02): under an RL policy that explores the

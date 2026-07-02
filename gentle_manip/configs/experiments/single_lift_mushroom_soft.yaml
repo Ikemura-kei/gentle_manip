@@ -1,19 +1,26 @@
-# Experiment = single source of truth for the mushroom-lift task across all stages.
-# Data collection records the SUPERSET obs (configs/obs/mushroom_superset.yaml); training
-# / online interaction use a VIEW (a subset of the superset, params inherited so it can't
-# drift). New tasks = a new file like this; no new training code.
+# [experiment] Single-source-of-truth composition for SOFT mushroom lift (task+action+dr+aug+obs+views+rl).
+# Used by: serl_sim_server.py + train_serl.py (SERL); collect_demos_sim.py; DP3/DPPO
+# Status: active
+#
+# Experiment = single source of truth for the mushroom-lift task across all stages (SERL AND
+# DP3/DPPO). Data collection records the SUPERSET obs (configs/obs/superset_soft.yaml);
+# training / online interaction use a VIEW (a subset of the superset, params inherited so it
+# can't drift). New tasks = a new file like this; no new training code.
 task: single_lift_mushroom_soft                 # object + reward (yield-normalized stress) + dynamics
 action: delta_pose_delta_gripper
-dr: sim_demo                        # reset jitter (cube/arm)
-augmentation: l515_noise            # sim-only obs augmentation
+dr: sim_demo                        # reset jitter (object xy/orientation + arm home)
+augmentation: l515_noise            # sim-only obs augmentation (point-cloud path)
 
 obs: superset_soft              # SUPERSET (collection). Views subview() it:
+# views: named obs subsets of the superset — this is what lets ONE experiment + ONE demo set
+# serve BOTH lines (not SERL-only): teacher -> SERL teacher; student -> DP3/DPPO + deploy.
 views:
-  teacher: [privileged]             # state + privileged (object pose/vel + normalized stress); no render
-  student: [point_cloud]            # state + denoised point cloud (deployable); render on
+  teacher: [privileged]             # SERL: state + privileged (object pose/vel + normalized stress); no render
+  student: [point_cloud]            # DP3/deploy: state + denoised point cloud (deployable); render on
   # ablations, same demos: e.g. teacher_no_stress would be a view listing privileged-minus-stress
 
-# SAC/RLPD hyperparams (train_serl.py reads these over its defaults).
+# rl: TRAINING hyperparams for the RL lines ONLY (SERL now; DPPO later). Offline DP3 BC
+# ignores this block. train_serl.py reads these over its defaults.
 rl:
   random_steps: 200                 # actor: uniform-random exploration before the policy
   training_starts: 400              # learner: online transitions before gradient steps begin

@@ -1,3 +1,7 @@
+# [obs] SUPERSET obs for RIGID objects (no stress). Object-agnostic.
+# Used by: experiments (obs:) demo collection; subviewed into teacher/student
+# Status: active
+#
 # SUPERSET obs for RIGID objects (OBJECT-AGNOSTIC). Same as superset_soft but WITHOUT stress:
 # a rigid body has no von Mises (rigid solver has no particles), so privileged = pose+vel only.
 # has no particles), so the privileged teacher signal is object pose + velocity only.
