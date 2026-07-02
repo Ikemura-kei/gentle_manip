@@ -42,9 +42,14 @@ class GenesisWorker:
         noslip_iterations: int = 3,
         show_fps: bool = True,
         robot_overrides: Optional[dict] = None,
+        render_obs_cameras: bool = True,
     ) -> None:
         self.num_envs = int(num_envs)
         self.settle_steps = int(settle_steps)
+        # When False the scene cameras are still built (so they can be RGB-rendered
+        # on demand, e.g. for occasional policy-behaviour clips) but read_state does
+        # NOT render their depth every step — keeps the state teacher render-free/fast.
+        self.render_obs_cameras = bool(render_obs_cameras)
 
         _init_genesis()
         self.handle = build_scene(
@@ -113,7 +118,8 @@ class GenesisWorker:
         state = self.robot.read_state()
 
         depth_images, intrinsics, extrinsics = {}, {}, {}
-        for name, cam_list in self.handle.cameras.items():
+        cam_items = self.handle.cameras.items() if self.render_obs_cameras else []
+        for name, cam_list in cam_items:
             # One bound camera per env; each images its own env from the same
             # relative pose, so env-0's K/extrinsic apply to every env's depth
             # (cloud lands in the base frame — see dev script).

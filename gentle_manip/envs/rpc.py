@@ -63,16 +63,19 @@ def recv_msg(conn: socket.socket) -> Tuple[Dict[str, Any], Dict[str, np.ndarray]
 
 # ── server: drive any PolicyEnv-like object over the socket ────────────────────
 def serve_env(env, host: str = "127.0.0.1", port: int = 5555, ready_msg: str = "SIM_SERVER_READY",
-              frame_fn=None, video_dir=None, video_episodes: int = 0) -> None:
+              frame_fn=None, video_dir=None, video_episodes: int = 0, video_every: int = 0) -> None:
     """Serve reset/step/close requests for ``env`` until the client disconnects.
 
     ``env`` must expose reset()->obs dict and step(action)->(obs, reward, done, info),
     matching PolicyEnv. Prints ``ready_msg`` once the port is bound (so a launcher
     can wait for it).
 
-    If frame_fn is given, an mp4 of frame_fn() (an (H,W,3) uint8) is written per
-    episode (reset = boundary) for the first ``video_episodes`` episodes, into
-    ``video_dir`` — for offline eval visualisation.
+    If frame_fn is given, an mp4 of frame_fn() (an (H,W,3) uint8) is written into
+    ``video_dir`` for selected episodes (reset = boundary):
+      - ``video_episodes`` > 0: the FIRST N episodes (offline eval visualisation).
+      - ``video_every``    > 0: EVERY Nth episode, indefinitely — for periodic
+        behaviour clips during a long training run (watch the policy improve).
+    The two can combine; an episode records if either rule selects it.
     """
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -83,14 +86,18 @@ def serve_env(env, host: str = "127.0.0.1", port: int = 5555, ready_msg: str = "
     vframes: list = []
     vep = [0]   # episodes started (reset count)
 
+    def _recording(ep: int) -> bool:
+        return (video_episodes > 0 and ep <= video_episodes) or \
+               (video_every > 0 and ep % video_every == 0)
+
     def flush_video():
         if vframes and video_dir is not None:
             import imageio.v2 as imageio
             from pathlib import Path
             Path(video_dir).mkdir(parents=True, exist_ok=True)
-            out = str(Path(video_dir) / f"ep_{vep[0]:03d}.mp4")
+            out = str(Path(video_dir) / f"ep_{vep[0]:04d}.mp4")
             imageio.mimsave(out, vframes, fps=30, macro_block_size=1)
-            print(f"  saved video {out} ({len(vframes)} frames)", flush=True)
+            print(f"  saved clip {out} ({len(vframes)} frames)", flush=True)
         vframes.clear()
 
     # Accept clients repeatedly: an RL actor may crash/restart mid-run, and a mere
@@ -117,7 +124,7 @@ def serve_env(env, host: str = "127.0.0.1", port: int = 5555, ready_msg: str = "
                         send_msg(conn, {"ok": True}, _as_arrays(env.reset()))
                     elif cmd == "step":
                         obs, reward, done, info = env.step(arrays["action"])
-                        if frame_fn is not None and vep[0] <= video_episodes:
+                        if frame_fn is not None and _recording(vep[0]):
                             vframes.append(np.asarray(frame_fn(), dtype=np.uint8))
                         send_msg(conn, {
                             "ok": True,

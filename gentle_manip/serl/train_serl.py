@@ -67,7 +67,8 @@ def flatten_state(obs: dict, keys) -> np.ndarray:
 
 # ── state-based SAC agent (mirror make_sac_pixel_agent, encoder-free) ──────────────
 def make_sac_state_agent(seed, sample_obs, sample_action, hidden_dims=(256, 256),
-                         discount=0.97, target_entropy=None):
+                         discount=0.97, target_entropy=None, critic_lr=3e-4,
+                         actor_lr=3e-4, clip_grad_norm=1.0):
     import jax
     import flax.linen as nn
     from functools import partial
@@ -96,6 +97,11 @@ def make_sac_state_agent(seed, sample_obs, sample_action, hidden_dims=(256, 256)
         actor_def=policy_def, critic_def=critic_def, temperature_def=temperature_def,
         discount=discount, backup_entropy=False, critic_ensemble_size=2,
         target_entropy=target_entropy, image_keys=("state",),   # pass the pack/unpack check
+        # clip_grad_norm bounds the Q-target feedback loop (the state teacher otherwise
+        # lets critic_loss explode to ~1e14 under high UTD); see utd_ratio gate below.
+        actor_optimizer_kwargs={"learning_rate": actor_lr, "clip_grad_norm": clip_grad_norm},
+        critic_optimizer_kwargs={"learning_rate": critic_lr, "clip_grad_norm": clip_grad_norm},
+        temperature_optimizer_kwargs={"learning_rate": actor_lr},
     )
 
 
@@ -158,7 +164,18 @@ def learner_loop(agent, replay_buffer, demo_buffer, cfg, sampling_rng, wandb_log
     critic_only = frozenset({"critic"})
     all_nets = frozenset({"critic", "actor", "temperature"})
 
-    for step in tqdm.tqdm(range(cfg["max_steps"]), desc="learner"):
+    # UTD (update-to-data) coupling: the learner does ~325 grad-steps/s but the actor only
+    # produces ~7.5 env-steps/s, a ~43:1 ratio that lets the Q-values self-amplify to garbage
+    # on the tiny buffer (the overnight divergence). Gate so cumulative grad steps never exceed
+    # utd_ratio * (online transitions received since training started) — waiting on the actor
+    # when ahead. This keeps SAC in its stable RLPD regime instead of sprinting on stale data.
+    utd = cfg["utd_ratio"]
+    online_start = len(replay_buffer)
+
+    pbar = tqdm.tqdm(range(cfg["max_steps"]), desc="learner")
+    for step in pbar:
+        while (len(replay_buffer) - online_start) * utd < step + 1:
+            time.sleep(0.02)                          # actor hasn't produced enough data yet
         for _ in range(cfg["cta_ratio"] - 1):        # extra critic updates (high UTD)
             batch = concat_batches(next(replay_it), next(demo_it), axis=0)
             agent, _ = agent.update(batch, networks_to_update=critic_only)
@@ -198,9 +215,9 @@ def main():
 
     exp = Experiment.load(args.experiment)
     keys = exp.view_obs(args.view).obs_keys()
-    rl = {"max_steps": 100_000, "random_steps": 300, "training_starts": 1000,
-          "batch_size": 256, "discount": 0.97, "cta_ratio": 2, "steps_per_update": 10,
-          "log_period": 100,
+    rl = {"max_steps": 2_000_000, "random_steps": 300, "training_starts": 1000,
+          "batch_size": 256, "discount": 0.97, "cta_ratio": 1, "steps_per_update": 10,
+          "log_period": 100, "utd_ratio": 4, "critic_lr": 3e-4, "clip_grad_norm": 1.0,
           "replay_capacity": 200_000, "port_agentlace": args.port_agentlace, **exp.rl}
     if args.max_steps:
         rl["max_steps"] = args.max_steps
@@ -212,7 +229,8 @@ def main():
         env = SerlStateWrapper(SimGymEnv(port=args.port), keys=keys)
         sample_obs = env.observation_space.sample()
         sample_action = env.action_space.sample()
-        agent = make_sac_state_agent(args.seed, sample_obs, sample_action, discount=rl["discount"])
+        agent = make_sac_state_agent(args.seed, sample_obs, sample_action, discount=rl["discount"],
+                                     critic_lr=rl["critic_lr"], clip_grad_norm=rl["clip_grad_norm"])
         # Actor streams transitions to the learner -> a QueuedDataStore (implements
         # get_latest_data); the learner side is the ReplayBufferDataStore.
         data_store = QueuedDataStore(rl["replay_capacity"])
@@ -226,7 +244,8 @@ def main():
         obs_space = Dict({"state": Box(-np.inf, np.inf, (_demo_state_dim(args.demo_path[0], keys),), np.float32)})
         act_space = Box(-1.0, 1.0, (action_dim,), np.float32)
         sample_obs = obs_space.sample(); sample_action = act_space.sample()
-        agent = make_sac_state_agent(args.seed, sample_obs, sample_action, discount=rl["discount"])
+        agent = make_sac_state_agent(args.seed, sample_obs, sample_action, discount=rl["discount"],
+                                     critic_lr=rl["critic_lr"], clip_grad_norm=rl["clip_grad_norm"])
         replay_buffer = ReplayBufferDataStore(obs_space, act_space, rl["replay_capacity"])
         demo_buffer = ReplayBufferDataStore(obs_space, act_space, rl["replay_capacity"])
         n = _load_demos_into(demo_buffer, args.demo_path, keys)

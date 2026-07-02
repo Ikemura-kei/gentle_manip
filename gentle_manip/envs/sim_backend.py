@@ -32,6 +32,7 @@ class SimBackend:
         use_subprocess: bool = True,
         show_viewer: bool = False,
         render_cameras: bool = True,
+        record_camera: bool = False,
     ) -> None:
         config = config or {}
         self.num_envs = int(num_envs)
@@ -40,9 +41,14 @@ class SimBackend:
         # per-env depth render. Observation-only — does NOT touch the physics, so the
         # dynamics (and an off-policy replay buffer) stay consistent. Callers set this
         # from ObsConfig.needs_cameras().
-        if not render_cameras and spec.cameras:
-            import dataclasses
+        # record_camera keeps ONE camera built (for on-demand RGB clips of behaviour)
+        # even when obs needs none — read_state still skips its per-step depth render
+        # (worker render_obs_cameras=False below), so the teacher stays render-free.
+        import dataclasses
+        if not render_cameras and spec.cameras and not record_camera:
             spec = dataclasses.replace(spec, cameras=[])
+        elif not render_cameras and spec.cameras and record_camera:
+            spec = dataclasses.replace(spec, cameras=spec.cameras[:1])   # one clip cam
         self.render_cameras = bool(render_cameras)
 
         robot_overrides = config.get("robot", {})
@@ -59,6 +65,8 @@ class SimBackend:
             settle_steps=int(sim_cfg.get("settle_steps", 30)),
             coup_friction=float(sim_cfg.get("coup_friction", 4.0)),
             robot_overrides=robot_overrides,
+            # A record-only camera is built but not depth-rendered each step.
+            render_obs_cameras=bool(render_cameras),
         )
         if use_subprocess:
             # Training path: Genesis in a child process (GPU-memory-leak fix). A
