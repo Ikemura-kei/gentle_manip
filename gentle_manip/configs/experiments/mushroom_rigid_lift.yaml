@@ -16,7 +16,8 @@ views:
 rl:
   discount: 0.99
   random_steps: 300
-  training_starts: 1000
+  training_starts: 5000             # match proven config; more initial data before the
+                                    # free-running learner starts (reduces early overfitting)
   batch_size: 256
   # Horizon must exceed the task length or the policy is truncated before it can hold in the
   # success band for 30 steps (demos run to ~237 steps; the old 150 default made succeed=0

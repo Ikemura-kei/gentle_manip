@@ -72,9 +72,9 @@ def make_sac_state_agent(seed, sample_obs, sample_action,
                          critic_ensemble_size=10, critic_subsample_size=2,
                          discount=0.97, target_entropy=None, critic_lr=3e-4,
                          actor_lr=3e-4, clip_grad_norm=1.0):
-    # Defaults are the proven config from the prior SoftBodyLift project: deeper nets,
-    # REDQ critic ensemble (10, subsample 2 -> strong overestimation control), backup_entropy
-    # False. These (esp. the ensemble + net depth) are what kept training stable there.
+    # Defaults are the proven config from the prior codesign-dfom serl_control project: deeper
+    # nets, REDQ critic ensemble (10, subsample 2 -> strong overestimation control),
+    # backup_entropy True. The ensemble + net depth are what kept training stable there.
     import jax
     import flax.linen as nn
     from functools import partial
@@ -102,7 +102,7 @@ def make_sac_state_agent(seed, sample_obs, sample_action,
     return SACAgent.create(
         jax.random.PRNGKey(seed), sample_obs, sample_action,
         actor_def=policy_def, critic_def=critic_def, temperature_def=temperature_def,
-        discount=discount, backup_entropy=False,
+        discount=discount, backup_entropy=True,   # True in the proven serl_control config
         critic_ensemble_size=critic_ensemble_size, critic_subsample_size=critic_subsample_size,
         target_entropy=target_entropy, image_keys=("state",),   # pass the pack/unpack check
         # clip_grad_norm bounds the Q-target feedback loop (the state teacher otherwise
@@ -184,19 +184,14 @@ def learner_loop(agent, replay_buffer, demo_buffer, cfg, sampling_rng, wandb_log
     critic_only = frozenset({"critic"})
     all_nets = frozenset({"critic", "actor", "temperature"})
 
-    # UTD (update-to-data) coupling: the learner does ~325 grad-steps/s but the actor only
-    # produces ~7.5 env-steps/s, a ~43:1 ratio that lets the Q-values self-amplify to garbage
-    # on the tiny buffer (the overnight divergence). Gate so cumulative grad steps never exceed
-    # utd_ratio * (online transitions received since training started) — waiting on the actor
-    # when ahead. This keeps SAC in its stable RLPD regime instead of sprinting on stale data.
-    utd = cfg["utd_ratio"]
-    online_start = len(replay_buffer)
-
+    # Learner runs FREELY at full speed — NO actor throttle. This matches the proven
+    # prior-project loop (codesign-dfom serl_runner). The earlier learner-waits-for-actor
+    # gate (added pre-REDQ to stop divergence) throttled the learner to ~1 grad step per
+    # online transition (≈actor rate), doing ~10x too few updates -> stuck learning. With the
+    # REDQ critic ensemble bounding Q, free-running is both stable AND fast (like the reference).
     pbar = tqdm.tqdm(range(cfg["max_steps"]), desc="learner")
     for step in pbar:
-        while (len(replay_buffer) - online_start) * utd < step + 1:
-            time.sleep(0.02)                          # actor hasn't produced enough data yet
-        for _ in range(cfg["cta_ratio"] - 1):        # extra critic updates (high UTD)
+        for _ in range(cfg["cta_ratio"] - 1):        # critic_actor_ratio-1 extra critic updates
             batch = concat_batches(next(replay_it), next(demo_it), axis=0)
             agent, _ = agent.update(batch, networks_to_update=critic_only)
         batch = concat_batches(next(replay_it), next(demo_it), axis=0)
