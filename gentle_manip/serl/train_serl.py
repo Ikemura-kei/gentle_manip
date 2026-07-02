@@ -145,8 +145,18 @@ def learner_loop(agent, replay_buffer, demo_buffer, cfg, sampling_rng, wandb_log
     from serl_launcher.utils.launcher import make_trainer_config
     from serl_launcher.utils.train_utils import concat_batches
 
+    # Capture the actor's per-episode return/success (sent via client.request("send-stats"))
+    # so we can watch ACTUAL task performance, not just losses. Kept as "latest" and emitted
+    # with the periodic log below (stepwise-constant between episodes — fine for a curve).
+    latest_env_stats: dict = {}
+
+    def _request_cb(t, p):
+        if t == "send-stats" and isinstance(p, dict):
+            latest_env_stats.update(p.get("environment", {}) or {})
+        return {}
+
     server = TrainerServer(make_trainer_config(cfg["port_agentlace"], cfg["port_agentlace"] + 1),
-                           request_callback=lambda t, p: {})
+                           request_callback=_request_cb)
     server.register_data_store("actor_env", replay_buffer)
     server.start(threaded=True)
 
@@ -188,8 +198,12 @@ def learner_loop(agent, replay_buffer, demo_buffer, cfg, sampling_rng, wandb_log
             flat = {f"{k}/{kk}": float(vv) for k, v in info.items() if isinstance(v, dict)
                     for kk, vv in v.items()}
             flat.update({k: float(v) for k, v in info.items() if not isinstance(v, dict)})
+            flat.update({f"environment/{k}": float(v) for k, v in latest_env_stats.items()})
+            ret = latest_env_stats.get("return")
             print(f"[learner step {step}] " + " ".join(f"{k}={v:.3f}" for k, v in flat.items()
-                                                       if "loss" in k), flush=True)
+                                                       if "loss" in k)
+                  + (f" | return={ret:.3f} succeed={latest_env_stats.get('succeed', 0):.2f}"
+                     if ret is not None else ""), flush=True)
             if wandb_logger is not None:
                 wandb_logger.log(flat, step=step)
 

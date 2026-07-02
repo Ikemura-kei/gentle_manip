@@ -19,3 +19,8 @@ rl:
   training_starts: 400              # learner: online transitions before gradient steps begin
   batch_size: 256
   discount: 0.97
+  # Stability tune (2026-07-02): the UTD gate + grad-clip only SLOWED the Q-overestimation
+  # (critic_loss crept 50->460, Q hit ~1150 >> the ~130 return ceiling). Halve the update
+  # ratio and slow the critic to curb the bootstrap blow-up.
+  utd_ratio: 2                      # was 4 (grad steps per online transition)
+  critic_lr: 1.0e-4                 # was 3e-4

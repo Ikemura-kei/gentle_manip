@@ -29,7 +29,10 @@ rewards:
     top10_weight: 0.8
   dist_to_obj:
     scale: 1.0
-    decay: 20.0
+    # decay 20 -> 8 (2026-07-02): exp(-20d) is ~flat (~0.02) beyond 10cm, so from the
+    # ~20cm home pose the policy got no gradient to approach. exp(-8d) gives a smooth,
+    # informative pull across the whole 0.02-0.3m approach range.
+    decay: 8.0
   # Lift: rise normalized to [0,1] by lift_target (~rest->success-band rise) then *scale,
   # so a fully-lifted object gives ~1.0 (a real gradient toward the success band), ~10x
   # the old raw-metres term, with no runaway for over-lifting.
