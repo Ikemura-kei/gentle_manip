@@ -11,11 +11,10 @@ views:
   student: [point_cloud]            # state + denoised point cloud (deployable)
 
 # SERL-default-ish hyperparams (per user: test basic training with defaults, discount 0.99).
-# RESULT of the SERL-defaults test: it LEARNED then diverged (return 44->82, then Q->26k,
-# critic_loss->8.5M) — so the dense-reward Q-overestimation is fundamental, not soft-specific.
-# discount 0.99->0.92 (Q-ceiling r/(1-γ): 100x -> 12.5x) paired with reward ×0.1 (task config).
+# discount 0.99 (standard) — the REDQ critic ensemble (train_serl defaults) controls the
+# Q-overestimation, so no need for the 0.92/reward-×0.1 band-aids that starved learning.
 rl:
-  discount: 0.92
+  discount: 0.99
   random_steps: 300
   training_starts: 1000
   batch_size: 256
