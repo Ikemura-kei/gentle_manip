@@ -4,8 +4,8 @@
 # on a failed grasp/lift. Records the SUPERSET obs + reward (experiment mode), so the demos
 # are dual-purpose (RLPD teacher/student) and in the CURRENT action convention (gripper scale
 # 0.005) — no rescale needed.
-experiment: mushroom_lift
-task_name: mushroom
+experiment: single_lift_mushroom_soft
+task_name: single_lift_mushroom_soft
 out_dir: dataset/demos
 
 input: scripted               # automatic state-machine expert (headless)

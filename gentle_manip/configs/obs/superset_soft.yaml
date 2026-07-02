@@ -1,5 +1,5 @@
-# SUPERSET obs for mushroom DEMO COLLECTION: records EVERY modality (state +
-# privileged + point cloud) so one demo set serves all training views and ablations
+# SUPERSET obs for SOFT objects (OBJECT-AGNOSTIC — rig/workspace + modalities are the same
+# for any object; only `stress` is material-specific, hence the soft/rigid split). Records
 # (teacher = state+privileged, student = state+point_cloud, with/without stress, ...).
 #
 # This is the SINGLE SOURCE OF TRUTH for each modality's processing params — views are

@@ -18,7 +18,7 @@ Two windows open: a small pygame window (focus it for keys) and the Genesis
 viewer. Needs a display.
 
     MUJOCO_GL=glfw uv run --project envs/sim python examples/collect_demos_sim.py \
-        --config gentle_manip/configs/collect/red_cube_sim.yaml
+        --config gentle_manip/configs/collect/single_lift_cube_rigid_teleop.yaml
 
 Controls: W/S A/D Up/Dn move, L/R R/F Q/E rotate, O/P grip, SPACE save,
 BACKSPACE discard, ESC quit.
@@ -38,7 +38,7 @@ import yaml
 
 _PKG = Path(__file__).resolve().parents[1] / "gentle_manip"
 _CFG = _PKG / "configs"
-_DEFAULT_CONFIG = _CFG / "collect" / "red_cube_sim.yaml"
+_DEFAULT_CONFIG = _CFG / "collect" / "single_lift_cube_rigid_teleop.yaml"
 
 
 def _load_named(subdir: str, name) -> dict:

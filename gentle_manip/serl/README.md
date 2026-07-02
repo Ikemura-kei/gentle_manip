@@ -16,7 +16,7 @@ pure-python `gentle_manip.envs.rpc` socket (same idea as the sim↔DP3 eval brid
                                               gentle_manip.envs.rpc  (socket)
                                                             |
                                           serl_sim_server (envs/sim, 3.12, genesis)
-                                            PolicyEnv(mushroom_lift, state_privileged,
+                                            PolicyEnv(single_lift_mushroom_soft, state_privileged,
                                             num_envs=1, render off, no auto-reset)
 ```
 
@@ -61,9 +61,9 @@ constructs, `sample_actions` returns a (7,) action, and `agent.update` runs grad
 
 Run (genesis teacher server in envs/sim, learner+actor in envs/serl):
 ```bash
-uv run --project envs/sim  python -m gentle_manip.scripts.serl_sim_server --experiment mushroom_lift --view teacher --port 5566
-uv run --project envs/serl python -m gentle_manip.serl.train_serl --experiment mushroom_lift --view teacher --learner --demo-path demos_serl/mushroom.pkl
-uv run --project envs/serl python -m gentle_manip.serl.train_serl --experiment mushroom_lift --view teacher --actor  --port 5566
+uv run --project envs/sim  python -m gentle_manip.scripts.serl_sim_server --experiment single_lift_mushroom_soft --view teacher --port 5566
+uv run --project envs/serl python -m gentle_manip.serl.train_serl --experiment single_lift_mushroom_soft --view teacher --learner --demo-path demos_serl/mushroom.pkl
+uv run --project envs/serl python -m gentle_manip.serl.train_serl --experiment single_lift_mushroom_soft --view teacher --actor  --port 5566
 ```
 
 ## Remaining

@@ -1,11 +1,11 @@
 # RIGID mushroom experiment — fast debug + rigid->soft curriculum base.
 # Identical geometry to mushroom_lift (same mesh, camera, action, DR), material=rigid.
-task: mushroom_rigid_lift
+task: single_lift_mushroom_rigid
 action: delta_pose_delta_gripper
 dr: sim_demo
 augmentation: l515_noise            # sim-only; teacher (no render) ignores it
 
-obs: mushroom_rigid_superset        # privileged has NO stress (rigid)
+obs: superset_rigid        # privileged has NO stress (rigid)
 views:
   teacher: [privileged]             # state + object pose/vel (no stress)
   student: [point_cloud]            # state + denoised point cloud (deployable)

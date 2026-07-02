@@ -24,7 +24,7 @@ def main():
     ap.add_argument("--num-envs", type=int, default=10)
     ap.add_argument("--steps", type=int, default=60, help="timed steps (after warmup)")
     ap.add_argument("--warmup", type=int, default=5)
-    ap.add_argument("--experiment", default="mushroom_lift", help="configs/experiments/<name>.yaml")
+    ap.add_argument("--experiment", default="single_lift_mushroom_soft", help="configs/experiments/<name>.yaml")
     ap.add_argument("--view", default="teacher", help="obs view (teacher | student)")
     ap.add_argument("--settle-steps", type=int, default=40)
     ap.add_argument("--seed", type=int, default=0)

@@ -531,7 +531,7 @@ Rewards are individual components composed via YAML config and summed by `Compos
 **Success is not a reward component.** It is handled at the task level: `BaseTask.compute_reward` calls `is_success` and adds `success.astype(float) * success_scale` on top of the shaped reward. This keeps the sim/task boundary clean — reward components only see raw physics state.
 
 ```yaml
-# configs/tasks/single_lift.yaml
+# configs/tasks/single_lift_mushroom_soft.yaml (example)
 lift_height: 0.15
 hold_steps: 30
 object_name: "tofu"
@@ -647,11 +647,11 @@ render excluded). Real Agaricus values: E 0.3–3.0 MPa, ν 0.3–0.5, yield 40�
 substeps than 0.9 MPa, which buys a finer grid that's *both* faster *and* higher-fidelity
 than the coarse-stiff baseline (C beats A on both axes). The `"mushroom"` material preset
 is therefore `E=3e5, ν=0.35, yield=4e4` (≈13% yield strain → bruises under a firm grasp,
-the regime the stress reward targets). `configs/tasks/mushroom_lift.yaml` sets
+the regime the stress reward targets). `configs/tasks/single_lift_mushroom_soft.yaml` sets
 `sim_substeps=210, mpm_grid_density=250`; `SingleLiftTask` now reads `sim_substeps /
 mpm_grid_density / cam_fov` from the task cfg (defaults = the rigid-cube values, unchanged).
 For training throughput the **point-cloud render** (per env/step) is expected to dominate,
-not this MPM, so the physics has headroom once envs are parallelized. The mushroom_lift
+not this MPM, so the physics has headroom once envs are parallelized. The single_lift_mushroom_soft
 stress-reward `cap/divisor` are still the tofu values — TODO: re-tune to the ~40 kPa yield.
 
 ---

@@ -14,10 +14,10 @@ image_keys=("state",) (so the agent's pack/unpack check passes), and a StateEnco
 returns obs["state"] into MLP actor/critic (encoder-free networks).
 
     # genesis teacher server (envs/sim, 3.12):
-    uv run --project envs/sim python -m gentle_manip.scripts.serl_sim_server --experiment mushroom_lift --view teacher --port 5566
+    uv run --project envs/sim python -m gentle_manip.scripts.serl_sim_server --experiment single_lift_mushroom_soft --view teacher --port 5566
     # learner + actor (envs/serl, 3.10):
-    uv run --project envs/serl python -m gentle_manip.serl.train_serl --experiment mushroom_lift --view teacher --learner --demo-path demos_serl/mushroom.pkl
-    uv run --project envs/serl python -m gentle_manip.serl.train_serl --experiment mushroom_lift --view teacher --actor --port 5566
+    uv run --project envs/serl python -m gentle_manip.serl.train_serl --experiment single_lift_mushroom_soft --view teacher --learner --demo-path demos_serl/mushroom.pkl
+    uv run --project envs/serl python -m gentle_manip.serl.train_serl --experiment single_lift_mushroom_soft --view teacher --actor --port 5566
 """
 from __future__ import annotations
 
@@ -258,7 +258,7 @@ def learner_loop(agent, replay_buffer, demo_buffer, cfg, sampling_rng, wandb_log
 
 def main():
     ap = argparse.ArgumentParser(description="Generic SERL SAC/RLPD trainer (experiment-driven)")
-    ap.add_argument("--experiment", default="mushroom_lift")
+    ap.add_argument("--experiment", default="single_lift_mushroom_soft")
     ap.add_argument("--view", default="teacher")
     ap.add_argument("--learner", action="store_true")
     ap.add_argument("--actor", action="store_true")

@@ -2,12 +2,12 @@
 # Data collection records the SUPERSET obs (configs/obs/mushroom_superset.yaml); training
 # / online interaction use a VIEW (a subset of the superset, params inherited so it can't
 # drift). New tasks = a new file like this; no new training code.
-task: mushroom_lift                 # object + reward (yield-normalized stress) + dynamics
+task: single_lift_mushroom_soft                 # object + reward (yield-normalized stress) + dynamics
 action: delta_pose_delta_gripper
 dr: sim_demo                        # reset jitter (cube/arm)
 augmentation: l515_noise            # sim-only obs augmentation
 
-obs: mushroom_superset              # SUPERSET (collection). Views subview() it:
+obs: superset_soft              # SUPERSET (collection). Views subview() it:
 views:
   teacher: [privileged]             # state + privileged (object pose/vel + normalized stress); no render
   student: [point_cloud]            # state + denoised point cloud (deployable); render on

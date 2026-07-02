@@ -9,7 +9,7 @@ collection/training/online all share the one source of truth. Pick the obs with 
 auto-reset: the SERL actor owns episode boundaries. One server = one actor.
 
     uv run --project envs/sim python -m gentle_manip.scripts.serl_sim_server \
-        --experiment mushroom_lift --view teacher --port 5566
+        --experiment single_lift_mushroom_soft --view teacher --port 5566
 """
 import argparse
 import os
@@ -19,7 +19,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Serve an experiment's SAC-teacher env over RPC")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=5566)
-    ap.add_argument("--experiment", default="mushroom_lift", help="configs/experiments/<name>.yaml")
+    ap.add_argument("--experiment", default="single_lift_mushroom_soft", help="configs/experiments/<name>.yaml")
     ap.add_argument("--view", default="teacher", help="obs view (e.g. teacher | student)")
     ap.add_argument("--num-envs", type=int, default=1, help="parallel genesis envs (vectorized actor)")
     ap.add_argument("--settle-steps", type=int, default=40)

@@ -3,8 +3,8 @@
 # reward, so ONE demo set serves both:
 #   - HIL-SERL RLPD  (teacher/student views via subset_demo; reward kept)
 #   - DP3            (point-cloud view; reward discarded)
-experiment: mushroom_lift     # -> obs (superset), task (with reward), action, dr, augmentation
-task_name: mushroom
+experiment: single_lift_mushroom_soft     # -> obs (superset), task (with reward), action, dr, augmentation
+task_name: single_lift_mushroom_soft
 out_dir: dataset/demos
 
 input: keyboard               # human teleop (opens pygame + Genesis viewer). "scripted" = automatic.

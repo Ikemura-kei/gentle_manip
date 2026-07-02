@@ -1,8 +1,8 @@
 # Automatic scripted demo collection for the RIGID mushroom. SERL recommends ~20 demos.
 # Records the SUPERSET obs (no stress) + reward at the rigid task's scale, so demos match
 # the training env exactly (no rescale needed).
-experiment: mushroom_rigid_lift
-task_name: mushroom_rigid
+experiment: single_lift_mushroom_rigid
+task_name: single_lift_mushroom_rigid
 out_dir: dataset/demos
 
 input: scripted

@@ -7,7 +7,7 @@ demo to a view (drop the modalities that view doesn't use) and converts.
 
     uv run --project envs/serl python -m gentle_manip.serl.convert_demos \
         --demo dataset/demos/mushroom/<run>/data.pkl \
-        --experiment mushroom_lift --view teacher --out demos_serl/mushroom_teacher.pkl
+        --experiment single_lift_mushroom_soft --view teacher --out demos_serl/mushroom_teacher.pkl
 
 The demo pickle is written in envs/sim (numpy 2.x); envs/serl is numpy 1.x, so it is read
 with a compat unpickler (numpy._core -> numpy.core). obs stays a dict here — train_serl

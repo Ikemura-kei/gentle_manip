@@ -1,7 +1,7 @@
 # Scripted (automatic) sim demo collection for the red-cube lift task — drives
 # examples/collect_demos_sim.py with input=scripted: no teleop, runs headless, and
 # produces the same (obs, action) schema a human teleoperator would.
-task_name: red_cube_sim
+task_name: single_lift_cube_rigid
 object: red_cube
 object_type: rigid              # "rigid" | "soft"
 

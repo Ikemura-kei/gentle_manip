@@ -1,5 +1,5 @@
-# SUPERSET obs for the RIGID mushroom (debug / rigid->soft curriculum). Same as
-# mushroom_superset but WITHOUT stress: a rigid body has no von Mises (the rigid solver
+# SUPERSET obs for RIGID objects (OBJECT-AGNOSTIC). Same as superset_soft but WITHOUT stress:
+# a rigid body has no von Mises (rigid solver has no particles), so privileged = pose+vel only.
 # has no particles), so the privileged teacher signal is object pose + velocity only.
 include_joint_pos: false
 include_joint_vel: false
