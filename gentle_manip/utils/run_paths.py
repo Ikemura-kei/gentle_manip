@@ -92,8 +92,8 @@ def write_experiment_md(dest: Path, *, algo: str, motivation: str = "", hypothes
         lines += ["```", ""]
     lines += ["## Observations (append during/after — agent + user)", "- ", "",
               "## Final summary (fill when the run ends)",
-              "- duration:", "- learner steps:", "- replay buffer size at end:",
-              "- return / succeed:", "- verdict:", ""]
+              "_Record: duration, learner steps, replay-buffer size at end, return/succeed, verdict._",
+              "- ", ""]
     md.write_text("\n".join(lines))
     return md
 
