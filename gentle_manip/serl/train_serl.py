@@ -131,7 +131,13 @@ def actor_loop(agent, data_store, client, keys, cfg, sampling_rng, ip, port_agen
 
     tclient = TrainerClient("actor_env", ip, make_trainer_config(port_agentlace, port_agentlace + 1),
                             data_stores={"actor_env": data_store}, wait_for_server=True, timeout_ms=3000)
-    tclient.recv_network_callback(lambda params: agent.replace(state=agent.state.replace(params=params)))
+    # CRITICAL: reassign `agent` (nonlocal) — a lambda `agent.replace(...)` returns a new agent
+    # but discards it, so the actor would run the FROZEN init policy forever (the degenerate-
+    # behaviour-in-every-video bug). This is how the reference (codesign-dfom) does it.
+    def _update_params(params):
+        nonlocal agent
+        agent = agent.replace(state=agent.state.replace(params=params))
+    tclient.recv_network_callback(_update_params)
 
     N, horizon = num_envs, cfg["max_episode_steps"]
     obs = client.reset()                                 # dict of (N, ...)
