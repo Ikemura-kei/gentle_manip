@@ -28,6 +28,9 @@ import numpy as np
 
 # Default STATE view — MUST match the sim server's obs order (serl_sim_server teacher view).
 STATE_VIEW = ["ee_pos", "ee_quat", "gripper_width", "priv_object_pos", "priv_object_vel"]
+# PROPRIO view — deployable state for the point-cloud (student) pipeline: no privileged obs,
+# the PointNet consumes the cloud instead. MUST match the sim server's student-view obs order.
+PROPRIO_VIEW = ["ee_pos", "ee_quat", "gripper_width"]
 
 
 def _load_episodes(paths: Sequence[Path]) -> list:
@@ -48,12 +51,15 @@ def _episode_state(ep: dict, obs_keys: Sequence[str]) -> np.ndarray:
 
 
 def convert(demo_paths: Sequence[Path], out_dir: Path, obs_keys: Sequence[str] = STATE_VIEW,
-            val_split: float = 0.1, seed: int = 0) -> dict:
+            pointcloud_key: str = None, val_split: float = 0.1, seed: int = 0) -> dict:
     episodes = _load_episodes(demo_paths)
     states = [_episode_state(ep, obs_keys) for ep in episodes]
     actions = [np.asarray(ep["actions"], np.float32) for ep in episodes]
     rewards = [np.asarray(ep["rewards"], np.float32).reshape(-1) for ep in episodes]
     obs_dim, act_dim = states[0].shape[1], actions[0].shape[1]
+    # point-cloud modality (raw xyz, NOT normalized — the PointNet consumes metric coords)
+    clouds = ([np.asarray(ep["observations"][pointcloud_key], np.float32) for ep in episodes]
+              if pointcloud_key else None)
 
     # normalization stats over ALL data (raw units)
     all_s = np.concatenate(states, axis=0)
@@ -85,8 +91,11 @@ def convert(demo_paths: Sequence[Path], out_dir: Path, obs_keys: Sequence[str] =
         a = np.concatenate([norm_a(actions[i]) for i in idxs], axis=0)
         r = np.concatenate([rewards[i] for i in idxs], axis=0)
         tl = np.asarray([len(actions[i]) for i in idxs], np.int64)
-        np.savez_compressed(out_dir / f"{split_name}.npz", states=s, actions=a, rewards=r,
-                            terminals=np.zeros(len(s), bool), traj_lengths=tl)
+        arrays = dict(states=s, actions=a, rewards=r,
+                      terminals=np.zeros(len(s), bool), traj_lengths=tl)
+        if clouds is not None:                       # (T_total, N, 3) raw xyz
+            arrays["point_cloud"] = np.concatenate([clouds[i] for i in idxs], axis=0)
+        np.savez_compressed(out_dir / f"{split_name}.npz", **arrays)
         return len(idxs)
 
     n_tr = _write("train", train_idx)
@@ -96,7 +105,8 @@ def convert(demo_paths: Sequence[Path], out_dir: Path, obs_keys: Sequence[str] =
 
     meta = dict(obs_keys=list(obs_keys), obs_dim=int(obs_dim), action_dim=int(act_dim),
                 n_episodes=n, n_train_traj=n_tr, n_val_traj=n_va,
-                total_steps=int(all_s.shape[0]), out_dir=str(out_dir))
+                total_steps=int(all_s.shape[0]), out_dir=str(out_dir),
+                point_cloud=(None if clouds is None else list(clouds[0].shape[1:])))
     return meta
 
 
@@ -112,12 +122,17 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("demos", type=Path, help="demo pkl or dir (recurses for data.pkl)")
     ap.add_argument("--out", type=Path, required=True, help="output dir for train/val/normalization npz")
-    ap.add_argument("--obs-keys", nargs="+", default=STATE_VIEW, help="ordered state view")
+    ap.add_argument("--obs-keys", nargs="+", default=None,
+                    help="ordered state view (default: STATE_VIEW, or PROPRIO_VIEW with --point-cloud)")
+    ap.add_argument("--point-cloud", dest="pc_key", nargs="?", const="point_cloud", default=None,
+                    help="also store a raw point-cloud modality (student view); default key 'point_cloud'")
     ap.add_argument("--val-split", type=float, default=0.1)
     args = ap.parse_args()
+    obs_keys = args.obs_keys or (PROPRIO_VIEW if args.pc_key else STATE_VIEW)
     paths = _find_demo_pkls(args.demos)
     print(f"converting {len(paths)} demo file(s): {[str(p) for p in paths]}")
-    meta = convert(paths, args.out, obs_keys=args.obs_keys, val_split=args.val_split)
+    meta = convert(paths, args.out, obs_keys=obs_keys, pointcloud_key=args.pc_key,
+                   val_split=args.val_split)
     for k, v in meta.items():
         print(f"  {k}: {v}")
 

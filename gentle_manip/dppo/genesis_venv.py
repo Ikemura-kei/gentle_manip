@@ -22,9 +22,11 @@ import numpy as np
 
 class GenesisMultiStepVecEnv:
     def __init__(self, client, obs_keys, n_envs: int, n_obs_steps: int, n_action_steps: int,
-                 max_episode_steps: int, obs_min, obs_max, action_min, action_max):
+                 max_episode_steps: int, obs_min, obs_max, action_min, action_max,
+                 pointcloud_key: Optional[str] = None):
         self.client = client                       # SimEnvClient (batched N-env rpc)
-        self.obs_keys = list(obs_keys)
+        self.obs_keys = list(obs_keys)             # proprio/state keys -> normalized "state"
+        self.pointcloud_key = pointcloud_key       # e.g. "point_cloud" -> raw xyz modality
         self.n_envs = int(n_envs)
         self.n_obs_steps = int(n_obs_steps)
         self.n_action_steps = int(n_action_steps)
@@ -51,15 +53,22 @@ class GenesisMultiStepVecEnv:
     def _unnorm_action(self, a: np.ndarray) -> np.ndarray:        # [-1,1] -> physical
         return ((a + 1.0) / 2.0 * self._act_range + self.action_min).astype(np.float32)
 
-    def _stacked(self) -> dict:                     # -> {"state": (n_envs, n_obs_steps, obs_dim)}
+    def _modalities(self, obs: dict) -> dict:       # sim obs -> {"state": norm, ["point_cloud": raw]}
+        m = {"state": self._norm_obs(self._raw_state(obs))}
+        if self.pointcloud_key is not None:         # raw xyz (meters); crop bounds already limit it
+            m["point_cloud"] = np.asarray(obs[self.pointcloud_key], np.float32).reshape(self.n_envs, -1, 3)
+        return m
+
+    def _stacked(self) -> dict:                     # per modality -> (n_envs, n_obs_steps, ...)
         h = list(self._hist)
         while len(h) < self.n_obs_steps:            # left-pad with the earliest obs
             h.insert(0, h[0])
-        return {"state": np.stack(h[-self.n_obs_steps:], axis=1)}
+        h = h[-self.n_obs_steps:]
+        return {k: np.stack([step[k] for step in h], axis=1) for k in h[0]}
 
     def _reset_all(self) -> dict:
-        s = self._norm_obs(self._raw_state(self.client.reset()))
-        self._hist = deque([s], maxlen=self.n_obs_steps + 1)
+        m = self._modalities(self.client.reset())
+        self._hist = deque([m], maxlen=self.n_obs_steps + 1)
         self._cnt[:] = 0
         return self._stacked()
 
@@ -89,7 +98,7 @@ class GenesisMultiStepVecEnv:
             obs, r, _done, _info = self.client.step(self._unnorm_action(a[:, t]))
             reward += np.asarray(r, np.float32).reshape(self.n_envs)
             self._cnt += 1
-            self._hist.append(self._norm_obs(self._raw_state(obs)))
+            self._hist.append(self._modalities(obs))
         terminated = np.zeros(self.n_envs, bool)    # no early termination (robomimic pattern)
         truncated = self._cnt >= self.max_episode_steps
         obs_out = self._stacked()
@@ -110,21 +119,25 @@ class GenesisMultiStepVecEnv:
 
 
 def build_genesis_venv(num_envs, obs_steps, act_steps, max_episode_steps, normalization_path,
-                       obs_keys=None, host="127.0.0.1", port=5570, connect_timeout=240.0):
+                       obs_keys=None, pointcloud_key=None, host="127.0.0.1", port=5570,
+                       connect_timeout=240.0):
     """Factory used by DPPO's make_async (env_type="genesis"): connect a SimEnvClient to a
     running sim server, load demo normalization, and wrap it as a DPPO VectorEnv.
 
     The sim server (scripts/serl_sim_server.py) must already be serving the SAME experiment
     + view whose obs order matches obs_keys / the demo converter. normalization_path is the
-    demo converter's normalization.npz (obs_min/obs_max/action_min/action_max).
+    demo converter's normalization.npz (obs_min/obs_max/action_min/action_max). Set
+    pointcloud_key="point_cloud" for the DP3/PointNet student view (adds a raw-xyz modality).
     """
     from gentle_manip.envs.rpc import SimEnvClient
-    from gentle_manip.dppo.convert_demos import STATE_VIEW
+    from gentle_manip.dppo.convert_demos import STATE_VIEW, PROPRIO_VIEW
 
+    default_keys = PROPRIO_VIEW if pointcloud_key else STATE_VIEW
     stats = np.load(normalization_path)
     client = SimEnvClient(host=host, port=int(port), connect_timeout=connect_timeout)
     return GenesisMultiStepVecEnv(
-        client, obs_keys=list(obs_keys) if obs_keys else STATE_VIEW, n_envs=num_envs,
+        client, obs_keys=list(obs_keys) if obs_keys else default_keys, n_envs=num_envs,
         n_obs_steps=obs_steps, n_action_steps=act_steps, max_episode_steps=max_episode_steps,
         obs_min=stats["obs_min"], obs_max=stats["obs_max"],
-        action_min=stats["action_min"], action_max=stats["action_max"])
+        action_min=stats["action_min"], action_max=stats["action_max"],
+        pointcloud_key=pointcloud_key)

@@ -14,7 +14,7 @@ out_dir: dataset/demos
 
 input: scripted               # automatic state-machine expert (headless)
 show_viewer: false
-n_episodes: 10
+n_episodes: 50               # DP3/DPPO BC set size (matches the DP3 author's 50)
 rate: 30                      # Hz
 speed: 0.5                    # scripted pose speed_cap (proportional move, capped)
 # Gripper close rate as a NORMALIZED action. MUST match the action scale: at gripper scale
