@@ -68,6 +68,7 @@ train:
   n_steps: 75
   gamma: 0.99
   augment: False             # point clouds: no image RandomShiftsAug
+  grad_accumulate: 1         # img-agent field; 1 = no gradient accumulation
   actor_lr: 1e-5
   actor_weight_decay: 0
   actor_lr_scheduler:
