@@ -21,7 +21,8 @@ import numpy as np
 CSV_FIELDS = ["episode", "batch", "env", "scenario_seed", "success", "ever_success",
               "first_success_step", "steps", "episode_reward", "stress_peak", "stress_mean",
               "obj_dx", "obj_dy", "obj_roll", "obj_pitch", "obj_yaw",
-              "home_dx", "home_dy", "home_dz", "mat_E", "mat_nu", "mat_rho", "mat_yield"]
+              "home_dx", "home_dy", "home_dz", "mat_E", "mat_nu", "mat_rho", "mat_yield",
+              "obj_scale", "obj_bend_deg", "obj_twist_deg", "obj_taper", "obj_rbf"]
 
 
 def _nan(x) -> float:

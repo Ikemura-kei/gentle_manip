@@ -60,6 +60,23 @@ def test_sample_scene_only_set_keys_and_in_range():
     assert DRConfig().sample_scene(rng) == {}                   # nothing set
 
 
+def test_sample_shape_scale_ranges_and_units():
+    rng = np.random.default_rng(0)
+    assert DRConfig().sample_shape_scale(rng) == {}             # disabled -> empty
+    assert not DRConfig().has_shape_dr()
+    cfg = DRConfig(object_scale=(0.8, 1.2), object_bend_deg=(-25, 25), object_taper=(-0.1, 0.1))
+    assert cfg.has_scene_dr() and cfg.has_shape_dr()
+    for _ in range(50):
+        s = cfg.sample_shape_scale(rng)
+        assert set(s) == {"scale", "bend", "taper"}
+        assert 0.8 <= s["scale"] <= 1.2
+        assert abs(s["bend"]) <= np.deg2rad(25) + 1e-6          # deg -> radians
+        assert abs(s["taper"]) <= 0.1
+    # scale-only counts as scene DR but not shape DR
+    assert DRConfig(object_scale=(0.9, 1.1)).has_scene_dr()
+    assert not DRConfig(object_scale=(0.9, 1.1)).has_shape_dr()
+
+
 # ── presets + yaml configs ──────────────────────────────────────────────────────
 def test_presets():
     assert set(DR_PRESETS) == {"mild", "aggressive"}

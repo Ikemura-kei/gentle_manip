@@ -26,6 +26,11 @@ def aggressive() -> DRConfig:
         object_rho=(300.0, 1500.0),
         object_yield=(1.0e4, 4.0e4),
         coup_friction=(2.5, 6.0),
+        # food comes in different sizes and shapes
+        object_scale=(0.8, 1.2),
+        object_bend_deg=(-25.0, 25.0),
+        object_twist_deg=(-20.0, 20.0),
+        object_taper=(-0.15, 0.15),
     )
 
 

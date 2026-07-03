@@ -38,6 +38,7 @@ def _scenario_columns(sc, n):
     dr = sc.get("dr") or {}
     dxy, eul, home = dr.get("object_dxy"), dr.get("object_euler"), dr.get("home_offset")
     mat = sc.get("material") or {}
+    scene = sc.get("scene") or {}          # object size + shape DR (constant per scene)
     for j in range(n):
         c = cols[j]
         if dxy is not None:
@@ -47,6 +48,8 @@ def _scenario_columns(sc, n):
         if home is not None:
             c["home_dx"], c["home_dy"], c["home_dz"] = (float(home[j][0]), float(home[j][1]), float(home[j][2]))
         c.update(mat_E=mat.get("E"), mat_nu=mat.get("nu"), mat_rho=mat.get("rho"), mat_yield=mat.get("yield"))
+        c.update(obj_scale=scene.get("scale"), obj_bend_deg=scene.get("bend_deg"),
+                 obj_twist_deg=scene.get("twist_deg"), obj_taper=scene.get("taper"), obj_rbf=scene.get("rbf"))
     return cols
 
 

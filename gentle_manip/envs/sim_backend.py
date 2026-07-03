@@ -60,6 +60,10 @@ class SimBackend:
         self._rng = np.random.default_rng(config.get("seed", 0))
 
         # Kept for per-scene DR (material/friction) — rebuilt via process.restart().
+        self._nominal_scale = float(spec.objects[0].scale) if spec.objects else 1.0
+        self._deform_dir = None            # temp dir for shape-DR deformed meshes
+        self._applied_scene: dict = {}     # size/shape DR actually applied (for eval CSV)
+        spec = self._apply_shape_scale_dr(spec)   # object SIZE + SHAPE DR at launch (bakes into spec)
         self._spec = spec
         worker_kwargs = dict(
             settle_steps=int(sim_cfg.get("settle_steps", 30)),
@@ -131,18 +135,62 @@ class SimBackend:
                 "rho": float(e.density if e.density is not None else m.density),
                 "yield": float(m.von_mises_yield_stress)}
 
+    def scene_params(self) -> dict:
+        """The object SIZE + SHAPE DR actually applied to the current scene ('scale',
+        'bend_deg', 'twist_deg', 'taper', 'rbf' for whatever is randomized) — {} if none.
+        Constant per scene; recorded per eval episode alongside material."""
+        return dict(self._applied_scene)
+
+    def _apply_shape_scale_dr(self, spec: SceneSpec) -> SceneSpec:
+        """Sample object size + shape DR and bake it into `spec` (scale on the ObjectEntry +
+        a deformed mesh written to a temp .obj). Deforms from the REGISTRY nominal mesh and the
+        NOMINAL scale so it's idempotent (safe to re-apply on rebuild). Records the applied
+        values in self._applied_scene. No-op if size/shape DR is off or the object has no mesh."""
+        import dataclasses
+        import numpy as _np
+        params = self._dr.sample_shape_scale(self._rng)
+        if not params or not spec.objects:
+            return spec
+        from gentle_manip.assets.registry import get_object_def
+        o = spec.objects[0]
+        updates, applied = {}, {}
+        if "scale" in params:
+            updates["scale"] = float(self._nominal_scale * params["scale"])
+            applied["scale"] = updates["scale"]
+        shape = {k: params[k] for k in ("bend", "twist", "taper", "rbf") if k in params}
+        nominal_mesh = get_object_def(o.name).mesh_path          # always from nominal (no chaining)
+        if shape and nominal_mesh is not None:                   # mesh object only; boxes -> size only
+            import tempfile
+            from gentle_manip.assets import mesh_deform
+            if self._deform_dir is None:
+                self._deform_dir = tempfile.mkdtemp(prefix="gm_deform_")
+            updates["mesh_path"] = str(mesh_deform.save_deformed(nominal_mesh, shape, self._rng, self._deform_dir))
+            for k, deg in (("bend", "bend_deg"), ("twist", "twist_deg")):
+                if k in shape:
+                    applied[deg] = float(_np.rad2deg(shape[k]))
+            for k in ("taper", "rbf"):
+                if k in shape:
+                    applied[k] = float(shape[k])
+        self._applied_scene = applied
+        if not updates:
+            return spec
+        objects = list(spec.objects)
+        objects[0] = dataclasses.replace(o, **updates)
+        return dataclasses.replace(spec, objects=objects)
+
     def randomize_scene(self) -> RawObs:
-        """Sample per-scene DR (object material + coupling friction) and REBUILD the
-        scene via restart (MPM material is global per scene). Expensive — call every N
-        episodes, not every reset. Returns the reset obs of the new scene; a plain
-        reset() if no scene DR is configured.
+        """Sample per-scene DR (material + coupling friction + object size/shape) and REBUILD
+        the scene via restart (MPM material + mesh are global per scene). Expensive — call every
+        N episodes, not every reset. Returns the reset obs of the new scene; a plain reset() if
+        no scene DR is configured.
         """
         if not self._dr.has_scene_dr():
             return self.reset()
         if not hasattr(self.process, "restart"):
             raise RuntimeError("scene DR needs the subprocess backend (use_subprocess=True)")
         params = self._dr.sample_scene(self._rng)
-        self._spec = self._spec_with_material(params)
+        spec = self._spec_with_material(params)
+        self._spec = self._apply_shape_scale_dr(spec)           # size + shape (resampled)
         self.process.restart(self._spec, coup_friction=params.get("coup_friction"))
         return self.reset()
 
@@ -203,6 +251,10 @@ class SimBackend:
 
     def close(self) -> None:
         self.process.stop()
+        if self._deform_dir is not None:            # remove temp shape-DR meshes
+            import shutil
+            shutil.rmtree(self._deform_dir, ignore_errors=True)
+            self._deform_dir = None
 
     # ── internal ──────────────────────────────────────────────────────────────
     def _build_raw_obs(self, state: dict) -> RawObs:

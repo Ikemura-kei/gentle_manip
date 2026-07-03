@@ -122,10 +122,12 @@ def build_scene(
         mat = odef.material
         rho = entry.density if entry.density is not None else mat.density
         size = tuple(s * entry.scale for s in odef.size)
-        # Scanned mesh (in meters; scale=entry.scale, default 1.0) when mesh_path is
-        # set, else a primitive box. Same morph drives rigid or MPM material below.
-        if odef.mesh_path is not None:
-            morph = gs.morphs.Mesh(file=odef.mesh_path, pos=odef.default_pos,
+        # Scanned mesh (in meters; scale=entry.scale, default 1.0) when a mesh is
+        # set, else a primitive box. entry.mesh_path (a shape-DR deformed .obj) overrides
+        # the registry default. Same morph drives rigid or MPM material below.
+        mesh_file = entry.mesh_path or odef.mesh_path
+        if mesh_file is not None:
+            morph = gs.morphs.Mesh(file=mesh_file, pos=odef.default_pos,
                                    scale=entry.scale, euler=(0, 0, 0))
         else:
             morph = gs.morphs.Box(size=size, pos=odef.default_pos, euler=(0, 0, 0))

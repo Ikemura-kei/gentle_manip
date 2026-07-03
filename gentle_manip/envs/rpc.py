@@ -133,6 +133,11 @@ def serve_env(env, host: str = "127.0.0.1", port: int = 5555, ready_msg: str = "
                                 hdr["material"] = be.material_params()
                             except Exception:
                                 pass
+                        if be is not None and hasattr(be, "scene_params"):   # size/shape DR
+                            try:
+                                hdr["scene"] = be.scene_params()
+                            except Exception:
+                                pass
                         send_msg(conn, hdr, _as_arrays(obs))
                     elif cmd == "step":
                         obs, reward, done, info = env.step(arrays["action"])
@@ -204,7 +209,8 @@ class SimEnvClient:
         header, obs = recv_msg(self.conn)
         # per-env randomization applied this reset (object dxy/euler, arm home) + material —
         # stashed for the eval harness (last_scenario), obs return unchanged.
-        self.last_scenario = {"dr": header.get("dr"), "material": header.get("material")}
+        self.last_scenario = {"dr": header.get("dr"), "material": header.get("material"),
+                              "scene": header.get("scene")}
         return obs
 
     def step(self, action: np.ndarray):
