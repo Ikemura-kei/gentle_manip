@@ -106,6 +106,10 @@ class SimBackend:
         else:
             object_euler = self._dr.sample_object_euler(self._rng, self.num_envs)
 
+        # Record the per-env randomization actually applied this reset (for eval audit/CSV).
+        self._last_reset_dr = {"object_dxy": object_dxy, "home_offset": home_offset,
+                               "object_euler": object_euler}
+
         state = self.process.reset(object_dxy, home_offset, object_euler)
         self._last_state = state
         # Seed targets from the actual reset pose so the first deltas are relative
@@ -114,6 +118,18 @@ class SimBackend:
         self._target_quat = state["ee_quat"].astype(np.float64).copy()
         self._target_gripper = state["gripper_width"].astype(np.float64).copy()
         return self._build_raw_obs(state)
+
+    def material_params(self) -> dict:
+        """The resolved material of the (first) object — E/nu/rho/yield, ObjectEntry overrides
+        applied over the registry default (same resolution as SceneBuilder). Constant per
+        scene; recorded per eval episode for the audit trail."""
+        from gentle_manip.assets.registry import get_object_def
+        e = self._spec.objects[0]
+        m = get_object_def(e.name).material
+        return {"E": float(e.youngs_modulus if e.youngs_modulus is not None else m.youngs_modulus),
+                "nu": float(e.poisson_ratio if e.poisson_ratio is not None else m.poisson_ratio),
+                "rho": float(e.density if e.density is not None else m.density),
+                "yield": float(m.von_mises_yield_stress)}
 
     def randomize_scene(self) -> RawObs:
         """Sample per-scene DR (object material + coupling friction) and REBUILD the

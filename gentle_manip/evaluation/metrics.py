@@ -14,9 +14,14 @@ from typing import Any, Dict, List
 
 import numpy as np
 
-# episodes.csv columns (stable order)
+# episodes.csv columns (stable order). The obj_*/home_*/mat_* columns are the RANDOMIZATION
+# parameters actually applied to that episode (object initial offset + orientation, arm-home
+# jitter, object material) — the audit trail that makes runs comparable. Blank when a given DR
+# is disabled; mat_* are constant during eval (material not per-episode randomized).
 CSV_FIELDS = ["episode", "batch", "env", "scenario_seed", "success", "ever_success",
-              "first_success_step", "steps", "episode_reward", "stress_peak", "stress_mean"]
+              "first_success_step", "steps", "episode_reward", "stress_peak", "stress_mean",
+              "obj_dx", "obj_dy", "obj_roll", "obj_pitch", "obj_yaw",
+              "home_dx", "home_dy", "home_dz", "mat_E", "mat_nu", "mat_rho", "mat_yield"]
 
 
 def _nan(x) -> float:

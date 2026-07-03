@@ -14,7 +14,6 @@ import torch
 from agent.eval.eval_agent import EvalAgent
 
 from gentle_manip.evaluation import EvalSpec, run_eval
-from gentle_manip.evaluation.harness import eval_out_dir
 
 
 class _DiffusionPolicy:
@@ -51,9 +50,10 @@ class EvalHarnessAgent(EvalAgent):
             max_policy_steps=int(self.cfg.env.max_episode_steps) // self.act_steps,
         )
         policy = _DiffusionPolicy(self.model, self.obs_keys, self.device, self.act_steps)
-        out_dir = eval_out_dir(self.cfg.base_policy_path)
+        # ONE folder: hydra's run.dir already IS <base_policy_run>/eval/<datetime> (via the
+        # eval_base resolver in the config's logdir), so write the harness outputs there.
         run_eval(
-            self.venv, policy, spec, out_dir,
+            self.venv, policy, spec, self.logdir,
             experiment_name=self.cfg.get("experiment"),
             checkpoint=self.cfg.base_policy_path,
             record_batches=int(self.cfg.get("record_batches", 2)),

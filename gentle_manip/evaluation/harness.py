@@ -29,6 +29,27 @@ def eval_out_dir(checkpoint, base_logs: str = "logs/eval", name: str = "eval") -
     return Path(base_logs) / name / ts
 
 
+def _scenario_columns(sc, n):
+    """Per-env randomization -> episodes.csv columns. sc = {"dr": {object_dxy, object_euler,
+    home_offset}, "material": {E, nu, rho, yield}}; any DR entry may be None (disabled)."""
+    cols = [{} for _ in range(n)]
+    if not sc:
+        return cols
+    dr = sc.get("dr") or {}
+    dxy, eul, home = dr.get("object_dxy"), dr.get("object_euler"), dr.get("home_offset")
+    mat = sc.get("material") or {}
+    for j in range(n):
+        c = cols[j]
+        if dxy is not None:
+            c["obj_dx"], c["obj_dy"] = float(dxy[j][0]), float(dxy[j][1])
+        if eul is not None:
+            c["obj_roll"], c["obj_pitch"], c["obj_yaw"] = (float(eul[j][0]), float(eul[j][1]), float(eul[j][2]))
+        if home is not None:
+            c["home_dx"], c["home_dy"], c["home_dz"] = (float(home[j][0]), float(home[j][1]), float(home[j][2]))
+        c.update(mat_E=mat.get("E"), mat_nu=mat.get("nu"), mat_rho=mat.get("rho"), mat_yield=mat.get("yield"))
+    return cols
+
+
 def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional[str] = None,
              checkpoint=None, record_batches: int = 2, extra_meta: Optional[dict] = None) -> Dict[str, Any]:
     out_dir = Path(out_dir)
@@ -46,6 +67,8 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
             options += [{} for _ in range(n - 1)]
         obs = venv.reset_arg(options)
         policy.reset()
+        dr_cols = _scenario_columns(                    # randomization params for this batch
+            venv.scenario_params() if hasattr(venv, "scenario_params") else None, n)
 
         ep_reward = np.zeros(n)
         ever = np.zeros(n, bool)
@@ -80,6 +103,7 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
                 "episode_reward": float(ep_reward[j]),
                 "stress_peak": None if np.isnan(stress_peak[j]) else float(stress_peak[j]),
                 "stress_mean": None if stress_cnt[j] == 0 else float(stress_sum[j] / stress_cnt[j]),
+                **dr_cols[j],
             })
         print(f"[eval] batch {i + 1}/{spec.n_batches} seed={seed_i} "
               f"success={final.mean():.2f} ever={ever.mean():.2f}", flush=True)

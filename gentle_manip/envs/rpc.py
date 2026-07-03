@@ -121,7 +121,19 @@ def serve_env(env, host: str = "127.0.0.1", port: int = 5555, ready_msg: str = "
                     elif cmd == "reset":
                         flush_video()              # save the episode just finished
                         vep[0] += 1
-                        send_msg(conn, {"ok": True}, _as_arrays(env.reset()))
+                        obs = env.reset()
+                        hdr = {"ok": True}
+                        be = getattr(env, "backend", None)   # per-env DR + material for eval CSV
+                        dr = getattr(be, "_last_reset_dr", None)
+                        if dr is not None:
+                            hdr["dr"] = {k: (None if v is None else np.asarray(v).tolist())
+                                         for k, v in dr.items()}
+                        if be is not None and hasattr(be, "material_params"):
+                            try:
+                                hdr["material"] = be.material_params()
+                            except Exception:
+                                pass
+                        send_msg(conn, hdr, _as_arrays(obs))
                     elif cmd == "step":
                         obs, reward, done, info = env.step(arrays["action"])
                         if frame_fn is not None and _recording(vep[0]):
@@ -167,6 +179,7 @@ class SimEnvClient:
 
     def __init__(self, host: str = "127.0.0.1", port: int = 5555, connect_timeout: float = 240.0) -> None:
         self.conn = self._connect(host, port, connect_timeout)
+        self.last_scenario = None      # {"dr":..., "material":...} from the most recent reset
 
     @staticmethod
     def _connect(host: str, port: int, timeout: float) -> socket.socket:
@@ -188,7 +201,10 @@ class SimEnvClient:
 
     def reset(self) -> Dict[str, np.ndarray]:
         send_msg(self.conn, {"cmd": "reset"}, {})
-        _, obs = recv_msg(self.conn)
+        header, obs = recv_msg(self.conn)
+        # per-env randomization applied this reset (object dxy/euler, arm home) + material —
+        # stashed for the eval harness (last_scenario), obs return unchanged.
+        self.last_scenario = {"dr": header.get("dr"), "material": header.get("material")}
         return obs
 
     def step(self, action: np.ndarray):

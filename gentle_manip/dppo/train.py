@@ -34,9 +34,19 @@ os.environ.setdefault("DPPO_DATA_DIR", str(_REPO / "dataset" / "dppo"))
 os.environ.setdefault("DPPO_WANDB_ENTITY", "")
 
 
+def _eval_base(ckpt: str) -> str:
+    """OmegaConf resolver: a checkpoint's own training run dir, so an eval config can point
+    hydra.run.dir at <run>/eval/<datetime> (ONE folder — no separate dppo-eval/ tree).
+    <run>/checkpoint/state_X.pt -> <run>; otherwise the checkpoint's parent."""
+    p = Path(ckpt)
+    return str(p.parent.parent if p.parent.name == "checkpoint" else p.parent)
+
+
 def main() -> None:
     if not _RUN_PY.exists():
         raise FileNotFoundError(f"DPPO run.py not found at {_RUN_PY} — is the submodule initialised?")
+    from omegaconf import OmegaConf
+    OmegaConf.register_new_resolver("eval_base", _eval_base, replace=True)
     runpy.run_path(str(_RUN_PY), run_name="__main__")
 
 

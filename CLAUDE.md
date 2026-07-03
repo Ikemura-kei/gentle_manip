@@ -678,6 +678,14 @@ across algorithms and runs. Do NOT write a second, algorithm-specific eval loop.
   stress_peak, stress_mean). Stress columns are NaN for rigid tasks. Stress reaches the harness
   via the rpc step (`PolicyEnv.step` → per-env `stress_max`/`stress_mean` from
   `von_mises_stress` → `serve_env` → `SimEnvClient.step` → the venv's step `info`).
+- **Per-episode randomization audit:** `episodes.csv` also records the DR params ACTUALLY
+  applied (`obj_dx/dy`, `obj_roll/pitch/yaw`, `home_dx/dy/dz`, `mat_E/nu/rho/yield`). Captured
+  server-side (`SimBackend._last_reset_dr` + `material_params()`) and returned in the rpc reset
+  (`SimEnvClient.last_scenario` → `venv.scenario_params()`). Verified: a fixed `scenario_seed`
+  reproduces the object placement to ~1e-6 (deterministic scenarios), so the same 100 scenarios
+  face every policy. NOTE: soft-body MPM on GPU is NOT bit-deterministic in the *rollout*
+  (parallel float atomics), so success/stress have small run-to-run variance at identical init —
+  the initial conditions are fixed (apples-to-apples), the physics has residual noise.
 - **Output location:** eval writes into the evaluated policy's OWN training run dir —
   `<base_policy_run>/eval/<datetime>/` (`harness.eval_out_dir`; falls back to `logs/eval/...`).
   Includes `summary.json`, `episodes.csv`, `config/` (env snapshot), `render/*.mp4` (env-0 clips

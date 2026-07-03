@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from gentle_manip.evaluation import EvalSpec
-from gentle_manip.evaluation.harness import eval_out_dir
+from gentle_manip.evaluation.harness import eval_out_dir, _scenario_columns
 from gentle_manip.evaluation.metrics import CSV_FIELDS, aggregate, write_episodes_csv, write_summary
 
 
@@ -73,3 +73,29 @@ def test_write_summary_json(tmp_path):
     write_summary(aggregate(_recs(), checkpoint="c"), tmp_path / "summary.json")
     d = json.loads((tmp_path / "summary.json").read_text())
     assert d["success_rate"] == 0.5 and d["is_soft_task"]
+
+
+# ── per-episode randomization columns ─────────────────────────────────────────
+def test_scenario_columns_parses_dr_and_material():
+    sc = {"dr": {"object_dxy": [[0.01, -0.02], [0.03, 0.04]],
+                 "object_euler": [[0.1, 0.2, 3.0], [0.0, 0.0, -1.0]],
+                 "home_offset": None},                       # home DR disabled
+          "material": {"E": 3e5, "nu": 0.35, "rho": 1050.0, "yield": 4e4}}
+    cols = _scenario_columns(sc, 2)
+    assert cols[0]["obj_dx"] == 0.01 and cols[0]["obj_yaw"] == 3.0
+    assert "home_dx" not in cols[0]                          # disabled -> column blank
+    assert cols[1]["mat_E"] == 3e5 and cols[0]["mat_yield"] == 4e4
+
+def test_scenario_columns_none_is_empty():
+    assert _scenario_columns(None, 3) == [{}, {}, {}]
+
+def test_dr_columns_survive_csv_roundtrip(tmp_path):
+    recs = _recs(soft=True)
+    for r, c in zip(recs, _scenario_columns({"dr": {"object_dxy": [[0.01, 0.02]] * 4,
+                                                    "object_euler": None, "home_offset": None},
+                                             "material": {"E": 3e5, "nu": 0.35, "rho": 1050.0,
+                                                          "yield": 4e4}}, 4)):
+        r.update(c)
+    write_episodes_csv(recs, tmp_path / "e.csv")
+    row = next(csv.DictReader(open(tmp_path / "e.csv")))
+    assert float(row["obj_dx"]) == 0.01 and float(row["mat_E"]) == 3e5 and row["obj_yaw"] == ""

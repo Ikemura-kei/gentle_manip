@@ -126,6 +126,11 @@ class GenesisMultiStepVecEnv:
     def reset(self, **kwargs) -> dict:
         return self._reset_all()
 
+    def scenario_params(self):
+        """Per-env randomization applied at the last reset (object dxy/euler, arm home) +
+        material — for the eval harness's per-episode CSV. Passthrough from the rpc client."""
+        return getattr(self.client, "last_scenario", None)
+
     def step(self, action_venv):
         a = np.asarray(action_venv, np.float32)
         if a.ndim == 2:                             # (n_envs, act_dim) -> single-step chunk

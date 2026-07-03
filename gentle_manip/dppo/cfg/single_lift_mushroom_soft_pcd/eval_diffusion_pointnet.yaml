@@ -17,7 +17,10 @@ hydra:
 _target_: gentle_manip.dppo.eval_agent.EvalHarnessAgent
 
 name: ${env_name}_eval_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
-logdir: ${oc.env:DPPO_LOG_DIR}/dppo-eval/${name}/${now:%Y-%m-%d}_${now:%H-%M-%S}_${seed}
+# ONE output folder: eval lives inside the evaluated policy's own run dir, <run>/eval/<datetime>
+# (eval_base resolver = the checkpoint's run dir; registered in gentle_manip.dppo.train). hydra's
+# run.dir == this, and the harness writes summary/csv/config/render into the SAME dir.
+logdir: ${eval_base:${base_policy_path}}/eval/${now:%Y-%m-%d}_${now:%H-%M-%S}
 base_policy_path: ???        # set on CLI: a pre_diffusion_pointnet (BC) or finetuned checkpoint
 normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_mushroom_soft_pcd/normalization.npz
 experiment: single_lift_mushroom_soft   # env (experiment) config snapshotted into the eval dir
