@@ -14,7 +14,11 @@
 #     --index-url https://download.pytorch.org/whl/cu121
 # (A bare `uv sync` may pull the CPU torch that dppo pins — reinstall the CUDA build after.)
 #
-# Run:  uv run --project envs/dppo python third_party/dppo/script/run.py --config-name=... --config-dir=...
+# Run:  uv run --project envs/dppo python -m gentle_manip.dppo.train \
+#         --config-path $(pwd)/gentle_manip/dppo/cfg/<exp> --config-name <ft_ppo_diffusion_mlp|pre_diffusion_mlp>
+#       (gentle_manip.dppo.train is a thin launcher: pins repo root on sys.path so the
+#        genesis bridge imports after hydra's chdir, sets DPPO_LOG_DIR/DPPO_DATA_DIR,
+#        then hands off to third_party/dppo/script/run.py. See its docstring.)
 [project]
 name = "gentle-manip-dppo"
 version = "0.1.0"
