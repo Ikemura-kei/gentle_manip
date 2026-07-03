@@ -36,7 +36,7 @@ use_ddim: False              # full 20-step denoising for an honest BC eval
 ddim_steps: ${ft_denoising_steps}
 
 n_steps: 75                  # per-env steps this eval pass (max_episode_steps / act_steps)
-render_num: 0
+render_num: 4
 
 env:
   n_envs: 4                  # MUST match serl_sim_server --num-envs
@@ -44,7 +44,10 @@ env:
   env_type: genesis
   max_episode_steps: 300
   reset_at_iteration: False
-  save_video: False
+  # save_video: the genesis sim renders env 0 only, so this writes ONE mp4 (env 0's rollout)
+  # to <logdir>/render/eval_trial-0.mp4. REQUIRES the server started with --render-rgb (it
+  # builds the RGB frame camera + enables the 'render' rpc the bridge pulls frames from).
+  save_video: True
   use_image_obs: True
   # per-step reward ~0.2-0.34 while holding a lifted mushroom -> best-step >= 0.2 ~ "reached
   # and held the lift". A PROXY (best single-step reward); read avg_episode_reward too.

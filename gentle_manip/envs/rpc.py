@@ -132,6 +132,13 @@ def serve_env(env, host: str = "127.0.0.1", port: int = 5555, ready_msg: str = "
                             "done": bool(np.asarray(done).all()),
                             "success": [bool(i.get("success", False)) for i in info],
                         }, _as_arrays(obs))
+                    elif cmd == "render":
+                        # On-demand RGB frame (env 0) for a client that writes its own video
+                        # (e.g. the DPPO eval/finetune bridge). frame_fn -> (H,W,3) uint8.
+                        if frame_fn is not None:
+                            send_msg(conn, {"ok": True}, {"frame": np.asarray(frame_fn(), dtype=np.uint8)})
+                        else:
+                            send_msg(conn, {"ok": False, "error": "server has no frame camera (start with --render-rgb)"}, {})
                     else:
                         send_msg(conn, {"ok": False, "error": f"unknown cmd {cmd!r}"}, {})
             except (ConnectionError, OSError):
@@ -187,6 +194,13 @@ class SimEnvClient:
         done = np.asarray([header.get("done", False)], dtype=bool)
         info = [{"success": s} for s in header.get("success", [False])]
         return obs, reward, done, info
+
+    def render(self):
+        """Request an RGB frame (env 0) from the server, or None if unavailable.
+        The server must be started with a frame camera (serl_sim_server --render-rgb)."""
+        send_msg(self.conn, {"cmd": "render"}, {})
+        header, arrays = recv_msg(self.conn)
+        return arrays.get("frame") if header.get("ok") else None
 
     def close(self) -> None:
         try:

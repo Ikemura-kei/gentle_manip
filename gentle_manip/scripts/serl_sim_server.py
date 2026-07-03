@@ -26,6 +26,10 @@ def main() -> None:
     ap.add_argument("--clip-dir", default=None, help="dir for periodic RGB behaviour clips (overrides --run-name)")
     ap.add_argument("--clip-every", type=int, default=25, help="record 1 clip every N episodes (with clips on)")
     ap.add_argument("--run-name", default=None, help="share the learner's run: clips -> logs/serl/<task>/<run>/videos")
+    ap.add_argument("--render-rgb", action="store_true",
+                    help="build the RGB frame camera + enable the on-demand 'render' rpc "
+                         "(so a client — e.g. the DPPO eval/finetune bridge — can pull frames "
+                         "and write its own video). No server-side clip files needed.")
     args = ap.parse_args()
 
     os.environ.setdefault("MUJOCO_GL", "egl")
@@ -52,16 +56,17 @@ def main() -> None:
         from gentle_manip.utils.run_paths import run_dir
         clip_dir = str(run_dir("serl", exp.name, args.run_name) / "videos")
     record_clips = clip_dir is not None
+    want_frame_cam = record_clips or args.render_rgb    # build the RGB clip camera if either wants it
     # num_envs parallel genesis envs (vectorized actor); max_episode_steps huge (no auto-reset
     # — the SERL actor drives episodes synchronously across all envs).
     backend = SimBackend(task.scene_spec, num_envs=args.num_envs, use_subprocess=False, show_viewer=False,
-                         render_cameras=obs_cfg.needs_cameras(), record_camera=record_clips,
+                         render_cameras=obs_cfg.needs_cameras(), record_camera=want_frame_cam,
                          config={"sim": {"settle_steps": args.settle_steps}, "dr": exp.dr})
     env = PolicyEnv(backend, obs_cfg, exp.action_config, task=task,
                     max_episode_steps=10 ** 9, augmentation=aug)
 
     frame_fn = None
-    if record_clips:
+    if want_frame_cam:
         from gentle_manip.robot.xarm7_sim import _np
         cam_list = next(iter(backend.process.handle.cameras.values()))   # one clip cam, env 0
         def frame_fn():
@@ -70,6 +75,7 @@ def main() -> None:
     print(f"serl sim server: exp={exp.name} view={args.view} object={task.object_name} "
           f"num_envs={args.num_envs} substeps={task.scene_spec.sim_substeps} render={obs_cfg.needs_cameras()} "
           f"clips={'every %d ep -> %s' % (args.clip_every, clip_dir) if record_clips else 'off'} "
+          f"render_rgb={args.render_rgb} "
           f"obs={list(env.observation_space.spaces)} — serving on {args.host}:{args.port}",
           flush=True)
     serve_env(env, host=args.host, port=args.port, frame_fn=frame_fn,
