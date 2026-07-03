@@ -587,6 +587,20 @@ applied by `SimBackend` with its own RNG):
 - **Object material E/ν/ρ + coupling friction** (per-scene) — `SimBackend.randomize_scene()`
   samples them and **rebuilds via `GenesisProcess.restart(new_spec, coup_friction=...)`**
   (MPM material is global per scene). Call every N episodes, not every reset.
+- **Object orientation** (per-reset) — `object_yaw_deg` (full 180) + `object_pitch_roll_deg`
+  → `sample_object_euler` (worker rotates the object at spawn).
+- **Object SIZE + SHAPE** (per-scene) — `object_scale` (uniform mesh scale) + procedural mesh
+  deformation `object_{bend,twist,taper,rbf}` (real food varies in both). `SimBackend.
+  _apply_shape_scale_dr` samples at scene build (launch-time) from the REGISTRY nominal mesh +
+  nominal scale (idempotent), writes a mild near-diffeomorphic deformed `.obj` (`assets/
+  mesh_deform.py` — Barr bend=curvature/twist/taper along the long axis + optional RBF bumps,
+  with a positive-volume validity guard + retry/fallback), and bakes `scale`+`mesh_path` into
+  the `ObjectEntry` (scene_spec gained `mesh_path`; scene_builder uses it). SIZE+SHAPE are
+  SCENE-level: one per launch (Genesis batched envs share geometry — variety is across launches
+  or via periodic `randomize_scene`, NOT across sub-envs). `configs/dr/food_shape.yaml`,
+  `presets.aggressive`. `scene_params()` exposes the applied values → eval CSV.
+  Showcase: `examples/dr_showcase.py` (random policy, N fresh-process episodes → one labelled
+  video of the varied objects).
 
 TODO:
 - **Initial robot pose** — jitter `DEFAULT_EE_POSE` / seed joints per env at reset (needs
@@ -597,7 +611,6 @@ TODO:
 
 Expensive / "crazier" (rebuild, and they change sim *fidelity* — randomize cautiously,
 they shift the dynamics, not just appearance):
-- **Object size / shape** — box extents, or swapping meshes once real scanned meshes exist.
 - **sim_substeps / mpm_grid_density** — robustness to integration resolution; rebuild, and
   watch that the grasp still succeeds across the range (low grid density may leak/penetrate).
 
