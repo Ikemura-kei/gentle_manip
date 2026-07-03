@@ -126,12 +126,16 @@ def serve_env(env, host: str = "127.0.0.1", port: int = 5555, ready_msg: str = "
                         obs, reward, done, info = env.step(arrays["action"])
                         if frame_fn is not None and _recording(vep[0]):
                             vframes.append(np.asarray(frame_fn(), dtype=np.uint8))
-                        send_msg(conn, {
+                        resp = {
                             "ok": True,
                             "reward": [float(x) for x in np.asarray(reward).ravel()],
                             "done": bool(np.asarray(done).all()),
                             "success": [bool(i.get("success", False)) for i in info],
-                        }, _as_arrays(obs))
+                        }
+                        if info and "stress_max" in info[0]:      # soft body: per-env von-Mises
+                            resp["stress_max"] = [float(i["stress_max"]) for i in info]
+                            resp["stress_mean"] = [float(i["stress_mean"]) for i in info]
+                        send_msg(conn, resp, _as_arrays(obs))
                     elif cmd == "render":
                         # On-demand RGB frame (env 0) for a client that writes its own video
                         # (e.g. the DPPO eval/finetune bridge). frame_fn -> (H,W,3) uint8.
@@ -193,6 +197,10 @@ class SimEnvClient:
         reward = np.asarray(header.get("reward", [0.0]), dtype=np.float32)
         done = np.asarray([header.get("done", False)], dtype=bool)
         info = [{"success": s} for s in header.get("success", [False])]
+        smax, smean = header.get("stress_max"), header.get("stress_mean")   # soft body only
+        if smax is not None:
+            for k, d in enumerate(info):
+                d["stress_max"], d["stress_mean"] = float(smax[k]), float(smean[k])
         return obs, reward, done, info
 
     def render(self):

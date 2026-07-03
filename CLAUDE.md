@@ -656,6 +656,47 @@ stress-reward `cap/divisor` are still the tofu values — TODO: re-tune to the ~
 
 ---
 
+## Canonical Evaluation (ALL algorithms — SERL, DPPO, and future)
+
+**Every algorithm's sim evaluation MUST go through the one shared harness
+`gentle_manip.evaluation.run_eval` (`gentle_manip/evaluation/`, genesis-free).** This is the
+single place the protocol + metrics + outputs are defined, so numbers are apples-to-apples
+across algorithms and runs. Do NOT write a second, algorithm-specific eval loop.
+
+- **Fixed protocol — `EvalSpec` (`eval_spec.py`):** `n_episodes=100`, `num_envs=5` (→ 20
+  batches), `seed=0`. These three are FIXED (canonical); only `max_policy_steps` (episode
+  horizon = sim `max_episode_steps / act_steps`) is task-dependent. Don't vary the trio per
+  experiment.
+- **Fixed randomization sequence (apples-to-apples):** before batch `i` the harness calls
+  `venv.seed([spec.seed_for_batch(i)]*num_envs)` (→ `SimEnvClient.reseed` → `SimBackend._rng`),
+  so env `j` of batch `i` gets an *identical* randomized scenario (object pose/orientation/
+  arm-home) across every eval run and every algorithm. `seed_for_batch(i)=base_seed*100003+i`.
+  Scene-level DR (material rebuild) is NOT varied during eval.
+- **Metrics — success + (soft) stress, aggregate AND per-episode:** `summary.json` (success_rate,
+  ever_success_rate, mean_episode_reward, stress_peak/mean for soft tasks) + `episodes.csv`
+  (one row per episode×env: batch, env, scenario_seed, success, first_success_step, reward,
+  stress_peak, stress_mean). Stress columns are NaN for rigid tasks. Stress reaches the harness
+  via the rpc step (`PolicyEnv.step` → per-env `stress_max`/`stress_mean` from
+  `von_mises_stress` → `serve_env` → `SimEnvClient.step` → the venv's step `info`).
+- **Output location:** eval writes into the evaluated policy's OWN training run dir —
+  `<base_policy_run>/eval/<datetime>/` (`harness.eval_out_dir`; falls back to `logs/eval/...`).
+  Includes `summary.json`, `episodes.csv`, `config/` (env snapshot), `render/*.mp4` (env-0 clips
+  for the first `record_batches`). `summary.json` records the checkpoint path.
+- **Per-algorithm adapters (the only per-algorithm code):** an `EvalVenv` (drives the sim,
+  returns per-env success/stress — for DPPO this is the `GenesisMultiStepVecEnv` bridge) and a
+  `Policy` (obs→action chunk). DPPO wiring: `gentle_manip/dppo/eval_agent.py::EvalHarnessAgent`
+  + `cfg/.../eval_diffusion_pointnet.yaml`. The sim server must run `--num-envs 5 --render-rgb`.
+  SERL adoption = write a SERL `EvalVenv`+`Policy` and call the same `run_eval` (TODO).
+
+**Every training run (ANY algorithm) also snapshots its env (experiment) config** into
+`<run>/config/` — separate from framework logs. SERL does this via `run_paths.snapshot_experiment`;
+DPPO via the `ExperimentSnapshot` hydra callback (`gentle_manip/dppo/hydra_snapshot.py`) enabled
+by `experiment: <name>` + a `hydra.callbacks` entry in the config. This is on top of the
+per-run `EXPERIMENT.md` (git commit, motivation, hypothesis) — the config snapshot records
+*what env was trained on*, the EXPERIMENT.md records *why*.
+
+---
+
 ## Old Code Reference
 
 This project is a restructured version of two existing repos:

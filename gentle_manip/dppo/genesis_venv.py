@@ -131,9 +131,18 @@ class GenesisMultiStepVecEnv:
         if a.ndim == 2:                             # (n_envs, act_dim) -> single-step chunk
             a = a[:, None]
         reward = np.zeros(self.n_envs, np.float32)
+        success = np.zeros(self.n_envs, bool)       # last sub-step's success (current state)
+        s_max, s_sum, s_cnt = None, None, 0         # von-Mises over the chunk (soft body)
         for t in range(a.shape[1]):                 # execute the action chunk, sum reward
-            obs, r, _done, _info = self.client.step(self._unnorm_action(a[:, t]))
+            obs, r, _done, sub_info = self.client.step(self._unnorm_action(a[:, t]))
             reward += np.asarray(r, np.float32).reshape(self.n_envs)
+            success = np.array([bool(d.get("success", False)) for d in sub_info])
+            if sub_info and "stress_max" in sub_info[0]:
+                sm = np.array([d["stress_max"] for d in sub_info], np.float32)
+                s_max = sm if s_max is None else np.maximum(s_max, sm)
+                smn = np.array([d["stress_mean"] for d in sub_info], np.float32)
+                s_sum = smn if s_sum is None else s_sum + smn
+                s_cnt += 1
             self._cnt += 1
             self._hist.append(self._modalities(obs))
             if self._rec_path is not None:          # pull an env-0 RGB frame for the video
@@ -143,7 +152,9 @@ class GenesisMultiStepVecEnv:
         terminated = np.zeros(self.n_envs, bool)    # no early termination (robomimic pattern)
         truncated = self._cnt >= self.max_episode_steps
         obs_out = self._stacked()
-        info: dict = {}
+        info: dict = {"success": success}           # per-env eval signals
+        if s_max is not None:
+            info["stress_max"], info["stress_mean"] = s_max, s_sum / s_cnt
         if bool(truncated.all()):                   # synchronous horizon -> auto-reset all
             self._flush_video()                     # write this episode's clip; keep recording
             info["final_obs"] = obs_out

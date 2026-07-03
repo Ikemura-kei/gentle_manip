@@ -11,11 +11,15 @@ defaults:
 hydra:
   run:
     dir: ${logdir}
+  callbacks:                    # snapshot the env (experiment) config -> <run>/config/
+    experiment_snapshot:
+      _target_: gentle_manip.dppo.hydra_snapshot.ExperimentSnapshot
 _target_: agent.pretrain.train_diffusion_agent.TrainDiffusionAgent
 
 name: ${env}_pre_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
 logdir: ${oc.env:DPPO_LOG_DIR}/dppo-pretrain/${name}/${now:%Y-%m-%d}_${now:%H-%M-%S}_${seed}
 train_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/train.npz
+experiment: single_lift_mushroom_soft   # env definition (task+obs+action+dr+reward) snapshot
 
 seed: 42
 device: cuda:0

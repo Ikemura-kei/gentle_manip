@@ -13,12 +13,16 @@ defaults:
 hydra:
   run:
     dir: ${logdir}
+  callbacks:                    # snapshot the env (experiment) config -> <run>/config/
+    experiment_snapshot:
+      _target_: gentle_manip.dppo.hydra_snapshot.ExperimentSnapshot
 _target_: agent.finetune.train_ppo_diffusion_img_agent.TrainPPOImgDiffusionAgent
 
 name: ${env_name}_ppo_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}_tdf${ft_denoising_steps}
 logdir: ${oc.env:DPPO_LOG_DIR}/dppo-finetune/${name}/${now:%Y-%m-%d}_${now:%H-%M-%S}_${seed}
 base_policy_path: ???        # set on CLI: a pre_diffusion_pointnet checkpoint .pt
 normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_mushroom_soft_pcd/normalization.npz
+experiment: single_lift_mushroom_soft   # env definition (task+obs+action+dr+reward) snapshot
 
 seed: 42
 device: cuda:0

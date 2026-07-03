@@ -176,6 +176,13 @@ class PolicyEnv:
         sim_feedback = self._sim_feedback()
         rewards, success = self._compute_reward(raw, sim_feedback)
 
+        # Per-env von-Mises stress summary for evaluation (soft bodies only; captured BEFORE the
+        # horizon reset). Rigid tasks have no von_mises_stress -> stress stays None -> omitted.
+        stress = None
+        if sim_feedback is not None and "von_mises_stress" in sim_feedback.extra:
+            vm = np.asarray(sim_feedback.extra["von_mises_stress"])   # (num_envs, n_particles)
+            stress = (vm.max(axis=1), vm.mean(axis=1))
+
         timeout = self._episode_step >= self.max_episode_steps
         dones = np.full(self.num_envs, timeout, dtype=bool)
 
@@ -189,6 +196,10 @@ class PolicyEnv:
             {"success": bool(success[i]), "time_out": bool(timeout)}
             for i in range(self.num_envs)
         ]
+        if stress is not None:
+            for i in range(self.num_envs):
+                infos[i]["stress_max"] = float(stress[0][i])
+                infos[i]["stress_mean"] = float(stress[1][i])
         return obs, rewards, dones, infos
 
     def close(self) -> None:

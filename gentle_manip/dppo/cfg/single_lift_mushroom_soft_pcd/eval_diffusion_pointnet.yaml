@@ -1,23 +1,26 @@
 # [dppo-eval] Evaluate a PointNet diffusion policy (BC base or finetuned) on the live sim.
-# Used by: third_party/dppo/script/run.py (EvalImgDiffusionAgent) via gentle_manip.dppo.train
+# Used by: third_party/dppo/script/run.py (EvalHarnessAgent) via gentle_manip.dppo.train
 # Status: experimental (DPPO step-2 eval: point-cloud student policy on soft mushroom)
 #
-# Runs the (deterministic) policy for n_steps in the batched genesis sim and reports
-# success rate + avg / best episode reward. A serl_sim_server --experiment
-# single_lift_mushroom_soft --view student must be serving on env.specific.port with matching
-# n_envs. Point the base_policy_path at a pre_diffusion_pointnet checkpoint (BC) or a finetuned
-# one. ft_denoising_steps=0 + use_ddim=False -> full-denoising BC policy. Run with envs/dppo.
+# Routes through the SHARED canonical eval harness (gentle_manip.evaluation.run_eval): the
+# fixed EvalSpec (n_episodes=100, num_envs=5, deterministic per-batch DR seed) -> summary.json
+# + episodes.csv (success + per-episode stress) + env_config snapshot + env-0 videos, written
+# to the POLICY's own run dir (<base_policy_run>/eval/<datetime>/). A serl_sim_server
+# --experiment single_lift_mushroom_soft --view student --num-envs 5 --render-rgb must be
+# serving on env.specific.port. base_policy_path -> a pre_diffusion_pointnet (BC) or finetuned
+# checkpoint. ft_denoising_steps=0 + use_ddim=False -> full-denoising BC policy. Run with envs/dppo.
 defaults:
   - _self_
 hydra:
   run:
     dir: ${logdir}
-_target_: agent.eval.eval_diffusion_img_agent.EvalImgDiffusionAgent
+_target_: gentle_manip.dppo.eval_agent.EvalHarnessAgent
 
 name: ${env_name}_eval_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
 logdir: ${oc.env:DPPO_LOG_DIR}/dppo-eval/${name}/${now:%Y-%m-%d}_${now:%H-%M-%S}_${seed}
 base_policy_path: ???        # set on CLI: a pre_diffusion_pointnet (BC) or finetuned checkpoint
 normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_mushroom_soft_pcd/normalization.npz
+experiment: single_lift_mushroom_soft   # env (experiment) config snapshotted into the eval dir
 
 seed: 42
 device: cuda:0
@@ -35,11 +38,14 @@ act_steps: 4
 use_ddim: False              # full 20-step denoising for an honest BC eval
 ddim_steps: ${ft_denoising_steps}
 
-n_steps: 75                  # per-env steps this eval pass (max_episode_steps / act_steps)
-render_num: 4
+# CANONICAL eval spec (shared across algorithms) — 100 episodes / 5 sub-envs = 20 batches.
+n_episodes: 100
+record_batches: 2            # record env-0 video for the first N batches
+n_steps: 75                  # (read by DPPO's EvalAgent base; harness derives its own horizon)
+render_num: 5
 
 env:
-  n_envs: 4                  # MUST match serl_sim_server --num-envs
+  n_envs: 5                  # MUST match serl_sim_server --num-envs; part of the canonical spec
   name: ${env_name}
   env_type: genesis
   max_episode_steps: 300
