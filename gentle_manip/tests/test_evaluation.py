@@ -89,6 +89,59 @@ def test_scenario_columns_parses_dr_and_material():
 def test_scenario_columns_none_is_empty():
     assert _scenario_columns(None, 3) == [{}, {}, {}]
 
+
+# ── SimEvalVenv (state-policy venv over rpc) + ScriptedPolicy ──────────────────
+class _FakeStateClient:
+    """SimEnvClient stand-in: teacher-ish obs, per-env success/stress, scenario passthrough."""
+    def __init__(self, n=5):
+        self.n = n
+        self.last_scenario = {"dr": {"object_dxy": [[0.0, 0.0]] * n, "object_euler": None,
+                                     "home_offset": None}, "material": {"E": 3e5}}
+        self.steps = 0
+
+    def _obs(self):
+        return {"ee_pos": np.zeros((self.n, 3), np.float32),
+                "priv_object_pos": np.tile([0.4, 0.0, 0.02], (self.n, 1)).astype(np.float32),
+                "gripper_width": np.full((self.n, 1), 0.08, np.float32)}
+
+    def reseed(self, s): self.seeded = s
+    def reset(self): return self._obs()
+    def step(self, a):
+        self.steps += 1
+        info = [{"success": self.steps >= 3, "stress_max": 100.0 + i, "stress_mean": 10.0 + i}
+                for i in range(self.n)]
+        return self._obs(), np.ones(self.n, np.float32), np.zeros(self.n, bool), info
+    def render(self): return None
+    def close(self): pass
+
+
+def test_sim_eval_venv_step_surfaces_success_stress_and_truncates():
+    from gentle_manip.evaluation.sim_eval_venv import SimEvalVenv
+    c = _FakeStateClient(5)
+    v = SimEvalVenv(c, num_envs=5, max_episode_steps=3)
+    v.seed([123, 123, 123, 123, 123]); assert c.seeded == 123
+    v.reset_arg()
+    obs, r, term, trunc, info = v.step(np.zeros((5, 7), np.float32))
+    assert r.shape == (5,) and not trunc.any()
+    assert "stress_max" in info and info["stress_max"].shape == (5,)
+    v.step(np.zeros((5, 7), np.float32))
+    _, _, _, trunc, info = v.step(np.zeros((5, 7), np.float32))   # cnt hits 3 -> truncate
+    assert trunc.all() and info["success"].all() and "final_obs" in info
+    assert v.scenario_params()["material"]["E"] == 3e5
+
+
+def test_scripted_policy_produces_per_env_action_chunkless():
+    from gentle_manip.scripts.eval_scripted import ScriptedPolicy
+    p = ScriptedPolicy(num_envs=4, action_scales=[0.0052] * 6 + [0.005], rate_hz=30,
+                       params=dict(lift_height=0.2, approach_height=0.12, grasp_z=0.006,
+                                   grasp_gw=0.03, gripper_close=0.5, speed_cap=0.5))
+    p.reset()
+    obs = {"ee_pos": np.tile([0.4, 0.0, 0.3], (4, 1)),
+           "priv_object_pos": np.tile([0.45, 0.02, 0.02], (4, 1)),
+           "gripper_width": np.full((4, 1), 0.08)}
+    a = p.act(obs)
+    assert a.shape == (4, 7) and np.all(np.abs(a) <= 1.0)     # normalized deltas, per env
+
 def test_dr_columns_survive_csv_roundtrip(tmp_path):
     recs = _recs(soft=True)
     for r, c in zip(recs, _scenario_columns({"dr": {"object_dxy": [[0.01, 0.02]] * 4,
