@@ -41,8 +41,9 @@ class GenesisMultiStepVecEnv:
         self._act_range = (self.action_max - self.action_min) + 1e-6
         self._hist: Optional[deque] = None         # deque of per-step modality dicts
         self._cnt = np.zeros(self.n_envs, np.int64)
-        self._rec_path: Optional[str] = None       # video_path for the current recording (env 0)
-        self._frames: list = []                    # accumulated RGB frames (env 0)
+        self._rec_path: Optional[str] = None       # base video_path for recording (env 0)
+        self._frames: list = []                    # accumulated RGB frames (env 0), current episode
+        self._rec_ep = 0                            # episode index within the recording session
 
     # ── normalization ──────────────────────────────────────────────────────────
     def _raw_state(self, obs: dict) -> np.ndarray:  # SimEnvClient obs -> (n_envs, obs_dim)
@@ -81,25 +82,34 @@ class GenesisMultiStepVecEnv:
 
     def reset_arg(self, options_list=None, **kwargs) -> dict:
         # DPPO eval/finetune passes options_list[env]["video_path"]. Our sim renders env 0
-        # only, so we record env 0 to the first supplied video_path and write one mp4.
+        # only, so we record env 0 and write ONE clip PER EPISODE (numbered) to that path —
+        # so more episodes (larger n_steps) => more clips.
         self._flush_video()
-        self._rec_path = None
+        self._rec_path, self._rec_ep, self._frames = None, 0, []
         if options_list:
             first = options_list[0] if isinstance(options_list[0], dict) else {}
             self._rec_path = first.get("video_path")
         return self._reset_all()
 
+    def _clip_path(self):
+        # episode 0 -> the exact video_path (DPPO's eval_trial-0.mp4); later episodes get an
+        # _ep{k} suffix so a multi-episode pass yields eval_trial-0.mp4, ..._ep1.mp4, ...
+        from pathlib import Path
+        p = Path(self._rec_path)
+        return p if self._rec_ep == 0 else p.with_name(f"{p.stem}_ep{self._rec_ep}{p.suffix}")
+
     def _flush_video(self) -> None:
         if self._rec_path and self._frames:
             import imageio.v2 as imageio
-            from pathlib import Path
-            Path(self._rec_path).parent.mkdir(parents=True, exist_ok=True)
+            out = self._clip_path()
+            out.parent.mkdir(parents=True, exist_ok=True)
             frames = [self._even_dims(f) for f in self._frames]   # h264/PyAV needs even dims
             try:                                                  # imageio-ffmpeg backend
-                imageio.mimsave(self._rec_path, frames, fps=30, macro_block_size=1)
+                imageio.mimsave(str(out), frames, fps=30, macro_block_size=1)
             except TypeError:                                     # PyAV backend (envs/dppo)
-                imageio.mimsave(self._rec_path, frames, fps=30, codec="libx264")
-            print(f"  [genesis_venv] saved eval video {self._rec_path} ({len(frames)} frames)", flush=True)
+                imageio.mimsave(str(out), frames, fps=30, codec="libx264")
+            print(f"  [genesis_venv] saved eval video {out} ({len(frames)} frames)", flush=True)
+            self._rec_ep += 1
         self._frames = []
 
     @staticmethod
@@ -135,8 +145,7 @@ class GenesisMultiStepVecEnv:
         obs_out = self._stacked()
         info: dict = {}
         if bool(truncated.all()):                   # synchronous horizon -> auto-reset all
-            self._flush_video()                     # write the recorded episode, stop recording
-            self._rec_path = None
+            self._flush_video()                     # write this episode's clip; keep recording
             info["final_obs"] = obs_out
             obs_out = self._reset_all()
         return obs_out, reward, terminated, truncated, info
