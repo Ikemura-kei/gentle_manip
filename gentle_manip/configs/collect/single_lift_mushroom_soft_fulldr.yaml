@@ -11,7 +11,7 @@ experiment: single_lift_mushroom_soft
 task_name: single_lift_mushroom_soft   # canonical soft-demo dir (now full-DR)
 out_dir: dataset/demos
 dr_override: food_shape        # full size/shape/material ranges (redundant now the experiment is food_shape)
-scene_dr_every: 2             # relaunch the scene every 2 saved episodes -> 25 geometries over 50 eps
+scene_dr_every: 3             # relaunch the scene every 3 saved episodes -> 25 geometries over 50 eps
 
 input: scripted
 show_viewer: false
@@ -30,7 +30,7 @@ scripted:
   grasp_firm_steps: 1
 
 record_video: true            # cam_ext RGB (via backend.render_rgb — works under subprocess)
-video_episodes: 8
+video_episodes: 10
 video_fps: 30
 
 idle_threshold: 0.001
