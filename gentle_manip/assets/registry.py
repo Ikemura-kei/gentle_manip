@@ -50,7 +50,7 @@ OBJECT_MAP: dict[str, ObjectDef] = {
     # default_pos z=0.016 puts it just above the surface). size is informational only
     # (ignored for meshes). Material is the soft-end "Config C" (see materials.py).
     "mushroom": ObjectDef("mushroom", MATERIALS["mushroom"], object_type="soft",
-                          size=(0.033, 0.032, 0.035), default_pos=(0.47, 0.011, 0.016),
+                          size=(0.033, 0.032, 0.035), default_pos=(0.47, 0.0, 0.016),
                           mesh_path=str(_OBJ_DIR / "mushroom.obj")),
 }
 

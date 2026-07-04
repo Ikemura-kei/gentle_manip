@@ -41,5 +41,6 @@ htmlcov/
 dataset/demos/
 dataset/real_deploy/
 dataset/serl_clips/
-dataset/dppo/          # DPPO pretrain npz — derived from dataset/demos via gentle_manip.dppo.convert_demos
+# DPPO pretrain npz — derived from dataset/demos via gentle_manip.dppo.convert_demos
+dataset/dppo/
 logs/
