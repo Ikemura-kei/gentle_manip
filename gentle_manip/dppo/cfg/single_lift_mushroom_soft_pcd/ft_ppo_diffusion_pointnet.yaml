@@ -3,11 +3,14 @@
 # Status: experimental (DPPO step-2: point-cloud student pipeline, the real target)
 #
 # Drives the batched genesis sim via env_type="genesis" with a point_cloud modality
-# (pointcloud_key). A serl_sim_server --experiment single_lift_mushroom_soft --view student
-# must be serving on env.specific.port with matching n_envs. Reward is the sim's shaped
-# reward INCLUDING the von-Mises stress penalty (soft mushroom). Uses the generic image
-# finetune agent (handles arbitrary shape_meta.obs keys; image aug is skipped for clouds).
-# base_policy_path = a pre_diffusion_pointnet checkpoint. Run with envs/dppo.
+# (pointcloud_key). A serl_sim_server --experiment single_lift_mushroom_soft --view student must
+# be serving on env.specific.port with matching n_envs. FULL DR (the experiment's dr=food_shape)
+# is active — one random object size/shape/material per server launch; for WITHIN-run geometry
+# variety launch the training server with `--scene-dr-every N` (relaunches the scene every N
+# episodes, ~30-45 s each, so use a larger N). Reward is the sim's shaped reward INCLUDING the
+# von-Mises stress penalty (soft mushroom). Uses the generic image finetune agent (handles
+# arbitrary shape_meta.obs keys; image aug is skipped for clouds). base_policy_path = a
+# pre_diffusion_pointnet checkpoint. Run with envs/dppo.
 defaults:
   - _self_
 hydra:

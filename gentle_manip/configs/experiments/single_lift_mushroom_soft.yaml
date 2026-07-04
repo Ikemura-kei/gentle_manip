@@ -8,7 +8,11 @@
 # can't drift). New tasks = a new file like this; no new training code.
 task: single_lift_mushroom_soft                 # object + reward (yield-normalized stress) + dynamics
 action: delta_pose_delta_gripper
-dr: sim_demo                        # reset jitter (object xy/orientation + arm home)
+# FULL DR (default for train + eval): pose + orientation + arm-home jitter (per-reset) AND object
+# size + procedural shape + material (per-scene). Per-scene DR is sampled at scene build (one
+# geometry per sim launch); for WITHIN-run variety relaunch the scene: training server
+# `serl_sim_server --scene-dr-every N`, eval `scene_group_size` (per-group, deterministic).
+dr: food_shape
 augmentation: l515_noise            # sim-only obs augmentation (point-cloud path)
 
 obs: superset_soft              # SUPERSET (collection). Views subview() it:

@@ -4,11 +4,16 @@
 #
 # Routes through the SHARED canonical eval harness (gentle_manip.evaluation.run_eval): the
 # fixed EvalSpec (n_episodes=100, num_envs=5, deterministic per-batch DR seed) -> summary.json
-# + episodes.csv (success + per-episode stress) + env_config snapshot + env-0 videos, written
-# to the POLICY's own run dir (<base_policy_run>/eval/<datetime>/). A serl_sim_server
-# --experiment single_lift_mushroom_soft --view student --num-envs 5 --render-rgb must be
-# serving on env.specific.port. base_policy_path -> a pre_diffusion_pointnet (BC) or finetuned
-# checkpoint. ft_denoising_steps=0 + use_ddim=False -> full-denoising BC policy. Run with envs/dppo.
+# + episodes.csv (success + per-episode stress + per-episode object geometry) + env_config
+# snapshot + env-0 videos, written to the POLICY's run dir (<base_policy_run>/eval/<datetime>/).
+# FULL DR eval: scene_group_size>0 rebuilds the object geometry (size/shape/material) every K
+# batches from a deterministic group seed (apples-to-apples across evals). That needs the sim to
+# relaunch, so the server MUST be started with --subprocess:
+#   serl_sim_server --experiment single_lift_mushroom_soft --view student --num-envs 5 \
+#                   --render-rgb --subprocess
+# (the experiment's dr=food_shape supplies the ranges). scene_group_size=0 -> fixed geometry, and
+# then plain --render-rgb (no --subprocess) suffices. base_policy_path -> a pre_diffusion_pointnet
+# (BC) or finetuned checkpoint. Run with envs/dppo.
 defaults:
   - _self_
 hydra:
@@ -43,6 +48,9 @@ ddim_steps: ${ft_denoising_steps}
 
 # CANONICAL eval spec (shared across algorithms) — 100 episodes / 5 sub-envs = 20 batches.
 n_episodes: 100
+scene_group_size: 4          # full DR: rebuild geometry every 4 batches -> 5 distinct sizes/shapes
+                             # across the 100 episodes (deterministic; needs the server --subprocess).
+                             # 0 = fixed geometry (only pose/orientation vary).
 record_batches: 2            # record env-0 video for the first N batches
 n_steps: 75                  # (read by DPPO's EvalAgent base; harness derives its own horizon)
 render_num: 5
