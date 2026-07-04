@@ -213,21 +213,29 @@ class SimBackend:
             spec = dataclasses.replace(spec, objects=objects)
         return spec, coup
 
-    def randomize_scene(self) -> RawObs:
+    def randomize_scene(self, tries: int = 6) -> RawObs:
         """Re-randomize the WHOLE scene (material + coupling friction + object size/shape) and
         REBUILD via GenesisProcess.restart (kill + respawn the genesis child — a single sim at a
-        time). Deterministic if the caller reseeds self._rng first (eval). Returns the reset obs;
-        a plain reset() if no scene DR is configured."""
+        time). Deterministic if the caller reseeds self._rng first (eval). An unlucky combo can
+        make the settle blow up (solver NaN); we resample + rebuild up to `tries` times so full DR
+        stays robust. Returns the reset obs; a plain reset() if no scene DR is configured."""
         if not self._dr.has_scene_dr():
             return self.reset()
         if not hasattr(self.process, "restart"):
             raise RuntimeError("scene DR needs the subprocess backend (use_subprocess=True)")
         self._in_scene_dr = True
         try:
-            spec, coup = self._apply_scene_dr(self._nominal_spec)   # resample from nominal
-            self._spec = spec
-            self.process.restart(spec, coup_friction=coup)
-            return self.reset()                                     # plain reset (guard set)
+            for attempt in range(tries):
+                spec, coup = self._apply_scene_dr(self._nominal_spec)   # resample from nominal
+                self._spec = spec
+                self.process.restart(spec, coup_friction=coup)
+                try:
+                    return self.reset()                                # settle (guard set)
+                except RuntimeError as e:                              # unstable scene -> resample
+                    if attempt == tries - 1:
+                        raise
+                    print(f"[dr] unstable rebuilt scene {self._applied_scene} (attempt "
+                          f"{attempt + 1}/{tries}), resampling: {str(e).splitlines()[-1][:80]}", flush=True)
         finally:
             self._in_scene_dr = False
 

@@ -200,6 +200,8 @@ class SimEnvClient:
         while time.time() < deadline:
             try:
                 c = socket.create_connection((host, port), timeout=10.0)
+                c.settimeout(None)                     # blocking data ops: a scene rebuild
+                                                       # (randomize_scene) can take ~90s to reply
                 c.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 return c
             except OSError as e:                       # server not up yet — retry
