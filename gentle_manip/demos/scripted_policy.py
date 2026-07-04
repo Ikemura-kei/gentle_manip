@@ -51,6 +51,21 @@ class ScriptedLiftDemonstrator:
         self.phase = self.APPROACH
         self.grasp_xy = None        # cube xy captured at episode start
         self._hold = self._grasp = self._firm = self._lift = 0
+        self._gw = self._gz = self._approach = None   # size-adaptive grasp geometry, set lazily
+                                                      # on the first action (after reset picks the scene)
+
+    def _size_adapt(self) -> None:
+        """Scale the grasp geometry by the object's DR size, so the fixed nominal grasp width/
+        height don't fail on scaled objects (full DR). No-op (scale=1) if size DR is off or the
+        backend doesn't expose scene_params."""
+        s = 1.0
+        try:
+            s = float(getattr(self.backend, "scene_params", lambda: {})().get("scale", 1.0)) or 1.0
+        except Exception:
+            pass
+        self._gw = self.grasp_gw * s
+        self._gz = self.grasp_z * s
+        self._approach = self.approach_height * s
 
     # ── teleop interface ──────────────────────────────────────────────────────
     def open(self) -> None: ...
@@ -71,6 +86,8 @@ class ScriptedLiftDemonstrator:
 
     def get_action(self) -> np.ndarray:
         ee, cube, gw = self._state()
+        if self._gw is None:                           # first action of the episode: read the
+            self._size_adapt()                         # (post-reset) object size, scale the grasp
         a = np.zeros(7, dtype=np.float64)
         # Track the object while approaching/descending — a rigid object rolls/settles after
         # reset, so a target frozen at episode start goes stale and the grasp misses. Lock the
@@ -81,18 +98,18 @@ class ScriptedLiftDemonstrator:
         gx, gy = self.grasp_xy
 
         if self.phase == self.APPROACH:                # move above the cube, open
-            tgt = (gx, gy, cube[2] + self.approach_height)
+            tgt = (gx, gy, cube[2] + self._approach)
             a[:3] = self._move(ee, tgt)
             if np.hypot(ee[0] - gx, ee[1] - gy) < self.pos_tol and abs(ee[2] - tgt[2]) < 0.01:
                 self.phase = self.DESCEND
         elif self.phase == self.DESCEND:               # lower to grasp height
-            a[:3] = self._move(ee, (gx, gy, self.grasp_z))
-            if ee[2] <= self.grasp_z + self.pos_tol:
+            a[:3] = self._move(ee, (gx, gy, self._gz))
+            if ee[2] <= self._gz + self.pos_tol:
                 self.phase = self.GRASP
         elif self.phase == self.GRASP:                 # close to firm contact, hold xy
-            a[:3] = self._move(ee, (gx, gy, self.grasp_z))
+            a[:3] = self._move(ee, (gx, gy, self._gz))
             self._grasp += 1
-            if gw > self.grasp_gw:                     # still closing toward the cube
+            if gw > self._gw:                          # still closing toward the cube
                 a[6] = -self.gripper_close
                 self._firm = 0
             elif self._firm < self.grasp_firm_steps:   # a few steps past contact for grip

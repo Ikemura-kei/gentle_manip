@@ -39,25 +39,36 @@ class _ShimFeedback:
 
 
 class _ShimBackend:
+    def __init__(self, scale=1.0):
+        self._scale = float(scale)
+
     def set(self, ee, obj, gw):
         self._fb = _ShimFeedback(ee, obj, gw)
 
     def get_sim_feedback(self):
         return self._fb
 
+    def scene_params(self):                       # so the demonstrator can size-adapt its grasp
+        return {"scale": self._scale}
+
 
 class ScriptedPolicy:
     """Batched scripted expert: one ScriptedLiftDemonstrator per sub-env, fed that env's state."""
 
-    def __init__(self, num_envs, action_scales, rate_hz, params):
+    def __init__(self, num_envs, action_scales, rate_hz, params, venv=None):
         self.num_envs = int(num_envs)
         self.scales = np.asarray(action_scales, np.float64)
         self.rate_hz = float(rate_hz)
         self.params = dict(params)
+        self.venv = venv                          # to read the current scene's object scale
         self.demos = None
 
     def reset(self):
-        self.demos = [ScriptedLiftDemonstrator(_ShimBackend(), self.scales, n_episodes=1,
+        scale = 1.0                               # full-DR: adapt the grasp to this scene's size
+        if self.venv is not None:
+            sc = (self.venv.scenario_params() or {}).get("scene") or {}
+            scale = float(sc.get("scale", 1.0)) or 1.0
+        self.demos = [ScriptedLiftDemonstrator(_ShimBackend(scale), self.scales, n_episodes=1,
                                                rate_hz=self.rate_hz, **self.params)
                       for _ in range(self.num_envs)]
 
@@ -100,7 +111,7 @@ def main() -> None:
 
     client = SimEnvClient(port=args.port)
     venv = SimEvalVenv(client, args.num_envs, args.max_steps)
-    policy = ScriptedPolicy(args.num_envs, exp.action_config.scales, cc.get("rate", 30), params)
+    policy = ScriptedPolicy(args.num_envs, exp.action_config.scales, cc.get("rate", 30), params, venv=venv)
     spec = EvalSpec(n_episodes=args.n_episodes, num_envs=args.num_envs, seed=args.seed,
                     max_policy_steps=args.max_steps, scene_group_size=args.scene_group_size)
 

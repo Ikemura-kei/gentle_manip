@@ -8,14 +8,14 @@
 # experiment's pose-only DR for configs/dr/food_shape.yaml. Each rebuild is ~30-45 s, so this is
 # slower than the fixed-scene recipe — trade throughput for a size/shape/material-varied dataset.
 experiment: single_lift_mushroom_soft
-task_name: single_lift_mushroom_soft_fulldr
+task_name: single_lift_mushroom_soft   # canonical soft-demo dir (now full-DR)
 out_dir: dataset/demos
-dr_override: food_shape        # full size/shape/material ranges (else the experiment's sim_demo)
-scene_dr_every: 4             # relaunch + resample the scene every 4 saved episodes
+dr_override: food_shape        # full size/shape/material ranges (redundant now the experiment is food_shape)
+scene_dr_every: 2             # relaunch the scene every 2 saved episodes -> 25 geometries over 50 eps
 
 input: scripted
 show_viewer: false
-n_episodes: 40
+n_episodes: 50
 rate: 30
 speed: 0.5
 gripper_value: 0.5
