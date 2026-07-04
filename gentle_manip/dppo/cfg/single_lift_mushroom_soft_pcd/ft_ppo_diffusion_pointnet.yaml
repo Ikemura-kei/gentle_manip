@@ -42,7 +42,7 @@ horizon_steps: 4
 act_steps: 4
 
 env:
-  n_envs: 4                  # MUST match serl_sim_server --num-envs
+  n_envs: 5                  # MUST match serl_sim_server --num-envs (== the eval's 5)
   name: ${env_name}
   env_type: genesis
   max_episode_steps: 300
