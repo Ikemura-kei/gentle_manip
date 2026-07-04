@@ -27,6 +27,15 @@ def test_seed_for_batch_is_deterministic_and_distinct():
     assert len(set(seeds)) == 20                                             # distinct per batch
     assert EvalSpec(seed=0).seed_for_batch(3) != EvalSpec(seed=1).seed_for_batch(3)
 
+def test_scene_seed_for_group_deterministic_and_disjoint_from_batch():
+    s = EvalSpec(seed=0)
+    groups = [s.scene_seed_for_group(g) for g in range(4)]
+    assert groups == [EvalSpec(seed=0).scene_seed_for_group(g) for g in range(4)]  # reproducible
+    assert len(set(groups)) == 4                                                   # distinct per group
+    batch = {s.seed_for_batch(i) for i in range(20)}
+    assert not batch & set(groups)                          # scene seeds don't collide with pose seeds
+    assert EvalSpec().scene_group_size == 0                 # default = fixed nominal geometry
+
 
 # ── output dir (option b) ─────────────────────────────────────────────────────
 def test_eval_out_dir_uses_run_dir_when_under_checkpoint(tmp_path):

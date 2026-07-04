@@ -30,6 +30,16 @@ def main() -> None:
                     help="build the RGB frame camera + enable the on-demand 'render' rpc "
                          "(so a client — e.g. the DPPO eval/finetune bridge — can pull frames "
                          "and write its own video). No server-side clip files needed.")
+    ap.add_argument("--scene-dr-every", type=int, default=0,
+                    help="full DR: re-randomize the whole scene (material+size+shape) by relaunching "
+                         "the genesis child every N resets (0=off). Forces the subprocess backend; "
+                         "one sim at a time. Use a larger N for training (each rebuild ~30-45s).")
+    ap.add_argument("--subprocess", action="store_true",
+                    help="force the subprocess backend without auto scene-DR — for the eval harness, "
+                         "which drives DETERMINISTIC per-group scene rebuilds over rpc itself.")
+    ap.add_argument("--dr", default=None,
+                    help="override the experiment's DR with configs/dr/<name>.yaml (e.g. 'food_shape' "
+                         "for full size/shape/material ranges during scene-DR eval/training).")
     args = ap.parse_args()
 
     os.environ.setdefault("MUJOCO_GL", "egl")
@@ -57,25 +67,29 @@ def main() -> None:
         clip_dir = str(run_dir("serl", exp.name, args.run_name) / "videos")
     record_clips = clip_dir is not None
     want_frame_cam = record_clips or args.render_rgb    # build the RGB clip camera if either wants it
+    # Full DR: scene_dr_every>0 -> SimBackend re-randomizes the whole scene every N resets by
+    # relaunching the genesis child (needs the subprocess backend; RGB flows via render_rgb).
+    use_subprocess = args.scene_dr_every > 0 or args.subprocess
+    dr_cfg = exp.dr
+    if args.dr:                                          # override DR ranges (full size/shape/material)
+        import yaml
+        from pathlib import Path
+        dr_cfg = yaml.safe_load((Path(__file__).resolve().parents[1] / "configs" / "dr" / f"{args.dr}.yaml").read_text())
     # num_envs parallel genesis envs (vectorized actor); max_episode_steps huge (no auto-reset
     # — the SERL actor drives episodes synchronously across all envs).
-    backend = SimBackend(task.scene_spec, num_envs=args.num_envs, use_subprocess=False, show_viewer=False,
+    backend = SimBackend(task.scene_spec, num_envs=args.num_envs, use_subprocess=use_subprocess, show_viewer=False,
                          render_cameras=obs_cfg.needs_cameras(), record_camera=want_frame_cam,
-                         config={"sim": {"settle_steps": args.settle_steps}, "dr": exp.dr})
+                         config={"sim": {"settle_steps": args.settle_steps,
+                                         "scene_dr_every": args.scene_dr_every}, "dr": dr_cfg})
     env = PolicyEnv(backend, obs_cfg, exp.action_config, task=task,
                     max_episode_steps=10 ** 9, augmentation=aug)
 
-    frame_fn = None
-    if want_frame_cam:
-        from gentle_manip.robot.xarm7_sim import _np
-        cam_list = next(iter(backend.process.handle.cameras.values()))   # one clip cam, env 0
-        def frame_fn():
-            return _np(cam_list[0].render(rgb=True, depth=False)[0])
+    frame_fn = backend.render_rgb if want_frame_cam else None   # works in-process AND subprocess
 
     print(f"serl sim server: exp={exp.name} view={args.view} object={task.object_name} "
           f"num_envs={args.num_envs} substeps={task.scene_spec.sim_substeps} render={obs_cfg.needs_cameras()} "
           f"clips={'every %d ep -> %s' % (args.clip_every, clip_dir) if record_clips else 'off'} "
-          f"render_rgb={args.render_rgb} "
+          f"render_rgb={args.render_rgb} scene_dr_every={args.scene_dr_every} subprocess={use_subprocess} "
           f"obs={list(env.observation_space.spaces)} — serving on {args.host}:{args.port}",
           flush=True)
     serve_env(env, host=args.host, port=args.port, frame_fn=frame_fn,

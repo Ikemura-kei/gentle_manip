@@ -20,6 +20,8 @@ class EvalSpec:
     num_envs: int = 5            # FIXED — canonical (must divide n_episodes)
     seed: int = 0                # FIXED — canonical base seed for the scenario sequence
     max_policy_steps: int = 75   # task horizon in POLICY steps (sim max_episode_steps / act_steps)
+    scene_group_size: int = 0    # rebuild the object geometry (size/shape/material) every K
+                                 # batches — 0 = fixed nominal geometry (only pose/orientation vary)
 
     def __post_init__(self):
         if self.n_episodes % self.num_envs != 0:
@@ -33,3 +35,8 @@ class EvalSpec:
         """Deterministic DR seed for batch i — a pure function of (base seed, batch index), so
         the k-th scenario is identical across every eval run and every algorithm."""
         return self.seed * 100003 + i
+
+    def scene_seed_for_group(self, g: int) -> int:
+        """Deterministic scene-DR seed for group g (distinct from the per-batch pose seed), so the
+        g-th object geometry is reproducible across every eval/policy — apples-to-apples."""
+        return (self.seed + 991) * 100003 + g

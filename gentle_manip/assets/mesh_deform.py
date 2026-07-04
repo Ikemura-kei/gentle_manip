@@ -81,6 +81,17 @@ def twist(verts: np.ndarray, angle: float, L: int, P: int, Q: int) -> np.ndarray
     return v
 
 
+def axis_scale(verts: np.ndarray, factor: float, axis: int) -> np.ndarray:
+    """Anisotropic scale along ONE world axis (x/y/z) about the centroid — makes the object
+    wider/narrower on that axis independent of the uniform size scale."""
+    if abs(factor - 1.0) < 1e-6:
+        return verts
+    v = verts.copy()
+    c = v[:, axis].mean()
+    v[:, axis] = c + (v[:, axis] - c) * factor
+    return v
+
+
 def rbf_bumps(mesh: trimesh.Trimesh, mag: float, n_bumps: int, rng: np.random.Generator) -> np.ndarray:
     """Add smooth low-frequency lumps: displace vertices along their normals by a sum of a few
     Gaussians centered at random surface points. mag is a fraction of the object's size."""
@@ -108,16 +119,20 @@ def _valid(nominal: trimesh.Trimesh, deformed: trimesh.Trimesh) -> bool:
 
 def deform_mesh(mesh: trimesh.Trimesh, params: Dict[str, float],
                 rng: Optional[np.random.Generator] = None, tries: int = 4) -> trimesh.Trimesh:
-    """Apply bend/taper/twist/rbf (params keys: bend, twist, taper, rbf[, rbf_n]) along the long
-    axis. Retries with halved magnitude on a degenerate result; falls back to the nominal mesh."""
+    """Apply bend/taper/twist/rbf along the long axis, then an anisotropic scale along one world
+    axis (params keys: bend, twist, taper, rbf[, rbf_n], axis_scale[, axis_scale_ax]). Retries
+    with halved magnitude on a degenerate result; falls back to the nominal mesh."""
     rng = rng or np.random.default_rng()
     L, P, Q = _axes(mesh.vertices)
+    ax = int(params.get("axis_scale_ax", rng.integers(3))) if "axis_scale" in params else None
     scale = 1.0
     for _ in range(tries):
         v = mesh.vertices.copy()
         v = bend(v, params.get("bend", 0.0) * scale, L, P)
         v = taper(v, params.get("taper", 0.0) * scale, L, P, Q)
         v = twist(v, params.get("twist", 0.0) * scale, L, P, Q)
+        if ax is not None:                          # anisotropic scale on one axis (retry-tempered)
+            v = axis_scale(v, 1.0 + (params["axis_scale"] - 1.0) * scale, ax)
         out = trimesh.Trimesh(vertices=v, faces=mesh.faces, process=False)
         if params.get("rbf", 0.0) > 0:
             out = trimesh.Trimesh(

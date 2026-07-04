@@ -131,6 +131,12 @@ class GenesisMultiStepVecEnv:
         material — for the eval harness's per-episode CSV. Passthrough from the rpc client."""
         return getattr(self.client, "last_scenario", None)
 
+    def randomize_scene(self, seed):
+        """Eval per-group scene DR: reseed then rebuild the object geometry -> deterministic
+        size/shape/material from `seed`. The subsequent reset_arg rebuilds obs history."""
+        self.client.reseed(int(seed))
+        self.client.randomize_scene()
+
     def step(self, action_venv):
         a = np.asarray(action_venv, np.float32)
         if a.ndim == 2:                             # (n_envs, act_dim) -> single-step chunk

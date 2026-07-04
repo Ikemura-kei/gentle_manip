@@ -31,6 +31,7 @@ def aggressive() -> DRConfig:
         object_bend_deg=(-25.0, 25.0),
         object_twist_deg=(-20.0, 20.0),
         object_taper=(-0.15, 0.15),
+        object_axis_scale=(0.9, 1.1),
     )
 
 

@@ -34,6 +34,7 @@ recorded eval columns use **degrees** (`DRConfig.sample_shape_scale` converts).
 | `object_twist_deg` | `twist`        | degrees      | **twist** — rotate cross-sections about `L` proportionally to axial position; this is the total end-to-end twist. | `[-20, 20]` |
 | `object_taper`     | `taper`        | fraction     | **taper** — linear thickness change end-to-end: one end scaled `1+taper`, the other `1−taper` (e.g. `0.15` = ±15%). | `[-0.15, 0.15]` |
 | `object_rbf`       | `rbf` (+`rbf_n`)| fraction    | **organic lumps** — sum of a few Gaussian bumps along the surface normals; magnitude as a fraction of the object's size. Off by default. | `[0, 0.04]` (commented) |
+| `object_axis_scale`| `axis_scale` (+`axis_scale_ax`)| multiplier | **anisotropic scale** — scale the object along ONE randomly-chosen world axis (x/y/z) by this factor (wider/narrower on that axis), independent of the uniform `scale`. | `[0.9, 1.1]` |
 
 ### The operators (Barr deformations)
 - **bend(β)**: with axial coord `s` (centered) over length `ℓ`, curvature `κ = β/ℓ`, angle
@@ -43,6 +44,9 @@ recorded eval columns use **degrees** (`DRConfig.sample_shape_scale` converts).
 - **twist(θ)**: rotate `(P,Q)` about `L` by `θ·s/ℓ` — a linearly-increasing twist.
 - **rbf(m, n)**: pick `n` random surface points, displace all vertices along their normals by a
   sum of Gaussians (σ = ¼ of the object size) with amplitudes `∈ ±m·size`.
+- **axis_scale(f, ax)**: scale the vertices along one world axis `ax∈{x,y,z}` (chosen randomly per
+  scene) by `f` about the centroid — applied AFTER the long-axis operators, so it can stretch a
+  different axis than the bend/taper act on.
 
 ## Where & when it is applied
 

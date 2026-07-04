@@ -87,7 +87,9 @@ def main() -> None:
         exp = Experiment.load(cfg["experiment"])
         obs_config = exp.collection_obs()
         action_config = exp.action_config
-        dr_d = exp.dr
+        # dr_override lets a recipe swap in fuller DR ranges (e.g. food_shape for size/shape/
+        # material) without editing the shared experiment.
+        dr_d = _load_named("dr", cfg["dr_override"]) if cfg.get("dr_override") else exp.dr
         aug = exp.augmentation_config()
         task = SingleLiftTask(exp.task_cfg)          # full reward -> logged per step
         task_name = cfg.get("task_name", exp.name)
@@ -117,9 +119,19 @@ def main() -> None:
     mode = cfg.get("input", "keyboard")
     show_viewer = cfg.get("show_viewer", mode == "keyboard")
 
+    # Full DR: scene_dr_every>0 re-randomizes the whole scene (material+size+shape) by relaunching
+    # the genesis child every N SAVED episodes — needs the subprocess backend (no live viewer).
+    scene_dr_every = int(cfg.get("scene_dr_every", 0))
+    use_subprocess = scene_dr_every > 0
+    if use_subprocess and show_viewer:
+        print("scene_dr_every>0 uses the subprocess backend (headless); disabling the viewer.",
+              file=sys.stderr)
+        show_viewer = False
+
     backend = SimBackend(
-        task.scene_spec, num_envs=1, use_subprocess=False, show_viewer=show_viewer,
-        config={"sim": {"settle_steps": cfg["settle_steps"]}, "dr": dr_d},
+        task.scene_spec, num_envs=1, use_subprocess=use_subprocess, show_viewer=show_viewer,
+        config={"sim": {"settle_steps": cfg["settle_steps"], "scene_dr_every": scene_dr_every},
+                "dr": dr_d},
     )
     # task ON in experiment mode -> the demo's per-step reward is real (for RLPD);
     # legacy mode keeps task=None (reward 0, DP3-only).
@@ -146,9 +158,7 @@ def main() -> None:
     # quality-check video, written to <run_dir>/videos/ep_NNN.mp4.
     frame_fn = video_dir = None
     if cfg.get("record_video"):
-        from gentle_manip.robot.xarm7_sim import _np
-        cam = next(iter(backend.process.handle.cameras.values()))[0]   # in-process worker
-        frame_fn = lambda: _np(cam.render(rgb=True, depth=False)[0])
+        frame_fn = backend.render_rgb          # unified: works in-process AND under subprocess
         video_dir = run_dir
 
     recorder = DemoRecorder(

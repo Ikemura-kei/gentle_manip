@@ -18,4 +18,14 @@ object_scale: [0.8, 1.2]     # uniform object scale
 object_bend_deg: [-25, 25]   # total bend along the long axis (deg) — curvature (banana-like)
 object_twist_deg: [-20, 20]  # total twist about the long axis (deg)
 object_taper: [-0.15, 0.15]  # end-to-end thickness change (fraction)
+object_axis_scale: [0.9, 1.1] # anisotropic scale on ONE random x/y/z axis (wider/narrower)
 # object_rbf: [0.0, 0.04]    # optional organic bumps (fraction of size); off by default
+
+# ── per-scene material (rebuild) ─────────────────────────────────────────────
+# Bounded for MPM stability at the tuned substeps (210): stable substeps ∝ √E, so we keep E on
+# the SOFT side of the tuned 3e5 (softer = fewer substeps needed = always stable). yield stays
+# from the registry material.
+object_E: [2.0e5, 3.0e5]     # Young's modulus (Pa)
+object_nu: [0.30, 0.45]      # Poisson ratio
+object_rho: [800, 1200]      # density (kg/m^3)
+coup_friction: [3.5, 4.5]    # rigid<->MPM coupling friction

@@ -1,0 +1,39 @@
+# [collect] Scripted soft-mushroom collection with FULL DR (pose+orientation+size+shape+material).
+# Used by: examples/collect_demos_sim.py
+# Status: active
+#
+# Same scripted expert as single_lift_mushroom_soft_scripted, but with the full food DR: the
+# whole scene (object size/shape/material) is re-randomized every `scene_dr_every` saved episodes
+# by RELAUNCHING the genesis child (subprocess backend, one sim at a time). dr_override swaps the
+# experiment's pose-only DR for configs/dr/food_shape.yaml. Each rebuild is ~30-45 s, so this is
+# slower than the fixed-scene recipe — trade throughput for a size/shape/material-varied dataset.
+experiment: single_lift_mushroom_soft
+task_name: single_lift_mushroom_soft_fulldr
+out_dir: dataset/demos
+dr_override: food_shape        # full size/shape/material ranges (else the experiment's sim_demo)
+scene_dr_every: 4             # relaunch + resample the scene every 4 saved episodes
+
+input: scripted
+show_viewer: false
+n_episodes: 40
+rate: 30
+speed: 0.5
+gripper_value: 0.5
+settle_steps: 40
+
+scripted:
+  lift_height: 0.2
+  hold_seconds: 2.0
+  approach_height: 0.12
+  grasp_z: 0.006
+  grasp_gw: 0.030
+  grasp_firm_steps: 1
+
+record_video: true            # cam_ext RGB (via backend.render_rgb — works under subprocess)
+video_episodes: 8
+video_fps: 30
+
+idle_threshold: 0.001
+keep_trailing_idle: 5
+max_interior_idle: 3
+action_noise_std: 0.0

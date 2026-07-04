@@ -133,6 +133,16 @@ class GenesisWorker:
         self.handle.scene.step()
         return self.read_state()
 
+    def render_rgb(self):
+        """Env-0 RGB frame (H,W,3) uint8 from the first built camera, or None if no camera
+        was built. Used for behaviour clips / eval video — works in-process AND as the
+        subprocess 'render' command (so video survives the relaunch-based scene DR)."""
+        cams = getattr(self.handle, "cameras", {})
+        if not cams:
+            return None
+        cam = next(iter(cams.values()))[0]        # env-0 camera
+        return _np(cam.render(rgb=True, depth=False)[0]).astype(np.uint8)
+
     def close(self) -> None:
         try:
             gs.destroy()

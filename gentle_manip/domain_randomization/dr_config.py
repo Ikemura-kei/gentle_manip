@@ -39,12 +39,15 @@ class DRConfig:
     object_twist_deg: Optional[_Range] = None # shape: total twist about the long axis (deg)
     object_taper: Optional[_Range] = None     # shape: end-to-end thickness change (fraction, e.g. (-0.2, 0.2))
     object_rbf: Optional[_Range] = None       # shape: organic bump magnitude (fraction of size, e.g. (0, 0.05))
+    object_axis_scale: Optional[_Range] = None  # shape: anisotropic scale along ONE random x/y/z axis, e.g. (0.9, 1.1)
 
     seed: int = 0
 
     _SCENE_FIELDS = ("object_E", "object_nu", "object_rho", "object_yield", "coup_friction",
-                     "object_scale", "object_bend_deg", "object_twist_deg", "object_taper", "object_rbf")
-    _SHAPE_FIELDS = ("object_bend_deg", "object_twist_deg", "object_taper", "object_rbf")
+                     "object_scale", "object_bend_deg", "object_twist_deg", "object_taper",
+                     "object_rbf", "object_axis_scale")
+    _SHAPE_FIELDS = ("object_bend_deg", "object_twist_deg", "object_taper", "object_rbf",
+                     "object_axis_scale")
 
     def has_reset_dr(self) -> bool:
         return (self.object_pos_xy > 0 or self.robot_init_pos_xyz > 0
@@ -129,4 +132,7 @@ class DRConfig:
             out["taper"] = float(rng.uniform(*self.object_taper))
         if self.object_rbf is not None:
             out["rbf"] = float(rng.uniform(*self.object_rbf))
+        if self.object_axis_scale is not None:              # anisotropic scale on a random axis
+            out["axis_scale"] = float(rng.uniform(*self.object_axis_scale))
+            out["axis_scale_ax"] = int(rng.integers(3))     # 0=x, 1=y, 2=z
         return out

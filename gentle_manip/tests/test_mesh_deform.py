@@ -49,6 +49,17 @@ def test_taper_and_twist_valid_and_volume_preserving_ish():
         assert md._valid(m, out)
 
 
+def test_axis_scale_stretches_only_the_chosen_axis():
+    m = _banana()
+    ext0 = m.vertices.max(0) - m.vertices.min(0)
+    out = md.deform_mesh(m, {"axis_scale": 1.3, "axis_scale_ax": 0}, np.random.default_rng(0))  # x
+    ext1 = out.vertices.max(0) - out.vertices.min(0)
+    assert ext1[0] == pytest.approx(ext0[0] * 1.3, rel=1e-3)     # x stretched
+    assert ext1[1] == pytest.approx(ext0[1], rel=1e-3)           # y unchanged
+    assert ext1[2] == pytest.approx(ext0[2], rel=1e-3)           # z unchanged
+    assert md._valid(m, out)
+
+
 def test_degenerate_magnitude_falls_back_not_crash():
     m = _banana()
     # an absurd bend would blow up; deform_mesh retries smaller then falls back to a valid mesh

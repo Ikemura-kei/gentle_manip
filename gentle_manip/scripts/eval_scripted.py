@@ -84,6 +84,9 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--max-steps", type=int, default=300, help="policy steps per episode (sim steps)")
     ap.add_argument("--record-batches", type=int, default=2)
+    ap.add_argument("--scene-group-size", type=int, default=0,
+                    help="rebuild the object geometry every K batches (0=fixed nominal). Needs a "
+                         "subprocess server with full DR ranges (serl_sim_server --subprocess --dr food_shape).")
     args = ap.parse_args()
 
     cc = yaml.safe_load(args.collect_config.read_text())
@@ -99,7 +102,7 @@ def main() -> None:
     venv = SimEvalVenv(client, args.num_envs, args.max_steps)
     policy = ScriptedPolicy(args.num_envs, exp.action_config.scales, cc.get("rate", 30), params)
     spec = EvalSpec(n_episodes=args.n_episodes, num_envs=args.num_envs, seed=args.seed,
-                    max_policy_steps=args.max_steps)
+                    max_policy_steps=args.max_steps, scene_group_size=args.scene_group_size)
 
     # No training run to nest under (untrained expert) -> its own top-level dir named after the
     # "algorithm", mirroring logs/dppo, logs/serl (trained policies nest eval under <run>/eval/).

@@ -49,7 +49,8 @@ def _scenario_columns(sc, n):
             c["home_dx"], c["home_dy"], c["home_dz"] = (float(home[j][0]), float(home[j][1]), float(home[j][2]))
         c.update(mat_E=mat.get("E"), mat_nu=mat.get("nu"), mat_rho=mat.get("rho"), mat_yield=mat.get("yield"))
         c.update(obj_scale=scene.get("scale"), obj_bend_deg=scene.get("bend_deg"),
-                 obj_twist_deg=scene.get("twist_deg"), obj_taper=scene.get("taper"), obj_rbf=scene.get("rbf"))
+                 obj_twist_deg=scene.get("twist_deg"), obj_taper=scene.get("taper"), obj_rbf=scene.get("rbf"),
+                 obj_axis_scale=scene.get("axis_scale"), obj_axis=scene.get("axis"))
     return cols
 
 
@@ -61,8 +62,12 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
     records = []
 
     for i in range(spec.n_batches):
+        # Per-group scene DR: rebuild the object geometry (size/shape/material) every K batches from
+        # a deterministic group seed (identical across evals -> apples-to-apples across sizes/shapes).
+        if spec.scene_group_size > 0 and i % spec.scene_group_size == 0 and hasattr(venv, "randomize_scene"):
+            venv.randomize_scene(spec.scene_seed_for_group(i // spec.scene_group_size))
         seed_i = spec.seed_for_batch(i)
-        venv.seed([seed_i] * n)                       # deterministic scenario for this batch
+        venv.seed([seed_i] * n)                       # deterministic pose/orientation for this batch
         options = None
         if i < record_batches:                        # env-0 clip for the first few batches
             (out_dir / "render").mkdir(parents=True, exist_ok=True)

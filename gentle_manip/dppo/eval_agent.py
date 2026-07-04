@@ -48,6 +48,7 @@ class EvalHarnessAgent(EvalAgent):
             num_envs=self.n_envs,
             seed=int(self.cfg.get("seed", 0)),
             max_policy_steps=int(self.cfg.env.max_episode_steps) // self.act_steps,
+            scene_group_size=int(self.cfg.get("scene_group_size", 0)),
         )
         policy = _DiffusionPolicy(self.model, self.obs_keys, self.device, self.act_steps)
         # ONE folder: hydra's run.dir already IS <base_policy_run>/eval/<datetime> (via the

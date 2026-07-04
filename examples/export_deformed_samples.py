@@ -63,21 +63,25 @@ def main() -> None:
     rows_csv = []
     for i in range(args.n):
         p = dr.sample_shape_scale(rng)                       # exact DR sampling path
-        shape = {k: p[k] for k in ("bend", "twist", "taper", "rbf") if k in p}
+        shape = {k: p[k] for k in ("bend", "twist", "taper", "rbf", "axis_scale", "axis_scale_ax") if k in p}
         mesh = md.deform_mesh(nominal, shape, rng)
         scale = p.get("scale", 1.0)
         mesh = _scaled(mesh, scale)                          # bake size in too
+        axc = p.get("axis_scale", 1.0)
+        axn = "xyz"[int(p.get("axis_scale_ax", 0))] if "axis_scale" in p else "-"
         tag = (f"sample{i:02d}_scale{scale:.2f}_bend{np.rad2deg(p.get('bend', 0)):+.0f}"
-               f"_twist{np.rad2deg(p.get('twist', 0)):+.0f}_taper{p.get('taper', 0):+.2f}")
+               f"_twist{np.rad2deg(p.get('twist', 0)):+.0f}_taper{p.get('taper', 0):+.2f}"
+               f"_axis{axn}{axc:.2f}")
         mesh.export(str(out / f"{tag}.obj"))
         mesh.export(str(out / f"{tag}.stl"))
         _panel(axes[i + 1], mesh,
-               f"scale {scale:.2f}  bend {np.rad2deg(p.get('bend',0)):+.0f}°\n"
-               f"twist {np.rad2deg(p.get('twist',0)):+.0f}°  taper {p.get('taper',0):+.2f}")
+               f"scale {scale:.2f}  bend {np.rad2deg(p.get('bend',0)):+.0f}°  twist {np.rad2deg(p.get('twist',0)):+.0f}°\n"
+               f"taper {p.get('taper',0):+.2f}  axis {axn}×{axc:.2f}")
         rows_csv.append({"sample": i, "scale": round(scale, 4),
                          "bend_deg": round(np.rad2deg(p.get("bend", 0)), 2),
                          "twist_deg": round(np.rad2deg(p.get("twist", 0)), 2),
                          "taper": round(p.get("taper", 0), 4),
+                         "axis_scale": round(axc, 4), "axis": axn,
                          "n_vertices": len(mesh.vertices), "volume_cm3": round(mesh.volume * 1e6, 3)})
 
     for ax in axes[args.n + 1:]:

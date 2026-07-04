@@ -584,23 +584,35 @@ IMPLEMENTED (`domain_randomization/{dr_config.py,presets.py}`, `configs/dr/{mild
 applied by `SimBackend` with its own RNG):
 - **Object pose** (per-reset, cheap) — `DRConfig.object_pos_xy` → per-env `object_dxy`
   sampled in `SimBackend.reset()` (the worker shifts the object particles).
-- **Object material E/ν/ρ + coupling friction** (per-scene) — `SimBackend.randomize_scene()`
-  samples them and **rebuilds via `GenesisProcess.restart(new_spec, coup_friction=...)`**
-  (MPM material is global per scene). Call every N episodes, not every reset.
 - **Object orientation** (per-reset) — `object_yaw_deg` (full 180) + `object_pitch_roll_deg`
   → `sample_object_euler` (worker rotates the object at spawn).
-- **Object SIZE + SHAPE** (per-scene) — `object_scale` (uniform mesh scale) + procedural mesh
-  deformation `object_{bend,twist,taper,rbf}` (real food varies in both). `SimBackend.
-  _apply_shape_scale_dr` samples at scene build (launch-time) from the REGISTRY nominal mesh +
-  nominal scale (idempotent), writes a mild near-diffeomorphic deformed `.obj` (`assets/
-  mesh_deform.py` — Barr bend=curvature/twist/taper along the long axis + optional RBF bumps,
-  with a positive-volume validity guard + retry/fallback), and bakes `scale`+`mesh_path` into
-  the `ObjectEntry` (scene_spec gained `mesh_path`; scene_builder uses it). SIZE+SHAPE are
-  SCENE-level: one per launch (Genesis batched envs share geometry — variety is across launches
-  or via periodic `randomize_scene`, NOT across sub-envs). `configs/dr/food_shape.yaml`,
-  `presets.aggressive`. `scene_params()` exposes the applied values → eval CSV.
+- **Object material E/ν/ρ + friction + SIZE + SHAPE** (per-scene, unified in
+  `SimBackend._apply_scene_dr`) — samples material (`object_E/nu/rho`, `coup_friction`),
+  `object_scale` (uniform mesh scale), and procedural mesh deformation
+  `object_{bend,twist,taper,rbf,axis_scale}` (real food varies in all). Deforms from the
+  REGISTRY nominal mesh + nominal scale (idempotent) via `assets/mesh_deform.py` — mild
+  near-diffeomorphic ops: Barr **bend**=curvature / **twist** / **taper** along the long axis,
+  **axis_scale** = anisotropic scale on one random x/y/z axis, optional RBF bumps; a
+  positive-volume validity guard retries then falls back to nominal. Bakes E/ν/ρ + `scale` +
+  `mesh_path` onto the `ObjectEntry` (scene_spec gained `mesh_path`). `configs/dr/food_shape.yaml`
+  (material bounded for MPM stability at the tuned substeps), `presets.aggressive`.
+  `scene_params()` + `material_params()` → eval CSV.
+- **FULL DR via relaunch** (`sim.scene_dr_every` N > 0) — `SimBackend.reset()` re-randomizes the
+  WHOLE scene every N resets by **relaunching the genesis child** (`GenesisProcess.restart` =
+  stop→start, so ≤1 sim ever — no parallel/multi-process). Forces the subprocess backend; RGB
+  video survives via the new `render` worker command (`SimBackend.render_rgb`, in-proc OR
+  subprocess). Consumers: `serl_sim_server --scene-dr-every N` / `--subprocess` / `--dr <name>`,
+  `collect_demos_sim` (`scene_dr_every` + `dr_override` in the recipe;
+  `configs/collect/single_lift_mushroom_soft_fulldr.yaml`). Each rebuild ~30–45 s → small N for
+  collection, larger for training. SCENE geometry is shared across a batched build's sub-envs
+  (varies across relaunches, NOT across sub-envs). Since batched envs share geometry, per-launch
+  is the granularity; a subprocess `randomize_scene` rpc command lets the eval harness drive it.
+- **Eval scene DR (deterministic, apples-to-apples)** — `EvalSpec.scene_group_size K`: the harness
+  rebuilds the geometry every K batches from `scene_seed_for_group(g)` (reseed → rpc
+  `randomize_scene`), so eval spans ~n_batches/K distinct sizes/shapes, identical across every
+  eval/policy; pose stays per-batch (`seed_for_batch`). K=0 = fixed nominal geometry.
   Showcase: `examples/dr_showcase.py` (random policy, N fresh-process episodes → one labelled
-  video of the varied objects).
+  video); inspect deformed meshes with `examples/export_deformed_samples.py`.
 
 TODO:
 - **Initial robot pose** — jitter `DEFAULT_EE_POSE` / seed joints per env at reset (needs

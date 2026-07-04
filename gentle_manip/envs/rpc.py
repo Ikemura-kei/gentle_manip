@@ -121,24 +121,14 @@ def serve_env(env, host: str = "127.0.0.1", port: int = 5555, ready_msg: str = "
                     elif cmd == "reset":
                         flush_video()              # save the episode just finished
                         vep[0] += 1
-                        obs = env.reset()
-                        hdr = {"ok": True}
-                        be = getattr(env, "backend", None)   # per-env DR + material for eval CSV
-                        dr = getattr(be, "_last_reset_dr", None)
-                        if dr is not None:
-                            hdr["dr"] = {k: (None if v is None else np.asarray(v).tolist())
-                                         for k, v in dr.items()}
-                        if be is not None and hasattr(be, "material_params"):
-                            try:
-                                hdr["material"] = be.material_params()
-                            except Exception:
-                                pass
-                        if be is not None and hasattr(be, "scene_params"):   # size/shape DR
-                            try:
-                                hdr["scene"] = be.scene_params()
-                            except Exception:
-                                pass
-                        send_msg(conn, hdr, _as_arrays(obs))
+                        send_msg(conn, _scenario_header(env), _as_arrays(env.reset()))
+                    elif cmd == "randomize_scene":
+                        # Rebuild the scene (material+size+shape) — the eval harness's deterministic
+                        # per-group scene DR (reseed then randomize_scene => reproducible geometry).
+                        flush_video()
+                        vep[0] += 1
+                        obs = env.randomize_scene() if hasattr(env, "randomize_scene") else env.reset()
+                        send_msg(conn, _scenario_header(env), _as_arrays(obs))
                     elif cmd == "step":
                         obs, reward, done, info = env.step(arrays["action"])
                         if frame_fn is not None and _recording(vep[0]):
@@ -176,6 +166,23 @@ def _as_arrays(obs: Dict[str, Any]) -> Dict[str, np.ndarray]:
     return {k: np.asarray(v) for k, v in obs.items()}
 
 
+def _scenario_header(env) -> Dict[str, Any]:
+    """reset/randomize_scene response header: per-env reset DR + material + size/shape scene
+    params, for the eval audit (SimEnvClient.last_scenario -> episodes.csv)."""
+    hdr: Dict[str, Any] = {"ok": True}
+    be = getattr(env, "backend", None)
+    dr = getattr(be, "_last_reset_dr", None)
+    if dr is not None:
+        hdr["dr"] = {k: (None if v is None else np.asarray(v).tolist()) for k, v in dr.items()}
+    for key, attr in (("material", "material_params"), ("scene", "scene_params")):
+        if be is not None and hasattr(be, attr):
+            try:
+                hdr[key] = getattr(be, attr)()
+            except Exception:
+                pass
+    return hdr
+
+
 # ── client: a PolicyEnv stand-in that forwards to the sim server ───────────────
 class SimEnvClient:
     """Drop-in for PolicyEnv on the policy side: reset()/step()/close() over RPC."""
@@ -209,6 +216,15 @@ class SimEnvClient:
         header, obs = recv_msg(self.conn)
         # per-env randomization applied this reset (object dxy/euler, arm home) + material —
         # stashed for the eval harness (last_scenario), obs return unchanged.
+        self.last_scenario = {"dr": header.get("dr"), "material": header.get("material"),
+                              "scene": header.get("scene")}
+        return obs
+
+    def randomize_scene(self) -> Dict[str, np.ndarray]:
+        """Rebuild the sim's scene (material + size + shape). Deterministic if reseed() was called
+        first (eval per-group scene DR). Returns the fresh obs; updates last_scenario."""
+        send_msg(self.conn, {"cmd": "randomize_scene"}, {})
+        header, obs = recv_msg(self.conn)
         self.last_scenario = {"dr": header.get("dr"), "material": header.get("material"),
                               "scene": header.get("scene")}
         return obs

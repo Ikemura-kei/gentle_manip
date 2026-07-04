@@ -145,6 +145,16 @@ class PolicyEnv:
         raw = self._do_reset(**kwargs)
         return self._observe(raw, self._sim_feedback())
 
+    def randomize_scene(self) -> dict:
+        """Re-randomize the whole scene (material + size + shape) via a backend rebuild and return
+        the fresh obs — used by the eval harness for deterministic per-group scene DR. Falls back
+        to a plain reset for backends without scene DR (e.g. real)."""
+        if hasattr(self.backend, "randomize_scene"):
+            raw = self.backend.randomize_scene()
+            self._episode_step = 0
+            return self._observe(raw, self._sim_feedback())
+        return self.reset()
+
     def _observe(self, raw: RawObs, sim_feedback: Optional[SimFeedback] = None) -> dict:
         """RawObs -> obs dict: shared perception + sim-only augmentation, plus
         sim-only privileged fields (from SimFeedback) for the state teacher."""

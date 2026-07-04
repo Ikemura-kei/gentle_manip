@@ -53,6 +53,11 @@ class SimEvalVenv:
     def scenario_params(self):
         return getattr(self.client, "last_scenario", None)
 
+    def randomize_scene(self, seed):
+        """Eval per-group scene DR: reseed then rebuild -> deterministic geometry from `seed`."""
+        self.client.reseed(int(seed))
+        self.client.randomize_scene()
+
     def close(self):
         self._rec.flush()
         try:
