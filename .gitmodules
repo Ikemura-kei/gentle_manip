@@ -4,3 +4,6 @@
 [submodule "third_party/DP3"]
 	path = third_party/DP3
 	url = https://github.com/Ikemura-kei/DP3_fork.git
+[submodule "third_party/reactive_diffusion_policy"]
+	path = third_party/reactive_diffusion_policy
+	url = https://github.com/xiaoxiaoxh/reactive_diffusion_policy.git

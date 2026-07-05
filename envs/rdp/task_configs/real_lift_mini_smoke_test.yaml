@@ -1,0 +1,68 @@
+# Smoke-test task config for the "lift" mini dataset (dataset_mini/lift_v2_downsample2_zarr
+# on HuggingFace: WendiChen/reactive_diffusion_policy_dataset). Not shipped upstream, and
+# kept here (outside third_party/reactive_diffusion_policy, which is an unforked upstream
+# submodule) rather than committed inside it — copy it into
+# third_party/reactive_diffusion_policy/reactive_diffusion_policy/config/task/ before use:
+#   cp envs/rdp/task_configs/real_lift_mini_smoke_test.yaml \
+#     third_party/reactive_diffusion_policy/reactive_diffusion_policy/config/task/
+#
+# The shipped real_lift_image_tactile_emb_dp_absolute_12fps.yaml assumes a fully bimanual
+# tactile rig (right_wrist_img + right_gripper1_marker_offset_emb), but this mini recording
+# only has left-arm images/tactile (external_img, left_wrist_img, left_gripper{1,2}_img) plus
+# right-arm low-dim robot state only. Field names/shapes below were read directly off the
+# downloaded replay_buffer.zarr rather than assumed from the paper's task configs.
+defaults:
+  - real_lift_three_realsense_one_mctac_one_gelsight_24fps@_here_
+  - _self_
+
+name: real_lift_mini_smoke_test
+
+image_shape: [3, 240, 320]
+dataset_path: data/lift_v2_downsample2_zarr
+
+shape_meta: &shape_meta
+  obs:
+    external_img:
+      shape: ${task.image_shape}
+      type: rgb
+    left_wrist_img:
+      shape: ${task.image_shape}
+      type: rgb
+    left_robot_tcp_pose:
+      shape: [3]
+      type: low_dim
+    left_robot_gripper_width:
+      shape: [1]
+      type: low_dim
+    right_robot_tcp_pose:
+      shape: [3]
+      type: low_dim
+    right_robot_gripper_width:
+      shape: [1]
+      type: low_dim
+    # McTac sensor on this recording stores raw (63*3) marker offsets under the
+    # "_emb" key (no PCA reduction was applied when this mini set was exported).
+    left_gripper1_marker_offset_emb:
+      shape: [189]
+      type: low_dim
+    # GelSight sensor: PCA-reduced to 15 dims, matching upstream's convention.
+    left_gripper2_marker_offset_emb:
+      shape: [15]
+      type: low_dim
+  action:
+    shape: [8] # (4 + 4) (x_l, y_l, z_l, x_r, y_r, z_r, gripper_width_l, gripper_width_r)
+
+dataset:
+  _target_: reactive_diffusion_policy.dataset.real_image_tactile_dataset.RealImageTactileDataset
+  shape_meta: *shape_meta
+  dataset_path: ${task.dataset_path}
+  horizon: ${horizon}
+  pad_before: ${eval:'${dataset_obs_steps}-1+${n_latency_steps}'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  n_obs_steps: ${dataset_obs_steps}
+  n_latency_steps: ${n_latency_steps}
+  seed: 42
+  val_ratio: 0.0
+  max_train_episodes: null
+  delta_action: False
+  relative_action: False

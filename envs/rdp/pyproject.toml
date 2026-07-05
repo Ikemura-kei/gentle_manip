@@ -1,0 +1,112 @@
+# Reactive Diffusion Policy (RDP) baseline environment.
+#
+# Separate from envs/sim, envs/deploy, envs/dp3 because RDP (third_party/reactive_diffusion_policy)
+# carries its own Hydra/diffusers/zarr stack, similar in spirit to DP3 but with a
+# 2D image + tactile-embedding representation (no pytorch3d / point clouds).
+#
+# RDP has no installable package (no setup.py/pyproject in the submodule) — its
+# scripts (train.py, eval_real_robot_flexiv.py, ...) are run in place with the
+# submodule directory as cwd, importing the `reactive_diffusion_policy` package
+# next to them via a plain sys.path-style relative import. So this env only
+# supplies dependencies; nothing from the submodule is installed editable.
+#
+# Setup:   uv sync --project envs/rdp
+# Run:     cd third_party/reactive_diffusion_policy && \
+#          uv run --project ../../envs/rdp python train.py <hydra overrides>
+#
+# Only offline training (train.py) and dataset postprocessing are supported here.
+# RDP's live teleop/eval (teleop.py, camera_node_launcher.py, eval_real_robot_flexiv.py)
+# additionally need ROS2 Humble + real robot/VR hardware, which this env does not
+# provide — train.py itself never imports rclpy or instantiates env_runner, so
+# offline training/checkpointing works without them.
+#
+# Torch pinned to a CUDA 12.1 build (this lab box), same pattern as envs/dp3 — RDP's
+# own README pins torch==1.13.1+cu117, but that predates the unpinned `diffusers`/
+# `accelerate` in requirements.txt, so a modern torch is used instead (as with DP3).
+# >>> LATER USERS / DIFFERENT HARDWARE: change the torch/torchvision/torchaudio
+#     versions below AND the cu121 URL in [[tool.uv.index]] to match your GPU + driver.
+#
+# diffusers is pinned to 0.11.1, NOT left unpinned like upstream's requirements.txt:
+# reactive_diffusion_policy/model/common/lr_scheduler.py does
+# `from diffusers.optimization import Union, ...` — relying on `diffusers.optimization`
+# transitively re-exporting `typing.Union` via its own `from typing import Union` at
+# module level. Modern diffusers (0.2x+) cleaned that up, so the import breaks — this
+# is the exact same reason envs/dp3 pins diffusers==0.11.1 (both build on the same
+# vintage of the real-stanford `diffusion_policy` codebase). huggingface-hub is capped
+# below 0.14 because diffusers 0.11.1 imports `cached_download`, removed in hub 0.14+.
+
+[project]
+name = "gentle-manip-rdp"
+version = "0.1.0"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+    "torch==2.4.1",
+    "torchvision==0.19.1",
+    "torchaudio==2.4.1",
+    # Stub for `geometry_msgs` (see ros_msg_stubs/pyproject.toml) — RDP's dataset
+    # code transitively imports it purely for a type hint, not for live ROS2 use.
+    "ros-msg-stubs",
+    # RDP's requirements.txt, transcribed (hardware/teleop-only packages kept for
+    # fidelity with upstream; not needed for offline train.py).
+    "numpy==1.26.4",
+    "numba",
+    "scipy",
+    "opencv-python",
+    "cffi",
+    "ipykernel",
+    "matplotlib",
+    "zarr",
+    "numcodecs",
+    "h5py",
+    "hydra-core",
+    "einops",
+    "tqdm",
+    "dill",
+    "scikit-video",
+    "scikit-image",
+    "pymunk",
+    "wandb",
+    "threadpoolctl",
+    "shapely",
+    "cython",
+    "imageio",
+    "imageio-ffmpeg",
+    "termcolor",
+    "tensorboard",
+    "tensorboardx",
+    "psutil",
+    "click",
+    "boto3",
+    # accelerate must predate its use of huggingface_hub.split_torch_state_dict_into_shards
+    # (added ~accelerate 0.30), since huggingface-hub is capped below for diffusers 0.11.1.
+    "accelerate==0.21.0",
+    "datasets",
+    "diffusers==0.11.1",
+    "huggingface-hub<0.14",
+    "av",
+    "cmake",
+    "timm",
+    "peft",
+    # for teleop (not needed for offline training, kept for parity with upstream)
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "loguru",
+    "bson",
+    "open3d",
+    "transforms3d",
+    "pyinstrument",
+    "py_cli_interaction",
+    "pygame",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu121" }
+torchvision = { index = "pytorch-cu121" }
+torchaudio = { index = "pytorch-cu121" }
+ros-msg-stubs = { path = "ros_msg_stubs", editable = true }

@@ -39,7 +39,9 @@ Third-party libraries whose source may need modification live in `third_party/` 
 
 ```
 third_party/
-└── genesis/    # Genesis physics engine (fork: https://github.com/Ikemura-kei/Genesis_fork)
+├── genesis/                    # Genesis physics engine (fork: https://github.com/Ikemura-kei/Genesis_fork)
+├── DP3/                        # 3D Diffusion Policy (fork: https://github.com/Ikemura-kei/DP3_fork)
+└── reactive_diffusion_policy/  # RDP tactile baseline (https://github.com/xiaoxiaoxh/reactive_diffusion_policy)
 ```
 
 After cloning, initialise and install with:
@@ -86,6 +88,7 @@ so each environment is its own thin project under `envs/`, depending on the shar
 | `envs/sim/` | 3.12 | sim, training, tests (genesis + torch) | `uv sync --project envs/sim` |
 | `envs/deploy/` | 3.11 | teleop demo collection (pygame/pyspacemouse + hardware SDKs; genesis-free); viz (open3d/imageio) | `uv sync --project envs/deploy` |
 | `envs/dp3/` | 3.8 | DP3 training/eval/zarr **and real policy deployment** — unified: DP3+torch+pytorch3d AND the hardware SDKs (pyrealsense2+xArm), so `deploy_real.py` runs the policy+RealBackend in one process | `uv sync --project envs/dp3` |
+| `envs/rdp/` | 3.10 | RDP (Reactive Diffusion Policy) tactile baseline — **offline training/eval only** (own Hydra/diffusers/zarr stack, 2D image + tactile-embedding obs, no pytorch3d) | `uv sync --project envs/rdp` |
 
 **Which env runs what (real side):** the DP3 policy + real hardware coexist in `envs/dp3`
 (3.8) — `pyrealsense2==2.54.2.5684` ships a cp38 wheel, so `scripts/deploy_real.py` runs
@@ -113,6 +116,47 @@ The `envs/dp3/` env depends on the editable local DP3 checkout under
 `third_party/DP3/3D-Diffusion-Policy` and the editable `gentle-manip` package.
 Torch/torchvision and the simplified PyTorch3D extension are installed manually
 there as CUDA/platform-specific packages, as noted in `envs/dp3/pyproject.toml`.
+
+### RDP tactile baseline (`third_party/reactive_diffusion_policy`, `envs/rdp/`)
+
+Added as a **baseline for comparison**, not as a component wired into `PolicyEnv`/
+`RawObs` — it's run standalone via its own `train.py`, not imported by `gentle_manip`.
+RDP has no installable package (no setup.py/pyproject in the submodule); its scripts
+are run in place with the submodule directory as cwd:
+```bash
+cd third_party/reactive_diffusion_policy && \
+  uv run --project ../../envs/rdp python train.py --config-name=... task=... [overrides]
+```
+Only **offline training** (`train.py`) is supported by this env — RDP's live
+teleop/eval (`teleop.py`, `camera_node_launcher.py`, `eval_real_robot_flexiv.py`) need
+ROS2 Humble + real robot/VR hardware, which `envs/rdp` deliberately does not provide
+(`train.py` never imports `rclpy` or instantiates `env_runner`, so training/checkpointing
+works without them). `examples/rdp_offline_inference_smoke_test.py` demonstrates the
+"inference" side: loading a saved checkpoint in a fresh process and running the
+policy's diffusion-sampling `predict_action`, the same mechanism
+`eval_real_robot_flexiv.py` uses, without ROS2.
+
+`envs/rdp` pins `diffusers==0.11.1` + `accelerate==0.21.0` + `huggingface-hub<0.14`
+(same reason as DP3: this codebase's `diffusers.optimization` import relies on old
+diffusers internals) and torch 2.4.1+cu121 (RDP's own README pins 1.13.1+cu117, stale
+against its unpinned `diffusers`/`accelerate` in requirements.txt). It also depends on
+a tiny local `ros-msg-stubs` package (`envs/rdp/ros_msg_stubs/`) providing a plain-Python
+`geometry_msgs.msg.Pose` — RDP's dataset code imports it transitively for a type hint
+only, and installing real ROS2 Humble just for that is unwarranted for offline use.
+
+RDP's example data (peel/wipe/lift tasks, GelSight + McTac tactile) is on
+[HuggingFace](https://huggingface.co/datasets/WendiChen/reactive_diffusion_policy_dataset);
+downloaded zarr datasets and training outputs go under
+`third_party/reactive_diffusion_policy/data/` (gitignored by the submodule's own
+`.gitignore`). The shipped upstream task configs (e.g.
+`real_lift_image_tactile_emb_dp_absolute_12fps.yaml`) assume a fully bimanual tactile rig
+(`right_wrist_img` + `right_gripper1_marker_offset_emb`) that the `dataset_mini/lift_v2_*`
+example data doesn't actually have (only left-arm images/tactile + right-arm low-dim
+state) — `envs/rdp/task_configs/real_lift_mini_smoke_test.yaml` (not upstream, and kept
+outside the submodule since it's an unforked upstream checkout — copy it into
+`third_party/reactive_diffusion_policy/reactive_diffusion_policy/config/task/` before
+using `task=real_lift_mini_smoke_test`) has field names/shapes read directly off the
+downloaded `replay_buffer.zarr` instead.
 
 **System prereqs for teleop (demo collection):** `pygame` needs a display on the
 robot host. SpaceMouse mode also needs `libhidapi` + a udev rule giving hidraw

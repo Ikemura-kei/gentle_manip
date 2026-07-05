@@ -1,0 +1,28 @@
+# Minimal stand-in for the `geometry_msgs` ROS2 message package.
+#
+# reactive_diffusion_policy/common/space_utils.py does
+# `from geometry_msgs.msg import Pose` purely to type-hint two ROS-pose-to-numpy
+# converter functions (ros_pose_to_4x4matrix, ros_pose_to_6d_pose). Those converters
+# are only ever called from RDP's live ROS2 real_world/ nodes, never from offline
+# training on a zarr dataset — but the module-level import still runs, so without
+# `geometry_msgs` installed, importing the dataset module (which pulls in
+# space_utils transitively) fails outright even for offline use.
+#
+# Installing real ROS2 Humble just to satisfy this one type hint is unwarranted
+# for envs/rdp (offline training/eval only, see envs/rdp/pyproject.toml). This
+# stub provides a plain-Python `geometry_msgs.msg.Pose` with the same
+# `.position.{x,y,z}` / `.orientation.{x,y,z,w}` attribute shape as the real ROS2
+# message, so the import succeeds. If envs/rdp is ever extended to run RDP's live
+# ROS2 nodes, install real ROS2 Humble instead and drop this stub — a real
+# `geometry_msgs` on PYTHONPATH would need to take priority over this one.
+[project]
+name = "ros-msg-stubs"
+version = "0.1.0"
+requires-python = ">=3.10"
+
+[tool.setuptools]
+packages = ["geometry_msgs"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"

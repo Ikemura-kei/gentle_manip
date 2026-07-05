@@ -40,3 +40,8 @@ htmlcov/
 # summary PNGs/MP4s). Keep small calibration artifacts (dataset/camera_calibration/) tracked.
 dataset/demos/
 dataset/real_deploy/
+
+# RDP baseline (third_party/reactive_diffusion_policy): downloaded datasets,
+# training outputs/checkpoints, and wandb logs are large and machine-specific.
+third_party/reactive_diffusion_policy/data/
+third_party/reactive_diffusion_policy/wandb/
