@@ -156,7 +156,19 @@ state) — `envs/rdp/task_configs/real_lift_mini_smoke_test.yaml` (not upstream,
 outside the submodule since it's an unforked upstream checkout — copy it into
 `third_party/reactive_diffusion_policy/reactive_diffusion_policy/config/task/` before
 using `task=real_lift_mini_smoke_test`) has field names/shapes read directly off the
-downloaded `replay_buffer.zarr` instead.
+downloaded `replay_buffer.zarr` instead. Sibling configs `real_lift_mini_smoke_test_at.yaml`
+/ `_ldp.yaml` (same directory, same fix, same obs set) cover the full two-stage RDP
+(Asymmetric Tokenizer + Latent Diffusion Policy, `at=at_wipe_lift`, 24fps dataset
+`lift_v2_downsample1_zarr`) — train AT first, then LDP with `at_load_dir=<AT ckpt>`,
+mirroring upstream's `train_rdp.sh`. `examples/rdp_visualize_rollout.py` renders a rollout
+video (camera frames + GelSight marker quiver + predicted-vs-GT action) for either a plain
+DP or full-RDP checkpoint; `examples/rdp_compare_dp_vs_rdp.py` reports action-RMSE +
+predict_action latency for both (see its docstring for why this is an offline proxy, not
+the paper's real-robot success-rate metric). One checkpoint-reload quirk both scripts
+handle: the LDP policy's embedded AT submodule's own `normalizer` doesn't survive the
+state-dict round-trip (empty `ParameterDict` at construction can't absorb new keys via
+`load_state_dict`) — call `policy.at.set_normalizer(policy.normalizer)` again after
+`workspace.load_payload(...)`, exactly as upstream's own `eval_real_robot_flexiv.py` does.
 
 **System prereqs for teleop (demo collection):** `pygame` needs a display on the
 robot host. SpaceMouse mode also needs `libhidapi` + a udev rule giving hidraw
