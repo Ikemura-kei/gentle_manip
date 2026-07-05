@@ -3,6 +3,14 @@
 Map of the training/eval/collection entry points, which env each runs in, and how they connect.
 Analysis only — **staleness flags are at the bottom**; nothing here prescribes changes.
 
+## Experiment tracking (all training runs)
+Every TRAINING run gets a unique **5-letter ID** (`gentle_manip/utils/experiment_registry.py`)
+that names its dir `logs/<algo>/<task>/<id>/` and is recorded in project-root `experiments.csv`
+(gitignored; rebuild with `python -m gentle_manip.scripts.reconcile_experiments`). The **wandb**
+run name == the ID. wandb is enabled by default for DPPO (disable per-run with `wandb=null` or
+`WANDB_MODE=offline`) and via `--wandb` for SERL. Eval runs keep datetime naming and aren't
+registered. `reconcile_experiments.py --list` prints the table.
+
 ## The env + transport picture
 Genesis needs Python 3.12; the policy stacks need other versions, so they run in separate
 `envs/` and talk over a localhost socket (`gentle_manip/envs/rpc.py`). The **sim server** runs
