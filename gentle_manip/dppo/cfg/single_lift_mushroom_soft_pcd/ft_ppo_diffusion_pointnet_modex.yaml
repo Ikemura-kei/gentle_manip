@@ -109,7 +109,13 @@ train:
     warmup_steps: 10
     min_lr: 2e-5             # MoDex
   save_model_freq: 25
-  val_freq: 10
+  val_freq: 25               # SYNC eval to ckpt saving: each saved ckpt gets a comparable eval
+  # gentle_manip fixed-seed periodic eval: every eval reseeds + rebuilds to this SAME scene, so
+  # eval return/success/stress are apples-to-apple across iters (no scene-luck / varying-Young's
+  # confound). Logs task success + success-gated peak stress (P95) to wandb. A fresh training
+  # scene is restored after each eval. Needs the genesis bridge (seed()/randomize_scene()).
+  eval_fixed_seed: 77        # fixed scenario seed for eval (distinct from the 100-ep canonical 42)
+  eval_scene_dr: true        # also rebuild geometry/material to a fixed scene (fixes Young's etc.)
   render:
     freq: 25                 # env-0 rollout clip every 25 iters
     num: 1
