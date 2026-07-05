@@ -152,7 +152,11 @@ def main() -> None:
                 if ps:
                     data.append(ps); labels.append(f"{lab}\n(n={len(ps)})")
             fig, ax = plt.subplots(figsize=(1.6 * len(data) + 2, 5))
-            ax.boxplot(data, labels=labels, showmeans=True)
+            try:
+                ax.boxplot(data, tick_labels=labels, showmeans=True)   # matplotlib >= 3.9
+            except TypeError:
+                ax.boxplot(data, labels=labels, showmeans=True)        # older matplotlib
+
             ax.set_ylabel("peak von-Mises stress (success episodes)")
             ax.set_title("Gentleness: success-gated peak stress by policy")
             ax.axhline(40000, ls="--", c="r", lw=1, label="~40 kPa yield")
