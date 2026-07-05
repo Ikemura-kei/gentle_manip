@@ -61,16 +61,47 @@ def _recs(soft=True):
     return out
 
 def test_aggregate_success_and_stress_soft():
+    # peaks 1000/2000/3000/4000; success on k=0,2 (peaks 1000,3000). Stress is SUCCESS-GATED.
     agg = aggregate(_recs(soft=True), checkpoint="c", experiment="e")
     assert agg["n_episodes"] == 4
     assert agg["success_rate"] == 0.5 and agg["ever_success_rate"] == 1.0
-    assert agg["is_soft_task"] and agg["stress_peak_mean"] == pytest.approx(2500.0)
+    assert agg["is_soft_task"]
+    assert agg["stress_n_success"] == 2
+    assert agg["stress_peak_mean"] == pytest.approx(2000.0)      # (1000+3000)/2, gated
+    assert agg["stress_peak_mean_all"] == pytest.approx(2500.0)  # all 4, transparency
+    assert agg["stress_peak_p90"] == pytest.approx(2800.0)       # pctl of [1000,3000]
+    assert agg["stress_peak_p95"] == pytest.approx(2900.0)
     assert agg["checkpoint"] == "c" and agg["experiment"] == "e"
+
+def test_aggregate_stress_gate_ignores_gentle_but_failed():
+    # the trap: a failed episode with tiny stress must NOT lower the gated mean.
+    recs = [
+        {"episode": 0, "batch": 0, "env": 0, "scenario_seed": 0, "success": 1, "ever_success": 1,
+         "first_success_step": 5, "steps": 75, "episode_reward": 1.0,
+         "stress_peak": 5000.0, "stress_mean": 1000.0},
+        {"episode": 1, "batch": 0, "env": 1, "scenario_seed": 0, "success": 0, "ever_success": 0,
+         "first_success_step": -1, "steps": 75, "episode_reward": 0.0,
+         "stress_peak": 50.0, "stress_mean": 10.0},   # never touched object -> tiny stress
+    ]
+    agg = aggregate(recs)
+    assert agg["success_rate"] == 0.5
+    assert agg["stress_n_success"] == 1
+    assert agg["stress_peak_mean"] == pytest.approx(5000.0)       # gated: only the success
+    assert agg["stress_peak_mean_all"] == pytest.approx(2525.0)   # all: (5000+50)/2 — the trap
+
+def test_aggregate_no_success_stress_is_none():
+    recs = [dict(episode=0, batch=0, env=0, scenario_seed=0, success=0, ever_success=0,
+                 first_success_step=-1, steps=75, episode_reward=0.0,
+                 stress_peak=100.0, stress_mean=20.0)]
+    agg = aggregate(recs)
+    assert agg["is_soft_task"] and agg["stress_n_success"] == 0
+    assert agg["stress_peak_mean"] is None and agg["stress_peak_p95"] is None
+    assert agg["stress_peak_mean_all"] == pytest.approx(100.0)
 
 def test_aggregate_rigid_has_no_stress():
     agg = aggregate(_recs(soft=False))
     assert not agg["is_soft_task"]
-    assert agg["stress_peak_mean"] is None and agg["stress_mean_mean"] is None
+    assert "stress_peak_mean" not in agg
 
 def test_write_episodes_csv_roundtrip(tmp_path):
     write_episodes_csv(_recs(soft=True), tmp_path / "episodes.csv")

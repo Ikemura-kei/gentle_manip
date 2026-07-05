@@ -39,33 +39,68 @@ def write_episodes_csv(records: List[Dict[str, Any]], path: Path) -> None:
             w.writerow({k: r.get(k, "") for k in CSV_FIELDS})
 
 
+def _clean(vals: List[float]) -> np.ndarray:
+    return np.asarray([v for v in vals if v is not None and not math.isnan(v)], dtype=float)
+
+
 def _mean_std(vals: List[float]):
-    a = np.asarray([v for v in vals if v is not None and not math.isnan(v)], dtype=float)
+    a = _clean(vals)
     if a.size == 0:
         return None, None
     return float(a.mean()), float(a.std())
 
 
+def _pct(a: np.ndarray, q: float):
+    return float(np.percentile(a, q)) if a.size else None
+
+
 def aggregate(records: List[Dict[str, Any]], **meta) -> Dict[str, Any]:
     """Aggregate per-episode records into the summary dict. **meta = checkpoint, experiment,
-    spec fields, etc. — passed straight through for provenance."""
+    spec fields, etc. — passed straight through for provenance.
+
+    IMPORTANT (gentleness metric): stress aggregates are computed ONLY over episodes with task
+    SUCCESS. A failed episode (agent never touched the object) has near-zero stress and would
+    otherwise fool the mean into looking "gentle" while not doing the task. So the headline
+    stress_* metrics are success-gated; all-episode versions are kept as stress_*_all for
+    transparency. success_rate itself is over ALL episodes.
+    """
     n = len(records)
     succ = [bool(r["success"]) for r in records]
     ever = [bool(r["ever_success"]) for r in records]
-    peak_mean, peak_std = _mean_std([r.get("stress_peak") for r in records])
-    smean_mean, _ = _mean_std([r.get("stress_mean") for r in records])
-    has_stress = peak_mean is not None
-    return {
+    has_stress = _clean([r.get("stress_peak") for r in records]).size > 0
+
+    # success-gated stress: only episodes where success == True
+    succ_recs = [r for r in records if bool(r["success"])]
+    peak_s = _clean([r.get("stress_peak") for r in succ_recs])
+    smean_s = _clean([r.get("stress_mean") for r in succ_recs])
+    n_succ_stress = int(peak_s.size)
+
+    # all-episode stress (transparency / to expose the "gentle but failed" trap)
+    peak_all_mean, _ = _mean_std([r.get("stress_peak") for r in records])
+    smean_all_mean, _ = _mean_std([r.get("stress_mean") for r in records])
+
+    out = {
         **meta,
         "n_episodes": n,
         "success_rate": float(np.mean(succ)) if n else 0.0,
         "ever_success_rate": float(np.mean(ever)) if n else 0.0,
         "mean_episode_reward": float(np.mean([r["episode_reward"] for r in records])) if n else 0.0,
-        "stress_peak_mean": _nan(peak_mean) if has_stress else None,
-        "stress_peak_std": _nan(peak_std) if has_stress else None,
-        "stress_mean_mean": _nan(smean_mean) if has_stress else None,
         "is_soft_task": has_stress,
     }
+    if has_stress:
+        # headline = success-gated (None if no successful episode had stress)
+        out.update({
+            "stress_n_success": n_succ_stress,
+            "stress_peak_mean": _nan(float(peak_s.mean())) if n_succ_stress else None,
+            "stress_peak_std": _nan(float(peak_s.std())) if n_succ_stress else None,
+            "stress_peak_p90": _pct(peak_s, 90) if n_succ_stress else None,
+            "stress_peak_p95": _pct(peak_s, 95) if n_succ_stress else None,
+            "stress_mean_mean": _nan(float(smean_s.mean())) if n_succ_stress else None,
+            # all-episode (NOT success-gated) — transparency only
+            "stress_peak_mean_all": _nan(peak_all_mean),
+            "stress_mean_mean_all": _nan(smean_all_mean),
+        })
+    return out
 
 
 def write_summary(summary: Dict[str, Any], path: Path) -> None:

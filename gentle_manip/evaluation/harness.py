@@ -132,7 +132,9 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
         except Exception as e:
             print(f"[eval] env cfg snapshot skipped: {e}", flush=True)
 
+    sp = summary.get("stress_peak_mean") if summary.get("is_soft_task") else None
     print(f"[eval] DONE — success {summary['success_rate']:.3f}"
-          + (f", stress_peak {summary['stress_peak_mean']:.0f}" if summary["is_soft_task"] else "")
-          + f" over {summary['n_episodes']} episodes -> {out_dir}", flush=True)
+          + (f", stress_peak(succ) {sp:.0f} over {summary['stress_n_success']} succ eps"
+             if sp is not None else (", no successful eps for stress" if summary["is_soft_task"] else ""))
+          + f" | {summary['n_episodes']} episodes -> {out_dir}", flush=True)
     return summary
