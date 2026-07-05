@@ -334,10 +334,14 @@ def main():
               flush=True)
 
         # Per-run output dir: logs/serl/<task>/<run_name>/{config,videos,checkpoints}.
-        from gentle_manip.utils.run_paths import (make_run_name, run_dir, snapshot_experiment,
+        # run_name defaults to a global 5-letter experiment ID (short + unique across algos);
+        # override with --run-name for a custom handle. Registered in experiments.csv.
+        from gentle_manip.utils.run_paths import (run_dir, snapshot_experiment,
                                                   write_run_meta, write_experiment_md)
-        run_name = args.run_name or make_run_name(exp.name)
+        from gentle_manip.utils.experiment_registry import add_entry, new_id
+        run_name = args.run_name or new_id()
         rdir = run_dir("serl", exp.name, run_name)
+        add_entry(run_name, "serl", exp.name, exp.name, rdir)
         snapshot_experiment(exp, rdir)
         write_run_meta(rdir, algo="serl", view=args.view, demos=n, demo_paths=args.demo_path, rl=rl)
         write_experiment_md(rdir, algo="serl", motivation=args.motivation, hypothesis=args.hypothesis,

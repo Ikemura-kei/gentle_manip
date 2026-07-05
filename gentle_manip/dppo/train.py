@@ -31,7 +31,9 @@ sys.path.insert(0, str(_RUN_PY.parent))
 
 os.environ.setdefault("DPPO_LOG_DIR", str(_REPO / "logs" / "dppo"))
 os.environ.setdefault("DPPO_DATA_DIR", str(_REPO / "dataset" / "dppo"))
-os.environ.setdefault("DPPO_WANDB_ENTITY", "")
+# wandb: the training configs carry a `wandb:` block (entity = ${oc.env:DPPO_WANDB_ENTITY,null}
+# -> the logged-in default account when unset). Enabled by default; disable per-run with the
+# hydra override `wandb=null`, or force local-only with `WANDB_MODE=offline` in the environment.
 
 
 def _eval_base(ckpt: str) -> str:
@@ -42,11 +44,27 @@ def _eval_base(ckpt: str) -> str:
     return str(p.parent.parent if p.parent.name == "checkpoint" else p.parent)
 
 
+_EXP_ID: str | None = None
+
+
+def _exp_id() -> str:
+    """OmegaConf resolver `${exp_id:}` — a fresh 5-letter run ID, minted ONCE per process and
+    cached, so a training config's logdir leaf IS the global experiment ID (short + unique).
+    The ExperimentSnapshot hydra callback records it in experiments.csv. Training only —
+    eval configs use eval_base instead, so they never mint an ID."""
+    global _EXP_ID
+    if _EXP_ID is None:
+        from gentle_manip.utils.experiment_registry import new_id
+        _EXP_ID = new_id()
+    return _EXP_ID
+
+
 def main() -> None:
     if not _RUN_PY.exists():
         raise FileNotFoundError(f"DPPO run.py not found at {_RUN_PY} — is the submodule initialised?")
     from omegaconf import OmegaConf
     OmegaConf.register_new_resolver("eval_base", _eval_base, replace=True)
+    OmegaConf.register_new_resolver("exp_id", _exp_id, replace=True)
     runpy.run_path(str(_RUN_PY), run_name="__main__")
 
 
