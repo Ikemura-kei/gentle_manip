@@ -23,7 +23,7 @@ _COMPUTED = {"n_episodes", "success_rate", "ever_success_rate", "mean_episode_re
 for _c, _pct in STRESS_COLS:
     _COMPUTED.add(_c + "_mean")
     if _pct:
-        _COMPUTED.update({_c + "_p90", _c + "_p95"})
+        _COMPUTED.update({_c + "_std", _c + "_p90", _c + "_p95"})
 _STRESS_KEYS = [c for c, _ in STRESS_COLS]
 
 
@@ -63,15 +63,14 @@ def main() -> None:
         recs = _records(csv_p)
         new = aggregate(recs, **meta)
         write_summary(new, summ_p)
-        og = old.get("stress_peak_mean")
         print(f"[ok] {d}")
         print(f"     success_rate {new['success_rate']:.3f}  n={new['n_episodes']}")
         if new.get("is_soft_task"):
-            print(f"     stress_peak (success-gated): mean {new['stress_peak_mean']:.0f}  "
-                  f"P90 {new['stress_peak_p90']:.0f}  P95 {new['stress_peak_p95']:.0f}  "
-                  f"(n_succ={new['stress_n_success']})")
-            print(f"     stress_peak (all-episode)  : {new['stress_peak_mean_all']:.0f}"
-                  + (f"   [old summary reported {og:.0f}]" if isinstance(og, (int, float)) else ""))
+            print(f"     peak (max_tmax, success-gated): mean {new['stress_max_tmax_mean']:.0f}  "
+                  f"std {new['stress_max_tmax_std']:.0f}  P90 {new['stress_max_tmax_p90']:.0f}  "
+                  f"P95 {new['stress_max_tmax_p95']:.0f}  (n_succ={new['stress_n_success']})")
+            print(f"     top20.ttop20 {new['stress_top20_ttop20_mean']:.0f}  "
+                  f"mean_tmean(backup) {new['stress_mean_tmean_mean']:.0f}")
 
 
 if __name__ == "__main__":

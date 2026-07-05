@@ -100,7 +100,8 @@ def aggregate(records: List[Dict[str, Any]], **meta) -> Dict[str, Any]:
         for col, want_pct in STRESS_COLS:
             vals = _clean([r.get(col) for r in succ_recs])            # success-gated
             out[col + "_mean"] = _nan(float(vals.mean())) if vals.size else None
-            if want_pct:
+            if want_pct:                                              # headline metrics get spread + tail
+                out[col + "_std"] = _nan(float(vals.std())) if vals.size else None
                 out[col + "_p90"] = _pct(vals, 90) if vals.size else None
                 out[col + "_p95"] = _pct(vals, 95) if vals.size else None
         # all-episode backup mean (exposes the "gentle but failed" trap; compare to old evals)

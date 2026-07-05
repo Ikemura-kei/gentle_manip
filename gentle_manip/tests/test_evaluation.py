@@ -78,6 +78,7 @@ def test_aggregate_success_and_stress_soft():
     assert agg["is_soft_task"] and agg["stress_n_success"] == 2
     # headline peak = max_tmax: gated [1000, 3000] -> mean 2000, p90 2800, p95 2900
     assert agg["stress_max_tmax_mean"] == pytest.approx(2000.0)
+    assert agg["stress_max_tmax_std"] == pytest.approx(1000.0)   # std of [1000,3000]
     assert agg["stress_max_tmax_p90"] == pytest.approx(2800.0)
     assert agg["stress_max_tmax_p95"] == pytest.approx(2900.0)
     # interaction tail = top20_ttop20: gated [500,1500] -> 1000, p95 1450 (flagged for pctls)
