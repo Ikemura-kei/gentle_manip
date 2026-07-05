@@ -48,3 +48,6 @@ logs/
 # Experiment registry — local index of local training runs (absolute run_dir paths, changes
 # every run). Rebuildable from the log tree via scripts/reconcile_experiments.py.
 experiments.csv
+
+# wandb local run data (synced to the cloud; the run dir is the source of truth)
+wandb/
