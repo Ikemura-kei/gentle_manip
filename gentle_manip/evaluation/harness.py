@@ -82,9 +82,12 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
         ever = np.zeros(n, bool)
         final = np.zeros(n, bool)
         first_step = np.full(n, -1, int)
-        stress_peak = np.full(n, np.nan)
-        stress_sum = np.zeros(n)
-        stress_cnt = np.zeros(n)
+        # Buffer the per-step SPATIAL reductions per env, so we can aggregate over TIME with tmax
+        # / top-20%-mean (NOT plain time-mean — idle steps would dilute it, letting a dawdle-then-
+        # grab policy look gentle). Spatial keys come from the venv info (see policy_env
+        # _stress_summary): stress_mean / max / top10 / top20 (over particles, per step).
+        SKEYS = ["stress_mean", "stress_max", "stress_top10", "stress_top20"]
+        buf = {k: [[] for _ in range(n)] for k in SKEYS}
 
         for t in range(spec.max_policy_steps):
             action = policy.act(obs)
@@ -94,23 +97,44 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
             final = succ
             first_step = np.where((succ & ~ever) & (first_step < 0), t, first_step)
             ever |= succ
-            sm = info.get("stress_max")
-            if sm is not None:
-                sm = np.asarray(sm, float).reshape(n)
-                stress_peak = np.where(np.isnan(stress_peak), sm, np.maximum(stress_peak, sm))
-            smean = info.get("stress_mean")
-            if smean is not None:
-                stress_sum += np.asarray(smean, float).reshape(n)
-                stress_cnt += 1
+            for k in SKEYS:
+                v = info.get(k)
+                if v is not None:
+                    v = np.asarray(v, float).reshape(n)
+                    for j in range(n):
+                        buf[k][j].append(float(v[j]))
+
+        def _tmax(seq):
+            return float(np.max(seq)) if seq else None
+
+        def _ttop20(seq):                                 # mean of the hottest 20% of timesteps
+            if not seq:
+                return None
+            a = np.sort(np.asarray(seq, float))[::-1]
+            m = max(1, int(np.ceil(0.20 * a.size)))
+            return float(a[:m].mean())
+
+        def _tmean(seq):                                  # plain time-mean — BACKUP only
+            return float(np.mean(seq)) if seq else None
 
         for j in range(n):
+            b = {k: buf[k][j] for k in SKEYS}
             records.append({
                 "episode": i * n + j, "batch": i, "env": j, "scenario_seed": seed_i,
                 "success": int(bool(final[j])), "ever_success": int(bool(ever[j])),
                 "first_success_step": int(first_step[j]), "steps": spec.max_policy_steps,
                 "episode_reward": float(ep_reward[j]),
-                "stress_peak": None if np.isnan(stress_peak[j]) else float(stress_peak[j]),
-                "stress_mean": None if stress_cnt[j] == 0 else float(stress_sum[j] / stress_cnt[j]),
+                # 8 metrics = 4 spatial x {tmax (worst instant), ttop20 (interaction-window mean)}
+                "stress_mean_tmax": _tmax(b["stress_mean"]),
+                "stress_mean_ttop20": _ttop20(b["stress_mean"]),
+                "stress_max_tmax": _tmax(b["stress_max"]),      # == old stress_peak (global worst)
+                "stress_max_ttop20": _ttop20(b["stress_max"]),
+                "stress_top10_tmax": _tmax(b["stress_top10"]),
+                "stress_top10_ttop20": _ttop20(b["stress_top10"]),
+                "stress_top20_tmax": _tmax(b["stress_top20"]),
+                "stress_top20_ttop20": _ttop20(b["stress_top20"]),
+                # backup: plain time-mean of the spatial-mean == old stress_mean (compare to old evals)
+                "stress_mean_tmean": _tmean(b["stress_mean"]),
                 **dr_cols[j],
             })
         print(f"[eval] batch {i + 1}/{spec.n_batches} seed={seed_i} "
@@ -132,9 +156,10 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
         except Exception as e:
             print(f"[eval] env cfg snapshot skipped: {e}", flush=True)
 
-    sp = summary.get("stress_peak_mean") if summary.get("is_soft_task") else None
+    sp = summary.get("stress_max_tmax_mean") if summary.get("is_soft_task") else None
     print(f"[eval] DONE — success {summary['success_rate']:.3f}"
-          + (f", stress_peak(succ) {sp:.0f} over {summary['stress_n_success']} succ eps"
+          + (f", peak(succ) {sp:.0f} / top20-ttop20 {summary.get('stress_top20_ttop20_mean'):.0f}"
+             f" over {summary['stress_n_success']} succ eps"
              if sp is not None else (", no successful eps for stress" if summary["is_soft_task"] else ""))
           + f" | {summary['n_episodes']} episodes -> {out_dir}", flush=True)
     return summary

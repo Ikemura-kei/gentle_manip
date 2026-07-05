@@ -42,24 +42,28 @@ def _f(row, key):
         return None
 
 
+# stress columns to summarize (success-gated). PAIR_KEY drives the paired test.
+PAIR_KEY = "stress_max_tmax"        # the classic peak (worst particle, worst instant)
+_SUMMARY_COLS = ["stress_max_tmax", "stress_top20_ttop20", "stress_top10_ttop20",
+                 "stress_mean_ttop20", "stress_mean_tmean"]
+
+
+def _gated(rows, col):
+    return np.array([_f(r, col) for r in rows
+                     if int(float(r["success"])) and _f(r, col) is not None])
+
+
 def _agg(rows: list[dict]) -> dict:
     n = len(rows)
     succ = np.array([int(float(r["success"])) for r in rows], bool)
-    peak_all = np.array([_f(r, "stress_peak") for r in rows if _f(r, "stress_peak") is not None])
-    peak_s = np.array([_f(r, "stress_peak") for r in rows
-                       if int(float(r["success"])) and _f(r, "stress_peak") is not None])
-    mean_s = np.array([_f(r, "stress_mean") for r in rows
-                       if int(float(r["success"])) and _f(r, "stress_mean") is not None])
     g = lambda a, q: float(np.percentile(a, q)) if a.size else float("nan")
-    return {
-        "n": n, "success_rate": float(succ.mean()) if n else 0.0,
-        "n_success": int(succ.sum()),
-        "stress_peak_mean": float(peak_s.mean()) if peak_s.size else float("nan"),
-        "stress_peak_std": float(peak_s.std()) if peak_s.size else float("nan"),
-        "stress_peak_p90": g(peak_s, 90), "stress_peak_p95": g(peak_s, 95),
-        "stress_mean_mean": float(mean_s.mean()) if mean_s.size else float("nan"),
-        "stress_peak_mean_all": float(peak_all.mean()) if peak_all.size else float("nan"),
-    }
+    out = {"n": n, "success_rate": float(succ.mean()) if n else 0.0, "n_success": int(succ.sum())}
+    for col in _SUMMARY_COLS:
+        v = _gated(rows, col)
+        out[col] = float(v.mean()) if v.size else float("nan")
+    pk = _gated(rows, PAIR_KEY)
+    out[PAIR_KEY + "_p90"], out[PAIR_KEY + "_p95"] = g(pk, 90), g(pk, 95)
+    return out
 
 
 def _key(r):
@@ -78,7 +82,7 @@ def _paired(base_rows, other_rows) -> dict:
     deltas = []
     for k in keys:
         if int(float(b[k]["success"])) and int(float(o[k]["success"])):
-            pb, po = _f(b[k], "stress_peak"), _f(o[k], "stress_peak")
+            pb, po = _f(b[k], PAIR_KEY), _f(o[k], PAIR_KEY)
             if pb is not None and po is not None:
                 deltas.append(po - pb)
     deltas = np.asarray(deltas, float)
@@ -119,12 +123,15 @@ def main() -> None:
     base = args.baseline or next(iter(runs))
 
     aggs = {lab: _agg(rows) for lab, rows in runs.items()}
-    print(f"\n{'policy':<12}{'n':>5}{'succ%':>8}{'peakμ(s)':>11}{'peakP90':>10}"
-          f"{'peakP95':>10}{'meanμ(s)':>10}{'peakμ(all)':>12}  (s)=success-gated")
+    print(f"\nAll stress cols success-gated. peak=max_tmax (worst particle, worst instant); "
+          f"tt20=mean of hottest 20%% of timesteps (idle-immune); tmean=time-mean (backup).")
+    print(f"{'policy':<12}{'n':>5}{'succ%':>7}{'peak':>9}{'pkP90':>8}{'pkP95':>8}"
+          f"{'t20.tt20':>9}{'t10.tt20':>9}{'mn.tt20':>9}{'mn.tmean':>9}")
     for lab, m in aggs.items():
-        print(f"{lab:<12}{m['n']:>5}{100*m['success_rate']:>7.1f}%{m['stress_peak_mean']:>11.0f}"
-              f"{m['stress_peak_p90']:>10.0f}{m['stress_peak_p95']:>10.0f}"
-              f"{m['stress_mean_mean']:>10.0f}{m['stress_peak_mean_all']:>12.0f}")
+        print(f"{lab:<12}{m['n']:>5}{100*m['success_rate']:>6.1f}%{m['stress_max_tmax']:>9.0f}"
+              f"{m['stress_max_tmax_p90']:>8.0f}{m['stress_max_tmax_p95']:>8.0f}"
+              f"{m['stress_top20_ttop20']:>9.0f}{m['stress_top10_ttop20']:>9.0f}"
+              f"{m['stress_mean_ttop20']:>9.0f}{m['stress_mean_tmean']:>9.0f}")
 
     print(f"\nPaired vs baseline '{base}' (peak-stress delta = other - base, on BOTH-success "
           f"scenarios; negative = other is gentler):")
@@ -147,8 +154,8 @@ def main() -> None:
             import matplotlib.pyplot as plt
             data, labels = [], []
             for lab, rows in runs.items():
-                ps = [_f(r, "stress_peak") for r in rows
-                      if int(float(r["success"])) and _f(r, "stress_peak") is not None]
+                ps = [_f(r, PAIR_KEY) for r in rows
+                      if int(float(r["success"])) and _f(r, PAIR_KEY) is not None]
                 if ps:
                     data.append(ps); labels.append(f"{lab}\n(n={len(ps)})")
             fig, ax = plt.subplots(figsize=(1.6 * len(data) + 2, 5))

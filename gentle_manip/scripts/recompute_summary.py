@@ -15,13 +15,16 @@ import csv
 import json
 from pathlib import Path
 
-from gentle_manip.evaluation.metrics import aggregate, write_summary
+from gentle_manip.evaluation.metrics import STRESS_COLS, aggregate, write_summary
 
 # keys aggregate() computes itself — everything else in the old summary is provenance meta.
 _COMPUTED = {"n_episodes", "success_rate", "ever_success_rate", "mean_episode_reward",
-             "is_soft_task", "stress_n_success", "stress_peak_mean", "stress_peak_std",
-             "stress_peak_p90", "stress_peak_p95", "stress_mean_mean",
-             "stress_peak_mean_all", "stress_mean_mean_all", "stress_peak_std_all"}
+             "is_soft_task", "stress_n_success", "stress_mean_tmean_mean_all"}
+for _c, _pct in STRESS_COLS:
+    _COMPUTED.add(_c + "_mean")
+    if _pct:
+        _COMPUTED.update({_c + "_p90", _c + "_p95"})
+_STRESS_KEYS = [c for c, _ in STRESS_COLS]
 
 
 def _num(v):
@@ -41,8 +44,7 @@ def _records(csv_path: Path) -> list[dict]:
                 "success": int(float(r["success"])) if r.get("success") not in ("", None) else 0,
                 "ever_success": int(float(r["ever_success"])) if r.get("ever_success") not in ("", None) else 0,
                 "episode_reward": _num(r.get("episode_reward")) or 0.0,
-                "stress_peak": _num(r.get("stress_peak")),
-                "stress_mean": _num(r.get("stress_mean")),
+                **{k: _num(r.get(k)) for k in _STRESS_KEYS},
             })
     return out
 

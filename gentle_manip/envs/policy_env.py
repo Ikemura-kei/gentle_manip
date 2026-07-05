@@ -16,6 +16,24 @@ from gentle_manip.actions.pipeline import ActionPipeline
 from gentle_manip.tasks.base_task import BaseTask
 
 
+def _stress_summary(vm: np.ndarray) -> dict:
+    """Per-env spatial reductions of von-Mises stress at one timestep.
+    vm: (num_envs, n_particles). Returns per-env (num_envs,) arrays:
+      max    — the single most-stressed particle (worst point contact),
+      mean   — average over ALL particles,
+      top10  — mean of the top 10% most-stressed particles (tail: localized bruising),
+      top20  — mean of the top 20% most-stressed particles.
+    The top-k% sit between mean and max: they capture localized high-stress regions (a hard
+    finger press bruises a patch, not one point) without being dominated by a single outlier."""
+    n_p = vm.shape[1]
+    k10 = max(1, int(round(0.10 * n_p)))
+    k20 = max(1, int(round(0.20 * n_p)))
+    # np.partition puts the k largest at the end of each row (O(n), no full sort)
+    top10 = np.partition(vm, n_p - k10, axis=1)[:, n_p - k10:].mean(axis=1)
+    top20 = np.partition(vm, n_p - k20, axis=1)[:, n_p - k20:].mean(axis=1)
+    return {"max": vm.max(axis=1), "mean": vm.mean(axis=1), "top10": top10, "top20": top20}
+
+
 @runtime_checkable
 class Backend(Protocol):
     """The sim/real boundary as seen by PolicyEnv.
@@ -191,7 +209,7 @@ class PolicyEnv:
         stress = None
         if sim_feedback is not None and "von_mises_stress" in sim_feedback.extra:
             vm = np.asarray(sim_feedback.extra["von_mises_stress"])   # (num_envs, n_particles)
-            stress = (vm.max(axis=1), vm.mean(axis=1))
+            stress = _stress_summary(vm)   # dict: max, mean, top10, top20 (per env, this step)
 
         timeout = self._episode_step >= self.max_episode_steps
         dones = np.full(self.num_envs, timeout, dtype=bool)
@@ -208,8 +226,10 @@ class PolicyEnv:
         ]
         if stress is not None:
             for i in range(self.num_envs):
-                infos[i]["stress_max"] = float(stress[0][i])
-                infos[i]["stress_mean"] = float(stress[1][i])
+                infos[i]["stress_max"] = float(stress["max"][i])
+                infos[i]["stress_mean"] = float(stress["mean"][i])
+                infos[i]["stress_top10"] = float(stress["top10"][i])
+                infos[i]["stress_top20"] = float(stress["top20"][i])
         return obs, rewards, dones, infos
 
     def close(self) -> None:

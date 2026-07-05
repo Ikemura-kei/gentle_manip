@@ -36,8 +36,9 @@ class SimEvalVenv:
         self._cnt += 1
         out = {"success": np.array([bool(d.get("success", False)) for d in info])}
         if info and "stress_max" in info[0]:
-            out["stress_max"] = np.array([d["stress_max"] for d in info], np.float32)
-            out["stress_mean"] = np.array([d["stress_mean"] for d in info], np.float32)
+            for key in ("stress_max", "stress_mean", "stress_top10", "stress_top20"):
+                if key in info[0]:
+                    out[key] = np.array([d[key] for d in info], np.float32)
         if self._rec.path is not None:
             self._rec.add(self.client.render())
         terminated = np.zeros(self.num_envs, bool)

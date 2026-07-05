@@ -144,6 +144,7 @@ class GenesisMultiStepVecEnv:
         reward = np.zeros(self.n_envs, np.float32)
         success = np.zeros(self.n_envs, bool)       # last sub-step's success (current state)
         s_max, s_sum, s_cnt = None, None, 0         # von-Mises over the chunk (soft body)
+        s_t10, s_t20 = None, None                   # top-10%/20% particle tail (chunk-max)
         for t in range(a.shape[1]):                 # execute the action chunk, sum reward
             obs, r, _done, sub_info = self.client.step(self._unnorm_action(a[:, t]))
             reward += np.asarray(r, np.float32).reshape(self.n_envs)
@@ -154,6 +155,11 @@ class GenesisMultiStepVecEnv:
                 smn = np.array([d["stress_mean"] for d in sub_info], np.float32)
                 s_sum = smn if s_sum is None else s_sum + smn
                 s_cnt += 1
+                if "stress_top10" in sub_info[0]:   # tail: chunk-max (matches stress_max)
+                    t10 = np.array([d["stress_top10"] for d in sub_info], np.float32)
+                    s_t10 = t10 if s_t10 is None else np.maximum(s_t10, t10)
+                    t20 = np.array([d["stress_top20"] for d in sub_info], np.float32)
+                    s_t20 = t20 if s_t20 is None else np.maximum(s_t20, t20)
             self._cnt += 1
             self._hist.append(self._modalities(obs))
             if self._rec_path is not None:          # pull an env-0 RGB frame for the video
@@ -166,6 +172,8 @@ class GenesisMultiStepVecEnv:
         info: dict = {"success": success}           # per-env eval signals
         if s_max is not None:
             info["stress_max"], info["stress_mean"] = s_max, s_sum / s_cnt
+            if s_t10 is not None:
+                info["stress_top10"], info["stress_top20"] = s_t10, s_t20
         if bool(truncated.all()):                   # synchronous horizon -> auto-reset all
             self._flush_video()                     # write this episode's clip; keep recording
             info["final_obs"] = obs_out

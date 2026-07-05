@@ -19,7 +19,13 @@ import numpy as np
 # jitter, object material) — the audit trail that makes runs comparable. Blank when a given DR
 # is disabled; mat_* are constant during eval (material not per-episode randomized).
 CSV_FIELDS = ["episode", "batch", "env", "scenario_seed", "success", "ever_success",
-              "first_success_step", "steps", "episode_reward", "stress_peak", "stress_mean",
+              "first_success_step", "steps", "episode_reward",
+              # 9 stress metrics: 4 spatial (mean/max/top10/top20 over particles) x {tmax, ttop20
+              # over time} + mean_tmean backup. tmax=worst instant; ttop20=mean of hottest 20%% of
+              # timesteps (idle-immune). max_tmax==old stress_peak; mean_tmean==old stress_mean.
+              "stress_mean_tmax", "stress_mean_ttop20", "stress_max_tmax", "stress_max_ttop20",
+              "stress_top10_tmax", "stress_top10_ttop20", "stress_top20_tmax", "stress_top20_ttop20",
+              "stress_mean_tmean",
               "obj_dx", "obj_dy", "obj_roll", "obj_pitch", "obj_yaw",
               "home_dx", "home_dy", "home_dz", "mat_E", "mat_nu", "mat_rho", "mat_yield",
               "obj_scale", "obj_bend_deg", "obj_twist_deg", "obj_taper", "obj_rbf",
@@ -54,30 +60,32 @@ def _pct(a: np.ndarray, q: float):
     return float(np.percentile(a, q)) if a.size else None
 
 
+# The 9 per-episode stress metrics (see harness): 4 spatial reductions x {tmax, ttop20} + a
+# time-mean backup. True flag -> also report P90/P95 over episodes (worst-case bruising tail).
+STRESS_COLS = [
+    ("stress_mean_tmax", False), ("stress_mean_ttop20", False),
+    ("stress_max_tmax", True), ("stress_max_ttop20", False),     # max_tmax == the classic peak
+    ("stress_top10_tmax", False), ("stress_top10_ttop20", False),
+    ("stress_top20_tmax", False), ("stress_top20_ttop20", True),  # headline interaction tail
+    ("stress_mean_tmean", False),                                 # backup == old stress_mean
+]
+
+
 def aggregate(records: List[Dict[str, Any]], **meta) -> Dict[str, Any]:
     """Aggregate per-episode records into the summary dict. **meta = checkpoint, experiment,
     spec fields, etc. — passed straight through for provenance.
 
-    IMPORTANT (gentleness metric): stress aggregates are computed ONLY over episodes with task
-    SUCCESS. A failed episode (agent never touched the object) has near-zero stress and would
-    otherwise fool the mean into looking "gentle" while not doing the task. So the headline
-    stress_* metrics are success-gated; all-episode versions are kept as stress_*_all for
-    transparency. success_rate itself is over ALL episodes.
+    IMPORTANT (gentleness metric): stress aggregates are SUCCESS-GATED — computed only over
+    episodes with task success. A failed episode (agent never touched the object) has near-zero
+    stress and would otherwise fool the mean into looking gentle while not doing the task.
+    success_rate itself is over ALL episodes. See STRESS_COLS / harness for the 9 stress metrics.
     """
     n = len(records)
     succ = [bool(r["success"]) for r in records]
     ever = [bool(r["ever_success"]) for r in records]
-    has_stress = _clean([r.get("stress_peak") for r in records]).size > 0
-
-    # success-gated stress: only episodes where success == True
+    has_stress = _clean([r.get("stress_max_tmax") for r in records]).size > 0
     succ_recs = [r for r in records if bool(r["success"])]
-    peak_s = _clean([r.get("stress_peak") for r in succ_recs])
-    smean_s = _clean([r.get("stress_mean") for r in succ_recs])
-    n_succ_stress = int(peak_s.size)
-
-    # all-episode stress (transparency / to expose the "gentle but failed" trap)
-    peak_all_mean, _ = _mean_std([r.get("stress_peak") for r in records])
-    smean_all_mean, _ = _mean_std([r.get("stress_mean") for r in records])
+    n_succ_stress = int(_clean([r.get("stress_max_tmax") for r in succ_recs]).size)
 
     out = {
         **meta,
@@ -88,18 +96,16 @@ def aggregate(records: List[Dict[str, Any]], **meta) -> Dict[str, Any]:
         "is_soft_task": has_stress,
     }
     if has_stress:
-        # headline = success-gated (None if no successful episode had stress)
-        out.update({
-            "stress_n_success": n_succ_stress,
-            "stress_peak_mean": _nan(float(peak_s.mean())) if n_succ_stress else None,
-            "stress_peak_std": _nan(float(peak_s.std())) if n_succ_stress else None,
-            "stress_peak_p90": _pct(peak_s, 90) if n_succ_stress else None,
-            "stress_peak_p95": _pct(peak_s, 95) if n_succ_stress else None,
-            "stress_mean_mean": _nan(float(smean_s.mean())) if n_succ_stress else None,
-            # all-episode (NOT success-gated) — transparency only
-            "stress_peak_mean_all": _nan(peak_all_mean),
-            "stress_mean_mean_all": _nan(smean_all_mean),
-        })
+        out["stress_n_success"] = n_succ_stress
+        for col, want_pct in STRESS_COLS:
+            vals = _clean([r.get(col) for r in succ_recs])            # success-gated
+            out[col + "_mean"] = _nan(float(vals.mean())) if vals.size else None
+            if want_pct:
+                out[col + "_p90"] = _pct(vals, 90) if vals.size else None
+                out[col + "_p95"] = _pct(vals, 95) if vals.size else None
+        # all-episode backup mean (exposes the "gentle but failed" trap; compare to old evals)
+        allm, _ = _mean_std([r.get("stress_mean_tmean") for r in records])
+        out["stress_mean_tmean_mean_all"] = _nan(allm)
     return out
 
 
