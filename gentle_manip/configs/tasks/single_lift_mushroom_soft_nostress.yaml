@@ -1,0 +1,29 @@
+# [task] Soft-MPM mushroom single-lift, NO STRESS PENALTY — success-only ablation.
+# Used by: experiments (single_lift_mushroom_soft_nostress) -> DPPO finetune
+# Status: experimental (2026-07-05)
+#
+# Identical to single_lift_mushroom_soft EXCEPT the stress (gentleness) reward is removed, so the
+# shaped reward is dist_to_obj + lift + sparse success only. Purpose: isolate learning difficulty
+# — see how HIGH success PPO can reach with no gentleness constraint. If success climbs toward the
+# scripted expert's ~98%, headroom exists and the stress penalty was suppressing it (motivating a
+# deliberate stress term later); if it plateaus near BC, the bottleneck is representation/data.
+# von-Mises stress is still MEASURED at eval (object_type soft) — we just don't penalize it, so we
+# see how ungentle the success-maximizing policy becomes.
+success_z_min: 0.175
+success_z_max: 0.225
+hold_steps: 30
+object_name: "mushroom"
+object_type: "soft"      # still soft (MPM) so eval reports von_mises_stress; just not rewarded
+sim_substeps: 210
+mpm_grid_density: 250
+success_scale: 0.2
+
+rewards:
+  # NO stress component (that's the ablation). Approach + lift shaping only.
+  dist_to_obj:
+    scale: 0.1
+    decay: 8.0
+  lift:
+    scale: 0.1
+    grasp_gate_dist: 0.079
+    lift_target: 0.16
