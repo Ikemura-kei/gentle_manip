@@ -22,7 +22,8 @@ hydra:
 _target_: agent.finetune.train_ppo_diffusion_img_agent.TrainPPOImgDiffusionAgent
 
 name: ${env_name}_ppo_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}_tdf${ft_denoising_steps}
-logdir: ${oc.env:DPPO_LOG_DIR}/dppo-finetune/${name}/${now:%Y-%m-%d}_${now:%H-%M-%S}_${seed}
+# logdir leaf = the global 5-letter experiment ID (exp_id resolver; registered in experiments.csv)
+logdir: ${oc.env:DPPO_LOG_DIR}/dppo-finetune/${env_name}/${exp_id:}
 base_policy_path: ???        # set on CLI: a pre_diffusion_pointnet checkpoint .pt
 normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_mushroom_soft_pcd/normalization.npz
 experiment: single_lift_mushroom_soft   # env definition (task+obs+action+dr+reward) snapshot
@@ -47,7 +48,8 @@ env:
   env_type: genesis
   max_episode_steps: 300
   reset_at_iteration: False
-  save_video: False
+  save_video: True           # record env-0 rollout video (needs the server --render-rgb).
+                             # writes <run>/render/itr-<i>_trial-0.mp4 every train.render.freq iters
   use_image_obs: True        # routes obs_trajs through the generic (dict-obs) img agent path
   best_reward_threshold_for_success: 100
   specific:
@@ -67,7 +69,11 @@ shape_meta:
   action:
     shape: [7]
 
-wandb: null
+wandb:                          # enabled; disable per-run with `wandb=null`, or WANDB_MODE=offline
+  entity: ${oc.env:DPPO_WANDB_ENTITY,null}   # null -> logged-in default account
+  project: gentle-manip-${env_name}
+  run: ${exp_id:}               # wandb run name == the experiment ID (matches the log dir)
+  group: dppo-finetune
 
 train:
   n_train_itr: 500
@@ -91,8 +97,8 @@ train:
   save_model_freq: 50
   val_freq: 10
   render:
-    freq: 1
-    num: 0
+    freq: 25                 # record every 25 iters (~12-20 clips over a run) — keeps overhead low
+    num: 1                   # env-0 only (the genesis sim renders env 0)
   reward_scale_running: True
   reward_scale_const: 1.0
   gae_lambda: 0.95

@@ -17,7 +17,8 @@ hydra:
 _target_: agent.pretrain.train_diffusion_agent.TrainDiffusionAgent
 
 name: ${env}_pre_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
-logdir: ${oc.env:DPPO_LOG_DIR}/dppo-pretrain/${name}/${now:%Y-%m-%d}_${now:%H-%M-%S}_${seed}
+# logdir leaf = the global 5-letter experiment ID (exp_id resolver; registered in experiments.csv)
+logdir: ${oc.env:DPPO_LOG_DIR}/dppo-pretrain/${env}/${exp_id:}
 train_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/train.npz
 experiment: single_lift_mushroom_soft   # env definition (task+obs+action+dr+reward) snapshot
 
@@ -33,7 +34,11 @@ pc_cond_steps: 1             # clouds encoded per step (<= cond_steps)
 n_points: 1024
 visual_feature_dim: 256
 
-wandb: null
+wandb:                          # enabled; disable per-run with `wandb=null`, or WANDB_MODE=offline
+  entity: ${oc.env:DPPO_WANDB_ENTITY,null}   # null -> logged-in default account
+  project: gentle-manip-${env}
+  run: ${exp_id:}               # wandb run name == the experiment ID (matches the log dir)
+  group: dppo-pretrain
 
 train:
   n_epochs: 3000
