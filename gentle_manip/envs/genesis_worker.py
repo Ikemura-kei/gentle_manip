@@ -133,15 +133,19 @@ class GenesisWorker:
         self.handle.scene.step()
         return self.read_state()
 
-    def render_rgb(self):
-        """Env-0 RGB frame (H,W,3) uint8 from the first built camera, or None if no camera
-        was built. Used for behaviour clips / eval video — works in-process AND as the
-        subprocess 'render' command (so video survives the relaunch-based scene DR)."""
+    def render_rgb(self, all_envs: bool = False):
+        """RGB frame(s) uint8 from the first built camera. all_envs=False -> env-0 (H,W,3);
+        all_envs=True -> ALL envs (N,H,W,3), one per-env camera each imaging its own env (used
+        for per-trajectory eval video = one clip per episode). None if no camera was built.
+        Works in-process AND as the subprocess 'render' command (survives relaunch scene DR)."""
         cams = getattr(self.handle, "cameras", {})
         if not cams:
             return None
-        cam = next(iter(cams.values()))[0]        # env-0 camera
-        return _np(cam.render(rgb=True, depth=False)[0]).astype(np.uint8)
+        cam_list = next(iter(cams.values()))      # per-env camera list for the first camera
+        if all_envs:
+            return np.stack([_np(c.render(rgb=True, depth=False)[0]).astype(np.uint8)
+                             for c in cam_list])   # (N, H, W, 3)
+        return _np(cam_list[0].render(rgb=True, depth=False)[0]).astype(np.uint8)
 
     def close(self) -> None:
         try:

@@ -57,5 +57,5 @@ class EvalHarnessAgent(EvalAgent):
             self.venv, policy, spec, self.logdir,
             experiment_name=self.cfg.get("experiment"),
             checkpoint=self.cfg.base_policy_path,
-            record_batches=int(self.cfg.get("record_batches", 2)),
+            record_batches=self.cfg.get("record_batches", None),   # None -> all episodes (per-traj video)
         )

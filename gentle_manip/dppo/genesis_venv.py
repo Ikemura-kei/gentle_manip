@@ -41,9 +41,8 @@ class GenesisMultiStepVecEnv:
         self._act_range = (self.action_max - self.action_min) + 1e-6
         self._hist: Optional[deque] = None         # deque of per-step modality dicts
         self._cnt = np.zeros(self.n_envs, np.int64)
-        self._rec_path: Optional[str] = None       # base video_path for recording (env 0)
-        self._frames: list = []                    # accumulated RGB frames (env 0), current episode
-        self._rec_ep = 0                            # episode index within the recording session
+        from gentle_manip.evaluation.video import MultiClipRecorder
+        self._rec = MultiClipRecorder()            # per-env clips (per-trajectory eval video)
 
     # ── normalization ──────────────────────────────────────────────────────────
     def _raw_state(self, obs: dict) -> np.ndarray:  # SimEnvClient obs -> (n_envs, obs_dim)
@@ -81,41 +80,13 @@ class GenesisMultiStepVecEnv:
             self.client.reseed(int(np.asarray(seed).ravel()[0]))
 
     def reset_arg(self, options_list=None, **kwargs) -> dict:
-        # DPPO eval/finetune passes options_list[env]["video_path"]. Our sim renders env 0
-        # only, so we record env 0 and write ONE clip PER EPISODE (numbered) to that path —
-        # so more episodes (larger n_steps) => more clips.
-        self._flush_video()
-        self._rec_path, self._rec_ep, self._frames = None, 0, []
-        if options_list:
-            first = options_list[0] if isinstance(options_list[0], dict) else {}
-            self._rec_path = first.get("video_path")
+        # DPPO eval/finetune passes options_list[env]["video_path"]. We render ALL envs and write
+        # ONE clip PER ENV per episode (numbered) -> per-trajectory video (num clips = num episodes).
+        # Finetune sets only env-0's path (n_render=1) -> records env 0 only; eval sets every env.
+        paths = ([o.get("video_path") if isinstance(o, dict) else None for o in options_list]
+                 if options_list else None)
+        self._rec.start(paths)
         return self._reset_all()
-
-    def _clip_path(self):
-        # episode 0 -> the exact video_path (DPPO's eval_trial-0.mp4); later episodes get an
-        # _ep{k} suffix so a multi-episode pass yields eval_trial-0.mp4, ..._ep1.mp4, ...
-        from pathlib import Path
-        p = Path(self._rec_path)
-        return p if self._rec_ep == 0 else p.with_name(f"{p.stem}_ep{self._rec_ep}{p.suffix}")
-
-    def _flush_video(self) -> None:
-        if self._rec_path and self._frames:
-            import imageio.v2 as imageio
-            out = self._clip_path()
-            out.parent.mkdir(parents=True, exist_ok=True)
-            frames = [self._even_dims(f) for f in self._frames]   # h264/PyAV needs even dims
-            try:                                                  # imageio-ffmpeg backend
-                imageio.mimsave(str(out), frames, fps=30, macro_block_size=1)
-            except TypeError:                                     # PyAV backend (envs/dppo)
-                imageio.mimsave(str(out), frames, fps=30, codec="libx264")
-            print(f"  [genesis_venv] saved eval video {out} ({len(frames)} frames)", flush=True)
-            self._rec_ep += 1
-        self._frames = []
-
-    @staticmethod
-    def _even_dims(f: np.ndarray) -> np.ndarray:
-        h, w = f.shape[:2]
-        return f[: h - (h % 2), : w - (w % 2)]
 
     def reset_one_arg(self, env_ind=None, options=None) -> dict:
         # Synchronous sim: no cheap single-env reset. reset_env_all is the used path; this
@@ -162,10 +133,8 @@ class GenesisMultiStepVecEnv:
                     s_t20 = t20 if s_t20 is None else np.maximum(s_t20, t20)
             self._cnt += 1
             self._hist.append(self._modalities(obs))
-            if self._rec_path is not None:          # pull an env-0 RGB frame for the video
-                f = self.client.render()
-                if f is not None:
-                    self._frames.append(np.asarray(f, np.uint8))
+            if self._rec.active:                    # pull all-env RGB for per-trajectory video
+                self._rec.add(self.client.render(all_envs=True))
         terminated = np.zeros(self.n_envs, bool)    # no early termination (robomimic pattern)
         truncated = self._cnt >= self.max_episode_steps
         obs_out = self._stacked()
@@ -175,7 +144,7 @@ class GenesisMultiStepVecEnv:
             if s_t10 is not None:
                 info["stress_top10"], info["stress_top20"] = s_t10, s_t20
         if bool(truncated.all()):                   # synchronous horizon -> auto-reset all
-            self._flush_video()                     # write this episode's clip; keep recording
+            self._rec.flush()                       # write this episode's per-env clips; keep recording
             info["final_obs"] = obs_out
             obs_out = self._reset_all()
         return obs_out, reward, terminated, truncated, info
@@ -187,7 +156,7 @@ class GenesisMultiStepVecEnv:
             return None
 
     def close(self):
-        self._flush_video()                         # write any in-progress recording
+        self._rec.flush()                           # write any in-progress recording
         try:
             self.client.close()
         except Exception:

@@ -51,7 +51,8 @@ n_episodes: 100
 scene_group_size: 4          # full DR: rebuild geometry every 4 batches -> 5 distinct sizes/shapes
                              # across the 100 episodes (deterministic; needs the server --subprocess).
                              # 0 = fixed geometry (only pose/orientation vary).
-record_batches: 2            # record env-0 video for the first N batches
+record_batches: null         # null = record ALL batches, ALL envs -> one clip per episode
+                             # (100 videos, per-trajectory). Set a small int for a subset; 0 disables.
 n_steps: 75                  # (read by DPPO's EvalAgent base; harness derives its own horizon)
 render_num: 5
 

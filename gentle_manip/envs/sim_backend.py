@@ -151,12 +151,13 @@ class SimBackend:
                 "rho": float(e.density if e.density is not None else m.density),
                 "yield": float(m.von_mises_yield_stress)}
 
-    def render_rgb(self):
-        """Env-0 RGB frame (H,W,3 uint8) or None — behaviour clips / eval video. Works for both
-        the subprocess (GenesisProcess.render) and in-process (GenesisWorker.render_rgb) backends,
-        so video survives the relaunch-based scene DR (which needs the subprocess)."""
+    def render_rgb(self, all_envs: bool = False):
+        """RGB frame(s) or None — behaviour clips / eval video. all_envs=False -> env-0 (H,W,3);
+        all_envs=True -> all envs (N,H,W,3) for per-trajectory video. Works for both the subprocess
+        (GenesisProcess.render) and in-process (GenesisWorker.render_rgb) backends, so video
+        survives the relaunch-based scene DR (which needs the subprocess)."""
         fn = getattr(self.process, "render", None) or getattr(self.process, "render_rgb", None)
-        return fn() if fn is not None else None
+        return fn(all_envs) if fn is not None else None
 
     def scene_params(self) -> dict:
         """The object SIZE + SHAPE DR actually applied to the current scene ('scale',

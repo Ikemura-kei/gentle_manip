@@ -47,8 +47,8 @@ def _worker_loop(cmd_q: "mp.Queue", res_q: "mp.Queue", kwargs: dict) -> None:
                 result = worker.reset(**payload)
             elif cmd == "step":
                 result = worker.step(*payload)
-            elif cmd == "render":
-                result = worker.render_rgb()          # env-0 RGB (H,W,3) uint8 or None
+            elif cmd == "render":                     # env-0 (H,W,3) or all envs (N,H,W,3)
+                result = worker.render_rgb(bool(payload.get("all_envs", False)) if payload else False)
             else:
                 raise ValueError(f"unknown command {cmd!r}")
             res_q.put(("ok", result))
@@ -123,9 +123,10 @@ class GenesisProcess:
     def step(self, target_pos: np.ndarray, target_quat: np.ndarray, target_gripper: np.ndarray) -> dict:
         return self._call("step", (target_pos, target_quat, target_gripper))
 
-    def render(self):
-        """Env-0 RGB frame from the child (or None) — for behaviour clips / eval video."""
-        return self._call("render", None)
+    def render(self, all_envs: bool = False):
+        """RGB from the child — env-0 (H,W,3) or all envs (N,H,W,3); None if no camera.
+        For behaviour clips / per-trajectory eval video."""
+        return self._call("render", {"all_envs": all_envs})
 
     def _call(self, cmd: str, payload: Any) -> dict:
         if self._proc is None:

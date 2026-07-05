@@ -145,10 +145,12 @@ def serve_env(env, host: str = "127.0.0.1", port: int = 5555, ready_msg: str = "
                                     resp[key] = [float(i[key]) for i in info]
                         send_msg(conn, resp, _as_arrays(obs))
                     elif cmd == "render":
-                        # On-demand RGB frame (env 0) for a client that writes its own video
-                        # (e.g. the DPPO eval/finetune bridge). frame_fn -> (H,W,3) uint8.
+                        # On-demand RGB for a client that writes its own video (DPPO eval/finetune
+                        # bridge, SimEvalVenv). all_envs=False -> env-0 (H,W,3); all_envs=True ->
+                        # all envs (N,H,W,3) for per-trajectory eval video. frame_fn=backend.render_rgb.
                         if frame_fn is not None:
-                            send_msg(conn, {"ok": True}, {"frame": np.asarray(frame_fn(), dtype=np.uint8)})
+                            fr = frame_fn(bool(header.get("all_envs", False)))
+                            send_msg(conn, {"ok": True}, {"frame": np.asarray(fr, dtype=np.uint8)})
                         else:
                             send_msg(conn, {"ok": False, "error": "server has no frame camera (start with --render-rgb)"}, {})
                     else:
@@ -246,10 +248,11 @@ class SimEnvClient:
                         d[key] = float(vals[k])
         return obs, reward, done, info
 
-    def render(self):
-        """Request an RGB frame (env 0) from the server, or None if unavailable.
+    def render(self, all_envs: bool = False):
+        """Request RGB from the server, or None if unavailable. all_envs=False -> env-0 (H,W,3);
+        all_envs=True -> all envs (N,H,W,3) for per-trajectory eval video.
         The server must be started with a frame camera (serl_sim_server --render-rgb)."""
-        send_msg(self.conn, {"cmd": "render"}, {})
+        send_msg(self.conn, {"cmd": "render", "all_envs": all_envs}, {})
         header, arrays = recv_msg(self.conn)
         return arrays.get("frame") if header.get("ok") else None
 

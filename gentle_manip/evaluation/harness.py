@@ -4,7 +4,8 @@ Drives an EvalVenv + Policy (see eval_venv.py) through the canonical EvalSpec pr
 n_batches batches of num_envs sub-envs, each batch reseeded to a deterministic per-batch DR
 seed so the scenario set is identical across every eval/algorithm. Tracks per-env success and
 (soft) stress, writes summary.json + episodes.csv, snapshots the env (experiment) config, and
-records env-0 videos for the first `record_batches` batches.
+records PER-TRAJECTORY videos — one clip per episode (all envs, all batches by default:
+`render/batch{i}_env{j}.mp4`) so every rollout's failure mode is visually inspectable.
 """
 from __future__ import annotations
 
@@ -55,11 +56,16 @@ def _scenario_columns(sc, n):
 
 
 def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional[str] = None,
-             checkpoint=None, record_batches: int = 2, extra_meta: Optional[dict] = None) -> Dict[str, Any]:
+             checkpoint=None, record_batches: Optional[int] = None,
+             extra_meta: Optional[dict] = None) -> Dict[str, Any]:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     n = spec.num_envs
     records = []
+    # PER-TRAJECTORY video: record ALL envs of the first `record_batches` batches -> one clip per
+    # episode. Default (None) records EVERY batch -> num clips == num episodes (all 100), so any
+    # failure can be inspected visually. Set a small int for a quick subset; 0 to disable.
+    rec_batches = spec.n_batches if record_batches is None else int(record_batches)
 
     for i in range(spec.n_batches):
         # Per-group scene DR: rebuild the object geometry (size/shape/material) every K batches from
@@ -69,10 +75,10 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
         seed_i = spec.seed_for_batch(i)
         venv.seed([seed_i] * n)                       # deterministic pose/orientation for this batch
         options = None
-        if i < record_batches:                        # env-0 clip for the first few batches
+        if i < rec_batches:                           # one clip PER ENV for this batch's episodes
             (out_dir / "render").mkdir(parents=True, exist_ok=True)
-            options = [{"video_path": str(out_dir / "render" / f"batch{i:02d}_env0.mp4")}]
-            options += [{} for _ in range(n - 1)]
+            options = [{"video_path": str(out_dir / "render" / f"batch{i:02d}_env{j}.mp4")}
+                       for j in range(n)]
         obs = venv.reset_arg(options)
         policy.reset()
         dr_cols = _scenario_columns(                    # randomization params for this batch

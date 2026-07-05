@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from gentle_manip.evaluation.video import ClipRecorder
+from gentle_manip.evaluation.video import MultiClipRecorder
 
 
 class SimEvalVenv:
@@ -18,13 +18,16 @@ class SimEvalVenv:
         self.num_envs = int(num_envs)
         self.max_episode_steps = int(max_episode_steps)
         self._cnt = np.zeros(self.num_envs, np.int64)
-        self._rec = ClipRecorder()
+        self._rec = MultiClipRecorder()          # one clip per env (per-trajectory video)
 
     def seed(self, seeds) -> None:
         self.client.reseed(int(np.asarray(seeds).ravel()[0]))
 
     def reset_arg(self, options_list=None):
-        self._rec.start(options_list[0].get("video_path") if options_list else None)
+        # per-env video paths from the harness (options_list[j]["video_path"]); None -> skip
+        paths = ([o.get("video_path") if isinstance(o, dict) else None for o in options_list]
+                 if options_list else None)
+        self._rec.start(paths)
         self._cnt[:] = 0
         return self.client.reset()
 
@@ -39,8 +42,8 @@ class SimEvalVenv:
             for key in ("stress_max", "stress_mean", "stress_top10", "stress_top20"):
                 if key in info[0]:
                     out[key] = np.array([d[key] for d in info], np.float32)
-        if self._rec.path is not None:
-            self._rec.add(self.client.render())
+        if self._rec.active:
+            self._rec.add(self.client.render(all_envs=True))    # (N,H,W,3) — one clip per env
         terminated = np.zeros(self.num_envs, bool)
         truncated = self._cnt >= self.max_episode_steps
         obs_out = obs

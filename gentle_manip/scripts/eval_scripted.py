@@ -94,7 +94,9 @@ def main() -> None:
     ap.add_argument("--n-episodes", type=int, default=10)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--max-steps", type=int, default=300, help="policy steps per episode (sim steps)")
-    ap.add_argument("--record-batches", type=int, default=2)
+    ap.add_argument("--record-batches", type=int, default=None,
+                    help="batches to record (each = 1 clip PER ENV). Default None = ALL batches "
+                         "(num clips = num episodes); 0 disables video.")
     ap.add_argument("--scene-group-size", type=int, default=0,
                     help="rebuild the object geometry every K batches (0=fixed nominal). Needs a "
                          "subprocess server with full DR ranges (serl_sim_server --subprocess --dr food_shape).")

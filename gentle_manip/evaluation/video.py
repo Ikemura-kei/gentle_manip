@@ -49,3 +49,45 @@ class ClipRecorder:
             write_clip(out, self.frames)
             self.ep += 1
         self.frames = []
+
+
+class MultiClipRecorder:
+    """Per-trajectory recording: one clip PER ENV. Frames arrive as (N,H,W,3) each step; env j
+    is written to paths[j] (None -> skip that env). This is what gives 'num videos = num episodes'
+    — the harness passes a per-env video_path for every env of every recorded batch. Episodes
+    within a session are numbered (<stem>, <stem>_ep1, ...) like ClipRecorder."""
+
+    def __init__(self):
+        self.paths = None            # list[str|None]
+        self.frames = None           # list[list[frame]]
+        self.ep = 0
+
+    @property
+    def active(self) -> bool:
+        return bool(self.paths) and any(p for p in self.paths)
+
+    def start(self, paths) -> None:
+        self.flush()
+        self.paths = list(paths) if paths else None
+        self.frames = [[] for _ in self.paths] if self.paths else None
+        self.ep = 0
+
+    def add(self, frames_nhwc) -> None:
+        if not self.active or frames_nhwc is None:
+            return
+        arr = np.asarray(frames_nhwc, np.uint8)
+        if arr.ndim == 3:                        # a single (H,W,3) -> only env 0 available
+            arr = arr[None]
+        for j, p in enumerate(self.paths):
+            if p and j < arr.shape[0]:
+                self.frames[j].append(arr[j])
+
+    def flush(self) -> None:
+        if self.active:
+            for j, p in enumerate(self.paths):
+                if p and self.frames[j]:
+                    pth = Path(p)
+                    out = pth if self.ep == 0 else pth.with_name(f"{pth.stem}_ep{self.ep}{pth.suffix}")
+                    write_clip(out, self.frames[j])
+            self.ep += 1
+            self.frames = [[] for _ in self.paths]
