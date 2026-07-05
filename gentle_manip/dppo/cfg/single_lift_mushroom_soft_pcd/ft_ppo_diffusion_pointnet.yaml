@@ -82,6 +82,8 @@ train:
   gamma: 0.99
   augment: False             # point clouds: no image RandomShiftsAug
   grad_accumulate: 1         # img-agent field; 1 = no gradient accumulation
+  max_grad_norm: 1.0         # clip actor_ft grad norm — stabilizer (a 5e-5 lr / 0.05 clip run
+                             # diverged to NaN without it; keep it on for any lr bump)
   actor_lr: 1e-5
   actor_weight_decay: 0
   actor_lr_scheduler:
