@@ -120,6 +120,8 @@ train:
   # scene is restored after each eval. Needs the genesis bridge (seed()/randomize_scene()).
   eval_fixed_seed: 77        # fixed scenario seed for eval (distinct from the 100-ep canonical 42)
   eval_scene_dr: true        # also rebuild geometry/material to a fixed scene (fixes Young's etc.)
+  eval_n_batches: 5          # periodic eval = 5 batches x n_envs = 60 episodes (low variance) via
+                             # the shared harness; ONE geometry rebuild per eval + per-EPISODE video.
   render:
     freq: 25                 # record the eval rollout every 25 iters (== val_freq)
     num: 12                  # ALL subenvs (== env.n_envs) -> one clip per subenv per eval iter
