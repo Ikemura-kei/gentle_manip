@@ -1,0 +1,37 @@
+# [setup] Real-lab deployment WITH GelSight tactiles + extended fingers (raised EE z-min).
+# Used by: RealBackend / XArm7Real (tactile demo collection + deploy)
+# Status: active (2026-07-06)
+#
+# Same as real_lab.yaml but for the tactile rig: two GelSight Mini sensors read ASYNC (their own
+# threads, ~18-20 Hz sustained), with the RealSense L515 (cam_ext) as the SYNCED anchor — each
+# tactile frame is the nearest sample to the anchor's capture time (one monotonic clock). The
+# extended tactile fingers lengthen the tool, so the TCP can't descend as far: the EE z lower
+# bound is RAISED from 0.003 -> 0.0765 m (our-TCP frame, same frame the policy/action/EE_BOUNDS use).
+
+robot:
+  ip: '192.168.1.241'            # TODO: confirm the XArm7 controller IP
+  # Extended tactile fingers -> raise the EE z-min (was 0.003). Other bounds unchanged.
+  ee_bounds_min: [0.26, -0.225, 0.0765]
+  # ee_bounds_max: [0.59, 0.225, 0.50]     # override only if the reach changed too
+  servo_speed_mm_s: 50
+  servo_mvacc: 50
+
+cameras:
+  cam_ext:                       # Intel RealSense L515, world-fixed — SYNCED anchor
+    type: l515
+    serial: "f1120484"
+    width: 640
+    height: 480
+    depth_min: 0.1
+    depth_max: 0.85
+    # world_T_cam: [...]         # TODO: recalibrate extrinsic for the tactile rig if the camera moved
+
+tactile:                         # GelSight Mini x2 (real-only, async). RGB (H,W,3) uint8 per frame.
+  anchor_camera: cam_ext         # RealSense capture timestamp = tactile nearest-neighbor query key
+  tactile_left:
+    device: "/dev/video8"        # TODO: your left Mini node. PREFER a stable /dev/v4l/by-id/<...>
+    output_size: [640, 480]      #       path (survives replug); `ls /dev/v4l/by-id/` to find it.
+    # crop: [x, y, w, h]         # optional gel-region crop (applied pre-resize)
+  tactile_right:
+    device: "/dev/video10"       # TODO: your right Mini node (by-id preferred)
+    output_size: [640, 480]

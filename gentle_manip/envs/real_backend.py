@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Dict, Optional
 
 import numpy as np
@@ -35,6 +36,7 @@ class RealBackend:
         config: dict,
         _robot: Optional[XArm7Real] = None,
         _cameras: Optional[Dict[str, RealSenseCamera]] = None,
+        _tactiles: Optional[Dict[str, object]] = None,
     ) -> None:
         robot_cfg = config.get("robot", {})
         self.robot = _robot or XArm7Real(robot_cfg["ip"], overrides=robot_cfg)
@@ -64,6 +66,31 @@ class RealBackend:
 
         self._gripper_max = self.robot.default_gripper_width
 
+        # EE workspace bounds: config override (e.g. raised z-min for the longer tactile fingers)
+        # else the xarm7_config defaults. Applied to the accumulated target in step().
+        self._bounds_min = np.asarray(robot_cfg.get("ee_bounds_min", cfg.EE_BOUNDS_MIN), np.float64)
+        self._bounds_max = np.asarray(robot_cfg.get("ee_bounds_max", cfg.EE_BOUNDS_MAX), np.float64)
+
+        # GelSight Mini tactile sensors (real-only, async). The RealSense camera is the SYNCED
+        # anchor; each tactile frame is the nearest sample to the anchor's capture time. Absent on
+        # the current rig -> tactile_images stays {}. Config: tactile.<name>.{device,output_size,crop}.
+        tac_cfg = config.get("tactile", {}) or {}
+        self._anchor_cam = (tac_cfg.get("anchor_camera")
+                            or ("cam_ext" if "cam_ext" in self.cameras else next(iter(self.cameras), None)))
+        if _tactiles is not None:
+            self.tactiles = _tactiles
+        else:
+            self.tactiles = {}
+            for tname, t_cfg in tac_cfg.items():
+                if tname == "anchor_camera" or not isinstance(t_cfg, dict):
+                    continue
+                from gentle_manip.envs.tactile_sensor import TactileSensor
+                self.tactiles[tname] = TactileSensor(
+                    device=t_cfg["device"], name=tname,
+                    output_size=tuple(t_cfg["output_size"]) if t_cfg.get("output_size") else None,
+                    crop=tuple(t_cfg["crop"]) if t_cfg.get("crop") else None,
+                )
+
         # Accumulated command target (set on reset()).
         self._target_pos = np.zeros(3, dtype=np.float64)
         self._target_quat = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
@@ -75,6 +102,8 @@ class RealBackend:
         self.robot.connect()
         for cam in self.cameras.values():
             cam.start()
+        for tac in self.tactiles.values():                # ensure the async buffers are primed
+            tac.wait_for_frames()
 
         self.robot.set_gripper_width(self._gripper_max)
 
@@ -90,7 +119,7 @@ class RealBackend:
 
         # Translation: accumulate then clip to the workspace box.
         self._target_pos = np.clip(
-            self._target_pos + dpos, cfg.EE_BOUNDS_MIN, cfg.EE_BOUNDS_MAX
+            self._target_pos + dpos, self._bounds_min, self._bounds_max
         )
 
         # Orientation: compose the delta rotation (base-frame premultiply).
@@ -119,6 +148,8 @@ class RealBackend:
     def close(self) -> None:
         for cam in self.cameras.values():
             cam.stop()
+        for tac in self.tactiles.values():
+            tac.release()
         self.robot.disconnect()
 
     # ── Internal ──────────────────────────────────────────────────────────────
@@ -131,12 +162,23 @@ class RealBackend:
         depth_images, rgb_images = {}, {}
         intrinsics, extrinsics = {}, {}
         ext_lookup = self._camera_extrinsics(pos, quat)
+        anchor_t = None
         for name, cam in self.cameras.items():
             depth, rgb, K = cam.get_frame()
+            if name == self._anchor_cam:                  # capture time -> tactile alignment key
+                anchor_t = time.monotonic()
             depth_images[name] = np.expand_dims(depth.astype(np.float32), axis=0)   # (1, H, W)
             rgb_images[name] = np.expand_dims(rgb, axis=0)                           # (1, H, W, 3)
             intrinsics[name] = K
             extrinsics[name] = ext_lookup[name]
+
+        # Nearest tactile frame to the synced anchor's capture time (async GelSight -> RGB, (1,H,W,3)).
+        tactile_images = {}
+        if self.tactiles:
+            t_query = anchor_t if anchor_t is not None else time.monotonic()
+            for tname, tac in self.tactiles.items():
+                _, frame = tac.nearest(t_query)                       # (H, W, 3) BGR (cv2)
+                tactile_images[tname] = np.expand_dims(np.ascontiguousarray(frame[..., ::-1]), 0)
 
         raw = RawObs(
             ee_pos=np.expand_dims(pos.astype(np.float32), axis=0),     # (1, 3)
@@ -148,7 +190,7 @@ class RealBackend:
             rgb_images=rgb_images,
             camera_intrinsics=intrinsics,
             camera_extrinsics=extrinsics,
-            tactile_images={},                                         # no tactile on this rig
+            tactile_images=tactile_images,                             # {} if no tactile configured
         )
         raw.validate()
         return raw
