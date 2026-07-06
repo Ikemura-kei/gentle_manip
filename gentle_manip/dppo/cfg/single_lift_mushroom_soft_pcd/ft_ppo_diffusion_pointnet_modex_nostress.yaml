@@ -121,8 +121,10 @@ train:
   eval_fixed_seed: 77        # fixed scenario seed for eval (distinct from the 100-ep canonical 42)
   eval_scene_dr: true        # also rebuild geometry/material to a fixed scene (fixes Young's etc.)
   render:
-    freq: 25                 # env-0 rollout clip every 25 iters
-    num: 1
+    freq: 25                 # record the eval rollout every 25 iters (== val_freq)
+    num: 12                  # ALL subenvs (== env.n_envs) -> one clip per subenv per eval iter
+                             # (itr-N_trial-0..11). Needs the recorder bleed fix (else it also
+                             # renders train iters). Only on eval iters, so cheap.
   reward_scale_running: True
   reward_scale_const: 1.0
   gae_lambda: 0.95
