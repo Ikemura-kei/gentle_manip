@@ -86,8 +86,12 @@ class MultiClipRecorder:
         if self.active:
             for j, p in enumerate(self.paths):
                 if p and self.frames[j]:
-                    pth = Path(p)
-                    out = pth if self.ep == 0 else pth.with_name(f"{pth.stem}_ep{self.ep}{pth.suffix}")
-                    write_clip(out, self.frames[j])
-            self.ep += 1
-            self.frames = [[] for _ in self.paths]
+                    write_clip(Path(p), self.frames[j])
+        # Deactivate after writing: record ONLY the episode between this start() and its flush.
+        # Critical for the finetune-render case — the DPPO agent calls reset_arg (-> start) only on
+        # EVAL iterations, so without deactivating, recording bled into the ~24 following TRAIN
+        # iterations (mislabeled _ep1.._ep24, and rendering every train step = big slowdown).
+        # Per-episode consumers (harness / SimEvalVenv / eval bridge) call start() again next episode.
+        self.paths = None
+        self.frames = None
+        self.ep = 0
