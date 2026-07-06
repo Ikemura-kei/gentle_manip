@@ -51,3 +51,6 @@ experiments.csv
 
 # wandb local run data (synced to the cloud; the run dir is the source of truth)
 wandb/
+
+# Point-cloud focus comparison videos (viz output of examples/render_pntcld_focus.py)
+examples/pntcld_focus/
