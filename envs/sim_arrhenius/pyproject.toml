@@ -1,0 +1,64 @@
+# Simulation / training / tests environment — ARRHENIUS variant (aarch64 GH200).
+# Isolated copy of envs/sim so the original x86 env stays byte-for-byte as tested;
+# only the torch triple + this header differ from envs/sim.
+#
+# Depends on gentle-manip[sim] — the shared core plus the genesis fork. This is
+# the env that runs the sim backend, RL/DP3 training, and the test suite.
+#
+# Setup:   uv sync --project envs/sim_arrhenius
+# Run:     uv run --project envs/sim_arrhenius python <script>
+# Tests:   uv run --project envs/sim_arrhenius python -m pytest gentle_manip/tests/ -q
+#
+# torch is pinned below to a cu126 build via a dedicated index, so `uv sync`
+# installs it and it stays in the lock. genesis 1.1.2 wants torch>=2.8.
+# >>> TARGET: NAISS Arrhenius GH200 GPU nodes — aarch64 (Grace) + Hopper sm_90.
+#     Build/run on a GPU compute node, NOT the x86_64 login node (wheels differ).
+#     cu126 aarch64 wheels: torch has no 2.8.0 for cp312/aarch64, so the triple is
+#     torch 2.9.1 / torchvision 0.24.1 / torchaudio 2.9.1 (all cu126 aarch64 cp312;
+#     satisfies genesis's torch>=2.8). cu126 supports Hopper; driver 580 supports cu126.
+# >>> DIFFERENT HARDWARE: change the torch/torchvision/torchaudio versions AND the
+#     cu126 URL in [[tool.uv.index]] to match your GPU/driver (see
+#     https://pytorch.org/get-started/previous-versions/ for compatible triples). <<<
+# Genesis imports torch at import time, so it must be present to run sim/training.
+
+[project]
+name = "gentle-manip-sim-arrhenius"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+# genesis-world is listed directly (not via a gentle-manip extra) so the fork
+# source below applies — uv only honours [tool.uv.sources] for a project's DIRECT
+# dependencies, not transitive ones. genesis is purely an envs/sim concern; the
+# gentle-manip library itself never declares it (that's what keeps deploy clean).
+dependencies = [
+    "gentle-manip",
+    "genesis-world",
+    "pytest",
+    "numpy",
+    "gymnasium",
+    "scipy",   # rotation math in the real backend
+    "pyyaml",  # YAML config loading
+    "matplotlib",
+    "pygame",  # keyboard teleop for the in-process sim viewer (examples/sim_teleop_keyboard.py)
+    # torch — cu126 aarch64 (GH200); see header note to change for your HW.
+    "torch==2.9.1",
+    "torchvision==0.24.1",
+    "torchaudio==2.9.1",
+]
+
+[[tool.uv.index]]
+# Change this URL to match your CUDA (e.g. .../cu121, .../cpu) — see header note.
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true   # only the torch* packages below resolve from here, not all deps
+
+[tool.uv.sources]
+gentle-manip = { path = "../..", editable = true }
+genesis-world = { path = "../../third_party/genesis", editable = true }
+torch = { index = "pytorch-cu126" }
+torchvision = { index = "pytorch-cu126" }
+torchaudio = { index = "pytorch-cu126" }
+
+[tool.uv]
+constraint-dependencies = [
+    "pymeshlab<2025",  # 2025.x requires manylinux_2_35; older wheels support manylinux_2_31
+]

@@ -1,0 +1,48 @@
+# DPPO env — ARRHENIUS variant (aarch64 GH200). Isolated copy of envs/dppo so the original
+# x86 env stays byte-for-byte as tested. Only this file (torch version + cu126 index +
+# override of the dppo fork's torch pin) differs from envs/dppo.
+#
+# Fine-tune a point-cloud diffusion policy with PPO on the soft mushroom lift, bridging to the
+# genesis sim (envs/sim_arrhenius, 3.12) over the pure-python gentle_manip.envs.rpc socket
+# (imported via sys.path, NOT a dependency, to avoid a gym/gymnasium version clash — DPPO pins
+# the old gym==0.22).
+#
+# Setup:  uv sync --project envs/dppo_arrhenius   (installs the cu126 torch below — no manual step)
+#
+# >>> TARGET: NAISS Arrhenius GH200 GPU nodes — aarch64 (Grace) + Hopper sm_90. Build/run on a
+#     GPU compute node, NOT the x86_64 login node. The dppo fork still pins `torch==2.4.0`
+#     (which the x86 envs/dppo relies on), but 2.4.0 has NO aarch64 wheel — so here we OVERRIDE
+#     that transitive pin to 2.6.0 (`[tool.uv] override-dependencies`), the earliest aarch64
+#     CUDA torch (cu126), chosen to stay closest to DPPO's intended 2.4.0. The override keeps
+#     the shared dppo submodule unchanged, so the x86 env is unaffected. cu126 supports Hopper;
+#     driver 580 supports cu126. DIFFERENT HARDWARE: change the version + cu126 URL to match. <<<
+#
+# Run:  uv run --project envs/dppo_arrhenius python -m gentle_manip.dppo.train \
+#         --config-path $(pwd)/gentle_manip/dppo/cfg/<exp> --config-name <ft_ppo_diffusion_mlp|pre_diffusion_mlp>
+#       (gentle_manip.dppo.train is a thin launcher: pins repo root on sys.path so the
+#        genesis bridge imports after hydra's chdir, sets DPPO_LOG_DIR/DPPO_DATA_DIR,
+#        then hands off to third_party/dppo/script/run.py. See its docstring.)
+[project]
+name = "gentle-manip-dppo-arrhenius"
+version = "0.1.0"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+    "dppo",   # editable, third_party/dppo (pulls hydra-core 1.3, omegaconf, gym 0.22, einops, wandb, imageio, av, tqdm)
+    # torch — cu126 aarch64 (GH200); see header note to change for your HW.
+    "torch==2.6.0",
+]
+
+[[tool.uv.index]]
+# Change this URL to match your CUDA (e.g. .../cu121, .../cpu) — see header note.
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true   # only torch resolves from here, not all deps
+
+[tool.uv]
+# The dppo submodule hard-pins torch==2.4.0 (no aarch64 wheel). Override it to the version
+# above so we don't have to touch the shared fork (keeps the x86 envs/dppo intact).
+override-dependencies = ["torch==2.6.0"]
+
+[tool.uv.sources]
+dppo = { path = "../../third_party/dppo", editable = true }
+torch = { index = "pytorch-cu126" }
