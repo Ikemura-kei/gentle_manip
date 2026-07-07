@@ -43,11 +43,16 @@ class DemoRecorder:
                  dataset_path: Optional[Path] = None, frame_fn=None,
                  video_dir: Optional[Path] = None, video_fps: int = 20,
                  video_episodes: int = 0, video_failed_episodes: int = 0,
-                 cloud_viewer=None) -> None:
+                 cloud_viewer=None, collection_config: Optional[dict] = None) -> None:
         self.env = env
         self.teleop = teleop
         self.keyboard = keyboard
         self.task_name = task_name
+        # Verbatim + resolved config snapshot (setup/obs/action + CLI knobs) written once
+        # next to the dataset as <stem>_config.yaml, for reproducibility (mirrors
+        # collect_demos_sim.py). None -> no snapshot (e.g. tests).
+        self._collection_config = collection_config
+        self._config_written = False
         # Optional live Open3D view of the PROCESSED cloud (LiveCloudViewer); fed
         # obs["point_cloud"] each step so you watch what the policy will see.
         self.cloud_viewer = cloud_viewer
@@ -292,6 +297,18 @@ class DemoRecorder:
         with open(tmp, "wb") as f:
             pickle.dump(dataset, f)
         os.replace(tmp, path)                  # atomic swap (POSIX)
+        self._write_config_snapshot(path)
+
+    def _write_config_snapshot(self, path: Path) -> None:
+        """Write the collection config verbatim next to the dataset (once), so a recorded
+        demo is fully reproducible: which setup/obs/action configs + control knobs produced it."""
+        if self._collection_config is None or self._config_written:
+            return
+        cfg_path = path.with_name(path.stem + "_config.yaml")
+        with open(cfg_path, "w") as f:
+            yaml.safe_dump(self._collection_config, f, sort_keys=False)
+        self._config_written = True
+        print(f"  wrote config snapshot → {cfg_path}")
 
     def write(self) -> Optional[Path]:
         """Final report — episodes are already flushed incrementally as saved."""
@@ -308,6 +325,17 @@ class DemoRecorder:
 def _load_yaml(path: Path) -> dict:
     with open(path) as f:
         return yaml.safe_load(f)
+
+
+def _git_commit() -> str:
+    """Short current commit for the config snapshot; '' if not a repo / git missing."""
+    import subprocess
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=str(_PKG),
+            stderr=subprocess.DEVNULL).decode().strip()
+    except Exception:
+        return ""
 
 
 def _resolve_config(path: Path) -> Path:
@@ -362,8 +390,25 @@ def main() -> None:
     from gentle_manip.actions.action_config import ActionConfig
 
     setup = _load_yaml(_resolve_config(args.setup))
-    obs_config = ObsConfig.from_dict(_load_yaml(_resolve_config(args.obs_config)))
-    action_config = ActionConfig.from_dict(_load_yaml(_resolve_config(args.action_config)))
+    obs_d = _load_yaml(_resolve_config(args.obs_config))
+    action_d = _load_yaml(_resolve_config(args.action_config))
+    obs_config = ObsConfig.from_dict(obs_d)
+    action_config = ActionConfig.from_dict(action_d)
+
+    # Reproducibility snapshot: the resolved configs + control knobs that shaped the data,
+    # written next to the dataset as <stem>_config.yaml (mirrors collect_demos_sim.py).
+    collection_config = {
+        "task_name": args.task_name,
+        "input": args.input,
+        "git_commit": _git_commit(),
+        "sources": {"setup": str(args.setup), "obs": str(args.obs_config),
+                    "action": str(args.action_config)},
+        "control": {"rate_hz": args.rate, "speed": args.speed,
+                    "gripper_value": args.gripper_value, "idle_threshold": args.idle_threshold,
+                    "keep_trailing_idle": args.keep_trailing_idle,
+                    "max_interior_idle": args.max_interior_idle},
+        "setup": setup, "obs": obs_d, "action": action_d,
+    }
 
     backend = RealBackend(setup)
 
@@ -410,6 +455,7 @@ def main() -> None:
         keep_trailing_idle=args.keep_trailing_idle,
         max_interior_idle=args.max_interior_idle,
         cloud_viewer=cloud_viewer,
+        collection_config=collection_config,
     )
     recorder.run()
     recorder.write()

@@ -198,6 +198,30 @@ def test_write_nothing_when_no_episodes(tmp_path):
     assert rec.write() is None
 
 
+def test_config_snapshot_written_next_to_dataset(tmp_path):
+    import yaml
+    cfg = {"task_name": "unit", "setup": {"robot": {"ip": "1.2.3.4"}},
+           "obs": {"point_cloud": {"max_points": 1024}}, "control": {"speed": 0.35}}
+    rec = DemoRecorder(env=MockEnv(), teleop=FakeTeleop((0, 0, 0.01, 0, 0, 0, 0)),
+                       keyboard=ScriptedKeyboard([set(), {SAVE}, {QUIT}]),
+                       task_name="unit", out_dir=tmp_path, rate_hz=0.0,
+                       collection_config=cfg)
+    rec.run()
+    path = rec.write()
+    sidecar = path.with_name(path.stem + "_config.yaml")
+    assert sidecar.exists()                              # reproducibility snapshot next to the pkl
+    loaded = yaml.safe_load(open(sidecar))
+    assert loaded["setup"]["robot"]["ip"] == "1.2.3.4"
+    assert loaded["control"]["speed"] == 0.35
+
+
+def test_no_config_snapshot_when_none(tmp_path):
+    rec = make_recorder([set(), {SAVE}, {QUIT}], tmp_path)   # collection_config defaults to None
+    rec.run()
+    path = rec.write()
+    assert not path.with_name(path.stem + "_config.yaml").exists()
+
+
 def test_episode_flushed_immediately(tmp_path):
     import pickle, re
     # SAVE then QUIT — file must exist after run() WITHOUT a final write() call.
