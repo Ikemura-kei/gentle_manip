@@ -118,6 +118,13 @@ def serve_env(env, host: str = "127.0.0.1", port: int = 5555, ready_msg: str = "
                         if hasattr(env, "reseed"):
                             env.reseed(int(header["seed"]))
                         send_msg(conn, {"ok": True}, {})
+                    elif cmd == "set_auto_scene_dr":
+                        # Freeze/thaw the training server's periodic AUTO scene-DR relaunch so it
+                        # can't fire mid-eval (the harness drives its own deterministic per-group
+                        # rebuild). No-op if the env has no such control (e.g. scene_dr_every=0).
+                        if hasattr(env, "set_auto_scene_dr"):
+                            env.set_auto_scene_dr(bool(header["enabled"]))
+                        send_msg(conn, {"ok": True}, {})
                     elif cmd == "reset":
                         flush_video()              # save the episode just finished
                         vep[0] += 1
@@ -214,6 +221,13 @@ class SimEnvClient:
 
     def reseed(self, seed: int) -> None:
         send_msg(self.conn, {"cmd": "reseed", "seed": int(seed)}, {})
+        recv_msg(self.conn)
+
+    def set_auto_scene_dr(self, enabled: bool) -> None:
+        """Freeze (enabled=False) / restore the server's periodic auto scene-DR relaunch. Wrap a
+        fixed-seed eval in set_auto_scene_dr(False)…(True) so the training server's every-N-resets
+        rebuild can't fire mid-eval and corrupt the deterministic per-group geometry."""
+        send_msg(self.conn, {"cmd": "set_auto_scene_dr", "enabled": bool(enabled)}, {})
         recv_msg(self.conn)
 
     def reset(self) -> Dict[str, np.ndarray]:

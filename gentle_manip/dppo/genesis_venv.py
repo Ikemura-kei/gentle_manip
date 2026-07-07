@@ -108,6 +108,12 @@ class GenesisMultiStepVecEnv:
         self.client.reseed(int(seed))
         self.client.randomize_scene()
 
+    def set_auto_scene_dr(self, enabled):
+        """Freeze/restore the server's periodic auto scene-DR relaunch, so a fixed-seed eval
+        isn't corrupted by a mid-eval rebuild (the harness drives its own per-group DR)."""
+        if hasattr(self.client, "set_auto_scene_dr"):
+            self.client.set_auto_scene_dr(bool(enabled))
+
     def step(self, action_venv):
         a = np.asarray(action_venv, np.float32)
         if a.ndim == 2:                             # (n_envs, act_dim) -> single-step chunk

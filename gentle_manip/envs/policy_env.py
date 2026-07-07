@@ -247,6 +247,12 @@ class PolicyEnv:
         if self._augmentor is not None and hasattr(self._augmentor, "rng"):
             self._augmentor.rng = np.random.default_rng(seed)
 
+    def set_auto_scene_dr(self, enabled: bool) -> None:
+        """Delegate to the backend: freeze/restore its periodic auto scene-DR relaunch so a
+        fixed-seed eval isn't corrupted by a mid-eval rebuild. No-op if the backend lacks it."""
+        if hasattr(self.backend, "set_auto_scene_dr"):
+            self.backend.set_auto_scene_dr(bool(enabled))
+
     # ── Internal helpers ──────────────────────────────────────────────────────
 
     def _do_reset(self, **kwargs) -> RawObs:

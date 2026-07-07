@@ -240,6 +240,23 @@ class SimBackend:
         finally:
             self._in_scene_dr = False
 
+    def set_auto_scene_dr(self, enabled: bool) -> None:
+        """Enable/disable the periodic (every-N-resets) AUTO scene-DR relaunch WITHOUT touching
+        the RNG stream. Used to freeze auto scene DR during a fixed-seed eval: the eval harness
+        drives its own deterministic per-group randomize_scene(), so the training server's auto
+        relaunch must not also fire mid-eval (it would rebuild geometry + consume RNG, breaking the
+        eval's apples-to-apple determinism). Saves the configured cadence on the first disable and
+        restores it on re-enable. This only gates the counter branch in reset(); it changes no
+        _rng draw, so a normal reset is byte-identical whether auto DR is on or off."""
+        if not enabled:
+            if not hasattr(self, "_scene_dr_every_saved"):
+                self._scene_dr_every_saved = self._scene_dr_every
+            self._scene_dr_every = 0
+        else:
+            if hasattr(self, "_scene_dr_every_saved"):
+                self._scene_dr_every = self._scene_dr_every_saved
+                del self._scene_dr_every_saved
+
     def step(self, scaled_action: np.ndarray) -> RawObs:
         action = np.asarray(scaled_action, dtype=np.float64).reshape(self.num_envs, -1)
         dpos, drot, dgrip = action[:, :3], action[:, 3:6], action[:, 6]
