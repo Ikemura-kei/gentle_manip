@@ -11,7 +11,7 @@
 robot:
   ip: '192.168.1.241'            # TODO: confirm the XArm7 controller IP
   # Extended tactile fingers -> raise the EE z-min (was 0.003). Other bounds unchanged.
-  ee_bounds_min: [0.26, -0.225, 0.0765]
+  ee_bounds_min: [0.26, -0.225, 0.0825]
   # ee_bounds_max: [0.59, 0.225, 0.50]     # override only if the reach changed too
   servo_speed_mm_s: 50
   servo_mvacc: 50

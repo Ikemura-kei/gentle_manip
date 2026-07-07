@@ -1,7 +1,10 @@
 #!/bin/bash
 
-TASK=red_cube
-
 uv run --project envs/deploy python -m gentle_manip.demos.record \
-  --obs-config gentle_manip/configs/obs/point_cloud_1cam.yaml \
-  --task-name "$TASK" --input keyboard --rate 30 --speed 0.3
+  --setup      gentle_manip/configs/setup/real_lab_tactile.yaml \
+  --obs-config gentle_manip/configs/obs/real_tactile.yaml \
+  --action-config gentle_manip/configs/action/delta_pose_delta_gripper.yaml \
+  --task-name  mushroom_lift_tactile \
+  --input      keyboard \
+  --speed      0.385 \
+  --show-pointcloud

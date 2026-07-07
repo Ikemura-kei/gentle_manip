@@ -340,7 +340,7 @@ def main() -> None:
     p.add_argument("--speed", type=float, default=0.55,
                    help="teleop motion magnitude in [0,1] (lower = slower); "
                         "per-step delta = speed * action-scale")
-    p.add_argument("--gripper-value", type=float, default=0.05,
+    p.add_argument("--gripper-value", type=float, default=0.45,
                    help="per-step gripper delta magnitude in [0,1]")
     p.add_argument("--idle-threshold", type=float, default=1e-3,
                    help="action-norm at/below which a frame is idle; 0 disables idle trim")
