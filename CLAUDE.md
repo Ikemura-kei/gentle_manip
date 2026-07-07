@@ -16,6 +16,47 @@ For old implementation, check:
 
 If anything was installed for running the modules, please add them into `pyproject.toml` under `[project] dependencies` if not present yet.
 
+## Experiment Discipline (HARD REQUIREMENTS — read before launching ANY run)
+
+Non-negotiable for every experiment (training, eval, demo collection), and especially when
+running many in parallel on a cluster. Details live in the bracketed sections; this is the
+checklist — do not skip an item because "it's just a quick run".
+
+1. **One shared eval harness — offline AND in-training.** Every sim eval MUST go through
+   `gentle_manip.evaluation.run_eval` with the fixed canonical `EvalSpec` (`n_episodes=100`,
+   `num_envs=5`, `seed=0`; only `max_policy_steps` is task-dependent). NEVER write a second,
+   algorithm-specific eval loop — that breaks apples-to-apple. [Canonical Evaluation]
+2. **Per-trajectory eval video, no exceptions.** EVERY eval (harness AND in-training/periodic)
+   records ONE clip per episode: `record_batches=None` (all batches, all envs), and the sim
+   server runs `--num-envs 5 --render-rgb`. Do NOT reduce to env-0-only or a subset. [Canonical Evaluation]
+3. **Apples-to-apple: freeze auto scene-DR during any eval.** If the sim server runs
+   `scene_dr_every>0` (a training server shared with periodic eval), the eval MUST wrap itself in
+   `venv.set_auto_scene_dr(False)…(True)` (already wired in the DPPO fork agent) so the periodic
+   relaunch can't fire mid-eval and desync geometry/RNG. The harness owns the deterministic
+   per-group rebuild (`EvalSpec.scene_group_size`). Offline eval servers use `scene_dr_every=0`
+   (freeze is a no-op there). [Canonical Evaluation]
+4. **Every TRAINING run gets a unique 5-letter ID; evals do NOT.** The ID names the run dir
+   `logs/<algo>/<task>/<id>/`, is the wandb run name, and is registered in `experiments.csv`.
+   Eval runs keep `<policy_run>/eval/<datetime>/` naming and are never registered. [Conventions]
+5. **experiments.csv stays honest.** Registration is automatic at launch. If a row is missing or a
+   deleted run lingers, run `python -m gentle_manip.scripts.reconcile_experiments` (syncs EXISTENCE
+   only — drops deleted, back-fills orphans). Status (`running`→`done`/`diverged`/`stopped-iterN`/…)
+   is NOT automatic — set it explicitly (`experiment_registry.set_status`) when a run ends. [Conventions]
+6. **Every TRAINING run writes + maintains EXPERIMENT.md.** `write_experiment_md` at launch (git
+   commit, motivation, hypothesis, key config); `append_experiment_note` during; fill the Final
+   summary (duration, steps, verdict) when it ends. Single record of *why* a run happened + *what
+   it showed*. [Conventions]
+7. **Every TRAINING and DEMO-COLLECTION run records its config.** Training snapshots the env config
+   into `<run>/config/` (SERL `run_paths.snapshot_experiment`; DPPO `ExperimentSnapshot` hydra
+   callback). Demo collection: sim `collect_demos_sim.py` writes `config.yaml`/`config_resolved.yaml`
+   in its run dir; real teleop `demos/record.py` writes `<stem>_config.yaml` (resolved
+   setup+obs+action + source paths + git commit + control knobs) beside the dataset. No config
+   snapshot = not reproducible = not acceptable. [Canonical Evaluation, ObsConfig]
+8. **Parallel runs need isolated sim servers.** Each training/eval sim server binds a port
+   (default 5570) and owns exactly ONE genesis child (single sim). When launching concurrently,
+   give each its own `--port` and never share a server between two trainers. GPU memory is the
+   limiter — check `nvidia-smi` headroom before stacking runs.
+
 ## Architecture — The Big Picture
 
 ```
@@ -139,13 +180,17 @@ access to the 3Dconnexion device (else run as root); keyboard mode needs neither
 Collect demos with:
 ```bash
 uv run --project envs/deploy python -m gentle_manip.demos.record \
+  --setup gentle_manip/configs/setup/real_lab.yaml \
   --obs-config gentle_manip/configs/obs/state_ee_only.yaml \
-  --task-name <name> --input keyboard --i-have-cleared-the-workspace
+  --task-name <name> --input keyboard
 ```
 `--input keyboard` (W/S A/D Up/Dn move, L/R R/F Q/E rotate, O/P grip, SPACE save,
 BKSP discard, ESC quit) or `--input spacemouse` (default). Both produce the same
 normalized `[-1,1]` action through the same `ActionPipeline`. Episode keys
-(SPACE/BACKSPACE/ESC) are identical across both modes.
+(SPACE/BACKSPACE/ESC) are identical across both modes. `--setup` picks the backend
+config (use `real_lab_tactile.yaml` for the GelSight rig). **Every recorded session
+also writes a `<stem>_config.yaml`** next to the dataset pkl (resolved setup+obs+action
++ control knobs + git commit) — the reproducibility snapshot (hard requirement #7).
 
 **Sim demo collection** (`examples/collect_demos_sim.py`, envs/sim, keyboard or scripted):
 config-driven, and **experiment-mode** ties it to the single-source-of-truth Experiment.
@@ -711,10 +756,21 @@ across algorithms and runs. Do NOT write a second, algorithm-specific eval loop.
   face every policy. NOTE: soft-body MPM on GPU is NOT bit-deterministic in the *rollout*
   (parallel float atomics), so success/stress have small run-to-run variance at identical init —
   the initial conditions are fixed (apples-to-apples), the physics has residual noise.
+- **Per-trajectory video (REQUIRED, all evals):** `record_batches=None` (the default) records
+  ONE clip per episode — every batch, every env (`render/batchNN_envM.mp4`), so `n_episodes`
+  videos in total. This applies to BOTH the offline harness eval AND the in-training/periodic eval
+  (the DPPO fork agent passes `record_batches=None`). Do NOT set a subset / env-0-only. The sim
+  server must run `--num-envs 5 --render-rgb` (per-env camera). A small int records only the first
+  N batches; `0` disables — neither is acceptable for a real eval.
+- **Freeze auto scene-DR during eval (determinism):** when the eval shares a training server with
+  `scene_dr_every>0`, wrap the eval in `venv.set_auto_scene_dr(False)…(True)` so the server's
+  periodic relaunch can't fire mid-eval (it would rebuild geometry + advance the RNG and desync the
+  fixed-seed scenarios). Only the harness's `scene_group_size` rebuild should touch geometry during
+  eval. Already wired in the DPPO fork agent's `_gm_periodic_eval`.
 - **Output location:** eval writes into the evaluated policy's OWN training run dir —
   `<base_policy_run>/eval/<datetime>/` (`harness.eval_out_dir`; falls back to `logs/eval/...`).
-  Includes `summary.json`, `episodes.csv`, `config/` (env snapshot), `render/*.mp4` (env-0 clips
-  for the first `record_batches`). `summary.json` records the checkpoint path.
+  Includes `summary.json`, `episodes.csv`, `config/` (env snapshot), `render/*.mp4` (per-episode
+  clips, see above). `summary.json` records the checkpoint path.
 - **Per-algorithm adapters (the only per-algorithm code):** an `EvalVenv` (drives the sim,
   returns per-env success/stress — for DPPO this is the `GenesisMultiStepVecEnv` bridge) and a
   `Policy` (obs→action chunk). DPPO wiring: `gentle_manip/dppo/eval_agent.py::EvalHarnessAgent`
