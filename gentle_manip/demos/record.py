@@ -366,7 +366,16 @@ def main() -> None:
     action_config = ActionConfig.from_dict(_load_yaml(_resolve_config(args.action_config)))
 
     backend = RealBackend(setup)
+
+    # build_obs_space needs the tactile image (H, W) when tactile is configured.
+    # The setup's per-sensor output_size is (W, H) (cv2 resize order); the frame is (H, W, 3).
+    tactile_shape = None
+    if obs_config.tactile is not None:
+        w, h = setup["tactile"][obs_config.tactile.sensors[0]]["output_size"]
+        tactile_shape = (int(h), int(w))
+
     env = PolicyEnv(backend, obs_config, action_config, task=None,
+                    tactile_shape=tactile_shape,
                     max_episode_steps=10 ** 9)  # huge → no auto-reset; keys bound episodes
 
     if args.input == "keyboard":
