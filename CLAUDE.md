@@ -158,6 +158,12 @@ Offline sim eval of a checkpoint: `scripts/eval_sim.py` (multi-env, fixed-seed, 
 Run the test suite with
 `uv run --project envs/sim python -m pytest gentle_manip/tests/ -q`.
 
+**After setting up the envs on a new machine/cluster, verify each with the standalone
+smoke tests** in `examples/env_debug/` (one `check_<env>.py` per env + a `run_all.sh`
+runner + README): they check the key third-party imports, CUDA/JAX see the GPU, and the
+`gentle_manip`/policy code loads and runs on synthetic data.
+`bash examples/env_debug/run_all.sh` runs all five and prints a PASS/FAIL/SKIP summary.
+
 The `envs/deploy/` env depends on `gentle-manip[real]` — the genesis-free core plus
 `pyrealsense2` + `xArm-Python-SDK` (+ `pyspacemouse`, `pygame` for teleop demo
 collection; `open3d` for the point-cloud viewer). Genesis is never pulled in (the
