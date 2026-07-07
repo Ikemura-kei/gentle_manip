@@ -29,9 +29,12 @@ cameras:
 tactile:                         # GelSight Mini x2 (real-only, async). RGB (H,W,3) uint8 per frame.
   anchor_camera: cam_ext         # RealSense capture timestamp = tactile nearest-neighbor query key
   tactile_left:
-    device: "/dev/video8"        # TODO: your left Mini node. PREFER a stable /dev/v4l/by-id/<...>
-    output_size: [640, 480]      #       path (survives replug); `ls /dev/v4l/by-id/` to find it.
+    # GelSight Mini serial 2DYE-1LB8, capture node index0 (== /dev/video8 today; by-id survives replug).
+    # If left/right are physically swapped, exchange this device with tactile_right's.
+    device: "/dev/v4l/by-id/usb-Arducam_Technology_Co.__Ltd._GelSight_Mini_R0B_2DYE-1LB8_2DYE1LB8-video-index0"
+    output_size: [640, 480]
     # crop: [x, y, w, h]         # optional gel-region crop (applied pre-resize)
   tactile_right:
-    device: "/dev/video10"       # TODO: your right Mini node (by-id preferred)
+    # GelSight Mini serial 2DYF-163L, capture node index0 (== /dev/video10 today).
+    device: "/dev/v4l/by-id/usb-Arducam_Technology_Co.__Ltd._GelSight_Mini_R0B_2DYF-163L_2DYF163L-video-index0"
     output_size: [640, 480]
