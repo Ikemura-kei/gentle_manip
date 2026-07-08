@@ -66,7 +66,14 @@ class SingleLiftTask(BaseTask):
             ],
             sim_dt=1.0 / 30.0,
             sim_substeps=self.sim_substeps,
-            mpm_bounds=((0.25, -0.15, -0.012), (0.75, 0.15, 0.32)),
+            # z-floor -0.02 (was -0.012): genesis pads the MPM domain inward by ~0.012, so
+            # -0.012 gave a padded floor of exactly 0.0 = ZERO clearance. The mushroom rests
+            # with its base at z~0, and its lowest particle can land a hair below 0 (seen on
+            # aarch64/GH200: min z = -3.6e-5, 36um under the floor -> build crash). x86 rounded
+            # to >=0 and passed. Dropping the floor gives real clearance + headroom for DR
+            # pose tilts that dip a corner lower. Only extends the (empty) domain below the
+            # plane; plane collision + physics unchanged.
+            mpm_bounds=((0.25, -0.15, -0.02), (0.75, 0.15, 0.32)),
             mpm_grid_density=self.mpm_grid_density,
         )
 
