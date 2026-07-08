@@ -64,6 +64,33 @@ def write_run_meta(dest: Path, **extras) -> None:
     (dest / "run_meta.json").write_text(json.dumps(meta, indent=2, default=str))
 
 
+def save_launch_command(dest: Path) -> Path:
+    """Save the exact launch command into <dest>/launch_command.sh, for reference / re-run.
+    Reads the running process's real argv (/proc/self/cmdline on Linux; falls back to
+    sys.argv) — i.e. the inner `python -m ... <all hydra overrides>` invocation. The outer
+    `uv run --project envs/<env> --no-sync` wrapper is the parent process; it's noted in the
+    header rather than reconstructed (the env is obvious from context). Best-effort."""
+    import shlex
+    import sys
+    dest = Path(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+    try:
+        with open("/proc/self/cmdline", "rb") as f:
+            argv = [a for a in f.read().decode(errors="replace").split("\0") if a]
+    except Exception:
+        argv = list(sys.argv)
+    cmd = " ".join(shlex.quote(a) for a in argv)
+    out = dest / "launch_command.sh"
+    out.write_text(
+        "#!/usr/bin/env bash\n"
+        "# Auto-saved at launch — the inner python invocation (config + all overrides).\n"
+        "# Run it under the matching env wrapper, e.g.:  uv run --project envs/dppo --no-sync <below>\n"
+        f"# git commit: {_git_commit()}\n"
+        f"{cmd}\n"
+    )
+    return out
+
+
 def write_experiment_md(dest: Path, *, algo: str, motivation: str = "", hypothesis: str = "",
                         config: Optional[dict] = None, wandb: str = "", **misc) -> Path:
     """Write a human-readable EXPERIMENT.md into the run dir at launch: commit, motivation,

@@ -22,11 +22,12 @@ class ExperimentSnapshot(Callback):
         try:
             from hydra.core.hydra_config import HydraConfig
             from gentle_manip.experiment import Experiment
-            from gentle_manip.utils.run_paths import snapshot_experiment
+            from gentle_manip.utils.run_paths import save_launch_command, snapshot_experiment
 
             run_dir = Path(HydraConfig.get().runtime.output_dir)
             snapshot_experiment(Experiment.load(exp_name), run_dir)      # -> <run>/config/
-            print(f"[snapshot] env config for '{exp_name}' -> {run_dir}/config/", flush=True)
+            save_launch_command(run_dir)                                 # -> <run>/launch_command.sh
+            print(f"[snapshot] env config for '{exp_name}' -> {run_dir}/config/ (+ launch_command.sh)", flush=True)
         except Exception as e:                                          # never fail a run over this
             print(f"[snapshot] env cfg snapshot skipped: {e}", flush=True)
 
