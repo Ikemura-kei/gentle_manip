@@ -15,6 +15,16 @@ the DR actually applied), `config/` (env snapshot), and `render/` with **one mp4
 Run from the **repo root**. Two processes: `envs/dppo` (3.10, the eval) ↔ `envs/sim` (3.12,
 genesis) on `--port 5570`.
 
+> ### ⚠️ HARD REQUIREMENT — per-trajectory video, no exceptions
+> Every eval MUST record **one video per episode** (every batch, every env → `n_episodes`
+> clips total). This is `record_batches: null` in the eval config (the default — do NOT set it
+> to an int or `0`) **and** the sim server MUST run `--render-rgb`. After every eval, verify:
+> ```bash
+> ls <policy_run>/eval/<datetime>/render/*.mp4 | wc -l    # MUST equal n_episodes (100)
+> ```
+> If the count is not 100, the eval is invalid — re-run with `record_batches=null` and a
+> `--render-rgb` server. Same rule applies to the in-training/periodic eval.
+
 ## The ONLY difference between BC and finetuned eval: `ft_denoising_steps`
 
 | Policy | `base_policy_path` | `ft_denoising_steps` | Why |

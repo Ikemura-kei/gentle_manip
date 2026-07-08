@@ -29,7 +29,10 @@ uv run --project envs/sim --no-sync python -m gentle_manip.scripts.serl_sim_serv
 ```
 Wait until it prints **`SIM_SERVER_READY`**. Notes:
 - `--num-envs 12` **MUST equal** the config's `train.n_envs` (12) and `env.n_envs`.
-- `--render-rgb` is **required** — the periodic eval records one clip per episode.
+- `--render-rgb` is **REQUIRED (hard requirement)** — the in-training/periodic eval records
+  **one video per episode** (every batch, every env), no exceptions. Without it the periodic
+  eval can't render and the run violates the per-trajectory-video rule. Verify after the first
+  eval: `ls <run>/periodic_eval/itr-0/render/*.mp4 | wc -l` == `eval_n_batches * n_envs` (60).
 - `--scene-dr-every 25` = training-time full DR (rebuild geometry every 25 resets). Safe
   during eval: the trainer freezes it via `set_auto_scene_dr` so a rebuild can't fire mid-eval.
 - `--view student` = point-cloud obs (the DPPO student). The server stays up across finetune
