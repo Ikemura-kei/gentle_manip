@@ -7,7 +7,7 @@
 set -u
 cd "$(dirname "$0")/../.." || exit 1              # repo root
 
-if [ "$#" -gt 0 ]; then ENVS=("$@"); else ENVS=(sim deploy dp3 dppo serl); fi
+if [ "$#" -gt 0 ]; then ENVS=("$@"); else ENVS=(sim deploy dp3 dppo dppo_deploy serl); fi
 
 # Clean, cluster-like environment: drop any inherited PYTHONPATH/ROS pollution (uv envs
 # are self-contained) and force headless GL for the genesis (sim) import.
