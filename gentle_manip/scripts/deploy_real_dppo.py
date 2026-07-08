@@ -127,7 +127,7 @@ def main() -> None:
                    default=_PKG / "configs/action/delta_pose_delta_gripper.yaml")
     p.add_argument("--cond-steps", type=int, default=2)
     p.add_argument("--act-steps", type=int, default=4)
-    p.add_argument("--max-steps", type=int, default=200)
+    p.add_argument("--max-steps", type=int, default=20000)
     p.add_argument("--rate", type=float, default=30.0, help="control rate (Hz)")
     p.add_argument("--pose-scale", type=float, default=1.0,
                    help="<1 shrinks the 6 delta-pose dims for slower/gentler motion")
