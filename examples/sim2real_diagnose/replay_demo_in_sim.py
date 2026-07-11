@@ -57,6 +57,14 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--object", default="red_cube")
     ap.add_argument("--object-type", default="soft", choices=("soft", "rigid"))
+    # MPM stability: a soft body needs enough substeps or it blows up (CFL). SingleLiftTask
+    # defaults (80/300) are fine for a rigid cube but UNDER-resolve the stiffer soft mushroom
+    # (E=3e5), which then explodes to the grid corner and vanishes from the cloud. Default to
+    # the mushroom's tuned 210/250 (safe for rigid too — just slower). Match the task cfg you
+    # trained/collected with.
+    ap.add_argument("--sim-substeps", type=int, default=210)
+    ap.add_argument("--mpm-grid-density", type=float, default=250.0)
+    ap.add_argument("--cam-fov", type=float, default=46.0)
     ap.add_argument("--obs", default="point_cloud_1cam")
     ap.add_argument("--augmentation", type=Path, default=None,
                     help="sim-only obs augmentation config (e.g. configs/augmentation/quat_snap.yaml)")
@@ -101,7 +109,9 @@ def main():
         aug_path = args.augmentation if args.augmentation.is_file() else _CFG.parent / args.augmentation
         aug_cfg = AugmentationConfig.from_dict(yaml.safe_load(aug_path.read_text()))
         print(f"augmentation: {aug_cfg}", flush=True)
-    task = SingleLiftTask({"object_name": args.object, "object_type": args.object_type})
+    task = SingleLiftTask({"object_name": args.object, "object_type": args.object_type,
+                           "sim_substeps": args.sim_substeps,
+                           "mpm_grid_density": args.mpm_grid_density, "cam_fov": args.cam_fov})
     default_xy = np.array(get_object_def(args.object).default_pos[:2], dtype=np.float32)
     fov = task.scene_spec.cameras[0].fov
 
