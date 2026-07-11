@@ -54,3 +54,7 @@ wandb/
 
 # Point-cloud focus comparison videos (viz output of examples/render_pntcld_focus.py)
 examples/pntcld_focus/
+
+# experiment_registry transient sidecars (flock + atomic-write temp)
+experiments.csv.lock
+experiments.csv.tmp
