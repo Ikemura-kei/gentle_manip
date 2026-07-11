@@ -92,13 +92,12 @@ class _Policy:
         return ((chunk + 1) / 2 * self.arange + self.amin).astype(np.float32)
 
 
-def _frame(fig, ax, pc, ee, gw, stress, tag):
+def _frame(fig, ax, rgb, gw, stress, tag):
+    """RGB scene render (cam_ext view) with a gripper/stress overlay."""
     ax.clear()
-    pc = pc[np.any(pc != 0, 1)]
-    ax.scatter(pc[:, 0], pc[:, 1], pc[:, 2], s=2, c=pc[:, 2], cmap="viridis", vmin=0, vmax=0.45, alpha=0.5)
-    ax.scatter(*ee, c="red", s=50, marker="*")
-    ax.set_xlim(0.2, 0.71); ax.set_ylim(-0.215, 0.215); ax.set_zlim(0, 0.45); ax.view_init(28, -60)
-    ax.set_title(f"{tag}  grip={gw*1000:.0f}mm  stress={stress:.0f}", fontsize=9)
+    ax.imshow(rgb)
+    ax.set_axis_off()
+    ax.set_title(f"{tag}   grip={gw*1000:.0f} mm   stress={stress:.0f}", fontsize=11)
     fig.canvas.draw()
     return np.asarray(fig.canvas.buffer_rgba())[..., :3].copy()
 
@@ -123,7 +122,7 @@ def main():
     env = PolicyEnv(backend, obs_cfg, act_cfg, task=None, max_episode_steps=10 ** 9)
     policy = _Policy(args.ckpt, args.norm, args.ft_denoising_steps, device=args.device)
 
-    fig = plt.figure(figsize=(7, 6)); ax = fig.add_subplot(111, projection="3d")
+    fig = plt.figure(figsize=(7, 6)); ax = fig.add_subplot(111)
     print(f"{'ep':>3} {'obj_xy(=real grasp)':>22} {'real gw_min':>11} {'SIM gw_min':>10} {'SIM stress_pk':>13} {'SIM lifted':>10}")
     print("-" * 74)
     rows = []
@@ -144,7 +143,8 @@ def main():
                 st = float(np.asarray(fb.extra["von_mises_stress"])[0].max())
                 gw = float(obs["gripper_width"][0, 0])
                 sim_gw.append(gw); sim_stress.append(st)
-                frames.append(_frame(fig, ax, obs["point_cloud"][0], obs["ee_pos"][0], gw, st, f"ep{i} sim t={steps}"))
+                rgb = backend.render_rgb()                             # (H, W, 3) cam_ext scene view
+                frames.append(_frame(fig, ax, rgb, gw, st, f"ep{i} sim t={steps}"))
                 steps += 1
                 if steps >= T: break
         z_end = float(backend.get_sim_feedback().object_center[0, 2])
