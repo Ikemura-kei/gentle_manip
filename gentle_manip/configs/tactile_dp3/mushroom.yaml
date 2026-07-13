@@ -1,0 +1,51 @@
+# Tactile-DP3 baseline: mushroom grasping (26-07-07-ufk-mushroom.pkl, 10 episodes).
+name: mushroom
+wandb_project: gentle-manip-tactile-dp3
+
+zarr_path: dataset/tactile_dp3/mushroom.zarr
+checkpoint_dir: dataset/tactile_dp3/checkpoints/mushroom
+
+# task / obs shapes (must match convert_tactile_demo_to_zarr.py output)
+action_dim: 7
+state_dim: 8            # ee_pos(3) + ee_quat(4) + gripper_width(1)
+point_cloud_points: 1024
+tactile_image_size: 128
+
+# diffusion policy (mirrors DP3's simple_dp3.yaml defaults)
+horizon: 16
+n_obs_steps: 2
+n_action_steps: 8
+num_train_timesteps: 100
+num_inference_steps: 10
+diffusion_step_embed_dim: 128
+down_dims: [128, 256, 384]
+encoder_output_dim: 128
+state_mlp_size: [64, 64]
+tactile_out_channels: 32
+dropout: 0.25              # confirmed on mushroom too (2-config screen, 60ep, EMA val loss):
+                            # baseline 0.0970 vs aug+dropout0.25 0.0769 (21% better, WINNER) — same
+                            # config validated on cube's 5-way sweep. Even fewer episodes here
+                            # (8 train / 2 val) so overfitting risk is higher than cube.
+
+# training — smaller dataset (10 episodes) than cube: smaller batch, larger val_ratio
+# so at least 2 episodes are held out.
+seed: 42
+val_ratio: 0.15
+batch_size: 32
+num_workers: 0             # in-memory zarr (92MB); see cube.yaml note on worker overhead
+lr: 1.0e-4
+betas: [0.95, 0.999]
+weight_decay: 1.0e-6
+lr_scheduler: cosine
+lr_warmup_steps: 300
+ema_power: 0.75
+epochs: 150                 # still improving at epoch 59 of the 60-epoch screen; 150 gives headroom
+val_every: 5
+device: cuda:0
+
+augmentation:
+  enabled: true
+  point_jitter_std: 0.005
+  point_offset_std: 0.0
+  tactile_noise_std: 4.0
+  tactile_gain_jitter: 0.1

@@ -1,0 +1,57 @@
+# Tactile-DP3 baseline: cube grasping (26-07-07-sxp.pkl + 26-07-07-lzw.pkl, 50 episodes).
+name: cube
+wandb_project: gentle-manip-tactile-dp3
+
+zarr_path: dataset/tactile_dp3/cube.zarr
+checkpoint_dir: dataset/tactile_dp3/checkpoints/cube
+
+# task / obs shapes (must match convert_tactile_demo_to_zarr.py output)
+action_dim: 7
+state_dim: 8            # ee_pos(3) + ee_quat(4) + gripper_width(1)
+point_cloud_points: 1024
+tactile_image_size: 128
+
+# diffusion policy (mirrors DP3's simple_dp3.yaml defaults)
+horizon: 16
+n_obs_steps: 2
+n_action_steps: 8
+num_train_timesteps: 100
+num_inference_steps: 10
+diffusion_step_embed_dim: 128
+down_dims: [128, 256, 384]
+encoder_output_dim: 128
+state_mlp_size: [64, 64]
+tactile_out_channels: 32
+dropout: 0.25             # 5-config screening sweep (60ep each, EMA val loss):
+                           # dropout=0.15 no-aug 0.0518 | +aug 0.0558 | +aug+dropout0.25 0.0489 (WINNER,
+                           # still improving at ep59) | +aug+wd1e-4 0.0559 | +aug+smaller-model 0.0528
+                           # See dataset/tactile_dp3/experiments.jsonl (tags a1-a5) for full sweep log.
+
+# training
+seed: 42
+val_ratio: 0.1
+batch_size: 64
+num_workers: 0            # in-memory zarr (463MB) fully fits in RAM; multi-worker IPC/copy
+                           # overhead outweighed any benefit (78% GPU util, data-loader bound)
+lr: 1.0e-4
+betas: [0.95, 0.999]
+weight_decay: 1.0e-6
+lr_scheduler: cosine
+lr_warmup_steps: 500
+ema_power: 0.75
+epochs: 150                # winning config (aug+dropout0.25) was STILL improving at epoch 59 of the
+                            # 60-epoch screening run (unlike the no-aug baseline, which plateaued by
+                            # epoch ~70 in the very first full run) — 150 gives it room to converge.
+val_every: 5
+device: cuda:0
+
+# train-split-only noise, applied as a batched GPU op in train_tactile_dp3.py's training
+# loop (NOT in TactileDP3Dataset — an earlier per-sample numpy version inside
+# __getitem__ was ~11x slower: 330s/epoch vs 30s/epoch, single-process CPU RNG on every
+# (16,128,128,3) tactile sample). See gentle_manip/baselines/tactile_dp3/augmentation.py.
+augmentation:
+  enabled: true              # validated winner — see dropout comment above
+  point_jitter_std: 0.005    # meters, per-point Gaussian (point cloud coords are ~0.1-0.7 range)
+  point_offset_std: 0.0      # meters, per-sample rigid offset
+  tactile_noise_std: 4.0     # delta-image pixel units (deltas observed range ~[-62,50])
+  tactile_gain_jitter: 0.1   # +/- fractional gain on the delta image

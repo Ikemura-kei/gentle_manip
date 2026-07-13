@@ -39,6 +39,7 @@ dependencies = [
     "scipy",
     "gymnasium",
     "pyyaml",
+    "pytest",  # gentle_manip/tests/test_tactile_dp3_*.py, test_convert_tactile_demo_to_zarr.py
     # DP3 stack (versions per DP3 INSTALL.md)
     "zarr==2.12.0",
     "numcodecs",
