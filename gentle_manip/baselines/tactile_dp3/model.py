@@ -81,7 +81,11 @@ class TactileCNNEncoder(nn.Module):
 
 
 class TactileDP3Encoder(nn.Module):
-    """Fuses point cloud + robot state + two tactile delta images by concatenation."""
+    """Fuses robot state with an optional point-cloud branch and/or optional
+    tactile branch by concatenation. state is always present; use_point_cloud /
+    use_tactile gate the other two for ablations (e.g. "tactile removed",
+    "point cloud removed") — see gentle_manip/scripts/train_tactile_dp3.py's
+    build_policy for the cfg keys that drive these."""
 
     def __init__(
         self,
@@ -92,16 +96,26 @@ class TactileDP3Encoder(nn.Module):
         pointcloud_encoder_cfg: dict | None = None,
         tactile_out_channels: int = 32,
         dropout: float = 0.0,
+        use_point_cloud: bool = True,
+        use_tactile: bool = True,
     ):
         super().__init__()
+        if not use_point_cloud and not use_tactile:
+            raise ValueError("at least one of use_point_cloud / use_tactile must be True")
         self.point_cloud_key = "point_cloud"
         self.state_key = "agent_pos"
         self.tactile_keys = ("tactile_left", "tactile_right")
+        self.use_point_cloud = use_point_cloud
+        self.use_tactile = use_tactile
 
-        pointcloud_encoder_cfg = dict(pointcloud_encoder_cfg or {})
-        pointcloud_encoder_cfg["in_channels"] = 3
-        pointcloud_encoder_cfg.setdefault("out_channels", out_channel)
-        self.extractor = PointNetEncoderXYZ(**pointcloud_encoder_cfg)
+        self.n_output_channels = 0
+
+        if use_point_cloud:
+            pointcloud_encoder_cfg = dict(pointcloud_encoder_cfg or {})
+            pointcloud_encoder_cfg["in_channels"] = 3
+            pointcloud_encoder_cfg.setdefault("out_channels", out_channel)
+            self.extractor = PointNetEncoderXYZ(**pointcloud_encoder_cfg)
+            self.n_output_channels += pointcloud_encoder_cfg["out_channels"]
 
         state_shape = observation_space[self.state_key]
         if len(state_mlp_size) == 1:
@@ -112,18 +126,20 @@ class TactileDP3Encoder(nn.Module):
         self.state_mlp = nn.Sequential(
             *create_mlp(state_shape[0], state_out_dim, net_arch, state_mlp_activation_fn)
         )
+        self.n_output_channels += state_out_dim
 
-        self.tactile_cnn = TactileCNNEncoder(out_channels=tactile_out_channels, dropout=dropout)
-
-        self.n_output_channels = (
-            pointcloud_encoder_cfg["out_channels"] + state_out_dim + 2 * tactile_out_channels
-        )
+        if use_tactile:
+            self.tactile_cnn = TactileCNNEncoder(out_channels=tactile_out_channels, dropout=dropout)
+            self.n_output_channels += 2 * tactile_out_channels
 
     def forward(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
-        pc_feat = self.extractor(observations[self.point_cloud_key])
-        state_feat = self.state_mlp(observations[self.state_key])
-        tactile_feats = [self.tactile_cnn(observations[k]) for k in self.tactile_keys]
-        return torch.cat([pc_feat, state_feat, *tactile_feats], dim=-1)
+        feats = []
+        if self.use_point_cloud:
+            feats.append(self.extractor(observations[self.point_cloud_key]))
+        feats.append(self.state_mlp(observations[self.state_key]))
+        if self.use_tactile:
+            feats.extend(self.tactile_cnn(observations[k]) for k in self.tactile_keys)
+        return torch.cat(feats, dim=-1)
 
     def output_shape(self) -> int:
         return self.n_output_channels
@@ -151,6 +167,8 @@ class TactileDiffusionPolicy(nn.Module):
         state_mlp_size=(64, 64),
         tactile_out_channels: int = 32,
         dropout: float = 0.0,
+        use_point_cloud: bool = True,
+        use_tactile: bool = True,
     ):
         super().__init__()
         obs_encoder = TactileDP3Encoder(
@@ -160,6 +178,8 @@ class TactileDiffusionPolicy(nn.Module):
             pointcloud_encoder_cfg=pointcloud_encoder_cfg,
             tactile_out_channels=tactile_out_channels,
             dropout=dropout,
+            use_point_cloud=use_point_cloud,
+            use_tactile=use_tactile,
         )
         obs_feature_dim = obs_encoder.output_shape()
         global_cond_dim = obs_feature_dim * n_obs_steps

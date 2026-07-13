@@ -77,6 +77,8 @@ def build_policy(cfg: dict, device: torch.device) -> TactileDiffusionPolicy:
         state_mlp_size=tuple(cfg.get("state_mlp_size", [64, 64])),
         tactile_out_channels=cfg.get("tactile_out_channels", 32),
         dropout=cfg.get("dropout", 0.0),
+        use_point_cloud=cfg.get("use_point_cloud", True),
+        use_tactile=cfg.get("use_tactile", True),
     )
     return policy
 
