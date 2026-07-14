@@ -1,0 +1,31 @@
+# [task] Soft-MPM mushroom single-lift — STRESS-SCALE SWEEP variant (rewards.stress.scale=0.01).
+# Used by: experiments/single_lift_mushroom_soft_stress0p01 -> DPPO finetune (stress-scale sweep)
+# Status: experimental (2026-07-13)
+#
+# IDENTICAL to single_lift_mushroom_soft in EVERY way EXCEPT rewards.stress.scale (0.2 -> 0.01).
+# Sweep probing how the stress-penalty weight trades success vs peak stress: pundd (scale 0.2)
+# collapsed success 0.89->0.47 with little peak-stress gain, so this sweep tries a stronger (0.5)
+# and two weaker (0.1, 0.01) penalties. Everything else — success band, dist/lift shaping, sim
+# dynamics — matches the base soft task exactly.
+success_z_min: 0.175
+success_z_max: 0.225
+hold_steps: 30
+object_name: "mushroom"
+object_type: "soft"      # MPM -> has von_mises_stress for the stress reward
+sim_substeps: 220        # GM_SIM_SUBSTEPS overrides at launch (these runs use 235, matching pundd)
+mpm_grid_density: 250
+success_scale: 0.2
+
+rewards:
+  stress:
+    scale: 0.01         # <-- the ONLY change vs single_lift_mushroom_soft (was 0.2)
+    cap: 1.5
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 0.1
+    decay: 8.0
+  lift:
+    scale: 0.1
+    grasp_gate_dist: 0.079
+    lift_target: 0.16
