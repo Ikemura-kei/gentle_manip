@@ -77,6 +77,16 @@ else
     OVERRIDES=(train.n_train_itr=250 train.actor_lr=2e-5 train.actor_lr_scheduler.min_lr=2e-6)
 fi
 
+# In-training eval: OFF by default (force_train) — the 12-env/5-batch periodic eval correlates
+# poorly with the harness eval and just burns wall time; ckpt saving is INDEPENDENT and kept.
+# Set GM_INTRAIN_EVAL=1 to re-enable the periodic eval. NOTE: force_train is read via
+# cfg.train.get("force_train", False), so it is NOT a declared config key -> it must be ADDED
+# with a '+' prefix (a plain `train.force_train=true` errors "not in struct" under hydra's
+# struct mode). Do NOT also pass +train.force_train in GM_EXTRA_OVERRIDES (double-add errors).
+if [ "${GM_INTRAIN_EVAL:-0}" != "1" ]; then
+    OVERRIDES+=(+train.force_train=true train.render.freq=99999)
+fi
+
 # Per-run extra hydra overrides (space-separated key=val), appended so they WIN over the base
 # (hydra: last value wins). e.g. GM_EXTRA_OVERRIDES="train.target_kl=1 train.batch_size=256".
 if [ -n "${GM_EXTRA_OVERRIDES:-}" ]; then

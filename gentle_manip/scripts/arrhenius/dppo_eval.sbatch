@@ -23,7 +23,13 @@ REPO=/nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip
 cd "$REPO"
 
 # ---- knobs (eval = canonical protocol; do NOT change num_envs/seed/n_episodes) ---------
-SIM_EXPERIMENT=single_lift_mushroom_soft      # eval MEASURES stress -> serve the base experiment
+# Env-overridable so you can eval a finetuned ckpt with its TRAIN-TIME config:
+#   SIM_EXPERIMENT (server task/reward+DR), EVAL_EXPERIMENT (eval-cfg experiment snapshot),
+#   FT_DENOISING (ft_denoising_steps: 0 for a BC base ckpt, 10 for a finetuned ckpt),
+#   GM_SIM_SUBSTEPS / GM_MPM_SAMPLER (sim substeps + MPM sampler, read by scene_builder).
+SIM_EXPERIMENT=${SIM_EXPERIMENT:-single_lift_mushroom_soft}   # default base (measures stress)
+EVAL_EXPERIMENT=${EVAL_EXPERIMENT:-}                          # if set -> hydra experiment=<...> on the eval cfg
+FT_DENOISING=${FT_DENOISING:-0}                              # 0 = eval BC base; 10 = eval finetuned denoising
 VIEW=student
 NUM_ENVS=5                                      # canonical EvalSpec; MUST match cfg n_envs
 PORT=5570
@@ -65,9 +71,23 @@ grep -q "SIM_SERVER_READY" "$SRV_LOG" || { echo "[sbatch] server not ready — t
 # is a video subset only and does not change the success number.)
 # N_EPISODES: full canonical eval = 100 (20 batches); set smaller (e.g. 25) for a quick diagnostic.
 N_EPISODES=${N_EPISODES:-100}
-echo "[sbatch] running eval of $CKPT (n_episodes=$N_EPISODES)"
+EVAL_EXP_OVR=(); [ -n "$EVAL_EXPERIMENT" ] && EVAL_EXP_OVR=(experiment="$EVAL_EXPERIMENT")
+# Unique output subdir (optional). By default the eval writes to <run>/eval/<datetime> where the
+# datetime has 1-SECOND resolution and is stamped when the eval PROCESS starts — so evaluating
+# several checkpoints of the SAME run in parallel makes them collide on that dir and clobber each
+# other's summary.json / episodes.csv / videos. Set EVAL_SUBDIR to a unique name (e.g. the
+# checkpoint stem "state_150") and the eval writes to <run>/eval/$EVAL_SUBDIR instead — collision
+# free. Unset -> unchanged datetime behaviour. (RUN_DIR = the ckpt's run dir = <run>/checkpoint/..).
+LOGDIR_OVR=()
+if [ -n "${EVAL_SUBDIR:-}" ]; then
+    RUN_DIR=$(dirname "$(dirname "$CKPT")")
+    LOGDIR_OVR=(logdir="$RUN_DIR/eval/$EVAL_SUBDIR")
+    echo "[sbatch] unique eval logdir -> $RUN_DIR/eval/$EVAL_SUBDIR (EVAL_SUBDIR set)"
+fi
+echo "[sbatch] running eval of $CKPT (n_episodes=$N_EPISODES, ft_denoising=$FT_DENOISING, ${EVAL_EXP_OVR[*]:-exp=cfg-default})"
 uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.train \
     --config-path "$CFG_DIR" --config-name "$CFG_NAME" \
-    base_policy_path="$CKPT" ft_denoising_steps=0 record_batches=null n_episodes="$N_EPISODES"
+    base_policy_path="$CKPT" ft_denoising_steps="$FT_DENOISING" record_batches=null n_episodes="$N_EPISODES" \
+    "${EVAL_EXP_OVR[@]}" "${LOGDIR_OVR[@]}"
 
 echo "[sbatch] eval finished OK"
