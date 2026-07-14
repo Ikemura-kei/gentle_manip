@@ -6,6 +6,12 @@ gentle_manip/assets/xarm/lc_soft_enable_wide_grip/urdf-viz
 examples/*.png
 examples/*.mp4
 
+# sim2real diagnosis artifacts — exploratory OUTPUTS (figures/videos), new + future, kept
+# LOCAL. One-off diagnostic scripts also stay local (not committed); reusable fixes that land
+# in shared code are committed as usual.
+examples/sim2real_diagnose/figures/
+examples/sim2real_diagnose/scripted_in_sim_at_real_positions.py
+
 # Python
 __pycache__/
 *.py[cod]
