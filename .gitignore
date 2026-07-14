@@ -64,3 +64,6 @@ examples/pntcld_focus/
 # experiment_registry transient sidecars (flock + atomic-write temp)
 experiments.csv.lock
 experiments.csv.tmp
+
+# MPM grid/substep sweep video outputs (examples/mushroom_grid_substep_sweep.py --video)
+examples/mushroom_sweep/
