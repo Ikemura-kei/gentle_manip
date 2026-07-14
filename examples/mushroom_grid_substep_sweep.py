@@ -24,8 +24,10 @@ _OBJ = Path(__file__).resolve().parents[1] / "gentle_manip" / "assets" / "object
 _OUT = Path(__file__).resolve().parent / "mushroom_sweep"
 
 
-def _run_one(grid, substeps, steps, E, nu, rho, yld, pos, scale, video_path, q):
-    """Worker (fresh process): build the mushroom at (grid, substeps), settle, return metrics."""
+def _run_one(grid, substeps, steps, E, nu, rho, yld, pos, scale, n_envs, sampler, video_path, q):
+    """Worker (fresh process): build the mushroom at (grid, substeps), settle, return metrics.
+    Batched (n_envs): steps/s is scene.step()/s at n_envs (training-relevant throughput);
+    shape/stability metrics use env 0, and the NaN blow-up check spans all envs."""
     try:
         import time
         os.environ.setdefault("MUJOCO_GL", "egl")
@@ -43,39 +45,40 @@ def _run_one(grid, substeps, steps, E, nu, rho, yld, pos, scale, video_path, q):
         scene.add_entity(gs.morphs.Plane())
         mush = scene.add_entity(
             morph=gs.morphs.Mesh(file=str(_OBJ), pos=tuple(pos), scale=scale),
-            material=gs.materials.MPM.ElastoPlastic(E=E, nu=nu, von_mises_yield_stress=yld, rho=rho),
+            material=gs.materials.MPM.ElastoPlastic(E=E, nu=nu, von_mises_yield_stress=yld, rho=rho,
+                                                    sampler=sampler),
             surface=gs.surfaces.Default(vis_mode="particle"))
         cam = None
         if video_path is not None:
             cam = scene.add_camera(res=(640, 480), pos=(pos[0] + 0.16, pos[1] - 0.16, 0.14),
                                    lookat=(pos[0], pos[1], 0.02), fov=30, GUI=False)
-        scene.build(n_envs=0)
+        scene.build(n_envs=n_envs)
 
         def _parts():
             p = mush.get_state().pos                                 # torch CUDA tensor
             if hasattr(p, "detach"):
                 p = p.detach().cpu().numpy()
-            return np.asarray(p).reshape(-1, 3)                      # (n_p, 3)
+            p = np.asarray(p)
+            return p[None] if p.ndim == 2 else p                     # -> (n_envs, n_p, 3)
 
-        p0 = _parts()
-        n_part = int(p0.shape[0])
-        c0 = p0.mean(0)
+        P0 = _parts()
+        n_part = int(P0.shape[1])                                    # particles PER env
+        c0 = P0[0].mean(0)                                           # env-0 center (representative)
         frames, phys_t, drift_max = [], 0.0, 0.0
         for t in range(steps):
             t0 = time.perf_counter(); scene.step(); phys_t += time.perf_counter() - t0
             if cam is not None and t % 3 == 0:
-                frames.append(np.asarray(cam.render(rgb=True)[0], np.uint8))
+                fr = np.asarray(cam.render(rgb=True)[0], np.uint8)
+                frames.append(fr[0] if fr.ndim == 4 else fr)         # env 0 if batched render
             if t % 20 == 0:
-                c = _parts().mean(0)
-                drift_max = max(drift_max, float(np.linalg.norm(c - c0)))
-        pf = _parts()
-        nan = bool(~np.isfinite(pf).all())
-        cf = pf.mean(0)
-        lo, hi = pf.min(0), pf.max(0)
+                drift_max = max(drift_max, float(np.linalg.norm(_parts()[0].mean(0) - c0)))
+        Pf = _parts()
+        nan = bool(~np.isfinite(Pf).all())                          # ANY env blew up -> NaN
+        cf = Pf[0].mean(0)
+        lo, hi = Pf[0].min(0), Pf[0].max(0)
         bbox = (hi - lo)
-        # blow-up detector: NaN, center outside the MPM box, or a degenerate/exploded shape
-        # (the intact mushroom is ~3 cm; collapsed -> ~0, exploded -> large). Drift is reported
-        # but not gated (spawn rests on the plane, so settle drift should be tiny anyway).
+        # blow-up detector: NaN (any env), env-0 center outside the MPM box, or a degenerate/
+        # exploded env-0 shape (intact mushroom ~3 cm; collapsed -> ~0, exploded -> large).
         in_box = bool((cf > [0.35, -0.13, -0.012]).all() and (cf < [0.63, 0.13, 0.23]).all())
         shape_ok = bool(np.all(bbox > 0.015) and np.all(bbox < 0.08))
         stable = (not nan) and in_box and shape_ok
@@ -93,14 +96,18 @@ def _run_one(grid, substeps, steps, E, nu, rho, yld, pos, scale, video_path, q):
 def main():
     from gentle_manip.assets.materials import MATERIALS
     ap = argparse.ArgumentParser()
-    ap.add_argument("--grids", default="120,150,185,250")
-    ap.add_argument("--substeps", default="40,80,150,210")
+    ap.add_argument("--grids", default="85,95,100,120,150,185,250")
+    ap.add_argument("--substeps", default="80,150,210")
     ap.add_argument("--pairs", action="store_true", help="zip grids+substeps instead of cartesian product")
     ap.add_argument("--material", default="mushroom", choices=sorted(MATERIALS))
+    ap.add_argument("--n-envs", type=int, default=15,
+                    help="parallel MPM envs (batched) — steps/s then reflects training throughput")
+    ap.add_argument("--sampler", default="regular", choices=("regular", "pbs", "random"),
+                    help="MPM particle sampler for the soft body (regular = deterministic grid)")
     ap.add_argument("--steps", type=int, default=200)
-    ap.add_argument("--pos", type=float, nargs=3, default=[0.5, 0.0, 0.045],
-                    help="spawn (m); z=0.045 clears the coarse-grid MPM boundary padding for all "
-                         "grids in the sweep (a resting z fails to BUILD on coarse grids). Small "
+    ap.add_argument("--pos", type=float, nargs=3, default=[0.5, 0.0, 0.055],
+                    help="spawn (m); raised to clear the coarse-grid MPM boundary padding for all "
+                         "grids in the sweep (a resting z fails to BUILD on coarse grids). The small "
                          "settle drop is uniform across configs, so still apples-to-apple.")
     ap.add_argument("--scale", type=float, default=1.0)
     ap.add_argument("--video", action="store_true")
@@ -111,19 +118,44 @@ def main():
     grids = [int(x) for x in args.grids.split(",")]
     subs = [int(x) for x in args.substeps.split(",")]
     combos = list(zip(grids, subs)) if args.pairs else [(g, s) for g in grids for s in subs]
-    print(f"material={args.material} E={E:.0f} nu={nu} rho={rho} yield={yld:.0f} | {len(combos)} configs, {args.steps} steps each\n")
+    print(f"material={args.material} E={E:.0f} nu={nu} rho={rho} yield={yld:.0f} sampler={args.sampler} | "
+          f"{len(combos)} configs, n_envs={args.n_envs}, {args.steps} steps each "
+          f"(steps/s = scene.step()/s at {args.n_envs} envs)\n")
 
     ctx = mp.get_context("spawn")
     rows = []
     for g, s in combos:
         vp = str(_OUT / f"gd{g}_ss{s}.mp4") if args.video else None
         q = ctx.Queue()
-        p = ctx.Process(target=_run_one, args=(g, s, args.steps, E, nu, rho, yld, args.pos, args.scale, vp, q))
+        p = ctx.Process(target=_run_one, args=(g, s, args.steps, E, nu, rho, yld, args.pos, args.scale, args.n_envs, args.sampler, vp, q))
         p.start(); r = q.get(); p.join()
         rows.append(r)
         tag = "ERR " + r["err"] if r["err"] else ("OK  " if r["stable"] else "UNSTABLE")
         print(f"  gd={g:>4} ss={s:>4} | {r['n_part']:>5}p | {r['steps_per_s']:>6.1f} st/s | "
               f"drift={r['drift_mm']:>5.1f}mm | bbox=({r['bbox'][0]*100:.1f},{r['bbox'][1]*100:.1f},{r['bbox'][2]*100:.1f})cm | {tag}", flush=True)
+
+    # ── SUMMARY: fps + stability for every combination ──
+    def _status(r):
+        return "ERR" if r["err"] else ("stable" if r["stable"] else "UNSTABLE")
+    print("\n=== SUMMARY: fps + stability per combination ===")
+    print(f"{'grid':>5} {'substeps':>9} {'particles':>10} {'steps/s':>9} {'status':>9}")
+    for r in rows:
+        print(f"{r['grid']:>5} {r['substeps']:>9} {r['n_part']:>10} {r['steps_per_s']:>9.1f} {_status(r):>9}")
+    if not args.pairs:                       # matrix view for a product sweep
+        gset = sorted({g for g, _ in combos}); sset = sorted({s for _, s in combos})
+        bk = {(r["grid"], r["substeps"]): r for r in rows}
+        print("\nsteps/s matrix (rows=grid_density, cols=substeps; x=unstable, !=err):")
+        print("  gd\\ss " + "".join(f"{s:>8}" for s in sset))
+        for g in gset:
+            cells = [f"{'-':>8}" if (r := bk.get((g, s))) is None else
+                     f"{'!':>8}" if r["err"] else
+                     f"{'x':>8}" if not r["stable"] else f"{r['steps_per_s']:>8.1f}" for s in sset]
+            print(f"  {g:>4}  " + "".join(cells))
+    _fast = [r for r in rows if r["stable"]]
+    if _fast:
+        b = max(_fast, key=lambda r: r["steps_per_s"])
+        print(f"\nfastest STABLE: gd={b['grid']} ss={b['substeps']} -> {b['steps_per_s']:.1f} steps/s "
+              f"({b['n_part']} particles/env)")
 
     # accuracy vs the finest STABLE config (max grid*substeps) as reference
     stable = [r for r in rows if r["stable"]]
