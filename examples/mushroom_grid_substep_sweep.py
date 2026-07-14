@@ -14,8 +14,10 @@ subprocess (Genesis can't re-init in one process), settles the mushroom, and rep
 --video writes examples/mushroom_sweep/gd<g>_ss<s>.mp4 per config (visual accuracy check).
 """
 import argparse
+import csv
 import multiprocessing as mp
 import os
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -61,17 +63,26 @@ def _run_one(grid, substeps, steps, E, nu, rho, yld, pos, scale, n_envs, sampler
             p = np.asarray(p)
             return p[None] if p.ndim == 2 else p                     # -> (n_envs, n_p, 3)
 
+        def _stress():
+            v = mush.get_state().von_mises                           # per-particle von Mises (Pa)
+            if hasattr(v, "detach"):
+                v = v.detach().cpu().numpy()
+            v = np.asarray(v)
+            return v[None] if v.ndim == 1 else v                     # -> (n_envs, n_p)
+
         P0 = _parts()
         n_part = int(P0.shape[1])                                    # particles PER env
         c0 = P0[0].mean(0)                                           # env-0 center (representative)
-        frames, phys_t, drift_max = [], 0.0, 0.0
+        frames, phys_t, drift_max, vm_samples = [], 0.0, 0.0, []
         for t in range(steps):
             t0 = time.perf_counter(); scene.step(); phys_t += time.perf_counter() - t0
             if cam is not None and t % 3 == 0:
                 fr = np.asarray(cam.render(rgb=True)[0], np.uint8)
                 frames.append(fr[0] if fr.ndim == 4 else fr)         # env 0 if batched render
-            if t % 20 == 0:
+            if t % 20 == 0:                                          # sampled OUTSIDE the timed step
                 drift_max = max(drift_max, float(np.linalg.norm(_parts()[0].mean(0) - c0)))
+                vm_samples.append(float(_stress()[0].mean()))        # env-0 mean von Mises
+        mean_vm = float(np.mean(vm_samples)) if vm_samples else 0.0  # time-averaged mean stress
         Pf = _parts()
         nan = bool(~np.isfinite(Pf).all())                          # ANY env blew up -> NaN
         cf = Pf[0].mean(0)
@@ -87,17 +98,18 @@ def _run_one(grid, substeps, steps, E, nu, rho, yld, pos, scale, n_envs, sampler
             Path(video_path).parent.mkdir(parents=True, exist_ok=True)
             imageio.mimsave(video_path, frames, fps=15, macro_block_size=1)
         q.put(dict(grid=grid, substeps=substeps, n_part=n_part, steps_per_s=steps / phys_t if phys_t else 0,
-                   center=cf.tolist(), bbox=bbox.tolist(), drift_mm=drift_max * 1000, stable=stable, err=None))
+                   center=cf.tolist(), bbox=bbox.tolist(), drift_mm=drift_max * 1000,
+                   mean_vonmises=mean_vm, stable=stable, err=None))
     except Exception as e:
         q.put(dict(grid=grid, substeps=substeps, n_part=0, steps_per_s=0, center=[0, 0, 0],
-                   bbox=[0, 0, 0], drift_mm=0, stable=False, err=f"{type(e).__name__}: {e}"))
+                   bbox=[0, 0, 0], drift_mm=0, mean_vonmises=0, stable=False, err=f"{type(e).__name__}: {e}"))
 
 
 def main():
     from gentle_manip.assets.materials import MATERIALS
     ap = argparse.ArgumentParser()
-    ap.add_argument("--grids", default="85,95,100,120,150,185,250")
-    ap.add_argument("--substeps", default="80,150,210")
+    ap.add_argument("--grids", default="105,110,115,120,210")
+    ap.add_argument("--substeps", default="95,100,105,110,120,130,210")
     ap.add_argument("--pairs", action="store_true", help="zip grids+substeps instead of cartesian product")
     ap.add_argument("--material", default="mushroom", choices=sorted(MATERIALS))
     ap.add_argument("--n-envs", type=int, default=15,
@@ -122,25 +134,47 @@ def main():
           f"{len(combos)} configs, n_envs={args.n_envs}, {args.steps} steps each "
           f"(steps/s = scene.step()/s at {args.n_envs} envs)\n")
 
+    # Per-run artifact folder (videos + CSV) under mushroom_sweep/<datetime>/.
+    run_dir = _OUT / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    run_dir.mkdir(parents=True, exist_ok=True)
+    print(f"artifacts -> {run_dir}\n")
+
     ctx = mp.get_context("spawn")
     rows = []
     for g, s in combos:
-        vp = str(_OUT / f"gd{g}_ss{s}.mp4") if args.video else None
+        vp = str(run_dir / f"gd{g}_ss{s}.mp4") if args.video else None
         q = ctx.Queue()
         p = ctx.Process(target=_run_one, args=(g, s, args.steps, E, nu, rho, yld, args.pos, args.scale, args.n_envs, args.sampler, vp, q))
         p.start(); r = q.get(); p.join()
         rows.append(r)
         tag = "ERR " + r["err"] if r["err"] else ("OK  " if r["stable"] else "UNSTABLE")
         print(f"  gd={g:>4} ss={s:>4} | {r['n_part']:>5}p | {r['steps_per_s']:>6.1f} st/s | "
-              f"drift={r['drift_mm']:>5.1f}mm | bbox=({r['bbox'][0]*100:.1f},{r['bbox'][1]*100:.1f},{r['bbox'][2]*100:.1f})cm | {tag}", flush=True)
+              f"stress={r['mean_vonmises']:>7.0f} | drift={r['drift_mm']:>5.1f}mm | "
+              f"bbox=({r['bbox'][0]*100:.1f},{r['bbox'][1]*100:.1f},{r['bbox'][2]*100:.1f})cm | {tag}", flush=True)
+
+    # CSV table of the full sweep -> <run_dir>/results.csv
+    csv_path = run_dir / "results.csv"
+    with open(csv_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["grid_density", "substeps", "n_envs", "sampler", "particles_per_env",
+                    "steps_per_s", "mean_vonmises_pa", "stable", "drift_mm", "center_z_mm",
+                    "bbox_x_cm", "bbox_y_cm", "bbox_z_cm", "error"])
+        for r in rows:
+            w.writerow([r["grid"], r["substeps"], args.n_envs, args.sampler, r["n_part"],
+                        f"{r['steps_per_s']:.2f}", f"{r['mean_vonmises']:.1f}", int(r["stable"]),
+                        f"{r['drift_mm']:.1f}", f"{r['center'][2]*1000:.1f}",
+                        f"{r['bbox'][0]*100:.2f}", f"{r['bbox'][1]*100:.2f}", f"{r['bbox'][2]*100:.2f}",
+                        r["err"] or ""])
+    print(f"\nCSV -> {csv_path}")
 
     # ── SUMMARY: fps + stability for every combination ──
     def _status(r):
         return "ERR" if r["err"] else ("stable" if r["stable"] else "UNSTABLE")
-    print("\n=== SUMMARY: fps + stability per combination ===")
-    print(f"{'grid':>5} {'substeps':>9} {'particles':>10} {'steps/s':>9} {'status':>9}")
+    print("\n=== SUMMARY: fps + stability + stress per combination ===")
+    print(f"{'grid':>5} {'substeps':>9} {'particles':>10} {'steps/s':>9} {'vonMises':>9} {'status':>9}")
     for r in rows:
-        print(f"{r['grid']:>5} {r['substeps']:>9} {r['n_part']:>10} {r['steps_per_s']:>9.1f} {_status(r):>9}")
+        print(f"{r['grid']:>5} {r['substeps']:>9} {r['n_part']:>10} {r['steps_per_s']:>9.1f} "
+              f"{r['mean_vonmises']:>9.0f} {_status(r):>9}")
     if not args.pairs:                       # matrix view for a product sweep
         gset = sorted({g for g, _ in combos}); sset = sorted({s for _, s in combos})
         bk = {(r["grid"], r["substeps"]): r for r in rows}
@@ -170,7 +204,7 @@ def main():
             db = np.linalg.norm(np.array(r["bbox"]) - rb) * 1000
             print(f"  gd={r['grid']:>4} ss={r['substeps']:>4} | {r['steps_per_s']:>8.1f} | {dc:>6.1f}mm | {db:>6.1f}mm")
     if args.video:
-        print(f"\nvideos -> {_OUT}/gd<g>_ss<s>.mp4")
+        print(f"videos -> {run_dir}/gd<g>_ss<s>.mp4")
 
 
 if __name__ == "__main__":
