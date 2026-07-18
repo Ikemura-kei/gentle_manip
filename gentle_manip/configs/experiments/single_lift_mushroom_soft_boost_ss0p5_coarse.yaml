@@ -1,0 +1,22 @@
+# [experiment] SOFT mushroom lift — COARSE sim (substeps=98, grid_density=105) speed/stability probe.
+#              Same as single_lift_mushroom_soft_boost_ss0p5 except the task -> coarse variant.
+# Used by: serl_sim_server.py (--experiment) + DPPO finetune (experiment snapshot)
+# Status: experimental (2026-07-15)
+#
+# Reward + params identical to boost_ss0p5 (domqg); ONLY the MPM resolution is coarsened to probe
+# sim speed and grasp stability at a much cheaper discretization.
+task: single_lift_mushroom_soft_boost_ss0p5_coarse
+action: delta_pose_delta_gripper
+dr: food_shape
+augmentation: l515_noise
+obs: superset_soft
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+rl:
+  random_steps: 200
+  training_starts: 400
+  batch_size: 256
+  discount: 0.92
+  utd_ratio: 2
+  critic_lr: 1.0e-4

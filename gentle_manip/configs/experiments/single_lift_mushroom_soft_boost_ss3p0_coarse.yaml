@@ -1,0 +1,21 @@
+# [experiment] SOFT mushroom lift — COARSE sim (98/105) + boost + stress.scale=3.0. Same as single_lift_mushroom_soft_boost_ss2p0_coarse except rewards.stress.scale.
+# Used by: serl_sim_server.py (--experiment) + DPPO finetune
+# Status: experimental (2026-07-16)
+#
+task: single_lift_mushroom_soft_boost_ss3p0_coarse
+action: delta_pose_delta_gripper
+dr: food_shape
+augmentation: l515_noise
+obs: superset_soft
+views:
+  teacher:
+  - privileged
+  student:
+  - point_cloud
+rl:
+  random_steps: 200
+  training_starts: 400
+  batch_size: 256
+  discount: 0.92
+  utd_ratio: 2
+  critic_lr: 0.0001
