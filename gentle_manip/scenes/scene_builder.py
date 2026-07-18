@@ -138,11 +138,15 @@ def build_scene(
         # set, else a primitive box. entry.mesh_path (a shape-DR deformed .obj) overrides
         # the registry default. Same morph drives rigid or MPM material below.
         mesh_file = entry.mesh_path or odef.mesh_path
+        # spawn_z override (else registry default_pos z) — raise the object to clear the MPM
+        # domain's inward safety padding at coarse grid_density.
+        _pos = odef.default_pos if entry.spawn_z is None else (
+            odef.default_pos[0], odef.default_pos[1], float(entry.spawn_z))
         if mesh_file is not None:
-            morph = gs.morphs.Mesh(file=mesh_file, pos=odef.default_pos,
+            morph = gs.morphs.Mesh(file=mesh_file, pos=_pos,
                                    scale=entry.scale, euler=(0, 0, 0))
         else:
-            morph = gs.morphs.Box(size=size, pos=odef.default_pos, euler=(0, 0, 0))
+            morph = gs.morphs.Box(size=size, pos=_pos, euler=(0, 0, 0))
         if entry.object_type == "rigid":
             # No von_mises_stress (rigid solver, no particles) — SimFeedback simply
             # omits the key for this object; see genesis_worker.read_state.

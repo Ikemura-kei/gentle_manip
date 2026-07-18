@@ -37,6 +37,10 @@ class SingleLiftTask(BaseTask):
         self.sim_substeps: int = int(task_cfg.get("sim_substeps", 80))
         self.mpm_grid_density: float = float(task_cfg.get("mpm_grid_density", 300.0))
         self.cam_fov: float = float(task_cfg.get("cam_fov", 46.0))
+        # optional spawn-height override (m); None => registry default_pos z. Used to clear the
+        # MPM domain padding at coarse grid_density (see ObjectEntry.spawn_z).
+        _sz = task_cfg.get("object_spawn_z")
+        self.object_spawn_z: float | None = float(_sz) if _sz is not None else None
 
         self._initial_z: np.ndarray | None = None
         self._success_counter: np.ndarray | None = None
@@ -48,7 +52,8 @@ class SingleLiftTask(BaseTask):
         # dt/substeps/mpm_bounds/grid_density. One external camera matches the real
         # single-camera rig (cam_ext at the calibrated WORLD_T_CAM_EXT pose).
         return SceneSpec(
-            objects=[ObjectEntry(name=self.object_name, object_type=self.object_type)],
+            objects=[ObjectEntry(name=self.object_name, object_type=self.object_type,
+                                 spawn_z=self.object_spawn_z)],
             fixtures=[FixtureEntry(fixture_type="table")],
             cameras=[
                 CameraEntry(

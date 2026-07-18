@@ -16,6 +16,11 @@ class ObjectEntry:
     scale: float = 1.0
     mesh_path: Optional[str] = None                 # per-scene mesh override (e.g. a shape-DR
                                                     # deformed .obj); None => registry default
+    spawn_z: Optional[float] = None                 # override the registry default_pos z (spawn
+                                                    # height, m). None => registry default. Used to
+                                                    # clear the MPM domain's inward safety padding
+                                                    # at coarse grid_density (bigger cells => bigger
+                                                    # padding => higher padded floor).
 
     def validate(self) -> None:
         if self.object_type not in ("soft", "rigid"):
