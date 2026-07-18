@@ -108,11 +108,11 @@ def _run_one(grid, substeps, steps, E, nu, rho, yld, pos, scale, n_envs, sampler
 def main():
     from gentle_manip.assets.materials import MATERIALS
     ap = argparse.ArgumentParser()
-    ap.add_argument("--grids", default="105,110,115,120,210")
-    ap.add_argument("--substeps", default="95,100,105,110,120,130,210")
+    ap.add_argument("--grids", default="105")
+    ap.add_argument("--substeps", default="95,100,105")
     ap.add_argument("--pairs", action="store_true", help="zip grids+substeps instead of cartesian product")
     ap.add_argument("--material", default="mushroom", choices=sorted(MATERIALS))
-    ap.add_argument("--n-envs", type=int, default=15,
+    ap.add_argument("--n-envs", type=int, default=100,
                     help="parallel MPM envs (batched) — steps/s then reflects training throughput")
     ap.add_argument("--sampler", default="regular", choices=("regular", "pbs", "random"),
                     help="MPM particle sampler for the soft body (regular = deterministic grid)")
