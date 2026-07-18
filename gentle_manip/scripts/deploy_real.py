@@ -12,10 +12,12 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-# Deploy a trained DP3 policy on the real XArm7 — runs in the unified 3.8 env
-# (envs/dp3), which has DP3 + pytorch3d AND the hardware SDKs, so the policy and
-# RealBackend share one process (no IPC):
+# Deploy a trained DP3 or Tactile-DP3 policy on the real XArm7 — runs in the unified
+# 3.8 env (envs/dp3), which has DP3 + pytorch3d AND the hardware SDKs, so the policy
+# and RealBackend share one process (no IPC):
 #   uv run --project envs/dp3 python gentle_manip/scripts/deploy_real.py --ckpt <latest.ckpt>
+#   uv run --project envs/dp3 python gentle_manip/scripts/deploy_real.py \
+#       --ckpt dataset/tactile_dp3/checkpoints/cube/final/best.ckpt --policy-type tactile
 #
 # gentle_manip and DP3 are imported from source via sys.path (neither is installed
 # as a package in envs/dp3): repo root for gentle_manip, the DP3 package dir for
@@ -103,6 +105,110 @@ class DP3PolicyAdapter:
         obs_dict = {
             "point_cloud": torch.from_numpy(pcs).unsqueeze(0).to(self.device),  # (1, To, 1024, 3)
             "agent_pos": torch.from_numpy(aps).unsqueeze(0).to(self.device),    # (1, To, 8)
+        }
+        with torch.no_grad():
+            result = self.policy.predict_action(obs_dict)
+        return result["action"][0].detach().cpu().numpy()          # (n_action_steps, 7)
+
+
+class TactileDP3PolicyAdapter:
+    """Wraps a trained Tactile-DP3 checkpoint (gentle_manip/baselines/tactile_dp3) as
+    `obs dict -> action chunk`.
+
+    Unlike DP3PolicyAdapter, this loads our own plain checkpoint dict directly
+    (train_tactile_dp3.py's save_checkpoint: {model, ema_model, normalizer, cfg, ...}),
+    not DP3's Hydra/workspace machinery — and feeds point_cloud + agent_pos + both
+    tactile deltas to predict_action instead of point_cloud + agent_pos only.
+
+    Tactile preprocessing must exactly match training
+    (gentle_manip/scripts/convert_tactile_demo_to_zarr.py): resize each raw GelSight
+    frame to cfg['tactile_image_size'], then delta against that EPISODE's own first
+    frame (assumed pre-contact). The offline converter computes this over a whole
+    recorded episode at once; here it's computed incrementally since deploy only
+    sees one frame at a time — reset() captures the reference frame per sensor.
+    """
+
+    def __init__(self, ckpt_path: str, device: str = "cuda:0") -> None:
+        import torch
+
+        from gentle_manip.scripts.convert_tactile_demo_to_zarr import _resize_frames
+        from gentle_manip.scripts.train_tactile_dp3 import build_policy
+
+        self._torch = torch
+        self._resize_frames = _resize_frames
+        payload = torch.load(ckpt_path, map_location=device, weights_only=False)
+        cfg = payload["cfg"]
+        policy = build_policy(cfg, torch.device(device))
+        policy.normalizer.load_state_dict(payload["normalizer"])
+        # EMA weights — the metric best.ckpt was selected on; matches DP3PolicyAdapter's
+        # own EMA preference and train_tactile_dp3.py's val_loss_ema convention.
+        policy.load_state_dict(payload["ema_model"])
+        policy = policy.to(device)   # after normalizer/state_dict load — see train_tactile_dp3.py's
+        policy.eval()                 # own comment on why load_state_dict must come first.
+        self.policy = policy
+        self.device = torch.device(device)
+        self.tactile_size = int(cfg["tactile_image_size"])
+        self.n_obs_steps = int(cfg["n_obs_steps"])
+        self.n_action_steps = int(cfg["n_action_steps"])
+        self._hist: deque = deque(maxlen=self.n_obs_steps)
+        self._tactile_ref: dict = {}
+        print(f"loaded Tactile-DP3 policy (ema) — n_obs_steps={self.n_obs_steps} "
+              f"n_action_steps={self.n_action_steps} tactile_size={self.tactile_size} "
+              f"device={self.device} (epoch {payload.get('epoch')}, "
+              f"val_loss_ema {payload.get('val_loss')})")
+
+    @staticmethod
+    def _agent_pos(obs: dict) -> np.ndarray:
+        return np.concatenate(
+            [obs["ee_pos"][0], obs["ee_quat"][0], obs["gripper_width"][0]]
+        ).astype(np.float32)                                         # (8,)
+
+    @staticmethod
+    def _point_cloud(obs: dict) -> np.ndarray:
+        return obs["point_cloud"][0].astype(np.float32)             # (1024, 3)
+
+    def _resized(self, frame: np.ndarray) -> np.ndarray:
+        """(H, W, 3) uint8 -> (tactile_size, tactile_size, 3) uint8."""
+        return self._resize_frames(frame[None], self.tactile_size)[0]
+
+    def _tactile_delta(self, obs: dict, sensor: str) -> np.ndarray:
+        # PerceptionPipeline double-prefixes: ObsConfig.tactile.sensors=["tactile_left",...]
+        # -> obs key "tactile_tactile_left" (see perception/pipeline.py).
+        raw = obs[f"tactile_tactile_{sensor}"][0]                   # (480, 640, 3) uint8
+        resized = self._resized(raw).astype(np.float32)
+        return resized - self._tactile_ref[sensor].astype(np.float32)
+
+    def _entry(self, obs: dict) -> tuple:
+        return (
+            self._point_cloud(obs),
+            self._agent_pos(obs),
+            self._tactile_delta(obs, "left"),
+            self._tactile_delta(obs, "right"),
+        )
+
+    def reset(self, obs: dict) -> None:
+        self._hist.clear()
+        for sensor in ("left", "right"):
+            self._tactile_ref[sensor] = self._resized(obs[f"tactile_tactile_{sensor}"][0])
+        entry = self._entry(obs)                                     # deltas are 0 at the reference frame
+        for _ in range(self.n_obs_steps):
+            self._hist.append(entry)
+
+    def push(self, obs: dict) -> None:
+        self._hist.append(self._entry(obs))
+
+    def predict(self) -> np.ndarray:
+        """Action chunk (n_action_steps, 7) in [-1,1] from the last n_obs_steps obs."""
+        torch = self._torch
+        pcs = np.stack([h[0] for h in self._hist])                  # (To, 1024, 3)
+        aps = np.stack([h[1] for h in self._hist])                  # (To, 8)
+        tl = np.stack([h[2] for h in self._hist])                   # (To, S, S, 3)
+        tr = np.stack([h[3] for h in self._hist])                   # (To, S, S, 3)
+        obs_dict = {
+            "point_cloud": torch.from_numpy(pcs).unsqueeze(0).to(self.device),
+            "agent_pos": torch.from_numpy(aps).unsqueeze(0).to(self.device),
+            "tactile_left": torch.from_numpy(tl).unsqueeze(0).to(self.device),
+            "tactile_right": torch.from_numpy(tr).unsqueeze(0).to(self.device),
         }
         with torch.no_grad():
             result = self.policy.predict_action(obs_dict)
@@ -278,11 +384,33 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
         env.close()
 
 
+# Per-policy-type defaults for --setup / --obs-config, so --policy-type tactile picks
+# up the tactile rig (extended fingers -> raised EE z-min, both GelSight Minis wired,
+# real_tactile.yaml's point_cloud+tactile obs) without needing every flag spelled out.
+_DEFAULTS = {
+    "dp3": {
+        "setup": _PKG / "configs" / "setup" / "real_lab.yaml",
+        "obs_config": _PKG / "configs" / "obs" / "point_cloud_1cam.yaml",
+    },
+    "tactile": {
+        "setup": _PKG / "configs" / "setup" / "real_lab_tactile.yaml",
+        "obs_config": _PKG / "configs" / "obs" / "real_tactile.yaml",
+    },
+}
+
+
 def main() -> None:
-    p = argparse.ArgumentParser(description="Deploy a trained DP3 policy on the real XArm7")
+    p = argparse.ArgumentParser(description="Deploy a trained DP3 or Tactile-DP3 policy on the real XArm7")
     p.add_argument("--ckpt", type=Path, required=True)
-    p.add_argument("--setup", type=Path, default=_PKG / "configs" / "setup" / "real_lab.yaml")
-    p.add_argument("--obs-config", type=Path, default=_PKG / "configs" / "obs" / "point_cloud_1cam.yaml")
+    p.add_argument("--policy-type", choices=["dp3", "tactile"], default="dp3",
+                   help="dp3 = original SimpleDP3 checkpoint (point_cloud+state only); "
+                        "tactile = gentle_manip/baselines/tactile_dp3 checkpoint "
+                        "(point_cloud+state+both GelSight tactiles). Picks matching "
+                        "--setup/--obs-config defaults below unless overridden.")
+    p.add_argument("--setup", type=Path, default=None,
+                   help=f"default: real_lab.yaml (dp3) / real_lab_tactile.yaml (tactile)")
+    p.add_argument("--obs-config", type=Path, default=None,
+                   help=f"default: point_cloud_1cam.yaml (dp3) / real_tactile.yaml (tactile)")
     p.add_argument("--action-config", type=Path,
                    default=_PKG / "configs" / "action" / "delta_pose_delta_gripper.yaml")
     p.add_argument("--max-steps", type=int, default=200)
@@ -298,15 +426,22 @@ def main() -> None:
     p.add_argument("--device", default="cuda:0")
     args = p.parse_args()
 
+    defaults = _DEFAULTS[args.policy_type]
+    setup_path = args.setup or defaults["setup"]
+    obs_config_path = args.obs_config or defaults["obs_config"]
+
     print("note: the robot moves under policy control — keep the e-stop in reach.", file=sys.stderr)
 
-    setup = _load_yaml(_resolve_config(args.setup))
-    obs_config = ObsConfig.from_dict(_load_yaml(_resolve_config(args.obs_config)))
+    setup = _load_yaml(_resolve_config(setup_path))
+    obs_config = ObsConfig.from_dict(_load_yaml(_resolve_config(obs_config_path)))
     action_config = ActionConfig.from_dict(_load_yaml(_resolve_config(args.action_config)))
 
     backend = RealBackend(setup)
     env = PolicyEnv(backend, obs_config, action_config, task=None, max_episode_steps=10 ** 9)
-    policy = DP3PolicyAdapter(str(args.ckpt), device=args.device)
+    if args.policy_type == "tactile":
+        policy = TactileDP3PolicyAdapter(str(args.ckpt), device=args.device)
+    else:
+        policy = DP3PolicyAdapter(str(args.ckpt), device=args.device)
 
     run_deploy_loop(env, policy, args.max_steps, args.rate, pose_scale=args.pose_scale,
                     record_path=args.record)
