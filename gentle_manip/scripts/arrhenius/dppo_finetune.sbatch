@@ -28,7 +28,9 @@ SMOKE=${SMOKE:-1}                     # 1 = short pipeline check; 0 = full run (
 # config experiment == single_lift_mushroom_soft_nostress, so the server serves the same.
 SIM_EXPERIMENT=${SIM_EXPERIMENT:-single_lift_mushroom_soft_nostress}
 VIEW=student
-NUM_ENVS=12                            # MUST match cfg env.n_envs and divide logprob_batch_size (504)
+NUM_ENVS=${NUM_ENVS:-12}               # server --num-envs; MUST match cfg env.n_envs (pass
+                                       # train.n_envs=$NUM_ENVS in GM_EXTRA_OVERRIDES) and
+                                       # logprob_batch_size must be divisible by it
 PORT=5570                              # MUST match cfg env.specific.port
 CKPT=$REPO/logs/dppo/dppo-pretrain/2026-07-04_20-03-36_42/checkpoint/state_3000.pt
 CFG_DIR=$REPO/gentle_manip/dppo/cfg/single_lift_mushroom_soft_pcd
@@ -175,5 +177,36 @@ uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.train
     --config-path "$CFG_DIR" --config-name "$CFG_NAME" \
     base_policy_path="$CKPT" \
     "${OVERRIDES[@]}" 2>&1 | tee "$TRAINER_LOG"
+TRAIN_RC=${PIPESTATUS[0]}
+echo "[sbatch] finetune finished (rc=$TRAIN_RC)"
 
-echo "[sbatch] finetune finished OK"
+# ---- optional appended CANONICAL eval (GM_AUTO_EVAL=1) — no external monitor needed ---------
+# After a SUCCESSFUL full run, evaluate the final checkpoint IN THIS JOB by running the tested
+# dppo_eval.sbatch as a child. It DEFAULTS to the reference eval sim (single_lift_mushroom_soft_eval
+# = 235/250), NOT the training sim, so a coarse-trained run is still measured at full fidelity.
+# GM_SIM_SUBSTEPS is UNSET for the eval (the eval task pins the fidelity); GM_MPM_SAMPLER stays regular.
+if [ "${GM_AUTO_EVAL:-0}" = "1" ] && [ "$TRAIN_RC" = "0" ] && [ "$SMOKE" != "1" ]; then
+    RD=$(grep -oE '/nobackup/[^ ]+/dppo-finetune/[^ ]+/config/' "$TRAINER_LOG" 2>/dev/null | head -1 | sed 's#/config/##')
+    LAST=$(ls -1v "$RD"/checkpoint/state_*.pt 2>/dev/null | tail -1)
+    if [ -n "$RD" ] && [ -f "$LAST" ]; then
+        CKN=$(basename "$LAST" .pt)
+        echo "[sbatch] AUTO-EVAL: canonical eval of $LAST on the reference sim (235/250)"
+        cleanup                       # stop the training sim server: free port $PORT + GPU
+        trap - EXIT                   # the child dppo_eval.sbatch installs its own cleanup trap
+        # FORCE the reference eval config: the training SIM_EXPERIMENT is exported into this job's
+        # env (sbatch --export=ALL), so the child eval's `${SIM_EXPERIMENT:-...eval}` default would
+        # NOT fire -> it would (wrongly) run the eval on the TRAINING sim. Set both explicitly so a
+        # coarse-trained run is still evaluated on 235/250. (GM_SIM_SUBSTEPS unset -> eval task pins 235.)
+        env -u GM_SIM_SUBSTEPS \
+            SIM_EXPERIMENT=single_lift_mushroom_soft_eval \
+            EVAL_EXPERIMENT=single_lift_mushroom_soft_eval \
+            FT_DENOISING=10 CKPT="$LAST" N_EPISODES=100 EVAL_SUBDIR="${CKN}_eval235" \
+            SLURM_JOB_ID="${SLURM_JOB_ID:-local}e" \
+            bash "$REPO/gentle_manip/scripts/arrhenius/dppo_eval.sbatch" \
+          && echo "[sbatch] AUTO-EVAL done -> $RD/eval/${CKN}_eval235" \
+          || echo "[sbatch] AUTO-EVAL failed (training + checkpoints are intact)"
+    else
+        echo "[sbatch] AUTO-EVAL: no run dir / final checkpoint found; skipped"
+    fi
+fi
+exit $TRAIN_RC
