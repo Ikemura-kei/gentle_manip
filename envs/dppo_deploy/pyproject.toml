@@ -1,0 +1,29 @@
+# DPPO REAL-DEPLOY environment (Python 3.10): run a trained DPPO diffusion policy on the
+# real XArm7 — the policy code (dppo: model.diffusion.*, gentle_manip.dppo.pointnet_diffusion)
+# needs 3.10, and the hardware SDKs (pyrealsense2 for the L515 cam_ext + xArm SDK) have 3.10
+# wheels, so the policy and RealBackend share ONE process (no IPC), like envs/dp3 does for DP3.
+# GENESIS-FREE (the real side of the RawObs boundary): neither `dppo` nor `gentle-manip`
+# declares genesis. Minimal hardware deps only (no pygame/open3d/pyspacemouse) to keep the
+# resolver clear of dppo's pins (gym 0.22 / hydra 1.3).
+#
+# Setup:  uv sync --project envs/dppo_deploy
+# torch is installed MANUALLY (CUDA build, kept out of the pyproject like the other envs):
+#   uv pip install --python envs/dppo_deploy/.venv/bin/python "torch==2.4.0+cu121" \
+#     --index-url https://download.pytorch.org/whl/cu121
+# (match the envs/dppo torch so the same checkpoint loads.)
+# Run:  uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#         --ckpt <finetune_or_bc>.pt [--ft-denoising-steps 10|0] ...
+[project]
+name = "gentle-manip-dppo-deploy"
+version = "0.1.0"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+    "gentle-manip",              # genesis-free core: RealBackend, PerceptionPipeline, PolicyEnv
+    "dppo",                      # DPPO policy code (model.diffusion.*), editable
+    "pyrealsense2==2.54.2.5684", # L515 (cam_ext) — last line supporting the discontinued L515
+    "xArm-Python-SDK",           # XArm7 control
+]
+
+[tool.uv.sources]
+gentle-manip = { path = "../..", editable = true }
+dppo = { path = "../../third_party/dppo", editable = true }

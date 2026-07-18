@@ -1,0 +1,32 @@
+# [obs] SUPERSET (record-everything) obs for SOFT objects: state + privileged (incl. stress) + point cloud. Object-agnostic.
+# Used by: experiments (obs:) demo collection; subviewed into teacher/student
+# Status: active
+#
+# SUPERSET obs for SOFT objects (OBJECT-AGNOSTIC — rig/workspace + modalities are the same
+# for any object; only `stress` is material-specific, hence the soft/rigid split). Records
+# (teacher = state+privileged, student = state+point_cloud, with/without stress, ...).
+#
+# This is the SINGLE SOURCE OF TRUTH for each modality's processing params — views are
+# ObsConfig.subview(...) of this, inheriting the params unchanged, so a view can never
+# drift from what the demos were recorded with. Use this ONLY for demo collection; for
+# ONLINE interaction always use a subview (nothing residual — e.g. the teacher's live
+# env carries no point-cloud pathway, so no render).
+include_joint_pos: false
+include_joint_vel: false
+quat_noise_std: 0.003
+
+# Privileged (sim-only) — the state teacher's extra signal.
+privileged:
+  object_pos: true
+  object_vel: true
+  stress: true
+
+# Point cloud (the student's input) with the real-parity denoiser baked in.
+point_cloud:
+  cameras: ["cam_ext"]
+  crop_min: [0.2, -0.215, 0.004]
+  crop_max: [0.71,   0.215,  0.45]
+  max_points: 1024
+  outlier_removal:
+    voxel_size: 0.01
+    min_neighbors: 23

@@ -36,6 +36,20 @@ def test_sample_object_dxy_shape_range_and_disabled():
     assert np.all(np.abs(dxy) <= 0.03)
 
 
+def test_sample_object_euler_shape_range_and_disabled():
+    rng = np.random.default_rng(0)
+    assert DRConfig().sample_object_euler(rng, 8) is None        # disabled -> None
+    assert not DRConfig().has_reset_dr()
+    cfg = DRConfig(object_yaw_deg=180, object_pitch_roll_deg=15)
+    assert cfg.has_reset_dr()
+    e = cfg.sample_object_euler(rng, 8)                          # (roll, pitch, yaw) radians
+    assert e.shape == (8, 3) and e.dtype == np.float32
+    assert np.all(np.abs(e[:, :2]) <= np.deg2rad(15) + 1e-6)     # pitch & roll within +/-15 deg
+    assert np.all(np.abs(e[:, 2]) <= np.deg2rad(180) + 1e-6)     # yaw within +/-180 deg
+    # yaw-only / tilt-only each still count as reset DR
+    assert DRConfig(object_yaw_deg=90).sample_object_euler(rng, 4).shape == (4, 3)
+
+
 def test_sample_scene_only_set_keys_and_in_range():
     rng = np.random.default_rng(0)
     cfg = DRConfig(object_E=(3e3, 6e3), coup_friction=(3.5, 4.5))
@@ -44,6 +58,23 @@ def test_sample_scene_only_set_keys_and_in_range():
         assert set(s) == {"E", "coup_friction"}                 # only randomized keys
         assert 3e3 <= s["E"] <= 6e3 and 3.5 <= s["coup_friction"] <= 4.5
     assert DRConfig().sample_scene(rng) == {}                   # nothing set
+
+
+def test_sample_shape_scale_ranges_and_units():
+    rng = np.random.default_rng(0)
+    assert DRConfig().sample_shape_scale(rng) == {}             # disabled -> empty
+    assert not DRConfig().has_shape_dr()
+    cfg = DRConfig(object_scale=(0.8, 1.2), object_bend_deg=(-25, 25), object_taper=(-0.1, 0.1))
+    assert cfg.has_scene_dr() and cfg.has_shape_dr()
+    for _ in range(50):
+        s = cfg.sample_shape_scale(rng)
+        assert set(s) == {"scale", "bend", "taper"}
+        assert 0.8 <= s["scale"] <= 1.2
+        assert abs(s["bend"]) <= np.deg2rad(25) + 1e-6          # deg -> radians
+        assert abs(s["taper"]) <= 0.1
+    # scale-only counts as scene DR but not shape DR
+    assert DRConfig(object_scale=(0.9, 1.1)).has_scene_dr()
+    assert not DRConfig(object_scale=(0.9, 1.1)).has_shape_dr()
 
 
 # ── presets + yaml configs ──────────────────────────────────────────────────────

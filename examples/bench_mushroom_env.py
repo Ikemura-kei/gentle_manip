@@ -14,7 +14,6 @@ import time
 from pathlib import Path
 
 import numpy as np
-import yaml
 
 _PKG = Path(__file__).resolve().parents[1] / "gentle_manip"
 _CFG = _PKG / "configs"
@@ -25,13 +24,8 @@ def main():
     ap.add_argument("--num-envs", type=int, default=10)
     ap.add_argument("--steps", type=int, default=60, help="timed steps (after warmup)")
     ap.add_argument("--warmup", type=int, default=5)
-    ap.add_argument("--task", type=Path, default=_CFG / "tasks" / "mushroom_lift.yaml")
-    ap.add_argument("--obs-config", type=Path, default=_CFG / "obs" / "state_privileged.yaml",
-                    help="default: state teacher (privileged, no render). Point at "
-                         "point_cloud_1cam.yaml for the point-cloud student bench.")
-    ap.add_argument("--action-config", type=Path, default=_CFG / "action" / "delta_pose_delta_gripper.yaml")
-    ap.add_argument("--augmentation", type=Path, default=_CFG / "augmentation" / "l515_noise.yaml")
-    ap.add_argument("--dr", type=Path, default=_CFG / "dr" / "sim_demo.yaml")
+    ap.add_argument("--experiment", default="single_lift_mushroom_soft", help="configs/experiments/<name>.yaml")
+    ap.add_argument("--view", default="teacher", help="obs view (teacher | student)")
     ap.add_argument("--settle-steps", type=int, default=40)
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
@@ -39,22 +33,20 @@ def main():
     if os.environ.get("MUJOCO_GL") not in {"glfw", "egl", "osmesa"}:
         os.environ["MUJOCO_GL"] = "egl"
 
+    from gentle_manip.experiment import Experiment
     from gentle_manip.tasks.single_lift import SingleLiftTask
     from gentle_manip.envs.sim_backend import SimBackend
     from gentle_manip.envs.policy_env import PolicyEnv
-    from gentle_manip.perception.obs_config import ObsConfig
-    from gentle_manip.actions.action_config import ActionConfig
-    from gentle_manip.perception.augmentation import AugmentationConfig
 
-    task = SingleLiftTask(yaml.safe_load(args.task.read_text()))
-    obs_cfg = ObsConfig.from_dict(yaml.safe_load(args.obs_config.read_text()))
-    act_cfg = ActionConfig.from_dict(yaml.safe_load(args.action_config.read_text()))
-    aug_cfg = (AugmentationConfig.from_dict(yaml.safe_load(args.augmentation.read_text()))
-               if args.augmentation else None)
-    dr = yaml.safe_load(args.dr.read_text()) if args.dr else {}
+    exp = Experiment.load(args.experiment)          # single source of truth
+    obs_cfg = exp.view_obs(args.view)               # a VIEW of the superset
+    task = SingleLiftTask(exp.task_cfg)
+    act_cfg = exp.action_config
+    dr = exp.dr
+    aug_cfg = exp.augmentation_config() if obs_cfg.needs_cameras() else None
 
-    # Conditional rendering: a state-based obs config needs no cameras, so skip the
-    # per-env depth render (observation-only; physics/dynamics unchanged).
+    # Conditional rendering: a state view needs no cameras, so skip the per-env depth
+    # render (observation-only; physics/dynamics unchanged).
     render = obs_cfg.needs_cameras()
     backend = SimBackend(task.scene_spec, num_envs=args.num_envs, use_subprocess=False,
                          show_viewer=False, render_cameras=render,
@@ -67,7 +59,7 @@ def main():
     rand = lambda: rng.uniform(-1.0, 1.0, (args.num_envs, adim)).astype(np.float32)
 
     print(f"[bench] object={task.object_name}/{task.object_type} substeps={task.scene_spec.sim_substeps} "
-          f"grid={task.scene_spec.mpm_grid_density} | obs={args.obs_config.name} render={render} "
+          f"grid={task.scene_spec.mpm_grid_density} | exp={exp.name} view={args.view} render={render} "
           f"aug={'on' if aug_cfg else 'off'} dr={'on' if dr else 'off'} | num_envs={args.num_envs}", flush=True)
 
     t0 = time.perf_counter()

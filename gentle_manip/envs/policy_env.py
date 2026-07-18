@@ -16,6 +16,24 @@ from gentle_manip.actions.pipeline import ActionPipeline
 from gentle_manip.tasks.base_task import BaseTask
 
 
+def _stress_summary(vm: np.ndarray) -> dict:
+    """Per-env spatial reductions of von-Mises stress at one timestep.
+    vm: (num_envs, n_particles). Returns per-env (num_envs,) arrays:
+      max    — the single most-stressed particle (worst point contact),
+      mean   — average over ALL particles,
+      top10  — mean of the top 10% most-stressed particles (tail: localized bruising),
+      top20  — mean of the top 20% most-stressed particles.
+    The top-k% sit between mean and max: they capture localized high-stress regions (a hard
+    finger press bruises a patch, not one point) without being dominated by a single outlier."""
+    n_p = vm.shape[1]
+    k10 = max(1, int(round(0.10 * n_p)))
+    k20 = max(1, int(round(0.20 * n_p)))
+    # np.partition puts the k largest at the end of each row (O(n), no full sort)
+    top10 = np.partition(vm, n_p - k10, axis=1)[:, n_p - k10:].mean(axis=1)
+    top20 = np.partition(vm, n_p - k20, axis=1)[:, n_p - k20:].mean(axis=1)
+    return {"max": vm.max(axis=1), "mean": vm.mean(axis=1), "top10": top10, "top20": top20}
+
+
 @runtime_checkable
 class Backend(Protocol):
     """The sim/real boundary as seen by PolicyEnv.
@@ -145,6 +163,16 @@ class PolicyEnv:
         raw = self._do_reset(**kwargs)
         return self._observe(raw, self._sim_feedback())
 
+    def randomize_scene(self) -> dict:
+        """Re-randomize the whole scene (material + size + shape) via a backend rebuild and return
+        the fresh obs — used by the eval harness for deterministic per-group scene DR. Falls back
+        to a plain reset for backends without scene DR (e.g. real)."""
+        if hasattr(self.backend, "randomize_scene"):
+            raw = self.backend.randomize_scene()
+            self._episode_step = 0
+            return self._observe(raw, self._sim_feedback())
+        return self.reset()
+
     def _observe(self, raw: RawObs, sim_feedback: Optional[SimFeedback] = None) -> dict:
         """RawObs -> obs dict: shared perception + sim-only augmentation, plus
         sim-only privileged fields (from SimFeedback) for the state teacher."""
@@ -176,6 +204,13 @@ class PolicyEnv:
         sim_feedback = self._sim_feedback()
         rewards, success = self._compute_reward(raw, sim_feedback)
 
+        # Per-env von-Mises stress summary for evaluation (soft bodies only; captured BEFORE the
+        # horizon reset). Rigid tasks have no von_mises_stress -> stress stays None -> omitted.
+        stress = None
+        if sim_feedback is not None and "von_mises_stress" in sim_feedback.extra:
+            vm = np.asarray(sim_feedback.extra["von_mises_stress"])   # (num_envs, n_particles)
+            stress = _stress_summary(vm)   # dict: max, mean, top10, top20 (per env, this step)
+
         timeout = self._episode_step >= self.max_episode_steps
         dones = np.full(self.num_envs, timeout, dtype=bool)
 
@@ -189,6 +224,12 @@ class PolicyEnv:
             {"success": bool(success[i]), "time_out": bool(timeout)}
             for i in range(self.num_envs)
         ]
+        if stress is not None:
+            for i in range(self.num_envs):
+                infos[i]["stress_max"] = float(stress["max"][i])
+                infos[i]["stress_mean"] = float(stress["mean"][i])
+                infos[i]["stress_top10"] = float(stress["top10"][i])
+                infos[i]["stress_top20"] = float(stress["top20"][i])
         return obs, rewards, dones, infos
 
     def close(self) -> None:
@@ -205,6 +246,12 @@ class PolicyEnv:
             self.perception._rng = np.random.default_rng(seed)
         if self._augmentor is not None and hasattr(self._augmentor, "rng"):
             self._augmentor.rng = np.random.default_rng(seed)
+
+    def set_auto_scene_dr(self, enabled: bool) -> None:
+        """Delegate to the backend: freeze/restore its periodic auto scene-DR relaunch so a
+        fixed-seed eval isn't corrupted by a mid-eval rebuild. No-op if the backend lacks it."""
+        if hasattr(self.backend, "set_auto_scene_dr"):
+            self.backend.set_auto_scene_dr(bool(enabled))
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 

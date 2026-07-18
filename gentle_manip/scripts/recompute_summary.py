@@ -1,0 +1,77 @@
+"""Recompute an eval run's summary.json from its episodes.csv, using the CURRENT
+metrics.aggregate() — e.g. after the stress metric became success-gated (+P90/P95). Rewrites
+summary.json in place (the episodes.csv table is NOT touched); provenance meta (checkpoint,
+experiment, seed, ...) is preserved from the old summary. The old all-episode stress value
+survives as stress_peak_mean_all in the new summary, so nothing is lost.
+
+Usage (any env; e.g. envs/sim):
+    uv run --project envs/sim python -m gentle_manip.scripts.recompute_summary <eval_dir> [<eval_dir> ...]
+where <eval_dir> contains episodes.csv + summary.json.
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+from pathlib import Path
+
+from gentle_manip.evaluation.metrics import STRESS_COLS, aggregate, write_summary
+
+# keys aggregate() computes itself — everything else in the old summary is provenance meta.
+_COMPUTED = {"n_episodes", "success_rate", "ever_success_rate", "mean_episode_reward",
+             "is_soft_task", "stress_n_success", "stress_mean_tmean_mean_all"}
+for _c, _pct in STRESS_COLS:
+    _COMPUTED.add(_c + "_mean")
+    if _pct:
+        _COMPUTED.update({_c + "_std", _c + "_p90", _c + "_p95"})
+_STRESS_KEYS = [c for c, _ in STRESS_COLS]
+
+
+def _num(v):
+    if v in ("", "None", None):
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _records(csv_path: Path) -> list[dict]:
+    out = []
+    with open(csv_path, newline="") as f:
+        for r in csv.DictReader(f):
+            out.append({
+                "success": int(float(r["success"])) if r.get("success") not in ("", None) else 0,
+                "ever_success": int(float(r["ever_success"])) if r.get("ever_success") not in ("", None) else 0,
+                "episode_reward": _num(r.get("episode_reward")) or 0.0,
+                **{k: _num(r.get(k)) for k in _STRESS_KEYS},
+            })
+    return out
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("eval_dirs", nargs="+", type=Path)
+    args = ap.parse_args()
+    for d in args.eval_dirs:
+        summ_p, csv_p = d / "summary.json", d / "episodes.csv"
+        if not csv_p.exists():
+            print(f"[skip] no episodes.csv in {d}")
+            continue
+        old = json.loads(summ_p.read_text()) if summ_p.exists() else {}
+        meta = {k: v for k, v in old.items() if k not in _COMPUTED}   # preserve provenance
+        recs = _records(csv_p)
+        new = aggregate(recs, **meta)
+        write_summary(new, summ_p)
+        print(f"[ok] {d}")
+        print(f"     success_rate {new['success_rate']:.3f}  n={new['n_episodes']}")
+        if new.get("is_soft_task"):
+            print(f"     peak (max_tmax, success-gated): mean {new['stress_max_tmax_mean']:.0f}  "
+                  f"std {new['stress_max_tmax_std']:.0f}  P90 {new['stress_max_tmax_p90']:.0f}  "
+                  f"P95 {new['stress_max_tmax_p95']:.0f}  (n_succ={new['stress_n_success']})")
+            print(f"     top20.ttop20 {new['stress_top20_ttop20_mean']:.0f}  "
+                  f"mean_tmean(backup) {new['stress_mean_tmean_mean']:.0f}")
+
+
+if __name__ == "__main__":
+    main()

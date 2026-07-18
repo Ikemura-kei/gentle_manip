@@ -1,0 +1,25 @@
+# [obs] SUPERSET obs for RIGID objects (no stress). Object-agnostic.
+# Used by: experiments (obs:) demo collection; subviewed into teacher/student
+# Status: active
+#
+# SUPERSET obs for RIGID objects (OBJECT-AGNOSTIC). Same as superset_soft but WITHOUT stress:
+# a rigid body has no von Mises (rigid solver has no particles), so privileged = pose+vel only.
+# has no particles), so the privileged teacher signal is object pose + velocity only.
+include_joint_pos: false
+include_joint_vel: false
+quat_noise_std: 0.003
+
+privileged:
+  object_pos: true
+  object_vel: true
+  stress: false          # rigid -> no von Mises
+
+# Point cloud (student input) — identical geometry to the soft mushroom, so parity holds.
+point_cloud:
+  cameras: ["cam_ext"]
+  crop_min: [0.2, -0.215, 0.004]
+  crop_max: [0.71,   0.215,  0.45]
+  max_points: 1024
+  outlier_removal:
+    voxel_size: 0.01
+    min_neighbors: 23

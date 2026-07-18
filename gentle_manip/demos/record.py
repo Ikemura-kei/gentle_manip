@@ -42,11 +42,17 @@ class DemoRecorder:
                  max_interior_idle: int = 3, action_noise_std: float = 0.0,
                  dataset_path: Optional[Path] = None, frame_fn=None,
                  video_dir: Optional[Path] = None, video_fps: int = 20,
-                 video_episodes: int = 0, cloud_viewer=None) -> None:
+                 video_episodes: int = 0, video_failed_episodes: int = 0,
+                 cloud_viewer=None, collection_config: Optional[dict] = None) -> None:
         self.env = env
         self.teleop = teleop
         self.keyboard = keyboard
         self.task_name = task_name
+        # Verbatim + resolved config snapshot (setup/obs/action + CLI knobs) written once
+        # next to the dataset as <stem>_config.yaml, for reproducibility (mirrors
+        # collect_demos_sim.py). None -> no snapshot (e.g. tests).
+        self._collection_config = collection_config
+        self._config_written = False
         # Optional live Open3D view of the PROCESSED cloud (LiveCloudViewer); fed
         # obs["point_cloud"] each step so you watch what the policy will see.
         self.cloud_viewer = cloud_viewer
@@ -57,6 +63,10 @@ class DemoRecorder:
         self.video_dir = Path(video_dir) if video_dir else None
         self.video_fps = int(video_fps)
         self.video_episodes = int(video_episodes)
+        # Also record the first N DISCARDED (failed) episodes as ep_FAILED_NNN.mp4 for
+        # diagnosis — otherwise a failed grasp leaves no trace to look at.
+        self.video_failed_episodes = int(video_failed_episodes)
+        self._failed_videos = 0
         self._frames: list = []
         # Gaussian noise (std, in normalized action units) added to the demonstrator's
         # POSE deltas (not gripper) each step — recorded and executed alike, so the demos
@@ -81,6 +91,7 @@ class DemoRecorder:
 
         self._obs_buf: List[Dict[str, np.ndarray]] = []
         self._act_buf: List[np.ndarray] = []
+        self._rew_buf: List[float] = []
         self.episodes: List[dict] = []
         self._path: Optional[Path] = None   # chosen lazily on the first saved episode
 
@@ -109,11 +120,16 @@ class DemoRecorder:
                 if DISCARD in events:
                     self._discard_episode()
                     print("  discarded episode")
+                    if self._failed_videos < self.video_failed_episodes:
+                        self._flush_video(label="FAILED", index=self._failed_videos)
+                        self._failed_videos += 1
                     self._frames = []
                     obs = self.env.reset()
                     continue
 
-                if self.frame_fn is not None and len(self.episodes) < self.video_episodes:
+                # Capture frames if EITHER budget (saved or failed) still has room.
+                if self.frame_fn is not None and (len(self.episodes) < self.video_episodes
+                                                  or self._failed_videos < self.video_failed_episodes):
                     self._frames.append(np.asarray(self.frame_fn(), dtype=np.uint8))
 
                 action = np.asarray(self.teleop.get_action(), dtype=np.float32)
@@ -137,23 +153,30 @@ class DemoRecorder:
                 self.cloud_viewer.close()
             self.env.close()
 
-    def _flush_video(self) -> None:
-        """Write the captured frames of the just-saved episode to an mp4."""
+    def _flush_video(self, label: str = "", index: Optional[int] = None) -> None:
+        """Write the captured frames of the just-ended episode to an mp4 (label = "" for a
+        saved episode, "FAILED" for a discarded one)."""
         if not self._frames:
             return
         import imageio.v2 as imageio
         vdir = (self.video_dir or self.out_dir) / "videos"
         vdir.mkdir(parents=True, exist_ok=True)
-        path = vdir / f"ep_{len(self.episodes):03d}.mp4"
-        imageio.mimsave(str(path), self._frames, fps=self.video_fps, macro_block_size=1)
-        print(f"  saved video → {path}")
+        idx = index if index is not None else len(self.episodes)
+        name = f"ep_{label}_{idx:03d}.mp4" if label else f"ep_{idx:03d}.mp4"
+        imageio.mimsave(str(vdir / name), self._frames, fps=self.video_fps, macro_block_size=1)
+        print(f"  saved video → {vdir / name}")
         self._frames = []
 
     def _step_and_record(self, obs, action: np.ndarray):
-        """Record (obs_t, action_t), advance the env, return the next obs."""
-        obs_next, _reward, _done, _info = self.env.step(action[None, :])
+        """Record (obs_t, action_t, reward_t), advance the env, return the next obs.
+
+        The env's per-step reward is logged too (0 when the env has task=None). This
+        makes a demo directly usable for reward-based RL (RLPD); reward-free consumers
+        (DP3) simply ignore the "rewards" array."""
+        obs_next, reward, _done, _info = self.env.step(action[None, :])
         self._obs_buf.append({k: np.asarray(v)[0] for k, v in obs.items()})  # drop num_envs
         self._act_buf.append(action.copy())
+        self._rew_buf.append(float(np.asarray(reward).ravel()[0]))
         return obs_next
 
     def _rate_limit(self, t0: float, period: float) -> None:
@@ -169,7 +192,7 @@ class DemoRecorder:
     # ── Episode buffer ────────────────────────────────────────────────────────
 
     def _save_episode(self) -> int:
-        obs_buf, act_buf = self._trim_idle(self._obs_buf, self._act_buf)
+        obs_buf, act_buf, rew_buf = self._trim_idle(self._obs_buf, self._act_buf, self._rew_buf)
         n = len(act_buf)
         if n == 0:
             self._clear()
@@ -177,12 +200,16 @@ class DemoRecorder:
         keys = obs_buf[0].keys()
         observations = {k: np.stack([o[k] for o in obs_buf]) for k in keys}
         actions = np.stack(act_buf)
-        self.episodes.append({"observations": observations, "actions": actions})
+        self.episodes.append({
+            "observations": observations,
+            "actions": actions,
+            "rewards": np.asarray(rew_buf, dtype=np.float32),   # per-step reward (0 if task=None)
+        })
         self._clear()
         self._flush()                          # persist immediately — crash-safe
         return n
 
-    def _trim_idle(self, obs_buf, act_buf):
+    def _trim_idle(self, obs_buf, act_buf, rew_buf):
         """Cap each consecutive idle run by position (leading/interior/trailing).
 
         Idle = full action norm <= idle_threshold. Keeps the first `cap` frames of
@@ -190,11 +217,11 @@ class DemoRecorder:
         trailing). idle_threshold <= 0 disables trimming.
         """
         if self.idle_threshold <= 0 or not act_buf:
-            return obs_buf, act_buf
+            return obs_buf, act_buf, rew_buf
         idle = np.linalg.norm(np.stack(act_buf), axis=1) <= self.idle_threshold
         T = len(act_buf)
         if idle.all():
-            return [], []                      # whole episode idle → nothing to keep
+            return [], [], []                  # whole episode idle → nothing to keep
 
         keep = np.ones(T, dtype=bool)
         i = 0
@@ -216,7 +243,8 @@ class DemoRecorder:
 
         obs_out = [o for o, k in zip(obs_buf, keep) if k]
         act_out = [a for a, k in zip(act_buf, keep) if k]
-        return obs_out, act_out
+        rew_out = [r for r, k in zip(rew_buf, keep) if k]
+        return obs_out, act_out, rew_out
 
     def _discard_episode(self) -> None:
         self._clear()
@@ -224,6 +252,7 @@ class DemoRecorder:
     def _clear(self) -> None:
         self._obs_buf = []
         self._act_buf = []
+        self._rew_buf = []
 
     # ── Output ────────────────────────────────────────────────────────────────
 
@@ -268,6 +297,18 @@ class DemoRecorder:
         with open(tmp, "wb") as f:
             pickle.dump(dataset, f)
         os.replace(tmp, path)                  # atomic swap (POSIX)
+        self._write_config_snapshot(path)
+
+    def _write_config_snapshot(self, path: Path) -> None:
+        """Write the collection config verbatim next to the dataset (once), so a recorded
+        demo is fully reproducible: which setup/obs/action configs + control knobs produced it."""
+        if self._collection_config is None or self._config_written:
+            return
+        cfg_path = path.with_name(path.stem + "_config.yaml")
+        with open(cfg_path, "w") as f:
+            yaml.safe_dump(self._collection_config, f, sort_keys=False)
+        self._config_written = True
+        print(f"  wrote config snapshot → {cfg_path}")
 
     def write(self) -> Optional[Path]:
         """Final report — episodes are already flushed incrementally as saved."""
@@ -284,6 +325,17 @@ class DemoRecorder:
 def _load_yaml(path: Path) -> dict:
     with open(path) as f:
         return yaml.safe_load(f)
+
+
+def _git_commit() -> str:
+    """Short current commit for the config snapshot; '' if not a repo / git missing."""
+    import subprocess
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=str(_PKG),
+            stderr=subprocess.DEVNULL).decode().strip()
+    except Exception:
+        return ""
 
 
 def _resolve_config(path: Path) -> Path:
@@ -316,7 +368,7 @@ def main() -> None:
     p.add_argument("--speed", type=float, default=0.55,
                    help="teleop motion magnitude in [0,1] (lower = slower); "
                         "per-step delta = speed * action-scale")
-    p.add_argument("--gripper-value", type=float, default=0.05,
+    p.add_argument("--gripper-value", type=float, default=0.45,
                    help="per-step gripper delta magnitude in [0,1]")
     p.add_argument("--idle-threshold", type=float, default=1e-3,
                    help="action-norm at/below which a frame is idle; 0 disables idle trim")
@@ -338,11 +390,37 @@ def main() -> None:
     from gentle_manip.actions.action_config import ActionConfig
 
     setup = _load_yaml(_resolve_config(args.setup))
-    obs_config = ObsConfig.from_dict(_load_yaml(_resolve_config(args.obs_config)))
-    action_config = ActionConfig.from_dict(_load_yaml(_resolve_config(args.action_config)))
+    obs_d = _load_yaml(_resolve_config(args.obs_config))
+    action_d = _load_yaml(_resolve_config(args.action_config))
+    obs_config = ObsConfig.from_dict(obs_d)
+    action_config = ActionConfig.from_dict(action_d)
+
+    # Reproducibility snapshot: the resolved configs + control knobs that shaped the data,
+    # written next to the dataset as <stem>_config.yaml (mirrors collect_demos_sim.py).
+    collection_config = {
+        "task_name": args.task_name,
+        "input": args.input,
+        "git_commit": _git_commit(),
+        "sources": {"setup": str(args.setup), "obs": str(args.obs_config),
+                    "action": str(args.action_config)},
+        "control": {"rate_hz": args.rate, "speed": args.speed,
+                    "gripper_value": args.gripper_value, "idle_threshold": args.idle_threshold,
+                    "keep_trailing_idle": args.keep_trailing_idle,
+                    "max_interior_idle": args.max_interior_idle},
+        "setup": setup, "obs": obs_d, "action": action_d,
+    }
 
     backend = RealBackend(setup)
+
+    # build_obs_space needs the tactile image (H, W) when tactile is configured.
+    # The setup's per-sensor output_size is (W, H) (cv2 resize order); the frame is (H, W, 3).
+    tactile_shape = None
+    if obs_config.tactile is not None:
+        w, h = setup["tactile"][obs_config.tactile.sensors[0]]["output_size"]
+        tactile_shape = (int(h), int(w))
+
     env = PolicyEnv(backend, obs_config, action_config, task=None,
+                    tactile_shape=tactile_shape,
                     max_episode_steps=10 ** 9)  # huge → no auto-reset; keys bound episodes
 
     if args.input == "keyboard":
@@ -377,6 +455,7 @@ def main() -> None:
         keep_trailing_idle=args.keep_trailing_idle,
         max_interior_idle=args.max_interior_idle,
         cloud_viewer=cloud_viewer,
+        collection_config=collection_config,
     )
     recorder.run()
     recorder.write()

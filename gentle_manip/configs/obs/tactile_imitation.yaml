@@ -1,3 +1,7 @@
+# [obs] Real-only imitation baseline: wrist+ext cameras + both GelSight Mini tactile streams.
+# Used by: real imitation baseline (no sim)
+# Status: experimental
+#
 # Real-only baseline: wrist + external cameras + both GelSight Mini sensors
 include_joint_pos: false
 include_joint_vel: false

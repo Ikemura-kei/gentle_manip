@@ -1,3 +1,7 @@
+# [dr] Mild DR preset (material + pose ranges centered on the soft object).
+# Used by: experiments (dr:)
+# Status: active
+#
 # Mild domain randomization (sim-only). Ranges centered on the soft tofu baseline;
 # re-center the material ranges for a stiffer object. Per-reset: object pose. Per-scene
 # (needs a GenesisProcess.restart): material + coupling friction.

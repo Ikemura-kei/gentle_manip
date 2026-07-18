@@ -29,6 +29,18 @@ from gentle_manip.scenes.scene_builder import build_scene
 from gentle_manip.scenes.scene_spec import SceneSpec
 
 
+def _quat_mul_wxyz(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Hamilton product a*b for batched (N,4) wxyz quats (apply b, then a — world-frame
+    rotation of the base orientation by a)."""
+    aw, ax, ay, az = a[:, 0], a[:, 1], a[:, 2], a[:, 3]
+    bw, bx, by, bz = b[:, 0], b[:, 1], b[:, 2], b[:, 3]
+    return np.stack([
+        aw * bw - ax * bx - ay * by - az * bz,
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw], axis=1).astype(np.float32)
+
+
 class GenesisWorker:
     def __init__(
         self,
@@ -42,9 +54,14 @@ class GenesisWorker:
         noslip_iterations: int = 3,
         show_fps: bool = True,
         robot_overrides: Optional[dict] = None,
+        render_obs_cameras: bool = True,
     ) -> None:
         self.num_envs = int(num_envs)
         self.settle_steps = int(settle_steps)
+        # When False the scene cameras are still built (so they can be RGB-rendered
+        # on demand, e.g. for occasional policy-behaviour clips) but read_state does
+        # NOT render their depth every step — keeps the state teacher render-free/fast.
+        self.render_obs_cameras = bool(render_obs_cameras)
 
         _init_genesis()
         self.handle = build_scene(
@@ -59,16 +76,29 @@ class GenesisWorker:
 
     # ── lifecycle ───────────────────────────────────────────────────────────────
     def reset(self, object_dxy: Optional[np.ndarray] = None,
-              home_offset: Optional[np.ndarray] = None) -> dict:
+              home_offset: Optional[np.ndarray] = None,
+              object_euler: Optional[np.ndarray] = None) -> dict:
         """Reset to the built state, re-home the arm, (optionally) pose-DR each
         env's object, settle, and return the initial state.
 
         object_dxy:   (num_envs, 2) per-env (dx, dy) object jitter, or None.
         home_offset:  (num_envs, 3) per-env (dx, dy, dz) jitter on the reset home EE
                       position (sim-only DR), or None for the shared home pose.
+        object_euler: (num_envs, 3) per-env (roll, pitch, yaw) radians — object spawn
+                      orientation DR (about its resting center), or None. Rigid: compose
+                      into set_quat; soft: rotate the particle cloud about its centroid.
         """
         self.handle.scene.reset()
         self.robot.reset_to_home(home_offset)
+
+        # Per-env rotation (quat wxyz for rigid, matrix for soft particles) from the euler DR.
+        rot_quat = rot_mat = None
+        if object_euler is not None:
+            from scipy.spatial.transform import Rotation as _R
+            R = _R.from_euler("xyz", np.asarray(object_euler, np.float64).reshape(self.num_envs, 3))
+            q = R.as_quat().astype(np.float32)                    # (N,4) xyzw
+            rot_quat = np.concatenate([q[:, 3:4], q[:, :3]], axis=1)   # -> wxyz (genesis convention)
+            rot_mat = R.as_matrix().astype(np.float32)            # (N,3,3)
 
         for obj, otype, base_particles, base_pose in zip(
             self.handle.objects, self.handle.object_types,
@@ -80,12 +110,18 @@ class GenesisWorker:
                 if object_dxy is not None:
                     shift[:, :2] = np.asarray(object_dxy, dtype=np.float32)
                 obj.set_pos(base_pos + shift, zero_velocity=True)
-                obj.set_quat(base_quat, zero_velocity=True)
+                bq = np.asarray(base_quat, np.float32).reshape(self.num_envs, 4)
+                obj.set_quat(_quat_mul_wxyz(rot_quat, bq) if rot_quat is not None else bq,
+                             zero_velocity=True)
             else:
+                parts = np.asarray(base_particles, np.float32).reshape(self.num_envs, -1, 3)
+                if rot_mat is not None:                           # rotate each env about its centroid
+                    cen = parts.mean(axis=1, keepdims=True)
+                    parts = np.einsum("nij,npj->npi", rot_mat, parts - cen) + cen
                 shift = np.zeros((self.num_envs, 1, 3), dtype=np.float32)
                 if object_dxy is not None:
                     shift[:, 0, :2] = np.asarray(object_dxy, dtype=np.float32)
-                obj.set_particles_pos(base_particles + shift)
+                obj.set_particles_pos(parts + shift)
 
         for _ in range(self.settle_steps):
             self.handle.scene.step()
@@ -96,6 +132,20 @@ class GenesisWorker:
         self.robot.apply_target(target_pos, target_quat, target_gripper)
         self.handle.scene.step()
         return self.read_state()
+
+    def render_rgb(self, all_envs: bool = False):
+        """RGB frame(s) uint8 from the first built camera. all_envs=False -> env-0 (H,W,3);
+        all_envs=True -> ALL envs (N,H,W,3), one per-env camera each imaging its own env (used
+        for per-trajectory eval video = one clip per episode). None if no camera was built.
+        Works in-process AND as the subprocess 'render' command (survives relaunch scene DR)."""
+        cams = getattr(self.handle, "cameras", {})
+        if not cams:
+            return None
+        cam_list = next(iter(cams.values()))      # per-env camera list for the first camera
+        if all_envs:
+            return np.stack([_np(c.render(rgb=True, depth=False)[0]).astype(np.uint8)
+                             for c in cam_list])   # (N, H, W, 3)
+        return _np(cam_list[0].render(rgb=True, depth=False)[0]).astype(np.uint8)
 
     def close(self) -> None:
         try:
@@ -113,7 +163,8 @@ class GenesisWorker:
         state = self.robot.read_state()
 
         depth_images, intrinsics, extrinsics = {}, {}, {}
-        for name, cam_list in self.handle.cameras.items():
+        cam_items = self.handle.cameras.items() if self.render_obs_cameras else []
+        for name, cam_list in cam_items:
             # One bound camera per env; each images its own env from the same
             # relative pose, so env-0's K/extrinsic apply to every env's depth
             # (cloud lands in the base frame — see dev script).

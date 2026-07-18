@@ -14,6 +14,8 @@ class ObjectEntry:
     density: Optional[float] = None                 # override default ρ (kg/m³)
     pose_range: Optional[Dict[str, Tuple[float, float]]] = None  # {"x": (lo, hi), ...}
     scale: float = 1.0
+    mesh_path: Optional[str] = None                 # per-scene mesh override (e.g. a shape-DR
+                                                    # deformed .obj); None => registry default
 
     def validate(self) -> None:
         if self.object_type not in ("soft", "rigid"):

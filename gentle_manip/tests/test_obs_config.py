@@ -138,3 +138,27 @@ def test_validate_raises_on_conflict():
     )
     with pytest.raises(ValueError, match="mutually exclusive"):
         cfg.validate()
+
+
+def test_subview_and_obs_keys():
+    # A superset with privileged + point cloud; views subset it, params inherited.
+    from gentle_manip.perception.obs_config import PrivilegedConfig
+    sup = ObsConfig(
+        quat_noise_std=0.003,
+        privileged=PrivilegedConfig(object_pos=True, object_vel=True, stress=True),
+        point_cloud=PointCloudConfig(cameras=["cam_ext"], crop_min=(0.2, -0.2, 0.0),
+                                     crop_max=(0.7, 0.2, 0.45), max_points=1024),
+    )
+    assert set(sup.obs_keys()) == {"ee_pos", "ee_quat", "gripper_width", "point_cloud",
+                                   "priv_object_pos", "priv_object_vel", "priv_stress"}
+    teacher = sup.subview(["privileged"])
+    assert teacher.point_cloud is None and teacher.privileged is not None
+    assert teacher.needs_cameras() is False
+    assert "point_cloud" not in teacher.obs_keys() and "priv_stress" in teacher.obs_keys()
+    student = sup.subview(["point_cloud"])
+    assert student.privileged is None and student.point_cloud is not None
+    # params inherited from the superset (no drift)
+    assert student.point_cloud.crop_min == sup.point_cloud.crop_min
+    assert student.quat_noise_std == sup.quat_noise_std
+    with pytest.raises(ValueError, match="unknown modalities"):
+        sup.subview(["nope"])

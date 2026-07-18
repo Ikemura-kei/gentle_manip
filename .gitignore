@@ -6,6 +6,12 @@ gentle_manip/assets/xarm/lc_soft_enable_wide_grip/urdf-viz
 examples/*.png
 examples/*.mp4
 
+# sim2real diagnosis artifacts — exploratory OUTPUTS (figures/videos), new + future, kept
+# LOCAL. One-off diagnostic scripts also stay local (not committed); reusable fixes that land
+# in shared code are committed as usual.
+examples/sim2real_diagnose/figures/
+examples/sim2real_diagnose/scripted_in_sim_at_real_positions.py
+
 # Python
 __pycache__/
 *.py[cod]
@@ -40,13 +46,33 @@ htmlcov/
 # summary PNGs/MP4s). Keep small calibration artifacts (dataset/camera_calibration/) tracked.
 dataset/demos/
 dataset/real_deploy/
+dataset/serl_clips/
+# DPPO pretrain npz — derived from dataset/demos via gentle_manip.dppo.convert_demos
+dataset/dppo/
+logs/
 
 # Tactile-DP3 baseline: converted zarr datasets + training checkpoints (large,
 # machine-specific — regenerate via convert_tactile_demo_to_zarr.py / train_tactile_dp3.py).
 dataset/tactile_dp3/
-wandb/
 
 # RDP baseline (third_party/reactive_diffusion_policy): downloaded datasets,
 # training outputs/checkpoints, and wandb logs are large and machine-specific.
 third_party/reactive_diffusion_policy/data/
 third_party/reactive_diffusion_policy/wandb/
+
+# Experiment registry — local index of local training runs (absolute run_dir paths, changes
+# every run). Rebuildable from the log tree via scripts/reconcile_experiments.py.
+experiments.csv
+
+# wandb local run data (synced to the cloud; the run dir is the source of truth)
+wandb/
+
+# Point-cloud focus comparison videos (viz output of examples/render_pntcld_focus.py)
+examples/pntcld_focus/
+
+# experiment_registry transient sidecars (flock + atomic-write temp)
+experiments.csv.lock
+experiments.csv.tmp
+
+# MPM grid/substep sweep video outputs (examples/mushroom_grid_substep_sweep.py --video)
+examples/mushroom_sweep/

@@ -18,7 +18,7 @@ Two windows open: a small pygame window (focus it for keys) and the Genesis
 viewer. Needs a display.
 
     MUJOCO_GL=glfw uv run --project envs/sim python examples/collect_demos_sim.py \
-        --config gentle_manip/configs/collect/red_cube_sim.yaml
+        --config gentle_manip/configs/collect/single_lift_cube_rigid_teleop.yaml
 
 Controls: W/S A/D Up/Dn move, L/R R/F Q/E rotate, O/P grip, SPACE save,
 BACKSPACE discard, ESC quit.
@@ -38,7 +38,7 @@ import yaml
 
 _PKG = Path(__file__).resolve().parents[1] / "gentle_manip"
 _CFG = _PKG / "configs"
-_DEFAULT_CONFIG = _CFG / "collect" / "red_cube_sim.yaml"
+_DEFAULT_CONFIG = _CFG / "collect" / "single_lift_cube_rigid_teleop.yaml"
 
 
 def _load_named(subdir: str, name) -> dict:
@@ -68,23 +68,7 @@ def main() -> None:
 
     cfg_text = args.config.read_text()
     cfg = yaml.safe_load(cfg_text)
-
-    # Resolve the sub-configs by name (contents inlined into config_resolved.yaml).
-    obs_d = _load_named("obs", cfg["obs_config"])
-    act_d = _load_named("action", cfg["action_config"])
-    dr_d = _load_named("dr", cfg.get("dr"))
-    aug_d = _load_named("augmentation", cfg.get("augmentation"))
-
-    # Create the run dir and snapshot the config (verbatim + fully resolved).
-    base = Path(cfg["out_dir"]) / cfg["task_name"]
-    run_dir = _make_run_dir(base)
-    (run_dir / "config.yaml").write_text(cfg_text)
-    resolved = dict(cfg)
-    resolved["obs_config"] = {"_name": cfg["obs_config"], **obs_d}
-    resolved["action_config"] = {"_name": cfg["action_config"], **act_d}
-    resolved["dr"] = {"_name": cfg["dr"], **dr_d} if cfg.get("dr") else None
-    resolved["augmentation"] = {"_name": cfg["augmentation"], **aug_d} if cfg.get("augmentation") else None
-    (run_dir / "config_resolved.yaml").write_text(yaml.safe_dump(resolved, sort_keys=False))
+    use_exp = bool(cfg.get("experiment"))   # experiment mode = single source of truth
 
     # Deferred imports so --help is cheap and doesn't build genesis.
     from gentle_manip.actions.action_config import ActionConfig
@@ -96,20 +80,62 @@ def main() -> None:
     from gentle_manip.perception.obs_config import ObsConfig
     from gentle_manip.tasks.single_lift import SingleLiftTask
 
-    obs_config = ObsConfig.from_dict(obs_d)
-    action_config = ActionConfig.from_dict(act_d)
-    aug = AugmentationConfig.from_dict(aug_d) if aug_d else None
+    if use_exp:
+        # Everything (obs=SUPERSET, task WITH reward, action, dr, aug) from the one
+        # experiment config, so a demo carries every modality AND the per-step reward.
+        from gentle_manip.experiment import Experiment
+        exp = Experiment.load(cfg["experiment"])
+        obs_config = exp.collection_obs()
+        action_config = exp.action_config
+        # dr_override lets a recipe swap in fuller DR ranges (e.g. food_shape for size/shape/
+        # material) without editing the shared experiment.
+        dr_d = _load_named("dr", cfg["dr_override"]) if cfg.get("dr_override") else exp.dr
+        aug = exp.augmentation_config()
+        task = SingleLiftTask(exp.task_cfg)          # full reward -> logged per step
+        task_name = cfg.get("task_name", exp.name)
+        resolved = {**cfg, "experiment_obs_keys": obs_config.obs_keys()}
+    else:
+        obs_d = _load_named("obs", cfg["obs_config"])
+        act_d = _load_named("action", cfg["action_config"])
+        dr_d = _load_named("dr", cfg.get("dr"))
+        aug_d = _load_named("augmentation", cfg.get("augmentation"))
+        obs_config = ObsConfig.from_dict(obs_d)
+        action_config = ActionConfig.from_dict(act_d)
+        aug = AugmentationConfig.from_dict(aug_d) if aug_d else None
+        task = SingleLiftTask({"object_name": cfg["object"], "object_type": cfg["object_type"]})
+        task_name = cfg["task_name"]
+        resolved = {**cfg,
+                    "obs_config": {"_name": cfg["obs_config"], **obs_d},
+                    "action_config": {"_name": cfg["action_config"], **act_d},
+                    "dr": ({"_name": cfg["dr"], **dr_d} if cfg.get("dr") else None),
+                    "augmentation": ({"_name": cfg["augmentation"], **aug_d} if cfg.get("augmentation") else None)}
+
+    # Create the run dir and snapshot the config (verbatim + resolved).
+    run_dir = _make_run_dir(Path(cfg["out_dir"]) / task_name)
+    (run_dir / "config.yaml").write_text(cfg_text)
+    (run_dir / "config_resolved.yaml").write_text(yaml.safe_dump(resolved, sort_keys=False))
 
     # "keyboard" (human teleop, viewer) or "scripted" (automatic, headless by default).
     mode = cfg.get("input", "keyboard")
     show_viewer = cfg.get("show_viewer", mode == "keyboard")
 
-    task = SingleLiftTask({"object_name": cfg["object"], "object_type": cfg["object_type"]})
+    # Full DR: scene_dr_every>0 re-randomizes the whole scene (material+size+shape) by relaunching
+    # the genesis child every N SAVED episodes — needs the subprocess backend (no live viewer).
+    scene_dr_every = int(cfg.get("scene_dr_every", 0))
+    use_subprocess = scene_dr_every > 0
+    if use_subprocess and show_viewer:
+        print("scene_dr_every>0 uses the subprocess backend (headless); disabling the viewer.",
+              file=sys.stderr)
+        show_viewer = False
+
     backend = SimBackend(
-        task.scene_spec, num_envs=1, use_subprocess=False, show_viewer=show_viewer,
-        config={"sim": {"settle_steps": cfg["settle_steps"]}, "dr": dr_d},
+        task.scene_spec, num_envs=1, use_subprocess=use_subprocess, show_viewer=show_viewer,
+        config={"sim": {"settle_steps": cfg["settle_steps"], "scene_dr_every": scene_dr_every},
+                "dr": dr_d},
     )
-    env = PolicyEnv(backend, obs_config, action_config, task=None,
+    # task ON in experiment mode -> the demo's per-step reward is real (for RLPD);
+    # legacy mode keeps task=None (reward 0, DP3-only).
+    env = PolicyEnv(backend, obs_config, action_config, task=(task if use_exp else None),
                     max_episode_steps=10 ** 9, augmentation=aug)
 
     if mode == "scripted":
@@ -132,22 +158,22 @@ def main() -> None:
     # quality-check video, written to <run_dir>/videos/ep_NNN.mp4.
     frame_fn = video_dir = None
     if cfg.get("record_video"):
-        from gentle_manip.robot.xarm7_sim import _np
-        cam = next(iter(backend.process.handle.cameras.values()))[0]   # in-process worker
-        frame_fn = lambda: _np(cam.render(rgb=True, depth=False)[0])
+        frame_fn = backend.render_rgb          # unified: works in-process AND under subprocess
         video_dir = run_dir
 
     recorder = DemoRecorder(
-        env=env, teleop=driver, keyboard=driver, task_name=cfg["task_name"],
+        env=env, teleop=driver, keyboard=driver, task_name=task_name,
         out_dir=run_dir, rate_hz=cfg["rate"], dataset_path=run_dir / "data.pkl",
         idle_threshold=cfg["idle_threshold"], keep_trailing_idle=cfg["keep_trailing_idle"],
         max_interior_idle=cfg["max_interior_idle"],
         action_noise_std=cfg.get("action_noise_std", 0.0),
         frame_fn=frame_fn, video_dir=video_dir, video_fps=cfg.get("video_fps", cfg["rate"]),
         video_episodes=cfg.get("video_episodes", 0),
+        video_failed_episodes=cfg.get("video_failed_episodes", 0),
     )
-    print(f"collecting '{cfg['task_name']}' in sim ({mode}) -> {run_dir}\n"
-          f"  obs={cfg['obs_config']} dr={cfg.get('dr') or 'off'} aug={cfg.get('augmentation') or 'off'}\n"
+    src = f"experiment={cfg['experiment']}" if use_exp else f"obs={cfg.get('obs_config')}"
+    print(f"collecting '{task_name}' in sim ({mode}) -> {run_dir}\n"
+          f"  {src}  obs_keys={obs_config.obs_keys()}  reward={'on' if use_exp else 'off'}\n"
           f"  {controls}")
     recorder.run()
 

@@ -1,8 +1,12 @@
+# [collect] Teleop demo collection — rigid cube (legacy red_cube).
+# Used by: examples/collect_demos_sim.py
+# Status: legacy
+#
 # Sim demo-collection config — drives examples/collect_demos_sim.py end to end, so
 # every run is reproducible from one file. Sub-configs are referenced by NAME (file
 # stem) under their configs/<dir>/ folder; the collector inlines their contents into
 # a resolved YAML saved next to the demos.
-task_name: red_cube_sim
+task_name: single_lift_cube_rigid
 object: red_cube
 object_type: rigid              # "rigid" | "soft"
 

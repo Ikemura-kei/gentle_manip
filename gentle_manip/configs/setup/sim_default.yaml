@@ -1,3 +1,7 @@
+# [setup] Sim setup defaults (merged over sim constants in XArm7Sim/SimBackend).
+# Used by: SimBackend / XArm7Sim
+# Status: active
+#
 # Sim setup defaults. Overrides here are merged over the sim constants in
 # robot/xarm7_config.py (KP/KV/DEFAULT_JOINT_ANGLES/DEFAULT_GRIPPER_WIDTH) and
 # the SimBackend/GenesisWorker defaults. Loaded with yaml.safe_load.

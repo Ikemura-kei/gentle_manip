@@ -1,3 +1,7 @@
+# [setup] Real-lab deployment config (camera extrinsics, servo params).
+# Used by: RealBackend / XArm7Real
+# Status: active
+#
 # Real lab deployment config — consumed by RealBackend / XArm7Real.
 # Values under robot.* override the real-only defaults in robot/xarm7_config.py.
 

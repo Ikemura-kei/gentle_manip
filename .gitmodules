@@ -7,3 +7,10 @@
 [submodule "third_party/reactive_diffusion_policy"]
 	path = third_party/reactive_diffusion_policy
 	url = https://github.com/xiaoxiaoxh/reactive_diffusion_policy.git
+[submodule "third_party/hil-serl"]
+	path = third_party/hil-serl
+	url = https://github.com/rail-berkeley/hil-serl.git
+[submodule "third_party/dppo"]
+	path = third_party/dppo
+	url = https://github.com/Ikemura-kei/DPPO_fork.git
+	branch = gentle_manip

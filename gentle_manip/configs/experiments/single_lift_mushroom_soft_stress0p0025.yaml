@@ -1,0 +1,22 @@
+# [experiment] SOFT mushroom lift — STRESS-SCALE SWEEP (stress.scale=0.0025). Identical to
+#              single_lift_mushroom_soft except task -> the 0.0025-scale stress variant.
+# Used by: serl_sim_server.py (--experiment) + DPPO finetune (experiment snapshot)
+# Status: experimental (2026-07-13)
+#
+# Same composition as single_lift_mushroom_soft (action/dr/aug/obs/views/rl) EXCEPT the task
+# points to the stress-scale-0.0025 variant. Smallest point of the pundd-based stress-scale sweep.
+task: single_lift_mushroom_soft_stress0p0025
+action: delta_pose_delta_gripper
+dr: food_shape
+augmentation: l515_noise
+obs: superset_soft
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+rl:
+  random_steps: 200
+  training_starts: 400
+  batch_size: 256
+  discount: 0.92
+  utd_ratio: 2
+  critic_lr: 1.0e-4

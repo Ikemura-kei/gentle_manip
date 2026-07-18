@@ -650,7 +650,7 @@ workspace:
 ```bash
 python scripts/train.py \
     --task single_lift \
-    --task_cfg configs/tasks/single_lift.yaml \
+    --task_cfg configs/tasks/single_lift_tofu_soft.yaml \
     --obs_cfg configs/obs/point_cloud_3cam.yaml \
     --action_cfg configs/action/delta_pose_delta_gripper.yaml \
     --sim_cfg configs/setup/sim_default.yaml \
@@ -663,7 +663,7 @@ python scripts/evaluate.py \
     --task single_lift \
     --checkpoint ckpt/single_lift_best.pt \
     --n_episodes 50 \
-    --task_cfg configs/tasks/single_lift.yaml \
+    --task_cfg configs/tasks/single_lift_tofu_soft.yaml \
     --obs_cfg configs/obs/point_cloud_3cam.yaml
 ```
 

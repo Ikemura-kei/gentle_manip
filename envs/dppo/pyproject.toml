@@ -1,0 +1,31 @@
+# DPPO (Diffusion Policy Policy Optimization) environment — fine-tune a point-cloud
+# diffusion policy with PPO on the soft mushroom lift, bridging to the genesis sim
+# (envs/sim, 3.12) over the pure-python gentle_manip.envs.rpc socket (imported via
+# sys.path, NOT a dependency, to avoid a gym/gymnasium version clash — DPPO pins the
+# old gym==0.22).
+#
+# A separate stack from envs/dp3 (older hydra/diffusers/zarr): DPPO pins hydra-core 1.3.2
+# + gym 0.22 + torch 2.4. Point-cloud DPPO reference: /home/kei/kei/MoDex-main (DP3 -> DPPO
+# pcd finetune in robosuite) — concepts only; we bridge to genesis instead.
+#
+# Setup:  uv sync --project envs/dppo
+# torch is installed MANUALLY (CUDA build, kept out of the pyproject like the other envs):
+#   uv pip install --python envs/dppo/.venv/bin/python "torch==2.4.0+cu121" \
+#     --index-url https://download.pytorch.org/whl/cu121
+# (A bare `uv sync` may pull the CPU torch that dppo pins — reinstall the CUDA build after.)
+#
+# Run:  uv run --project envs/dppo python -m gentle_manip.dppo.train \
+#         --config-path $(pwd)/gentle_manip/dppo/cfg/<exp> --config-name <ft_ppo_diffusion_mlp|pre_diffusion_mlp>
+#       (gentle_manip.dppo.train is a thin launcher: pins repo root on sys.path so the
+#        genesis bridge imports after hydra's chdir, sets DPPO_LOG_DIR/DPPO_DATA_DIR,
+#        then hands off to third_party/dppo/script/run.py. See its docstring.)
+[project]
+name = "gentle-manip-dppo"
+version = "0.1.0"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+    "dppo",   # editable, third_party/dppo (pulls hydra-core 1.3, omegaconf, gym 0.22, einops, wandb, imageio, av, tqdm)
+]
+
+[tool.uv.sources]
+dppo = { path = "../../third_party/dppo", editable = true }

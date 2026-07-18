@@ -1,3 +1,7 @@
+# [augmentation] Combined quat-snap + L515 noise (superseded).
+# Used by: (superseded)
+# Status: experimental
+#
 # Combined sim-only augmentation: clean the quaternion AND noise the point cloud.
 #  - quat_snap removes the OOD quaternion noise that stalled the real-trained policy.
 #  - pc_* pushes the clean sim cloud toward the noisy L515 distribution, to test

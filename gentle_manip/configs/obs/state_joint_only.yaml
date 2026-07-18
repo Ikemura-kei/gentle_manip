@@ -1,3 +1,7 @@
+# [obs] State + joint positions (no velocity, no cameras).
+# Used by: joint-space RL
+# Status: active
+#
 # ee_pos + ee_quat + gripper_width + joint_pos (no velocity, no cameras)
 include_joint_pos: true
 include_joint_vel: false

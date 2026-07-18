@@ -1,3 +1,7 @@
+# [obs] State-based RL TEACHER obs (sim-only): proprioception + privileged object pose/vel/stress.
+# Used by: SERL teacher view
+# Status: active
+#
 # State-based RL TEACHER obs (SIM ONLY): proprioception (ee_pos/ee_quat/gripper_width,
 # always included) + PRIVILEGED info read from the sim — true object pose/velocity and
 # the normalized von Mises stress (the gentleness signal the deployable student can't

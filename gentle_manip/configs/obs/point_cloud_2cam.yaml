@@ -1,3 +1,7 @@
+# [obs] Two-camera (wrist+ext) point cloud. The current real rig is 1-cam only.
+# Used by: (2-cam rig)
+# Status: legacy
+#
 include_joint_pos: false
 include_joint_vel: false
 

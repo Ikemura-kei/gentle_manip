@@ -16,6 +16,47 @@ For old implementation, check:
 
 If anything was installed for running the modules, please add them into `pyproject.toml` under `[project] dependencies` if not present yet.
 
+## Experiment Discipline (HARD REQUIREMENTS — read before launching ANY run)
+
+Non-negotiable for every experiment (training, eval, demo collection), and especially when
+running many in parallel on a cluster. Details live in the bracketed sections; this is the
+checklist — do not skip an item because "it's just a quick run".
+
+1. **One shared eval harness — offline AND in-training.** Every sim eval MUST go through
+   `gentle_manip.evaluation.run_eval` with the fixed canonical `EvalSpec` (`n_episodes=100`,
+   `num_envs=5`, `seed=0`; only `max_policy_steps` is task-dependent). NEVER write a second,
+   algorithm-specific eval loop — that breaks apples-to-apple. [Canonical Evaluation]
+2. **Per-trajectory eval video, no exceptions.** EVERY eval (harness AND in-training/periodic)
+   records ONE clip per episode: `record_batches=None` (all batches, all envs), and the sim
+   server runs `--num-envs 5 --render-rgb`. Do NOT reduce to env-0-only or a subset. [Canonical Evaluation]
+3. **Apples-to-apple: freeze auto scene-DR during any eval.** If the sim server runs
+   `scene_dr_every>0` (a training server shared with periodic eval), the eval MUST wrap itself in
+   `venv.set_auto_scene_dr(False)…(True)` (already wired in the DPPO fork agent) so the periodic
+   relaunch can't fire mid-eval and desync geometry/RNG. The harness owns the deterministic
+   per-group rebuild (`EvalSpec.scene_group_size`). Offline eval servers use `scene_dr_every=0`
+   (freeze is a no-op there). [Canonical Evaluation]
+4. **Every TRAINING run gets a unique 5-letter ID; evals do NOT.** The ID names the run dir
+   `logs/<algo>/<task>/<id>/`, is the wandb run name, and is registered in `experiments.csv`.
+   Eval runs keep `<policy_run>/eval/<datetime>/` naming and are never registered. [Conventions]
+5. **experiments.csv stays honest.** Registration is automatic at launch. If a row is missing or a
+   deleted run lingers, run `python -m gentle_manip.scripts.reconcile_experiments` (syncs EXISTENCE
+   only — drops deleted, back-fills orphans). Status (`running`→`done`/`diverged`/`stopped-iterN`/…)
+   is NOT automatic — set it explicitly (`experiment_registry.set_status`) when a run ends. [Conventions]
+6. **Every TRAINING run writes + maintains EXPERIMENT.md.** `write_experiment_md` at launch (git
+   commit, motivation, hypothesis, key config); `append_experiment_note` during; fill the Final
+   summary (duration, steps, verdict) when it ends. Single record of *why* a run happened + *what
+   it showed*. [Conventions]
+7. **Every TRAINING and DEMO-COLLECTION run records its config.** Training snapshots the env config
+   into `<run>/config/` (SERL `run_paths.snapshot_experiment`; DPPO `ExperimentSnapshot` hydra
+   callback). Demo collection: sim `collect_demos_sim.py` writes `config.yaml`/`config_resolved.yaml`
+   in its run dir; real teleop `demos/record.py` writes `<stem>_config.yaml` (resolved
+   setup+obs+action + source paths + git commit + control knobs) beside the dataset. No config
+   snapshot = not reproducible = not acceptable. [Canonical Evaluation, ObsConfig]
+8. **Parallel runs need isolated sim servers.** Each training/eval sim server binds a port
+   (default 5570) and owns exactly ONE genesis child (single sim). When launching concurrently,
+   give each its own `--port` and never share a server between two trainers. GPU memory is the
+   limiter — check `nvidia-smi` headroom before stacking runs.
+
 ## Architecture — The Big Picture
 
 ```
@@ -40,9 +81,28 @@ Third-party libraries whose source may need modification live in `third_party/` 
 ```
 third_party/
 ├── genesis/                    # Genesis physics engine (fork: https://github.com/Ikemura-kei/Genesis_fork)
-├── DP3/                        # 3D Diffusion Policy (fork: https://github.com/Ikemura-kei/DP3_fork)
-└── reactive_diffusion_policy/  # RDP tactile baseline (https://github.com/xiaoxiaoxh/reactive_diffusion_policy)
+├── DP3/                        # 3D Diffusion Policy (fork: Ikemura-kei/DP3_fork, branch gentle_manip)
+├── reactive_diffusion_policy/  # RDP tactile baseline (https://github.com/xiaoxiaoxh/reactive_diffusion_policy)
+├── hil-serl/                   # SERL/HIL-SERL sample-efficient RL (rail-berkeley) — for the SAC teacher
+└── dppo/                       # DPPO (fork: Ikemura-kei/DPPO_fork, branch gentle_manip)
 ```
+
+**hil-serl** is **JAX-based** (jax 0.4.35 + flax, Python 3.10) — a separate stack from
+the torch/genesis envs, so it needs its own env (`envs/serl`, py3.10, jax). Use
+`serl_launcher.agents` (SAC / BC / RLPD-style demo-bootstrapped SAC) + its replay buffer
+as the RL trainer; **ignore `serl_robot_infra`** (real-robot infra — we have our own
+XArm7/RealBackend). Integration is a cross-version bridge: the genesis sim (`PolicyEnv`,
+3.12) ↔ the SERL learner (jax, 3.10), analogous to the `envs/rpc.py` sim↔DP3 socket.
+
+**⚠️ Before tuning RL hyperparameters, READ the proven configs first — don't guess.** Start
+from the library's example experiment configs (`third_party/hil-serl/examples/experiments/*/config.py`)
+and the prior projects (`codesign_genesis`, `codesign-dfom`, `gentle_manipulation`). Guessing
+SAC hyperparameters here cost many hours + several diverging runs (`critic_loss`→1e14) that a
+known config would have avoided. The working SoftBodyLift SAC config: REDQ critic ensemble
+(`critic_ensemble_size: 10`, `critic_subsample_size: 2`), deeper nets `[64,128,128,128,256]`,
+`backup_entropy: False`, `utd_ratio: 1`, `critic_actor_ratio: 4`, `steps_per_update: 30` — the
+ensemble + net depth are what keep Q-overestimation in check. Prefer these structural stabilizers
+over reward-scale / discount band-aids. (`train_serl.py` now defaults to this config.)
 
 After cloning, initialise and install with:
 ```bash
@@ -100,6 +160,12 @@ Offline sim eval of a checkpoint: `scripts/eval_sim.py` (multi-env, fixed-seed, 
 
 Run the test suite with
 `uv run --project envs/sim python -m pytest gentle_manip/tests/ -q`.
+
+**After setting up the envs on a new machine/cluster, verify each with the standalone
+smoke tests** in `examples/env_debug/` (one `check_<env>.py` per env + a `run_all.sh`
+runner + README): they check the key third-party imports, CUDA/JAX see the GPU, and the
+`gentle_manip`/policy code loads and runs on synthetic data.
+`bash examples/env_debug/run_all.sh` runs all five and prints a PASS/FAIL/SKIP summary.
 
 The `envs/deploy/` env depends on `gentle-manip[real]` — the genesis-free core plus
 `pyrealsense2` + `xArm-Python-SDK` (+ `pyspacemouse`, `pygame` for teleop demo
@@ -176,13 +242,30 @@ access to the 3Dconnexion device (else run as root); keyboard mode needs neither
 Collect demos with:
 ```bash
 uv run --project envs/deploy python -m gentle_manip.demos.record \
+  --setup gentle_manip/configs/setup/real_lab.yaml \
   --obs-config gentle_manip/configs/obs/state_ee_only.yaml \
-  --task-name <name> --input keyboard --i-have-cleared-the-workspace
+  --task-name <name> --input keyboard
 ```
 `--input keyboard` (W/S A/D Up/Dn move, L/R R/F Q/E rotate, O/P grip, SPACE save,
 BKSP discard, ESC quit) or `--input spacemouse` (default). Both produce the same
 normalized `[-1,1]` action through the same `ActionPipeline`. Episode keys
-(SPACE/BACKSPACE/ESC) are identical across both modes.
+(SPACE/BACKSPACE/ESC) are identical across both modes. `--setup` picks the backend
+config (use `real_lab_tactile.yaml` for the GelSight rig). **Every recorded session
+also writes a `<stem>_config.yaml`** next to the dataset pkl (resolved setup+obs+action
++ control knobs + git commit) — the reproducibility snapshot (hard requirement #7).
+
+**Sim demo collection** (`examples/collect_demos_sim.py`, envs/sim, keyboard or scripted):
+config-driven, and **experiment-mode** ties it to the single-source-of-truth Experiment.
+```bash
+MUJOCO_GL=glfw uv run --project envs/sim python examples/collect_demos_sim.py \
+  --config gentle_manip/configs/collect/mushroom_teleop.yaml
+```
+An `experiment:` collect config records the **SUPERSET** obs (`collection_obs()` — state +
+privileged + point cloud) **and** the **per-step reward** (the env is built WITH the task).
+So **one demo set is dual-purpose**: keep the reward + a state view (`subset_demo`) for
+HIL-SERL RLPD, or drop the reward + take the point-cloud view for DP3 — same demonstrations,
+different obs. `DemoRecorder` now logs `episode["rewards"]` (0 when `task=None`, i.e. the
+legacy DP3-only path); reward-free consumers just ignore it.
 
 ---
 
@@ -555,7 +638,7 @@ Rewards are individual components composed via YAML config and summed by `Compos
 **Success is not a reward component.** It is handled at the task level: `BaseTask.compute_reward` calls `is_success` and adds `success.astype(float) * success_scale` on top of the shaped reward. This keeps the sim/task boundary clean — reward components only see raw physics state.
 
 ```yaml
-# configs/tasks/single_lift.yaml
+# configs/tasks/single_lift_mushroom_soft.yaml (example)
 lift_height: 0.15
 hold_steps: 30
 object_name: "tofu"
@@ -608,9 +691,35 @@ IMPLEMENTED (`domain_randomization/{dr_config.py,presets.py}`, `configs/dr/{mild
 applied by `SimBackend` with its own RNG):
 - **Object pose** (per-reset, cheap) — `DRConfig.object_pos_xy` → per-env `object_dxy`
   sampled in `SimBackend.reset()` (the worker shifts the object particles).
-- **Object material E/ν/ρ + coupling friction** (per-scene) — `SimBackend.randomize_scene()`
-  samples them and **rebuilds via `GenesisProcess.restart(new_spec, coup_friction=...)`**
-  (MPM material is global per scene). Call every N episodes, not every reset.
+- **Object orientation** (per-reset) — `object_yaw_deg` (full 180) + `object_pitch_roll_deg`
+  → `sample_object_euler` (worker rotates the object at spawn).
+- **Object material E/ν/ρ + friction + SIZE + SHAPE** (per-scene, unified in
+  `SimBackend._apply_scene_dr`) — samples material (`object_E/nu/rho`, `coup_friction`),
+  `object_scale` (uniform mesh scale), and procedural mesh deformation
+  `object_{bend,twist,taper,rbf,axis_scale}` (real food varies in all). Deforms from the
+  REGISTRY nominal mesh + nominal scale (idempotent) via `assets/mesh_deform.py` — mild
+  near-diffeomorphic ops: Barr **bend**=curvature / **twist** / **taper** along the long axis,
+  **axis_scale** = anisotropic scale on one random x/y/z axis, optional RBF bumps; a
+  positive-volume validity guard retries then falls back to nominal. Bakes E/ν/ρ + `scale` +
+  `mesh_path` onto the `ObjectEntry` (scene_spec gained `mesh_path`). `configs/dr/food_shape.yaml`
+  (material bounded for MPM stability at the tuned substeps), `presets.aggressive`.
+  `scene_params()` + `material_params()` → eval CSV.
+- **FULL DR via relaunch** (`sim.scene_dr_every` N > 0) — `SimBackend.reset()` re-randomizes the
+  WHOLE scene every N resets by **relaunching the genesis child** (`GenesisProcess.restart` =
+  stop→start, so ≤1 sim ever — no parallel/multi-process). Forces the subprocess backend; RGB
+  video survives via the new `render` worker command (`SimBackend.render_rgb`, in-proc OR
+  subprocess). Consumers: `serl_sim_server --scene-dr-every N` / `--subprocess` / `--dr <name>`,
+  `collect_demos_sim` (`scene_dr_every` + `dr_override` in the recipe;
+  `configs/collect/single_lift_mushroom_soft_fulldr.yaml`). Each rebuild ~30–45 s → small N for
+  collection, larger for training. SCENE geometry is shared across a batched build's sub-envs
+  (varies across relaunches, NOT across sub-envs). Since batched envs share geometry, per-launch
+  is the granularity; a subprocess `randomize_scene` rpc command lets the eval harness drive it.
+- **Eval scene DR (deterministic, apples-to-apples)** — `EvalSpec.scene_group_size K`: the harness
+  rebuilds the geometry every K batches from `scene_seed_for_group(g)` (reseed → rpc
+  `randomize_scene`), so eval spans ~n_batches/K distinct sizes/shapes, identical across every
+  eval/policy; pose stays per-batch (`seed_for_batch`). K=0 = fixed nominal geometry.
+  Showcase: `examples/dr_showcase.py` (random policy, N fresh-process episodes → one labelled
+  video); inspect deformed meshes with `examples/export_deformed_samples.py`.
 
 TODO:
 - **Initial robot pose** — jitter `DEFAULT_EE_POSE` / seed joints per env at reset (needs
@@ -621,7 +730,6 @@ TODO:
 
 Expensive / "crazier" (rebuild, and they change sim *fidelity* — randomize cautiously,
 they shift the dynamics, not just appearance):
-- **Object size / shape** — box extents, or swapping meshes once real scanned meshes exist.
 - **sim_substeps / mpm_grid_density** — robustness to integration resolution; rebuild, and
   watch that the grasp still succeeds across the range (low grid density may leak/penetrate).
 
@@ -671,12 +779,72 @@ render excluded). Real Agaricus values: E 0.3–3.0 MPa, ν 0.3–0.5, yield 40�
 substeps than 0.9 MPa, which buys a finer grid that's *both* faster *and* higher-fidelity
 than the coarse-stiff baseline (C beats A on both axes). The `"mushroom"` material preset
 is therefore `E=3e5, ν=0.35, yield=4e4` (≈13% yield strain → bruises under a firm grasp,
-the regime the stress reward targets). `configs/tasks/mushroom_lift.yaml` sets
+the regime the stress reward targets). `configs/tasks/single_lift_mushroom_soft.yaml` sets
 `sim_substeps=210, mpm_grid_density=250`; `SingleLiftTask` now reads `sim_substeps /
 mpm_grid_density / cam_fov` from the task cfg (defaults = the rigid-cube values, unchanged).
 For training throughput the **point-cloud render** (per env/step) is expected to dominate,
-not this MPM, so the physics has headroom once envs are parallelized. The mushroom_lift
+not this MPM, so the physics has headroom once envs are parallelized. The single_lift_mushroom_soft
 stress-reward `cap/divisor` are still the tofu values — TODO: re-tune to the ~40 kPa yield.
+
+---
+
+## Canonical Evaluation (ALL algorithms — SERL, DPPO, and future)
+
+**Every algorithm's sim evaluation MUST go through the one shared harness
+`gentle_manip.evaluation.run_eval` (`gentle_manip/evaluation/`, genesis-free).** This is the
+single place the protocol + metrics + outputs are defined, so numbers are apples-to-apples
+across algorithms and runs. Do NOT write a second, algorithm-specific eval loop.
+
+- **Fixed protocol — `EvalSpec` (`eval_spec.py`):** `n_episodes=100`, `num_envs=5` (→ 20
+  batches), `seed=0`. These three are FIXED (canonical); only `max_policy_steps` (episode
+  horizon = sim `max_episode_steps / act_steps`) is task-dependent. Don't vary the trio per
+  experiment.
+- **Fixed randomization sequence (apples-to-apples):** before batch `i` the harness calls
+  `venv.seed([spec.seed_for_batch(i)]*num_envs)` (→ `SimEnvClient.reseed` → `SimBackend._rng`),
+  so env `j` of batch `i` gets an *identical* randomized scenario (object pose/orientation/
+  arm-home) across every eval run and every algorithm. `seed_for_batch(i)=base_seed*100003+i`.
+  Scene-level DR (material rebuild) is NOT varied during eval.
+- **Metrics — success + (soft) stress, aggregate AND per-episode:** `summary.json` (success_rate,
+  ever_success_rate, mean_episode_reward, stress_peak/mean for soft tasks) + `episodes.csv`
+  (one row per episode×env: batch, env, scenario_seed, success, first_success_step, reward,
+  stress_peak, stress_mean). Stress columns are NaN for rigid tasks. Stress reaches the harness
+  via the rpc step (`PolicyEnv.step` → per-env `stress_max`/`stress_mean` from
+  `von_mises_stress` → `serve_env` → `SimEnvClient.step` → the venv's step `info`).
+- **Per-episode randomization audit:** `episodes.csv` also records the DR params ACTUALLY
+  applied (`obj_dx/dy`, `obj_roll/pitch/yaw`, `home_dx/dy/dz`, `mat_E/nu/rho/yield`). Captured
+  server-side (`SimBackend._last_reset_dr` + `material_params()`) and returned in the rpc reset
+  (`SimEnvClient.last_scenario` → `venv.scenario_params()`). Verified: a fixed `scenario_seed`
+  reproduces the object placement to ~1e-6 (deterministic scenarios), so the same 100 scenarios
+  face every policy. NOTE: soft-body MPM on GPU is NOT bit-deterministic in the *rollout*
+  (parallel float atomics), so success/stress have small run-to-run variance at identical init —
+  the initial conditions are fixed (apples-to-apples), the physics has residual noise.
+- **Per-trajectory video (REQUIRED, all evals):** `record_batches=None` (the default) records
+  ONE clip per episode — every batch, every env (`render/batchNN_envM.mp4`), so `n_episodes`
+  videos in total. This applies to BOTH the offline harness eval AND the in-training/periodic eval
+  (the DPPO fork agent passes `record_batches=None`). Do NOT set a subset / env-0-only. The sim
+  server must run `--num-envs 5 --render-rgb` (per-env camera). A small int records only the first
+  N batches; `0` disables — neither is acceptable for a real eval.
+- **Freeze auto scene-DR during eval (determinism):** when the eval shares a training server with
+  `scene_dr_every>0`, wrap the eval in `venv.set_auto_scene_dr(False)…(True)` so the server's
+  periodic relaunch can't fire mid-eval (it would rebuild geometry + advance the RNG and desync the
+  fixed-seed scenarios). Only the harness's `scene_group_size` rebuild should touch geometry during
+  eval. Already wired in the DPPO fork agent's `_gm_periodic_eval`.
+- **Output location:** eval writes into the evaluated policy's OWN training run dir —
+  `<base_policy_run>/eval/<datetime>/` (`harness.eval_out_dir`; falls back to `logs/eval/...`).
+  Includes `summary.json`, `episodes.csv`, `config/` (env snapshot), `render/*.mp4` (per-episode
+  clips, see above). `summary.json` records the checkpoint path.
+- **Per-algorithm adapters (the only per-algorithm code):** an `EvalVenv` (drives the sim,
+  returns per-env success/stress — for DPPO this is the `GenesisMultiStepVecEnv` bridge) and a
+  `Policy` (obs→action chunk). DPPO wiring: `gentle_manip/dppo/eval_agent.py::EvalHarnessAgent`
+  + `cfg/.../eval_diffusion_pointnet.yaml`. The sim server must run `--num-envs 5 --render-rgb`.
+  SERL adoption = write a SERL `EvalVenv`+`Policy` and call the same `run_eval` (TODO).
+
+**Every training run (ANY algorithm) also snapshots its env (experiment) config** into
+`<run>/config/` — separate from framework logs. SERL does this via `run_paths.snapshot_experiment`;
+DPPO via the `ExperimentSnapshot` hydra callback (`gentle_manip/dppo/hydra_snapshot.py`) enabled
+by `experiment: <name>` + a `hydra.callbacks` entry in the config. This is on top of the
+per-run `EXPERIMENT.md` (git commit, motivation, hypothesis) — the config snapshot records
+*what env was trained on*, the EXPERIMENT.md records *why*.
 
 ---
 
@@ -704,11 +872,18 @@ Key files from old code and where they map:
 
 ## Conventions
 
+- **Every training run gets a short global ID + registry entry.** `gentle_manip/utils/experiment_registry.py` mints a unique **5-letter ID** (e.g. `cqwxw`) that names the TRAINING run dir (`logs/<algo>/<task>/<id>/`) and is recorded in the project-root `experiments.csv` (id, algo, task, name, run_dir, created, commit, status). SERL calls `new_id()`+`add_entry()` in `train_serl.py`; DPPO uses the `${exp_id:}` OmegaConf resolver (registered in `dppo/train.py`) inside the logdir template, and the `ExperimentSnapshot` hydra callback writes the row. The wandb run name == the ID. **Eval runs keep datetime naming** (they nest under the policy's run dir) and are NOT registered. Reconcile the table with disk (drop deleted runs, back-fill orphans) via `python -m gentle_manip.scripts.reconcile_experiments` (`--list` just prints it).
+- **Every training run writes an `EXPERIMENT.md`** into its run dir (`logs/<algo>/<task>/<run>/`) — applies to ANY training (SERL, DP3, …), not just SERL. It records the git commit, **motivation**, **hypothesis**, key config, and empty **Observations** + **Final summary** sections to be filled during/after the run (by the agent when monitoring/stopping, and by the user adding insights). Helpers in `gentle_manip/utils/run_paths.py`: `write_experiment_md(...)` at launch, `append_experiment_note(run_dir, note)` during, and fill the Final summary (duration, learner steps, replay-buffer size at end, return/succeed, verdict) when the run ends. `train_serl.py` takes `--motivation` / `--hypothesis` and writes it automatically; wire the same into any new trainer. This is the single place to track *why* each run happened and *what it showed*.
 - **Units**: meters, radians, seconds everywhere. No mm. (The XArm SDK uses mm/deg internally; `xarm7_real.py` is the only place that converts.)
 - **Quaternion order**: (w, x, y, z) — enforce this at the RawObs boundary. **Quaternion sign-flip (RESOLVED 2026-06-30):** the real XArm reports `ee_quat` with the opposite sign from sim for the same pose (sim x≈+1, real x≈−1). q and −q are the same rotation but distinct policy inputs, so an unfiltered real deploy stalled (descended, ignoring the object). Fixed by **canonicalizing the quaternion sign in the shared `PerceptionPipeline`** (make the largest-magnitude component positive) — a no-op for sim, flips real to match, so a sim-trained policy works with no retrain.
 - **Camera names**: must match between SceneSpec (sim) and real_lab.yaml (real). Use `"cam_wrist"` and `"cam_ext"`. Tactile sensor names: `"tactile_left"`, `"tactile_right"`.
 - **World frame**: robot base at origin, z-up.
-- **Config**: plain YAML files loaded with yaml.safe_load or yacs. No Hydra.
+- **Config**: plain YAML files loaded with yaml.safe_load or yacs. No Hydra. Configs are
+  organized by ROLE (tasks/obs/action/dr/augmentation are reusable leaves; experiments/ are
+  compositions; collect/ are recipes; setup/ is backend params) — see `configs/README.md` for
+  the full index (dir → purpose → consuming script) and the shared-experiment / SERL-vs-DP3
+  split. **Every config file starts with a 3-line header** — `# [<type>] <purpose>` /
+  `# Used by: <script(s)>` / `# Status: active|legacy|experimental` — keep it on any new config.
 - **No over-abstraction**: XArm7 is the only robot. Don't build multi-robot abstractions.
 - **Shared code first**: any observation or action processing must go through PerceptionPipeline / ActionPipeline. Never duplicate processing logic between sim and real.
 

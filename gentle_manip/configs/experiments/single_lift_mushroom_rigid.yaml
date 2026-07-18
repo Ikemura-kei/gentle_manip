@@ -1,0 +1,31 @@
+# [experiment] Composition for RIGID mushroom lift (fast debug + rigid->soft base).
+# Used by: serl_sim_server.py + train_serl.py; collect_demos_sim.py
+# Status: active
+#
+# RIGID mushroom experiment — fast debug + rigid->soft curriculum base.
+# Identical geometry to mushroom_lift (same mesh, camera, action, DR), material=rigid.
+task: single_lift_mushroom_rigid
+action: delta_pose_delta_gripper
+dr: sim_demo
+augmentation: l515_noise            # sim-only; teacher (no render) ignores it
+
+obs: superset_rigid        # privileged has NO stress (rigid)
+# views: obs subsets — teacher -> SERL teacher; student -> DP3/DPPO + deploy (point cloud).
+views:
+  teacher: [privileged]             # SERL: state + object pose/vel (no stress)
+  student: [point_cloud]            # DP3/deploy: state + denoised point cloud (deployable)
+
+# rl: RL-lines-only TRAINING hyperparams (SERL/DPPO); offline DP3 BC ignores this block.
+# SERL-default-ish hyperparams (per user: test basic training with defaults, discount 0.99).
+# discount 0.99 (standard) — the REDQ critic ensemble (train_serl defaults) controls the
+# Q-overestimation, so no need for the 0.92/reward-×0.1 band-aids that starved learning.
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000             # match proven config; more initial data before the
+                                    # free-running learner starts (reduces early overfitting)
+  batch_size: 256
+  # Horizon must exceed the task length or the policy is truncated before it can hold in the
+  # success band for 30 steps (demos run to ~237 steps; the old 150 default made succeed=0
+  # impossible). 300 gives comfortable headroom. discount 0.92 caps Q regardless of length.
+  max_episode_steps: 300

@@ -1,0 +1,77 @@
+# [dppo-pretrain] BC-pretrain a state diffusion-MLP on rigid-mushroom lift demos.
+# Used by: third_party/dppo/script/run.py (TrainDiffusionAgent) via --config-path this dir
+# Status: experimental (DPPO integration step-1 validation: STATE pipeline before PointNet)
+#
+# Stock DiffusionMLP on the 14-dim teacher state (ee_pos+quat+gripper+priv obj pos/vel),
+# 7-dim delta-pose+gripper action. Trains on the demo converter's train.npz. This is the
+# plumbing-validation pipeline (rigid + state); the real target is soft mushroom + point
+# cloud (PointNet encoder, next). Run with envs/dppo.
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${logdir}
+  callbacks:                    # snapshot the env (experiment) config -> <run>/config/
+    experiment_snapshot:
+      _target_: gentle_manip.dppo.hydra_snapshot.ExperimentSnapshot
+_target_: agent.pretrain.train_diffusion_agent.TrainDiffusionAgent
+
+name: ${env}_pre_diffusion_mlp_ta${horizon_steps}_td${denoising_steps}
+logdir: ${oc.env:DPPO_LOG_DIR}/dppo-pretrain/${name}/${now:%Y-%m-%d}_${now:%H-%M-%S}_${seed}
+train_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/train.npz
+experiment: single_lift_mushroom_rigid   # env definition snapshot (task+obs+action+dr+reward)
+
+seed: 42
+device: cuda:0
+env: single_lift_mushroom_rigid_state
+obs_dim: 14
+action_dim: 7
+denoising_steps: 20
+horizon_steps: 4
+cond_steps: 1
+
+wandb: null                 # smoke: no wandb (set an entity block to enable)
+
+train:
+  n_epochs: 3000
+  batch_size: 128
+  learning_rate: 1e-3
+  weight_decay: 1e-6
+  lr_scheduler:
+    first_cycle_steps: 3000
+    warmup_steps: 1
+    min_lr: 1e-4
+  epoch_start_ema: 10
+  update_ema_freq: 5
+  save_model_freq: 500
+
+model:
+  _target_: model.diffusion.diffusion.DiffusionModel
+  predict_epsilon: True
+  denoised_clip_value: 1.0
+  network:
+    _target_: model.diffusion.mlp_diffusion.DiffusionMLP
+    horizon_steps: ${horizon_steps}
+    action_dim: ${action_dim}
+    cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+    time_dim: 16
+    mlp_dims: [512, 512, 512]
+    activation_type: ReLU
+    out_activation_type: Identity
+    use_layernorm: False
+    residual_style: True
+  horizon_steps: ${horizon_steps}
+  obs_dim: ${obs_dim}
+  action_dim: ${action_dim}
+  denoising_steps: ${denoising_steps}
+  device: ${device}
+
+ema:
+  decay: 0.995
+
+train_dataset:
+  _target_: agent.dataset.sequence.StitchedSequenceDataset
+  dataset_path: ${train_dataset_path}
+  horizon_steps: ${horizon_steps}
+  cond_steps: ${cond_steps}
+  device: ${device}

@@ -1,0 +1,23 @@
+# [experiment] RIGID mushroom lift, NO STRESS PENALTY — fast, NaN-free twin of
+#              single_lift_mushroom_soft_nostress (identical action/DR/aug/obs/views/rl; task -> rigid).
+# Used by: serl_sim_server.py (--experiment) + DPPO finetune (experiment snapshot)
+# Status: experimental (2026-07-12)
+#
+# Same as single_lift_mushroom_soft_nostress in EVERY way EXCEPT the task points to the rigid twin
+# (object_type: rigid). Purpose: a fast, never-NaN sim to sanity-check training hyperparameters
+# before spending soft-sim time. Same base policy (state_3000, SL-trained on soft demos).
+task: single_lift_mushroom_rigid_nostress
+action: delta_pose_delta_gripper
+dr: food_shape                      # same FULL DR as the soft experiment (E/nu unused for rigid; rho/scale/shape apply)
+augmentation: l515_noise
+obs: superset_soft
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+rl:
+  random_steps: 200
+  training_starts: 400
+  batch_size: 256
+  discount: 0.92
+  utd_ratio: 2
+  critic_lr: 1.0e-4

@@ -1,0 +1,44 @@
+# [collect] Scripted (automatic) demo collection — soft mushroom. Records SUPERSET obs + per-step reward.
+# Used by: examples/collect_demos_sim.py
+# Status: active
+#
+# Automatic (scripted) demo collection for the mushroom lift — no human needed.
+# ScriptedLiftDemonstrator servos on PRIVILEGED sim state (approach -> descend -> grasp ->
+# lift to 0.2 m -> hold), saves on success (object lifted to lift_height), discards+retries
+# on a failed grasp/lift. Records the SUPERSET obs + reward (experiment mode), so the demos
+# are dual-purpose (RLPD teacher/student) and in the CURRENT action convention (gripper scale
+# 0.005) — no rescale needed.
+experiment: single_lift_mushroom_soft
+task_name: single_lift_mushroom_soft
+out_dir: dataset/demos
+
+input: scripted               # automatic state-machine expert (headless)
+show_viewer: false
+n_episodes: 50               # DP3/DPPO BC set size (matches the DP3 author's 50)
+rate: 30                      # Hz
+speed: 0.5                    # scripted pose speed_cap (proportional move, capped)
+# Gripper close rate as a NORMALIZED action. MUST match the action scale: at gripper scale
+# 0.005, 0.5 -> 0.0025 m/step (~20 steps to close from 0.08 to the 0.03 grasp width). The old
+# 0.05 value (for the 0.05 scale) would close 10x too slowly and every grasp would time out.
+gripper_value: 0.5
+settle_steps: 40
+
+# Scripted state-machine params (grasp geometry for the ~3.3x3.2x3.5 cm mushroom).
+scripted:
+  lift_height: 0.2            # success = object center reaches this (band 0.175-0.225)
+  hold_seconds: 2.0
+  approach_height: 0.12       # hover this far above the object before descending
+  grasp_z: 0.006              # TCP descend height (fingertips straddle the object base)
+  grasp_gw: 0.030             # close until gripper width <= this (mushroom ~3.2 cm wide)
+  grasp_firm_steps: 1
+
+# quality-check video (cam_ext RGB) for the first N episodes -> <run_dir>/videos/
+record_video: true
+video_episodes: 5
+video_fps: 30
+
+# idle trimming (drop long pauses; keep a little trailing so the policy learns to stop)
+idle_threshold: 0.001
+keep_trailing_idle: 5
+max_interior_idle: 3
+action_noise_std: 0.0

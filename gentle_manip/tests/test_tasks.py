@@ -165,3 +165,19 @@ def test_compute_reward_no_task_state_in_feedback():
     task.reset(fb)
     task.compute_reward(fb, make_raw_obs())
     assert "success" not in fb.extra
+
+
+def test_success_absolute_band():
+    # Absolute z-band [0.175, 0.225], held hold_steps=3.
+    task = SingleLiftTask({"object_name": "mushroom", "object_type": "soft", "rewards": {},
+                           "success_z_min": 0.175, "success_z_max": 0.225, "hold_steps": 3})
+    task.reset(make_feedback(num_envs=1, obj_z=0.02))
+    ro = make_raw_obs(num_envs=1)
+    for _ in range(2):
+        assert not task.is_success(make_feedback(num_envs=1, obj_z=0.20), ro)[0]   # not held long enough
+    assert task.is_success(make_feedback(num_envs=1, obj_z=0.20), ro)[0]           # 3rd in-band step
+    # above the band resets the counter -> not success
+    task.reset(make_feedback(num_envs=1, obj_z=0.02))
+    for _ in range(5):
+        s = task.is_success(make_feedback(num_envs=1, obj_z=0.24), ro)
+    assert not s[0]

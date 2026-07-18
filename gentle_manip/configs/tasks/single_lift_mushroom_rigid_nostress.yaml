@@ -1,0 +1,28 @@
+# [task] RIGID mushroom single-lift, NO STRESS PENALTY — fast, NaN-free twin of the soft nostress task.
+# Used by: experiments (single_lift_mushroom_rigid_nostress) -> DPPO finetune
+# Status: experimental (2026-07-12)
+#
+# IDENTICAL to single_lift_mushroom_soft_nostress in EVERY way (success band, hold, mesh, reward
+# scales) EXCEPT object_type: soft -> rigid (same mushroom mesh, Rigid material). Rigid has no MPM
+# CFL limit and no grasp-coupling instability, so it runs much faster and never NaNs — a quick
+# testbed for training hyperparameters. (Not the standalone single_lift_mushroom_rigid, which uses
+# different "standard-scale" rewards + discount; this one mirrors the soft_nostress reward exactly.)
+success_z_min: 0.175
+success_z_max: 0.225
+hold_steps: 30
+object_name: "mushroom"
+object_type: "rigid"     # <-- the ONLY change from single_lift_mushroom_soft_nostress
+sim_substeps: 210        # rigid ignores the MPM CFL limit; kept for parity (GM_SIM_SUBSTEPS overrides at launch)
+mpm_grid_density: 250    # unused for rigid (no MPM particles); kept for parity
+success_scale: 0.2
+
+rewards:
+  # No stress component (rigid has no von Mises anyway). Approach + lift shaping only — reward
+  # scales IDENTICAL to single_lift_mushroom_soft_nostress so this is a true rigid twin.
+  dist_to_obj:
+    scale: 0.1
+    decay: 8.0
+  lift:
+    scale: 0.1
+    grasp_gate_dist: 0.079
+    lift_target: 0.16

@@ -1,0 +1,30 @@
+# [collect] Teleop (keyboard) demo collection — soft mushroom.
+# Used by: examples/collect_demos_sim.py
+# Status: active
+#
+# Teleop demo collection for the mushroom lift — experiment-driven (single source of
+# truth). Records the SUPERSET obs (state + privileged + point cloud) AND the per-step
+# reward, so ONE demo set serves both:
+#   - HIL-SERL RLPD  (teacher/student views via subset_demo; reward kept)
+#   - DP3            (point-cloud view; reward discarded)
+experiment: single_lift_mushroom_soft     # -> obs (superset), task (with reward), action, dr, augmentation
+task_name: single_lift_mushroom_soft
+out_dir: dataset/demos
+
+input: keyboard               # human teleop (opens pygame + Genesis viewer). "scripted" = automatic.
+n_episodes: 30                # scripted only
+rate: 30                      # Hz
+speed: 0.4                    # teleop per-step motion magnitude (gentle for a soft object)
+gripper_value: 0.05
+settle_steps: 40
+
+# quality-check video (cam_ext RGB) for the first N episodes -> <run_dir>/videos/
+record_video: true
+video_episodes: 5
+video_fps: 30
+
+# idle trimming (drop long pauses; keep a little trailing so the policy learns to stop)
+idle_threshold: 0.001
+keep_trailing_idle: 5
+max_interior_idle: 3
+action_noise_std: 0.0

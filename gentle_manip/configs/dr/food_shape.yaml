@@ -1,0 +1,31 @@
+# [dr] Full food DR: pose + orientation + size + procedural SHAPE deformation.
+# Used by: experiments (dr:) — sim demo collection / training that varies object geometry
+# Status: active
+#
+# Superset of sim_demo (pose + orientation + arm-home jitter) plus per-scene object SIZE and
+# SHAPE randomization (real food varies in both). Size = uniform mesh scale; shape = mild
+# near-diffeomorphic mesh deformation (bend = curvature, twist, taper) applied to the nominal
+# mesh at scene build (gentle_manip/assets/mesh_deform.py). Size/shape are SCENE-level: one
+# per sim launch (all sub-envs share the geometry); vary across launches, or rebuild every N
+# episodes via SimBackend.randomize_scene() for within-run variety.
+object_pos_xy: 0.075          # half-range (m): per-env object x/y jitter
+robot_init_pos_xyz: 0.02     # half-range (m): per-env reset home EE xyz jitter
+object_yaw_deg: 180          # per-env object yaw ~ U(-180,180) about world z (full range)
+object_pitch_roll_deg: 15    # per-env object pitch & roll tilt ~ U(-15,15) deg
+
+# ── per-scene size + shape (rebuild) ─────────────────────────────────────────
+object_scale: [0.8, 1.12]     # uniform object scale
+object_bend_deg: [-25, 25]   # total bend along the long axis (deg) — curvature (banana-like)
+object_twist_deg: [-20, 20]  # total twist about the long axis (deg)
+object_taper: [-0.15, 0.15]  # end-to-end thickness change (fraction)
+object_axis_scale: [0.9, 1.1] # anisotropic scale on ONE random x/y/z axis (wider/narrower)
+# object_rbf: [0.0, 0.04]    # optional organic bumps (fraction of size); off by default
+
+# ── per-scene material (rebuild) ─────────────────────────────────────────────
+# Bounded for MPM stability at the tuned substeps (210): stable substeps ∝ √E, so we keep E on
+# the SOFT side of the tuned 3e5 (softer = fewer substeps needed = always stable). yield stays
+# from the registry material.
+object_E: [2.0e5, 3.0e5]     # Young's modulus (Pa)
+object_nu: [0.32, 0.38]      # Poisson ratio
+object_rho: [900, 1100]      # density (kg/m^3)
+coup_friction: [3.5, 4.5]    # rigid<->MPM coupling friction

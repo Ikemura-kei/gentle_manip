@@ -1,3 +1,7 @@
+# [dr] Aggressive DR preset (wider material + pose spread).
+# Used by: experiments (dr:)
+# Status: active
+#
 # Aggressive domain randomization (sim-only). Wider material spread + larger pose
 # jitter; re-center material ranges per object. Material/friction need a rebuild.
 object_pos_xy: 0.06          # half-range (m): per-env object x/y jitter

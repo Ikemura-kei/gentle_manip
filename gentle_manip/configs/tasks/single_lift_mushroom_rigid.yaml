@@ -1,0 +1,33 @@
+# [task] Rigid mushroom single-lift (same mesh, Rigid material, no stress reward): fast debug + rigid->soft base.
+# Used by: experiments (task:) -> SERL, demo collection
+# Status: active
+#
+# RIGID mushroom lift — same mesh/geometry as mushroom_lift, but a Rigid material.
+# Purpose: fast debugging of basic training (no MPM CFL -> low substeps -> ~10x faster),
+# and the base policy for a rigid->soft curriculum (later finetune on the soft version).
+# No stress reward (rigid has no von Mises). Reward at STANDARD scale + discount 0.99:
+# the ×0.1 + discount 0.92 band-aids (added to fight divergence pre-REDQ) starved learning
+# (REDQ kept critic_loss ~0.008 but return stuck at ~5 = policy stays home). With the REDQ
+# critic ensemble now handling Q-overestimation, the full reward signal + long horizon are
+# restored (the proven-project regime).
+success_z_min: 0.175
+success_z_max: 0.225
+hold_steps: 30
+object_name: "mushroom"
+object_type: "rigid"     # <-- the only material difference from mushroom_lift
+
+# Rigid: no MPM CFL limit, so few substeps -> much faster than the soft mushroom's 210.
+sim_substeps: 20
+mpm_grid_density: 250    # unused (no MPM entity) but kept for SceneSpec
+
+success_scale: 2.0
+
+rewards:
+  # No stress term (rigid). Approach + lift + sparse success only. Standard scale.
+  dist_to_obj:
+    scale: 1.0
+    decay: 8.0
+  lift:
+    scale: 1.0
+    grasp_gate_dist: 0.079
+    lift_target: 0.16

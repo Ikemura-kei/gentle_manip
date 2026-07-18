@@ -1,0 +1,27 @@
+# [obs] Real tactile collection: ee state + cam_ext point cloud + both GelSight tactiles.
+# Used by: demos/record.py --obs-config (real tactile dataset collection)
+# Status: active (2026-07-06)
+#
+# Single-camera rig (cam_ext L515 only — no wrist cam) + both GelSight Mini tactile streams.
+# ee_pos/ee_quat/gripper_width are always included. Drop point_cloud (or swap for `images:`)
+# if the tactile policy is image/tactile-only. Tactile is real-only (None in any sim config).
+#
+# The state + point-cloud channel is kept IN PARITY with the sim setup (superset_soft.yaml)
+# and the real-deploy configs (point_cloud_1cam*): same crop/max_points, the L515 flying-pixel
+# denoiser (outlier_removal), and the shared tiny quaternion jitter (quat_noise_std). Point-cloud
+# jitter/dropout is deliberately omitted — the real camera already carries that noise inherently.
+include_joint_pos: false
+include_joint_vel: false
+quat_noise_std: 0.003            # shared sim+real ee_quat jitter (renormalized) — parity w/ sim
+
+point_cloud:
+  cameras: ["cam_ext"]
+  crop_min: [0.2, -0.215, 0.004]
+  crop_max: [0.71,  0.215, 0.45]
+  max_points: 1024
+  outlier_removal:               # real-only L515 denoise (no-op in sim); min_neighbors matches sim
+    voxel_size: 0.01
+    min_neighbors: 23
+
+tactile:
+  sensors: ["tactile_left", "tactile_right"]
