@@ -1,0 +1,32 @@
+# [task] CANONICAL EVALUATION sim for the mushroom soft-lift — the ONE reference fidelity every
+#         policy is evaluated on, regardless of what sim it TRAINED on.
+# Used by: experiments/single_lift_mushroom_soft_eval -> dppo_eval.sbatch (default eval experiment)
+# Status: active (2026-07-15)
+#
+# Pins the reference evaluation sim: sim_substeps=235, mpm_grid_density=250. Do NOT override these
+# at eval time (that is the whole point — apples-to-apple across every policy). Object / success
+# band / rewards are the standard single_lift_mushroom_soft (the reward scales are irrelevant to the
+# eval metrics: success comes from the success band, stress is MEASURED raw von-Mises regardless of
+# reward). A policy trained on a coarse/fine sim is still measured HERE.
+success_z_min: 0.175
+success_z_max: 0.225
+hold_steps: 30
+object_name: "mushroom"
+object_type: "soft"      # MPM -> von_mises_stress measured for the stress metrics
+sim_substeps: 235        # CANONICAL eval fidelity — pinned, do not override at eval time
+mpm_grid_density: 250    # CANONICAL eval grid — pinned
+success_scale: 0.2
+
+rewards:                 # standard single_lift_mushroom_soft rewards; do NOT affect success/stress metrics
+  stress:
+    scale: 0.2
+    cap: 1.5
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 0.1
+    decay: 8.0
+  lift:
+    scale: 0.1
+    grasp_gate_dist: 0.079
+    lift_target: 0.16

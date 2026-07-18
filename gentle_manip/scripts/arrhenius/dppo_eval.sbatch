@@ -27,8 +27,14 @@ cd "$REPO"
 #   SIM_EXPERIMENT (server task/reward+DR), EVAL_EXPERIMENT (eval-cfg experiment snapshot),
 #   FT_DENOISING (ft_denoising_steps: 0 for a BC base ckpt, 10 for a finetuned ckpt),
 #   GM_SIM_SUBSTEPS / GM_MPM_SAMPLER (sim substeps + MPM sampler, read by scene_builder).
-SIM_EXPERIMENT=${SIM_EXPERIMENT:-single_lift_mushroom_soft}   # default base (measures stress)
-EVAL_EXPERIMENT=${EVAL_EXPERIMENT:-}                          # if set -> hydra experiment=<...> on the eval cfg
+# CANONICAL eval sim is pinned in a CONFIG FILE, not reconstructed via env-vars: the default
+# experiment single_lift_mushroom_soft_eval fixes sim_substeps=235 / mpm_grid_density=250 in its
+# task config, so EVERY policy is evaluated on the same reference sim regardless of how it trained.
+# Do NOT pass GM_SIM_SUBSTEPS for a canonical eval (the eval task pins the fidelity); only override
+# for a deliberate off-reference probe. Only ft_denoising (policy: 0=BC, 10=finetuned) + CKPT vary.
+SIM_EXPERIMENT=${SIM_EXPERIMENT:-single_lift_mushroom_soft_eval}   # server sim: pinned 235/250
+EVAL_EXPERIMENT=${EVAL_EXPERIMENT:-single_lift_mushroom_soft_eval} # eval-cfg experiment snapshot (same)
+export GM_MPM_SAMPLER=${GM_MPM_SAMPLER:-regular}             # pinned sampler (aarch64 reference)
 FT_DENOISING=${FT_DENOISING:-0}                              # 0 = eval BC base; 10 = eval finetuned denoising
 VIEW=student
 NUM_ENVS=5                                      # canonical EvalSpec; MUST match cfg n_envs
