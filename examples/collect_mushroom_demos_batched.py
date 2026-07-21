@@ -108,6 +108,21 @@ def main():
     out_dir = args.out_dir or (_REPO / "dataset" / "demos" / "mushroom_soft_batched" /
                                datetime.now().strftime("%y-%m-%d-%H%M%S"))
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Self-document the run so it's reproducible without gentle_manip/dppo/demo_convert.sh:
+    # the exact launch command + the resolved config (args + scripted params + sim fidelity).
+    from gentle_manip.utils.run_paths import save_launch_command
+    save_launch_command(out_dir)                                    # -> <run>/launch_command.sh
+    (out_dir / "config.yaml").write_text(yaml.safe_dump({
+        "source": "collect_mushroom_demos_batched", "experiment": args.experiment,
+        "obs": args.obs, "collect_config": str(args.collect_config), "n_demos": args.n_demos,
+        "n_envs": args.n_envs, "pose_box_halfrange_m": list(args.pose_box),
+        "scene_dr_every": args.scene_dr_every, "max_steps": args.max_steps, "rate": args.rate,
+        "seed": args.seed, "shard_size": args.shard_size,
+        "sim_substeps": task.sim_substeps, "mpm_grid_density": task.mpm_grid_density,
+        "scripted_params": {k: (float(v) if isinstance(v, (int, float)) else v)
+                            for k, v in params.items()}}, sort_keys=False))
+
     box = np.array(args.pose_box, np.float32)
     rng = np.random.default_rng(args.seed)
     DONE = ScriptedLiftDemonstrator.DONE
