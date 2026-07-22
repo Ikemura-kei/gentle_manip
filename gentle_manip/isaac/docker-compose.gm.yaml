@@ -1,0 +1,15 @@
+# Compose OVERRIDE that bind-mounts our exploration dir into the Isaac Lab base container,
+# WITHOUT editing anything under third_party/IsaacLab. Merged in via container.py --files.
+#
+#   cd third_party/IsaacLab
+#   ./docker/container.py start base --files /home/kei/kei/gentle_manip/gentle_manip/isaac/docker-compose.gm.yaml
+#   ./docker/container.py enter base --files /home/kei/kei/gentle_manip/gentle_manip/isaac/docker-compose.gm.yaml
+#   # inside: ./isaaclab.sh -p /workspace/gm_isaac/play_deformables.py --headless --enable_cameras
+#
+# (absolute source path so compose doesn't resolve it relative to the merged file's location)
+services:
+  isaac-lab-base:
+    volumes:
+      - type: bind
+        source: /home/kei/kei/gentle_manip/gentle_manip/isaac
+        target: /workspace/gm_isaac
