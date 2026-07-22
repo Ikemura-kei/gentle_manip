@@ -87,6 +87,20 @@ Success: `actual` tracks `cmd` with `spread ~0` (all 6 move together), `finger_s
 smoothly, both fingers move symmetrically. Compare the printed SEP range to Genesis
 (0.1409 open .. 0.0536 closed). A functional soft grasp is Phase 5.
 
+## Phase 4 — scanned mushroom as an FEM deformable
+The compose override now mounts ALL of `gentle_manip/assets` (was just `xarm/`), so recreate the
+container once to pick it up: `./docker/container.py start base --files "$GM"` then re-enter (and
+re-`pip install -e source/isaaclab` — fresh overlay). No convert step — the spike loads mushroom.obj
+directly, welds it (trimesh), builds the deformable mesh prim, and binds the mushroom material:
+```bash
+./isaaclab.sh -p /workspace/gm_isaac/deform_mushroom.py
+```
+(`convert_mesh.py -> UsdFileCfg` was tried but its rigid USD structure won't take the deformable
+schema; the direct trimesh route mirrors IsaacLab's working MeshCfg deformable spawner.)
+Success: `tet-cook OK` prints elements/nodes > 0, `root_z` settles (bounded, no NaN/explosion, no
+sink through floor), von-Mises finite at the REAL softness (E=3e5). If it's unstable, drop `--youngs`
+or raise solver iterations; if the cook fails, the mesh may need decimation before welding.
+
 ## Files
 - `play_deformables.py` — deformable FEM benchmark: physics-only vs +render+pointcloud FPS,
   per-element von-Mises stress; `--dump` captures rgb+geometry+stress, `--squeeze` compresses.
@@ -96,6 +110,8 @@ smoothly, both fingers move symmetrically. Compare the printed SEP range to Gene
   6-DOF command); prints controlled frame + TCP for convention reconciliation.
 - `grip_test.py` — Phase 3: drive the parallel-jaw (all 6 joints equal), `--sweep` calibrates
   joint-angle → finger-separation.
+- `deform_mushroom.py` — Phase 4: scanned mushroom.obj → FEM deformable (convert_mesh → UsdFileCfg
+  deformable); checks tet-cook, stability, stress.
 - `docker-compose.gm.yaml` — compose override: mounts this dir (`/workspace/gm_isaac`) + the XArm
   assets (`/workspace/gm_assets/xarm`) into the container, no submodule edits.
 - `PLAN.md` — the Path-A adoption roadmap (this is Phase 1 of 7).

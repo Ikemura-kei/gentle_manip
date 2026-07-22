@@ -13,8 +13,9 @@ services:
       - type: bind
         source: /home/kei/kei/gentle_manip/gentle_manip/isaac
         target: /workspace/gm_isaac
-      # XArm7 URDF + meshes (read-only) so the URDF->USD conversion can run in-container
+      # gentle_manip assets (read-only) so URDF/mesh->USD conversions run in-container:
+      #   xarm/ (arm URDF+meshes, Phase 1-3) and objects/ (mushroom.obj etc., Phase 4+).
       - type: bind
-        source: /home/kei/kei/gentle_manip/gentle_manip/assets/xarm
-        target: /workspace/gm_assets/xarm
+        source: /home/kei/kei/gentle_manip/gentle_manip/assets
+        target: /workspace/gm_assets
         read_only: true
