@@ -46,8 +46,9 @@ train:
   learning_rate: 1e-4
   weight_decay: 1e-6
   lr_scheduler:
-    first_cycle_steps: 3000
-    warmup_steps: 1
+    first_cycle_steps: ${train.n_epochs}   # single cosine cycle over the whole run (no warm
+                                           # restart) — matches DPPO's convention (first_cycle==n_epochs)
+    warmup_steps: 100                      # DPPO uses 100 across all pretrains
     min_lr: 1e-5
   epoch_start_ema: 10
   update_ema_freq: 5

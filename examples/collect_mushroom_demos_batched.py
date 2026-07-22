@@ -16,6 +16,7 @@ re-randomize, repeat until --n-demos successes. Saved incrementally (interrupt-s
 from __future__ import annotations
 
 import argparse
+import os
 import pickle
 from datetime import datetime, timezone
 from pathlib import Path
@@ -88,6 +89,10 @@ def main():
 
     exp = Experiment.load(args.experiment)
     task = SingleLiftTask(exp.task_cfg)                              # 210/250, reward + success
+    # Effective sim fidelity actually used (GM_SIM_SUBSTEPS / GM_MPM_SAMPLER override the task cfg)
+    # so the recorded config/meta is HONEST when we run at the eval fidelity (235 + regular).
+    eff_substeps = int(os.environ.get("GM_SIM_SUBSTEPS") or task.sim_substeps)
+    mpm_sampler = os.environ.get("GM_MPM_SAMPLER") or "genesis-default"
     obs_cfg = ObsConfig.from_dict(yaml.safe_load((_CFG / "obs" / f"{args.obs}.yaml").read_text()))
     act_cfg = exp.action_config
     cc = yaml.safe_load(args.collect_config.read_text())
@@ -99,7 +104,10 @@ def main():
 
     use_sub = args.scene_dr_every > 0                               # geometry DR needs relaunch
     backend = SimBackend(task.scene_spec, num_envs=args.n_envs, use_subprocess=use_sub,
-                         config={"sim": {"settle_steps": int(cc.get("settle_steps", 30)),
+                         config={"seed": args.seed,        # seeds the OBJECT pose/orientation/scene-DR
+                                                           # RNG too (not just home offsets) -> a new
+                                                           # --seed gives genuinely new initial conditions
+                                 "sim": {"settle_steps": int(cc.get("settle_steps", 30)),
                                          "scene_dr_every": args.scene_dr_every},
                                  "dr": exp.dr})
     env = PolicyEnv(backend, obs_cfg, act_cfg, task=task, max_episode_steps=10 ** 9)
@@ -119,7 +127,7 @@ def main():
         "n_envs": args.n_envs, "pose_box_halfrange_m": list(args.pose_box),
         "scene_dr_every": args.scene_dr_every, "max_steps": args.max_steps, "rate": args.rate,
         "seed": args.seed, "shard_size": args.shard_size,
-        "sim_substeps": task.sim_substeps, "mpm_grid_density": task.mpm_grid_density,
+        "sim_substeps": eff_substeps, "mpm_grid_density": task.mpm_grid_density, "mpm_sampler": mpm_sampler,
         "scripted_params": {k: (float(v) if isinstance(v, (int, float)) else v)
                             for k, v in params.items()}}, sort_keys=False))
 
@@ -133,7 +141,7 @@ def main():
                 "action_dim": int(demos[0]["actions"].shape[1]) if demos else 0,
                 "rate_hz": args.rate, "n_envs": args.n_envs, "shard_size": args.shard_size,
                 "pose_box_halfrange_m": list(args.pose_box), "scene_dr_every": args.scene_dr_every,
-                "sim_substeps": task.sim_substeps, "mpm_grid_density": task.mpm_grid_density,
+                "sim_substeps": eff_substeps, "mpm_grid_density": task.mpm_grid_density, "mpm_sampler": mpm_sampler,
                 "source": "collect_mushroom_demos_batched",
                 "created": datetime.now(timezone.utc).isoformat()}
 
