@@ -16,7 +16,10 @@ object_type: "soft"      # MPM -> has von_mises_stress for the stress reward
 
 # Config C (from examples/mushroom_soft_dev.py sweep): E=0.3 MPa needs ~210 substeps
 # for CFL stability at grid_density 250 (~840 particles, ~15 physics steps/s, 1 env).
-sim_substeps: 210
+# aarch64/GH200: 210 (tuned on x86) NaNs during grasp on GH200 (rigid "decrease timestep").
+# 420 fully restores parity (success 0.76, stress 47.6k ≈ x86 44.9k); trying 220 as a cheaper
+# value — testing whether a small bump above 210 is enough. TODO: confirm 220 is stable.
+sim_substeps: 220
 mpm_grid_density: 250
 
 # Reward ×0.1 globally (2026-07-02): dense return was ~78/episode -> large Q-targets gave
