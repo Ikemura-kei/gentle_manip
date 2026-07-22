@@ -61,11 +61,27 @@ sed -e 's#package://xarm_description/#/workspace/gm_assets/xarm/xarm_description
 ```
 Success: arm stands at home, holds without drift, joint targets track (err ~0), EE pose reads back.
 
+## Phase 2 — cartesian / EE control (delta-pose via DiffIK)
+Needs the converted USD from Phase 1. Uses IsaacLab's `DifferentialIKController` in RELATIVE mode:
+the command is a 6-DOF `(dx,dy,dz,droll,dpitch,dyaw)` delta — the SAME thing our `ActionPipeline`
+emits (dims 0-5; dim 6 = gripper). Runs a scripted ±x/±y/±z/±yaw pattern so the EE visibly moves and
+returns, printing both the controlled frame (`xarm_gripper_base_link`) and "our TCP" (fingertip =
+base + `SIM_TCP_OFFSET` [0,0,0.171]).
+```bash
+./isaaclab.sh -p /workspace/gm_isaac/control_ee.py                 # GUI, scripted delta motion
+./isaaclab.sh -p /workspace/gm_isaac/control_ee.py --headless --steps 600
+```
+Success: EE follows each commanded delta and returns to start after the ± pattern; TCP(world) matches
+the fingertip you expect at home (reconcile against real EE_BOUNDS / DEFAULT_EE_POSE). If IK is
+jittery, try `--ik-method pinv` or bump `--arm-stiffness`.
+
 ## Files
 - `play_deformables.py` — deformable FEM benchmark: physics-only vs +render+pointcloud FPS,
   per-element von-Mises stress; `--dump` captures rgb+geometry+stress, `--squeeze` compresses.
 - `viz_capture.py` — host-side (envs/deploy): capture.npz -> mesh video + stress-node video + PNG.
 - `spawn_arm.py` — Phase 1: spawn XArm7, hold home, read joint/EE state, `--joint-test` tracking.
+- `control_ee.py` — Phase 2: cartesian delta-pose control via DiffIK (relative mode = ActionPipeline
+  6-DOF command); prints controlled frame + TCP for convention reconciliation.
 - `docker-compose.gm.yaml` — compose override: mounts this dir (`/workspace/gm_isaac`) + the XArm
   assets (`/workspace/gm_assets/xarm`) into the container, no submodule edits.
 - `PLAN.md` — the Path-A adoption roadmap (this is Phase 1 of 7).
