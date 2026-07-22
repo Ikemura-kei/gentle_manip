@@ -75,6 +75,18 @@ Success: EE follows each commanded delta and returns to start after the ± patte
 the fingertip you expect at home (reconcile against real EE_BOUNDS / DEFAULT_EE_POSE). If IK is
 jittery, try `--ik-method pinv` or bump `--arm-stiffness`.
 
+## Phase 3 — gripper (parallel-jaw drive + width calibration)
+PhysX doesn't honor URDF mimic joints, so we command all 6 gripper joints (drive_joint + 5 mimics,
+all multiplier=1) to the SAME angle — mirroring Genesis `XArm7Sim.apply_target`. `--sweep` ramps
+open→close and prints Isaac's own joint-angle→finger-separation calibration (its `GRIPPER_CALIB`).
+```bash
+./isaaclab.sh -p /workspace/gm_isaac/grip_test.py --sweep         # open->close, print calibration
+./isaaclab.sh -p /workspace/gm_isaac/grip_test.py --angle 0.5     # hold a fixed joint angle
+```
+Success: `actual` tracks `cmd` with `spread ~0` (all 6 move together), `finger_sep` decreases
+smoothly, both fingers move symmetrically. Compare the printed SEP range to Genesis
+(0.1409 open .. 0.0536 closed). A functional soft grasp is Phase 5.
+
 ## Files
 - `play_deformables.py` — deformable FEM benchmark: physics-only vs +render+pointcloud FPS,
   per-element von-Mises stress; `--dump` captures rgb+geometry+stress, `--squeeze` compresses.
@@ -82,6 +94,8 @@ jittery, try `--ik-method pinv` or bump `--arm-stiffness`.
 - `spawn_arm.py` — Phase 1: spawn XArm7, hold home, read joint/EE state, `--joint-test` tracking.
 - `control_ee.py` — Phase 2: cartesian delta-pose control via DiffIK (relative mode = ActionPipeline
   6-DOF command); prints controlled frame + TCP for convention reconciliation.
+- `grip_test.py` — Phase 3: drive the parallel-jaw (all 6 joints equal), `--sweep` calibrates
+  joint-angle → finger-separation.
 - `docker-compose.gm.yaml` — compose override: mounts this dir (`/workspace/gm_isaac`) + the XArm
   assets (`/workspace/gm_assets/xarm`) into the container, no submodule edits.
 - `PLAN.md` — the Path-A adoption roadmap (this is Phase 1 of 7).
