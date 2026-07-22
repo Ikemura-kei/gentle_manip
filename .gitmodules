@@ -11,3 +11,7 @@
 	path = third_party/dppo
 	url = https://github.com/Ikemura-kei/DPPO_fork.git
 	branch = gentle_manip
+[submodule "third_party/IsaacLab"]
+	path = third_party/IsaacLab
+	url = https://github.com/isaac-sim/IsaacLab.git
+	branch = main
