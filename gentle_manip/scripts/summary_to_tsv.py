@@ -38,14 +38,16 @@ import sys
 
 # Curated columns (order = spreadsheet column order). "run" and "checkpoint" are derived.
 CURATED = [
-    "run", "checkpoint", "experiment", "n_episodes",
-    "success_rate", "ever_success_rate", "mean_episode_reward",
-    "stress_max_tmax_mean",      # peak (worst particle, worst step) — noisy
-    "stress_max_tmax_p95",
-    "stress_mean_ttop20_mean",   # robust: spatial-mean over worst-20% timesteps
+    "run", "checkpoint",
+    "success_rate",                 # SR
+    "stress_mean_tmax_mean",
+    "stress_mean_ttop20_mean",
+    "stress_max_ttop20_mean",
     "stress_top10_ttop20_mean",
-    "stress_top20_ttop20_mean",
-    "stress_mean_tmean_mean",    # sustained (time-mean)
+    "stress_top20_tmax_mean",
+    "stress_top20_ttop20_mean",     # headline interaction tail
+    "stress_top20_ttop20_std",
+    "stress_top20_ttop20_p95",
 ]
 
 
