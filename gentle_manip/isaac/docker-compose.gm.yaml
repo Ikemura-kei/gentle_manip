@@ -13,3 +13,8 @@ services:
       - type: bind
         source: /home/kei/kei/gentle_manip/gentle_manip/isaac
         target: /workspace/gm_isaac
+      # XArm7 URDF + meshes (read-only) so the URDF->USD conversion can run in-container
+      - type: bind
+        source: /home/kei/kei/gentle_manip/gentle_manip/assets/xarm
+        target: /workspace/gm_assets/xarm
+        read_only: true
