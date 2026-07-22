@@ -19,12 +19,35 @@ parser.add_argument("--obj", default="/workspace/gm_assets/objects/mushroom.obj"
 parser.add_argument("--youngs", type=float, default=3.0e5, help="Young's modulus (mushroom preset)")
 parser.add_argument("--poisson", type=float, default=0.35)
 parser.add_argument("--z", type=float, default=0.005, help="gap above ground at spawn (m)")
+parser.add_argument("--sim-resolution", type=int, default=10,
+                    help="simulation_hexahedral_resolution — higher = finer/more-regular tets, "
+                         "cleaner stress, but slower")
+parser.add_argument("--solver-iters", type=int, default=20,
+                    help="solver_position_iteration_count — higher = better convergence, less "
+                         "spurious residual stress (PhysX default is low)")
+parser.add_argument("--fps-window", type=int, default=200, help="steps to time for FPS (after settle)")
+parser.add_argument("--rest-offset", type=float, default=0.0, help="deformable rest_offset (raise to "
+                    "stop ground penetration, e.g. 0.001-0.002)")
+parser.add_argument("--vel-damping", type=float, default=0.0,
+                    help="vertex_velocity_damping — dissipates drop/settle energy so the body relaxes "
+                         "to gravitational rest instead of holding a compressed stressed state")
+parser.add_argument("--remesh-pitch", type=float, default=0.0,
+                    help="voxel-remesh the scan to a CLEAN uniform watertight mesh before cooking "
+                         "(pitch in m, e.g. 0.0015). 0 = use the raw scan. Fixes bad-tet stress artifacts.")
+parser.add_argument("--smooth-iters", type=int, default=10,
+                    help="Taubin smoothing iterations on the remeshed surface (removes the voxel "
+                         "staircase, volume-preserving). 0 = off")
+parser.add_argument("--no-gravity", action="store_true", help="DIAGNOSTIC: gravity off + float the "
+                    "mesh (no ground contact). Stress should be ~0; if it stays high it's baked-in "
+                    "cooking rest-stress, not contact/load.")
 parser.add_argument("--steps", type=int, default=100000, help="steps before auto-exit (headless)")
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
+
+import time
 
 import numpy as np
 import torch
@@ -44,11 +67,26 @@ def von_mises(stress: torch.Tensor) -> torch.Tensor:
                       + 3.0 * (sxy ** 2 + syz ** 2 + szx ** 2) + 1e-12)
 
 
-def spawn_deformable_from_obj(obj_path, z_gap, youngs, poisson):
+def spawn_deformable_from_obj(obj_path, z_gap, youngs, poisson, sim_resolution, solver_iters,
+                              rest_offset, vel_damping):
     """Load a scanned .obj, weld it, and build a deformable mesh prim (mirrors MeshCfg's deformable
     path). Rests the mesh on the ground centered at origin. Returns the parent prim path."""
     mesh = trimesh.load(obj_path, process=True, force="mesh")
     mesh.merge_vertices()                                          # weld the unwelded scan
+    if args_cli.remesh_pitch > 0:                                  # voxel-remesh -> clean uniform watertight
+        vox = mesh.voxelized(pitch=args_cli.remesh_pitch).fill()
+        try:
+            mesh = vox.marching_cubes                              # smooth (needs scikit-image)
+            mesh.apply_transform(vox.transform)                    # index coords -> world (pitch+origin)!
+            how = "marching_cubes"
+        except Exception:
+            mesh = vox.as_boxes()                                 # blocky fallback, no extra deps
+            how = "as_boxes (blocky; pip install scikit-image for smooth)"
+        mesh.merge_vertices()
+        if args_cli.smooth_iters > 0:                             # Taubin: de-staircase, volume-preserving
+            trimesh.smoothing.filter_taubin(mesh, iterations=args_cli.smooth_iters)
+        print(f"[phase4] voxel-remeshed @ {args_cli.remesh_pitch} m via {how} -> "
+              f"{len(mesh.vertices)} verts, {len(mesh.faces)} tris (clean uniform)", flush=True)
     v = np.asarray(mesh.vertices, dtype=np.float32)
     f = np.asarray(mesh.faces, dtype=np.int32)
     v[:, 0] -= v[:, 0].mean(); v[:, 1] -= v[:, 1].mean()           # center x,y
@@ -64,7 +102,11 @@ def spawn_deformable_from_obj(obj_path, z_gap, youngs, poisson):
         "points": v, "faceVertexIndices": f.flatten(),
         "faceVertexCounts": np.asarray([3] * len(f)), "subdivisionScheme": "bilinear"})
     schemas.define_deformable_body_properties(
-        mesh_path, sim_utils.DeformableBodyPropertiesCfg(rest_offset=0.0, contact_offset=0.001), stage=stage)
+        mesh_path, sim_utils.DeformableBodyPropertiesCfg(
+            rest_offset=rest_offset, contact_offset=max(rest_offset + 0.001, 0.001),
+            simulation_hexahedral_resolution=sim_resolution,
+            solver_position_iteration_count=solver_iters,
+            vertex_velocity_damping=vel_damping), stage=stage)
     mat_cfg = sim_utils.DeformableBodyMaterialCfg(youngs_modulus=youngs, poissons_ratio=poisson)
     mat_cfg.func(root + "/material", mat_cfg)
     bind_physics_material(mesh_path, root + "/material", stage=stage)
@@ -72,13 +114,18 @@ def spawn_deformable_from_obj(obj_path, z_gap, youngs, poisson):
 
 
 def main():
-    sim = SimulationContext(sim_utils.SimulationCfg(device=args_cli.device, dt=1.0 / 60.0))
+    gravity = (0.0, 0.0, 0.0) if args_cli.no_gravity else (0.0, 0.0, -9.81)
+    sim = SimulationContext(sim_utils.SimulationCfg(device=args_cli.device, dt=1.0 / 60.0, gravity=gravity))
     sim.set_camera_view(eye=[0.25, 0.25, 0.18], target=[0.0, 0.0, 0.02])
-    sim_utils.GroundPlaneCfg().func("/World/ground", sim_utils.GroundPlaneCfg())
+    if not args_cli.no_gravity:                                    # diagnostic: no ground when floating
+        sim_utils.GroundPlaneCfg().func("/World/ground", sim_utils.GroundPlaneCfg())
     sim_utils.DomeLightCfg(intensity=2500.0).func("/World/Light",
                                                   sim_utils.DomeLightCfg(intensity=2500.0))
 
-    root = spawn_deformable_from_obj(args_cli.obj, args_cli.z, args_cli.youngs, args_cli.poisson)
+    z_gap = args_cli.z if not args_cli.no_gravity else 0.1        # float it off the ground
+    root = spawn_deformable_from_obj(args_cli.obj, z_gap, args_cli.youngs, args_cli.poisson,
+                                     args_cli.sim_resolution, args_cli.solver_iters,
+                                     args_cli.rest_offset, args_cli.vel_damping)
     mush = DeformableObject(cfg=DeformableObjectCfg(prim_path=root, spawn=None))
     sim.reset()
     dt = sim.get_physics_dt()
@@ -87,19 +134,33 @@ def main():
     n_node = mush.data.nodal_pos_w.shape[1]
     z0 = float(mush.data.root_pos_w[0, 2])
     print(f"[phase4] tet-cook OK: elements={n_elem}  nodes={n_node}  E={args_cli.youngs:.0e} "
-          f"nu={args_cli.poisson}  root_z={z0:.4f} — settling ...", flush=True)
+          f"nu={args_cli.poisson}  sim_res={args_cli.sim_resolution} solver_iters={args_cli.solver_iters}  "
+          f"root_z={z0:.4f} — settling ...", flush=True)
 
     steps = 0
+    t_fps0 = None                                                  # FPS timer (starts after 150-step settle)
     while simulation_app.is_running():
+        if steps == 150 and t_fps0 is None:
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            t_fps0 = time.perf_counter()
         mush.write_data_to_sim()
         sim.step(render=True)
         mush.update(dt)
+        if steps == 150 + args_cli.fps_window and t_fps0 is not None:
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            fps = args_cli.fps_window / (time.perf_counter() - t_fps0)
+            print(f"[phase4] FPS (with render, {n_elem} tets): {fps:.1f} steps/s   "
+                  f"(headless/no-render will be higher)", flush=True)
         if steps % 30 == 0:
-            vm = von_mises(mush.data.sim_element_stress_w)
+            vm = von_mises(mush.data.sim_element_stress_w).flatten()
+            q = torch.quantile(vm, torch.tensor([0.5, 0.9, 0.99], device=vm.device))
             z = float(mush.data.root_pos_w[0, 2])
             bad = "  <-- NaN/Inf!" if not torch.isfinite(mush.data.nodal_pos_w).all() else ""
-            print(f"[phase4] step {steps:5d}  root_z {z:.4f} (drift {z - z0:+.4f})  "
-                  f"vonMises peak {float(vm.max()):8.0f} mean {float(vm.mean()):7.0f} Pa{bad}", flush=True)
+            print(f"[phase4] step {steps:5d}  root_z {z:.4f} (drift {z - z0:+.4f})  vonMises "
+                  f"p50 {float(q[0]):7.0f} p90 {float(q[1]):8.0f} p99 {float(q[2]):9.0f} "
+                  f"mean {float(vm.mean()):8.0f} max {float(vm.max()):10.0f} Pa{bad}", flush=True)
         steps += 1
         if args_cli.headless and steps >= args_cli.steps:
             break

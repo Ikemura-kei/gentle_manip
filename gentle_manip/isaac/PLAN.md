@@ -15,6 +15,32 @@ feeds the next. Phases 5 and 7 are the make-or-break gates.
 
 ---
 
+## Results so far (Phases 0–4 validated, 2026-07-22)
+- **Ph 0–3 ✅** arm spawn/hold, cartesian delta-pose control (DiffIK, accumulated absolute target +
+  EE_BOUNDS clip), parallel-jaw drive (all 6 joints equal). **Gripper joint→width calibration is
+  ~identical to Genesis** (open 0.1409, closed 0.0537) → the existing `GRIPPER_CALIB` transfers verbatim.
+- **Speed ✅✅** FEM barely slows with tet count (GPU-parallel); it's render-bound. Mushroom: ~140
+  steps/s headless vs ~48 with the GUI viewport. Big win over Genesis MPM (no CFL substep tax, no blow-ups).
+- **Ph 4 scanned mushroom ✅ — but stress needed real work (the key finding):**
+  - Raw scan tet-cooks but its irregular tets give a stress field that is BOTH inflated (~10k median
+    vs ~300 Pa gravitational) AND numerically **diverging** (max 2M→13.5M). Contact tuning (rest_offset)
+    and finer hex resolution did NOT fix it (res=20 went NaN).
+  - **Fix = remesh the scan to a clean uniform mesh before cooking.** Pipeline: trimesh **weld** →
+    **voxel-remesh** (marching_cubes ~1.5 mm; needs `scikit-image`, else `as_boxes` blocky fallback —
+    NB `vox.marching_cubes` returns index coords, must `apply_transform(vox.transform)`) → **Taubin
+    smooth** (volume-preserving de-staircase). Cook with `sim_resolution=10`, `solver_iters=40`,
+    `vertex_velocity_damping=5`, spawn touching (no drop).
+  - Result: stress **stable & bounded** for 2600+ steps (p50 ~3.5k, p99 ~78k, max ~193k flat), correct
+    3.4 cm size. The ~3.5k median is plausibly physical (mushroom rests on a small contact patch).
+  - Isaac has **no built-in FEM stress viz**; `debug_vis` only draws kinematic markers. A spatial
+    heatmap is DIY and blocked by missing tet connectivity in the IsaacLab data layer.
+  - Diagnostic knobs live in `deform_mushroom.py` (`--remesh-pitch/--smooth-iters/--solver-iters/
+    --vel-damping/--rest-offset/--no-gravity`); `grasp_mushroom.py` bakes in the working recipe.
+- **Verdict:** Isaac is viable end-to-end for gentle-manip PROVIDED scanned objects are remeshed;
+  next gate is **Phase 5 (soft grasp — rigid-finger↔FEM contact)**, then Phase 7 (Genesis→Isaac transfer).
+
+---
+
 ## Phase 0 — Environment & deformable basics ✅ DONE
 Container up (Docker + nvidia runtime, headless + `--enable_cameras`), `play_deformables.py` validated:
 - Physics ~220 steps/s (4 cubes, 5000 tets), **stable** (no CFL blow-up, unlike Genesis MPM at low substeps).
