@@ -38,11 +38,20 @@ export GM_MPM_SAMPLER=${GM_MPM_SAMPLER:-regular}             # pinned sampler (a
 FT_DENOISING=${FT_DENOISING:-0}                              # 0 = eval BC base; 10 = eval finetuned denoising
 VIEW=student
 NUM_ENVS=5                                      # canonical EvalSpec; MUST match cfg n_envs
-PORT=5570
+# Unique per job: several checkpoint evals often run in parallel, and if two land on the SAME
+# node a fixed port makes the second server fail to bind (or worse, the client attaches to the
+# other job's sim). The value is arbitrary, but it MUST be given to BOTH ends: the server takes
+# --port, and the eval client reads cfg env.specific.port (default 5570) — so the override
+# env.specific.port="$PORT" below is REQUIRED, not optional. Without it the two only agree by
+# the coincidence that both defaulted to 5570, and the client dies with "Connection refused".
+PORT=${PORT:-$((5570 + ${SLURM_JOB_ID:-0} % 400))}
 CKPT=${CKPT:-$REPO/logs/dppo/dppo-pretrain/2026-07-04_20-03-36_42/checkpoint/state_3000.pt}
 CFG_DIR=$REPO/gentle_manip/dppo/cfg/single_lift_mushroom_soft_pcd
 CFG_NAME=eval_diffusion_pointnet
-NORM=$REPO/dataset/dppo/single_lift_mushroom_soft_pcd/normalization.npz
+# The policy's TRAINING normalization — MUST match the dataset the checkpoint was trained on.
+# The eval cfg's default points at single_lift_mushroom_soft_pcd; override NORM for a policy
+# trained on a different dataset (e.g. ..._wide1k) or the obs are mis-scaled and results are junk.
+NORM=${NORM:-$REPO/dataset/dppo/single_lift_mushroom_soft_pcd/normalization.npz}
 
 export WANDB_MODE=offline
 export MUJOCO_GL=egl
@@ -93,7 +102,9 @@ fi
 echo "[sbatch] running eval of $CKPT (n_episodes=$N_EPISODES, ft_denoising=$FT_DENOISING, ${EVAL_EXP_OVR[*]:-exp=cfg-default})"
 uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.train \
     --config-path "$CFG_DIR" --config-name "$CFG_NAME" \
-    base_policy_path="$CKPT" ft_denoising_steps="$FT_DENOISING" record_batches=null n_episodes="$N_EPISODES" \
+    base_policy_path="$CKPT" normalization_path="$NORM" \
+    ft_denoising_steps="$FT_DENOISING" record_batches=null n_episodes="$N_EPISODES" \
+    env.specific.port="$PORT" \
     "${EVAL_EXP_OVR[@]}" "${LOGDIR_OVR[@]}"
 
 echo "[sbatch] eval finished OK"

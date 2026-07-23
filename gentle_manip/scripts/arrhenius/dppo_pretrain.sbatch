@@ -43,7 +43,16 @@ unset PYTHONPATH ROS_DISTRO 2>/dev/null || true
 # ---- preflight -------------------------------------------------------------------------
 echo "[sbatch] host=$(hostname) arch=$(uname -m) job=${SLURM_JOB_ID:-NA} smoke=$SMOKE data_env=$DATA_ENV"
 TRAIN_NPZ=$DPPO_DATA_DIR/$DATA_ENV/train.npz
+VAL_NPZ=$DPPO_DATA_DIR/$DATA_ENV/val.npz
 [ -f "$TRAIN_NPZ" ] || { echo "[sbatch] MISSING dataset: $TRAIN_NPZ (upload dataset/dppo/$DATA_ENV/ first)"; exit 1; }
+# The config now wires a held-out val_dataset (-> "loss - val"); catch a missing split HERE rather
+# than 2 minutes in on a hydra instantiate error. Pass GM_EXTRA_OVERRIDES="val_dataset=null" to
+# train without validation on a dataset that has no val.npz.
+if [ ! -f "$VAL_NPZ" ] && [[ "${GM_EXTRA_OVERRIDES:-}" != *"val_dataset=null"* ]]; then
+    echo "[sbatch] MISSING val split: $VAL_NPZ"
+    echo "[sbatch]   -> add val.npz, or pass GM_EXTRA_OVERRIDES=\"val_dataset=null\" to skip validation"
+    exit 1
+fi
 
 # ---- overrides -------------------------------------------------------------------------
 if [ "$SMOKE" = "1" ]; then

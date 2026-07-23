@@ -20,6 +20,7 @@ name: ${env}_pre_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
 # logdir leaf = the global 5-letter experiment ID (exp_id resolver; registered in experiments.csv)
 logdir: ${oc.env:DPPO_LOG_DIR}/dppo-pretrain/${env}/${exp_id:}
 train_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/train.npz
+val_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/val.npz   # held-out split (BY TRAJECTORY)
 experiment: single_lift_mushroom_soft   # env definition (task+obs+action+dr+reward) snapshot
 
 seed: 42
@@ -52,7 +53,11 @@ train:
     min_lr: 1e-5
   epoch_start_ema: 10
   update_ema_freq: 5
-  save_model_freq: 500
+  save_model_freq: 500          # NOTE: the arrhenius launcher overrides this (SAVE_FREQ, default
+                                # 1000) — check <run>/.hydra/config.yaml for the effective value.
+  val_freq: 10                  # validate every N epochs (must be a multiple of log_freq=1, else
+                                # the val loss is computed but never logged). Cost is small: the
+                                # val pass is forward-only over the held-out split.
 
 model:
   _target_: model.diffusion.diffusion.DiffusionModel
@@ -85,6 +90,19 @@ ema:
 train_dataset:
   _target_: gentle_manip.dppo.pointcloud_dataset.StitchedSequencePointCloudDataset
   dataset_path: ${train_dataset_path}
+  horizon_steps: ${horizon_steps}
+  cond_steps: ${cond_steps}
+  pc_cond_steps: ${pc_cond_steps}
+  device: ${device}
+
+# Held-out validation set -> "loss - val" in wandb, the signal for picking a checkpoint / spotting
+# overfitting. These are DIFFERENT TRAJECTORIES from train (convert_demos splits by episode), which
+# is what makes the gap meaningful — do NOT use train.train_split instead: it carves val windows out
+# of the training trajectories, so it reports a near-iid copy of the train loss. Set `val_dataset=null`
+# for a dataset with no val.npz.
+val_dataset:
+  _target_: gentle_manip.dppo.pointcloud_dataset.StitchedSequencePointCloudDataset
+  dataset_path: ${val_dataset_path}
   horizon_steps: ${horizon_steps}
   cond_steps: ${cond_steps}
   pc_cond_steps: ${pc_cond_steps}
