@@ -83,7 +83,7 @@ uv run --project envs/sim --no-sync python examples/collect_mushroom_demos_batch
   --experiment single_lift_mushroom_soft \
   --obs superset_soft_focus \
   --collect-config gentle_manip/configs/collect/single_lift_mushroom_soft_scripted.yaml \
-  --n-demos 1000 --n-envs 5 --pose-box 0.15 0.15 0.10 \
+  --n-demos 100 --n-envs 5 --pose-box 0.02 0.02 0.02 \
   --scene-dr-every 5 --shard-size 20 --max-steps 320 --seed 1
 #    -> dataset/demos/mushroom_soft_batched/<DATETIME>/   (note the run dir it prints)
 

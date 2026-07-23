@@ -71,6 +71,11 @@ def main():
                                                   sim_utils.DomeLightCfg(intensity=2500.0))
     robot = Articulation(make_robot_cfg(args_cli.usd))
     sim.reset()
+    # Place the arm AT the home pose at t=0. init_state only sets the DEFAULT; without writing it to
+    # sim the robot spawns at the USD/URDF zero pose (gripper through the floor) and just servos home.
+    robot.write_joint_state_to_sim(robot.data.default_joint_pos.clone(),
+                                   robot.data.default_joint_vel.clone())
+    robot.reset()
     dt = sim.get_physics_dt()
     ee_id = robot.find_bodies(EE_LINK)[0][0]
     home = robot.data.default_joint_pos.clone()                  # == the init_state home
