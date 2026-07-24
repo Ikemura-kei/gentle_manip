@@ -32,10 +32,16 @@ NUM_ENVS=${NUM_ENVS:-12}               # server --num-envs; MUST match cfg env.n
                                        # train.n_envs=$NUM_ENVS in GM_EXTRA_OVERRIDES) and
                                        # logprob_batch_size must be divisible by it
 PORT=5570                              # MUST match cfg env.specific.port
-CKPT=$REPO/logs/dppo/dppo-pretrain/2026-07-04_20-03-36_42/checkpoint/state_3000.pt
+# base_policy checkpoint + its TRAINING normalization. BOTH overridable, and they MUST be kept
+# consistent: normalization is tied to the dataset the base policy was BC-pretrained on. The old
+# default base (2026-07-04 300-demo) pairs with single_lift_mushroom_soft_pcd/normalization.npz;
+# a base trained on a different set (e.g. a wide1k subset) needs THAT set's normalization or the
+# obs are mis-scaled and the finetune is junk. NORM is now actually passed to the trainer below
+# (previously only preflight-checked — harmless only because base+norm defaulted to the same set).
+CKPT=${CKPT:-$REPO/logs/dppo/dppo-pretrain/2026-07-04_20-03-36_42/checkpoint/state_3000.pt}
 CFG_DIR=$REPO/gentle_manip/dppo/cfg/single_lift_mushroom_soft_pcd
 CFG_NAME=ft_ppo_diffusion_pointnet_modex_nostress
-NORM=$REPO/dataset/dppo/single_lift_mushroom_soft_pcd/normalization.npz
+NORM=${NORM:-$REPO/dataset/dppo/single_lift_mushroom_soft_pcd/normalization.npz}
 
 export WANDB_MODE=${WANDB_MODE:-online}  # GH200 compute nodes DO have outbound internet (verified);
                                          # auth via ~/.netrc (api.wandb.ai). Override =offline to buffer.
@@ -88,6 +94,11 @@ fi
 if [ "${GM_INTRAIN_EVAL:-0}" != "1" ]; then
     OVERRIDES+=(+train.force_train=true train.render.freq=99999)
 fi
+# render.num (subenvs to record during periodic eval) defaults to 12 in the base cfg; the agent
+# asserts n_render <= n_envs at construction, so ANY run with NUM_ENVS<12 dies immediately unless
+# this is capped — even with rendering off (freq=99999), the assert still fires. Cap at NUM_ENVS
+# (always valid: you can't render more subenvs than exist).
+OVERRIDES+=(train.render.num="$NUM_ENVS")
 
 # Per-run extra hydra overrides (space-separated key=val), appended so they WIN over the base
 # (hydra: last value wins). e.g. GM_EXTRA_OVERRIDES="train.target_kl=1 train.batch_size=256".
@@ -175,7 +186,7 @@ OV
 echo "[sbatch] launching DPPO finetune (SMOKE=$SMOKE): ${OVERRIDES[*]}"
 uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.train \
     --config-path "$CFG_DIR" --config-name "$CFG_NAME" \
-    base_policy_path="$CKPT" \
+    base_policy_path="$CKPT" normalization_path="$NORM" \
     "${OVERRIDES[@]}" 2>&1 | tee "$TRAINER_LOG"
 TRAIN_RC=${PIPESTATUS[0]}
 echo "[sbatch] finetune finished (rc=$TRAIN_RC)"
@@ -190,20 +201,31 @@ if [ "${GM_AUTO_EVAL:-0}" = "1" ] && [ "$TRAIN_RC" = "0" ] && [ "$SMOKE" != "1" 
     LAST=$(ls -1v "$RD"/checkpoint/state_*.pt 2>/dev/null | tail -1)
     if [ -n "$RD" ] && [ -f "$LAST" ]; then
         CKN=$(basename "$LAST" .pt)
-        echo "[sbatch] AUTO-EVAL: canonical eval of $LAST on the reference sim (235/250)"
+        # Eval protocol + subdir tag: default = canonical 100ep; set AUTO_EVAL_CFG to another
+        # eval config (e.g. eval_diffusion_pointnet_200ep) for the variance-check protocol. The
+        # subdir tag mirrors the config so 100ep and 200ep results don't collide.
+        AE_CFG=${AUTO_EVAL_CFG:-eval_diffusion_pointnet}
+        case "$AE_CFG" in *200ep) AE_TAG="${CKN}_eval235_200ep";; *) AE_TAG="${CKN}_eval235";; esac
+        echo "[sbatch] AUTO-EVAL: eval of $LAST on the reference sim (235/250), cfg=$AE_CFG"
         cleanup                       # stop the training sim server: free port $PORT + GPU
         trap - EXIT                   # the child dppo_eval.sbatch installs its own cleanup trap
         # FORCE the reference eval config: the training SIM_EXPERIMENT is exported into this job's
         # env (sbatch --export=ALL), so the child eval's `${SIM_EXPERIMENT:-...eval}` default would
         # NOT fire -> it would (wrongly) run the eval on the TRAINING sim. Set both explicitly so a
         # coarse-trained run is still evaluated on 235/250. (GM_SIM_SUBSTEPS unset -> eval task pins 235.)
-        env -u GM_SIM_SUBSTEPS \
+        # NORM is forwarded (finetuning does NOT change the obs normalization -> the finetuned policy
+        # still expects the BASE policy's normalization; passing the default 300-demo set would
+        # mis-scale a wide1k-based policy). PORT is set explicitly: the training server is stopped,
+        # and the previous "${SLURM_JOB_ID}e" suffix is non-numeric and breaks the child's
+        # $((5570 + SLURM_JOB_ID % 400)) port math. CFG_NAME picks the protocol; N_EPISODES unset
+        # lets that config's n_episodes win (100 canonical / 200 for _200ep).
+        env -u GM_SIM_SUBSTEPS -u N_EPISODES \
             SIM_EXPERIMENT=single_lift_mushroom_soft_eval \
             EVAL_EXPERIMENT=single_lift_mushroom_soft_eval \
-            FT_DENOISING=10 CKPT="$LAST" N_EPISODES=100 EVAL_SUBDIR="${CKN}_eval235" \
-            SLURM_JOB_ID="${SLURM_JOB_ID:-local}e" \
+            CFG_NAME="$AE_CFG" NORM="$NORM" PORT="$((5570 + RANDOM % 400))" \
+            FT_DENOISING=10 CKPT="$LAST" EVAL_SUBDIR="$AE_TAG" \
             bash "$REPO/gentle_manip/scripts/arrhenius/dppo_eval.sbatch" \
-          && echo "[sbatch] AUTO-EVAL done -> $RD/eval/${CKN}_eval235" \
+          && echo "[sbatch] AUTO-EVAL done -> $RD/eval/$AE_TAG" \
           || echo "[sbatch] AUTO-EVAL failed (training + checkpoints are intact)"
     else
         echo "[sbatch] AUTO-EVAL: no run dir / final checkpoint found; skipped"

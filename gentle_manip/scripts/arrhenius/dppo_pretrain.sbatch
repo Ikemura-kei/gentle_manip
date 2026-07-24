@@ -121,8 +121,47 @@ MD
 
 # ---- run the trainer -------------------------------------------------------------------
 echo "[sbatch] pretrain: env=$DATA_ENV overrides=${OVERRIDES[*]}"
+set +e
 uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.train \
     --config-path "$CFG_DIR" --config-name "$CFG_NAME" \
     env="$DATA_ENV" "${OVERRIDES[@]}" 2>&1 | tee "$TRAINER_LOG"
+TRAIN_RC=${PIPESTATUS[0]}          # rc of the TRAINER, not of tee
+set -e
+echo "[sbatch] pretrain done (job ${SLURM_JOB_ID:-NA}) rc=$TRAIN_RC"
 
-echo "[sbatch] pretrain done (job ${SLURM_JOB_ID:-NA})"
+# ---- optional: auto-eval EVERY checkpoint (GM_AUTO_EVAL=1) ------------------------------
+# Runs the evals INLINE (bash the eval script) rather than sbatch-ing one job per checkpoint:
+# this job already holds a GPU node, and on a busy partition re-queueing costs hours per
+# checkpoint. Cost: this job's walltime must cover training + ~1.5h x n_checkpoints.
+# Each eval uses the canonical reference sim (235/250, regular sampler) and THIS dataset's
+# normalization — the checkpoint was trained on it, and passing the wrong one silently
+# mis-scales the observations.
+if [ "${GM_AUTO_EVAL:-0}" = "1" ] && [ "$TRAIN_RC" = "0" ] && [ "$SMOKE" != "1" ]; then
+    RD=$(grep -oE '/nobackup/[^ ]+/dppo-pretrain/[^ ]+/config/' "$TRAINER_LOG" | head -1 | sed 's#/config/##')
+    NORM_AE=$DPPO_DATA_DIR/$DATA_ENV/normalization.npz
+    if [ -z "$RD" ] || [ ! -d "$RD" ]; then
+        echo "[sbatch] AUTO-EVAL SKIPPED: could not locate the run dir in $TRAINER_LOG"
+    else
+        CKPTS=$(ls -1v "$RD"/checkpoint/state_*.pt 2>/dev/null)
+        echo "[sbatch] auto-eval: $(echo "$CKPTS" | grep -c .) checkpoint(s) from $RD"
+        AE_I=0
+        for CK in $CKPTS; do
+            CKN=$(basename "$CK" .pt)
+            # Distinct port per eval: these run back-to-back in ONE job, so they would all
+            # derive the same port from SLURM_JOB_ID and could collide on a socket still in
+            # TIME_WAIT from the previous checkpoint's server.
+            AE_I=$((AE_I + 1))
+            export PORT=$((5570 + (${SLURM_JOB_ID:-0} + AE_I * 7) % 400))
+            echo "[sbatch] === auto-eval $CKN ==="
+            # subshell + `|| true`: one failed checkpoint eval must not abort the rest
+            ( CKPT="$CK" NORM="$NORM_AE" FT_DENOISING=0 N_EPISODES="${AUTO_EVAL_EPISODES:-100}" \
+              EVAL_SUBDIR="${CKN}_eval235" \
+              SIM_EXPERIMENT=single_lift_mushroom_soft_eval \
+              EVAL_EXPERIMENT=single_lift_mushroom_soft_eval \
+              bash "$REPO/gentle_manip/scripts/arrhenius/dppo_eval.sbatch" ) || \
+                echo "[sbatch] auto-eval FAILED for $CKN (continuing)"
+        done
+        echo "[sbatch] auto-eval finished; summaries under $RD/eval/state_*_eval235/"
+    fi
+fi
+exit $TRAIN_RC
