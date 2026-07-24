@@ -12,9 +12,9 @@ import numpy as np
 # action in [-1, 1], i.e. the same raw_action a policy would output.
 
 # Action layout (matches ActionConfig): [dx, dy, dz, droll, dpitch, dyaw, dgripper].
-DEFAULT_SCALE = 0.8        # per-axis magnitude on the [-1,1] device reading
-DEFAULT_DEADZONE = 0.1     # raw |value| below this → 0 (filters drift/jitter)
-DEFAULT_GRIPPER_VALUE = 0.3  # per-step gripper delta when a button is held
+DEFAULT_SCALE = 0.85        # per-axis magnitude on the [-1,1] device reading
+DEFAULT_DEADZONE = 0.35     # raw |value| below this → 0 (filters drift/jitter)
+DEFAULT_GRIPPER_VALUE = 0.4  # per-step gripper delta when a button is held
 
 
 class SpaceMouseTeleop:
@@ -101,8 +101,8 @@ class SpaceMouseTeleop:
             -dz(state.y) * self.scale,      # dy  (Y negated)
              dz(state.z) * self.scale,      # dz
              dz(state.roll) * self.scale,
-             dz(state.pitch) * self.scale,
-             dz(state.yaw) * self.scale,
+             -dz(state.pitch) * self.scale,
+             -dz(state.yaw) * self.scale,
              self._gripper(state),
         ], dtype=np.float32)
         return np.clip(action, -1.0, 1.0)

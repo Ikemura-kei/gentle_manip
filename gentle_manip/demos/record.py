@@ -43,7 +43,8 @@ class DemoRecorder:
                  dataset_path: Optional[Path] = None, frame_fn=None,
                  video_dir: Optional[Path] = None, video_fps: int = 20,
                  video_episodes: int = 0, video_failed_episodes: int = 0,
-                 cloud_viewer=None, collection_config: Optional[dict] = None) -> None:
+                 cloud_viewer=None, collection_config: Optional[dict] = None,
+                 shard_size: int = 5) -> None:
         self.env = env
         self.teleop = teleop
         self.keyboard = keyboard
@@ -93,7 +94,15 @@ class DemoRecorder:
         self._act_buf: List[np.ndarray] = []
         self._rew_buf: List[float] = []
         self.episodes: List[dict] = []
-        self._path: Optional[Path] = None   # chosen lazily on the first saved episode
+        # Shard-based writing: episodes are flushed in groups of shard_size to small
+        # numbered files, then merged into data.pkl at end. Avoids the O(N²) rewrite
+        # cost of atomically rewriting a growing single file after every episode.
+        # shard_size=0 falls back to the old single-file atomic-rewrite behaviour.
+        self._shard_size = int(shard_size)
+        self._shard_buf: List[dict] = []    # episodes in the current (not yet flushed) shard
+        self._shard_count = 0               # number of shard files written so far
+        self._total_saved = 0              # total episodes saved across all shards
+        self._run_dir_path: Optional[Path] = None  # lazily set on first save
 
     # ── Loop ──────────────────────────────────────────────────────────────────
 
@@ -113,7 +122,7 @@ class DemoRecorder:
                     break
                 if SAVE in events:
                     n = self._save_episode()
-                    print(f"  saved episode {len(self.episodes)} ({n} steps) → {self._path}")
+                    print(f"  saved episode {self._total_saved} ({n} steps) → {self._run_dir_path}")
                     self._flush_video()
                     obs = self.env.reset()
                     continue
@@ -198,15 +207,21 @@ class DemoRecorder:
             self._clear()
             return 0
         keys = obs_buf[0].keys()
-        observations = {k: np.stack([o[k] for o in obs_buf]) for k in keys}
-        actions = np.stack(act_buf)
-        self.episodes.append({
-            "observations": observations,
-            "actions": actions,
-            "rewards": np.asarray(rew_buf, dtype=np.float32),   # per-step reward (0 if task=None)
-        })
+        episode = {
+            "observations": {k: np.stack([o[k] for o in obs_buf]) for k in keys},
+            "actions": np.stack(act_buf),
+            "rewards": np.asarray(rew_buf, dtype=np.float32),
+        }
+        self.episodes.append(episode)
+        self._total_saved += 1
+        self._run_dir()                        # ensure the run directory exists
         self._clear()
-        self._flush()                          # persist immediately — crash-safe
+        if self._shard_size > 0:
+            self._shard_buf.append(episode)
+            if len(self._shard_buf) >= self._shard_size:
+                self._flush_shard()
+        else:
+            self._flush()                      # single-file mode: rewrite whole file
         return n
 
     def _trim_idle(self, obs_buf, act_buf, rew_buf):
@@ -256,32 +271,43 @@ class DemoRecorder:
 
     # ── Output ────────────────────────────────────────────────────────────────
 
-    def _dataset_path(self) -> Path:
-        """The session output file. Either the caller-supplied dataset_path (e.g.
-        <run_dir>/data.pkl), or a short unique <out>/<task>/YY-MM-DD-xyz.pkl."""
-        if self._path is None:
+    def _run_dir(self) -> Path:
+        """The session run directory. Created lazily on first use.
+
+        Either the parent of the caller-supplied dataset_path override, or a fresh
+        <out>/<task>/YY-MM-DD-xyz/ directory (matching sim demo collection layout).
+        Data files (data.pkl, shard_*.pkl, config.yaml) all live inside this dir.
+        """
+        if self._run_dir_path is None:
             if self._dataset_path_override is not None:
-                self._dataset_path_override.parent.mkdir(parents=True, exist_ok=True)
-                self._path = self._dataset_path_override
-                return self._path
-            out = self.out_dir / self.task_name
-            out.mkdir(parents=True, exist_ok=True)
-            date = datetime.now().strftime("%y-%m-%d")
-            for _ in range(10000):
-                sfx = "".join(random.choices(string.ascii_lowercase, k=3))
-                cand = out / f"{date}-{sfx}.pkl"
-                if not cand.exists():
-                    self._path = cand
-                    break
+                d = self._dataset_path_override.parent
+                d.mkdir(parents=True, exist_ok=True)
+                self._run_dir_path = d
             else:
-                raise RuntimeError(f"no free filename in {out}")
-        return self._path
+                out = self.out_dir / self.task_name
+                out.mkdir(parents=True, exist_ok=True)
+                date = datetime.now().strftime("%y-%m-%d")
+                for _ in range(10000):
+                    sfx = "".join(random.choices(string.ascii_lowercase, k=3))
+                    cand = out / f"{date}-{sfx}"
+                    if not cand.exists():
+                        cand.mkdir()
+                        self._run_dir_path = cand
+                        break
+                else:
+                    raise RuntimeError(f"no free run dir in {out}")
+        return self._run_dir_path
 
     def _flush(self) -> None:
-        """Atomically (re)write the full dataset so an interrupt can't lose saved
-        episodes. Called after every saved episode; rewrites the one session file."""
+        """Single-file mode: atomically rewrite the full dataset after every save.
+
+        Used only when shard_size=0. Writes to run_dir/data.pkl (or the override path
+        when dataset_path was supplied by the caller).
+        """
         if not self.episodes:
             return
+        run_dir = self._run_dir()
+        data_path = self._dataset_path_override if self._dataset_path_override else run_dir / "data.pkl"
         dataset = {
             "meta": {
                 "task": self.task_name,
@@ -292,32 +318,91 @@ class DemoRecorder:
             },
             "episodes": self.episodes,
         }
-        path = self._dataset_path()
-        tmp = path.with_name(path.name + ".tmp")
+        tmp = data_path.with_name(data_path.name + ".tmp")
         with open(tmp, "wb") as f:
             pickle.dump(dataset, f)
-        os.replace(tmp, path)                  # atomic swap (POSIX)
-        self._write_config_snapshot(path)
+        os.replace(tmp, data_path)
+        self._write_config_snapshot()
 
-    def _write_config_snapshot(self, path: Path) -> None:
-        """Write the collection config verbatim next to the dataset (once), so a recorded
-        demo is fully reproducible: which setup/obs/action configs + control knobs produced it."""
+    def _flush_shard(self) -> None:
+        """Shard mode: write the current shard buffer to shard_NNNN.pkl and clear it."""
+        if not self._shard_buf:
+            return
+        run_dir = self._run_dir()
+        shard_path = run_dir / f"shard_{self._shard_count:04d}.pkl"
+        tmp = shard_path.with_suffix(".tmp")
+        first_ep = self._shard_buf[0]
+        data = {
+            "meta": {
+                "task": self.task_name,
+                "obs_keys": sorted(first_ep["observations"].keys()),
+                "action_dim": int(first_ep["actions"].shape[1]),
+                "rate_hz": self.rate_hz,
+            },
+            "episodes": self._shard_buf,
+        }
+        with open(tmp, "wb") as f:
+            pickle.dump(data, f)
+        os.replace(tmp, shard_path)
+        self._shard_count += 1
+        self._shard_buf = []
+        self._write_config_snapshot()
+
+    def _merge_shards(self) -> Optional[Path]:
+        """Merge all shard_*.pkl into data.pkl and remove the shards."""
+        run_dir = self._run_dir()
+        shards = sorted(run_dir.glob("shard_*.pkl"))
+        if not shards:
+            return None
+        all_episodes = []
+        meta = None
+        for p in shards:
+            with open(p, "rb") as f:
+                d = pickle.load(f)
+            if meta is None:
+                meta = dict(d["meta"])
+            all_episodes.extend(d["episodes"])
+        meta["n_episodes"] = len(all_episodes)
+        meta["created"] = datetime.now(timezone.utc).isoformat()
+        data_path = run_dir / "data.pkl"
+        tmp = data_path.with_name("data.pkl.tmp")
+        with open(tmp, "wb") as f:
+            pickle.dump({"meta": meta, "episodes": all_episodes}, f)
+        os.replace(tmp, data_path)
+        for p in shards:
+            p.unlink()
+        return data_path
+
+    def _write_config_snapshot(self) -> None:
+        """Write the collection config to run_dir/config.yaml (once)."""
         if self._collection_config is None or self._config_written:
             return
-        cfg_path = path.with_name(path.stem + "_config.yaml")
+        cfg_path = self._run_dir() / "config.yaml"
         with open(cfg_path, "w") as f:
             yaml.safe_dump(self._collection_config, f, sort_keys=False)
         self._config_written = True
         print(f"  wrote config snapshot → {cfg_path}")
 
     def write(self) -> Optional[Path]:
-        """Final report — episodes are already flushed incrementally as saved."""
-        if not self.episodes:
-            print("no episodes recorded — nothing written")
-            return None
-        self._flush()
-        print(f"saved {len(self.episodes)} episodes → {self._path}")
-        return self._path
+        """Flush remaining data, merge shards (if any), and report the final path."""
+        if self._shard_size > 0:
+            if self._shard_buf:
+                self._flush_shard()
+            if self._total_saved == 0:
+                print("no episodes recorded — nothing written")
+                return None
+            data_path = self._merge_shards()
+            print(f"saved {self._total_saved} episodes → {data_path}")
+            return data_path
+        else:
+            if not self.episodes:
+                print("no episodes recorded — nothing written")
+                return None
+            self._flush()
+            run_dir = self._run_dir()
+            data_path = self._dataset_path_override if self._dataset_path_override else run_dir / "data.pkl"
+            print(f"saved {len(self.episodes)} episodes → {data_path}")
+            return data_path
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -357,15 +442,18 @@ def main() -> None:
     p.add_argument("--setup", type=Path,
                    default=_PKG / "configs" / "setup" / "real_lab.yaml")
     p.add_argument("--obs-config", type=Path,
-                   default=_PKG / "configs" / "obs" / "state_ee_only.yaml")
+                   default=_PKG / "configs" / "obs" / "superset_real.yaml")
     p.add_argument("--action-config", type=Path,
                    default=_PKG / "configs" / "action" / "delta_pose_delta_gripper.yaml")
     p.add_argument("--task-name", required=True)
-    p.add_argument("--input", choices=["spacemouse", "keyboard"], default="spacemouse",
-                   help="teleop device")
+    p.add_argument("--input", choices=["spacemouse", "spacemouse-kb", "keyboard"],
+                   default="spacemouse",
+                   help="teleop device: spacemouse (buttons for gripper), "
+                        "spacemouse-kb (SpaceMouse pose + Z/X keys for gripper), "
+                        "keyboard (all keys)")
     p.add_argument("--out-dir", type=Path, default=Path("dataset") / "demos")
     p.add_argument("--rate", type=float, default=30.0, help="control rate (Hz)")
-    p.add_argument("--speed", type=float, default=0.55,
+    p.add_argument("--speed", type=float, default=0.75,
                    help="teleop motion magnitude in [0,1] (lower = slower); "
                         "per-step delta = speed * action-scale")
     p.add_argument("--gripper-value", type=float, default=0.45,
@@ -379,6 +467,11 @@ def main() -> None:
     p.add_argument("--show-pointcloud", action="store_true",
                    help="open a live Open3D window of the PROCESSED cloud (crop+filters) "
                         "as you teleop — visualize online instead of collecting to inspect")
+    p.add_argument("--shard-size", type=int, default=5,
+                   help="episodes per shard file written during collection (merged at end); "
+                        "0 disables sharding (old atomic-rewrite mode)")
+    p.add_argument("--description", type=str, default="",
+                   help="short free-text annotation saved in config.yaml (e.g. 'gentle grasps, left side only')")
     args = p.parse_args()
 
     print("note: the robot moves under teleop — keep the e-stop in reach.", file=sys.stderr)
@@ -399,6 +492,7 @@ def main() -> None:
     # written next to the dataset as <stem>_config.yaml (mirrors collect_demos_sim.py).
     collection_config = {
         "task_name": args.task_name,
+        "description": args.description,
         "input": args.input,
         "git_commit": _git_commit(),
         "sources": {"setup": str(args.setup), "obs": str(args.obs_config),
@@ -429,6 +523,12 @@ def main() -> None:
         kb = KeyboardTeleop(move_speed=args.speed, rot_speed=args.speed,
                             gripper_value=args.gripper_value)
         teleop, keyboard = kb, kb
+    elif args.input == "spacemouse-kb":
+        # SpaceMouse for pose, Z/X keys for gripper; one object serves both roles.
+        from gentle_manip.demos.teleop_spacemouse_kb import SpaceMousePygameTeleop
+        sm_kb = SpaceMousePygameTeleop(scale=args.speed,
+                                       gripper_value=args.gripper_value)
+        teleop, keyboard = sm_kb, sm_kb
     else:
         teleop = SpaceMouseTeleop(scale=args.speed, gripper_value=args.gripper_value)
         keyboard = PygameKeyboard()
@@ -456,6 +556,7 @@ def main() -> None:
         max_interior_idle=args.max_interior_idle,
         cloud_viewer=cloud_viewer,
         collection_config=collection_config,
+        shard_size=args.shard_size,
     )
     recorder.run()
     recorder.write()

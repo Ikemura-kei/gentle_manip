@@ -9,6 +9,7 @@ records PER-TRAJECTORY videos — one clip per episode (all envs, all batches by
 """
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -66,6 +67,9 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
     # episode. Default (None) records EVERY batch -> num clips == num episodes (all 100), so any
     # failure can be inspected visually. Set a small int for a quick subset; 0 to disable.
     rec_batches = spec.n_batches if record_batches is None else int(record_batches)
+    dump_pcd = os.environ.get("GM_EVAL_DUMP_PCD")   # DIAGNOSTIC: dump per-episode obs point clouds
+    if dump_pcd:
+        Path(dump_pcd).mkdir(parents=True, exist_ok=True)
 
     for i in range(spec.n_batches):
         # Per-group scene DR: rebuild the object geometry (size/shape/material) every K batches from
@@ -81,6 +85,8 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
                        for j in range(n)]
         obs = venv.reset_arg(options)
         policy.reset()
+        pcd_buf = [[] for _ in range(n)] if dump_pcd else None    # per-env obs cloud over the episode
+        state_buf = [[] for _ in range(n)] if dump_pcd else None
         dr_cols = _scenario_columns(                    # randomization params for this batch
             venv.scenario_params() if hasattr(venv, "scenario_params") else None, n)
 
@@ -96,6 +102,13 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
         buf = {k: [[] for _ in range(n)] for k in SKEYS}
 
         for t in range(spec.max_policy_steps):
+            if dump_pcd and isinstance(obs, dict) and "point_cloud" in obs:   # capture the obs the policy ACTS on
+                pc = np.asarray(obs["point_cloud"])                            # (n, [k,] 1024, 3)
+                st = np.asarray(obs["state"]) if "state" in obs else None
+                for j in range(n):
+                    pcd_buf[j].append(pc[j])
+                    if st is not None:
+                        state_buf[j].append(st[j])
             action = policy.act(obs)
             obs, reward, _term, _trunc, info = venv.step(action)
             ep_reward += np.asarray(reward, float).reshape(n)
@@ -109,6 +122,13 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
                     v = np.asarray(v, float).reshape(n)
                     for j in range(n):
                         buf[k][j].append(float(v[j]))
+
+        if dump_pcd:                                   # save one npz per episode (batch i, env j)
+            for j in range(n):
+                np.savez_compressed(
+                    Path(dump_pcd) / f"eval_ep{i * n + j:03d}.npz",
+                    point_cloud=np.stack(pcd_buf[j]),
+                    state=np.stack(state_buf[j]) if state_buf[j] else np.empty((0,)))
 
         def _tmax(seq):
             return float(np.max(seq)) if seq else None
