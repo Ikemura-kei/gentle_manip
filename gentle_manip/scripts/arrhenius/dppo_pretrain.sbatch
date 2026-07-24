@@ -30,8 +30,11 @@ N_EPOCHS=${N_EPOCHS:-8000}              # matches xxiaw's epoch budget (NOT matc
                                         # does ~3.3x more grad updates/epoch). Eval checkpoints (every
                                         # SAVE_FREQ) later + pick the best; final-vs-final can mislead.
 SAVE_FREQ=${SAVE_FREQ:-1000}            # checkpoint every N epochs (eval each -> compare best-vs-best)
-CFG_DIR=$REPO/gentle_manip/dppo/cfg/single_lift_mushroom_soft_pcd
-CFG_NAME=pre_diffusion_pointnet
+# Config dir/name are overridable so this launcher works for other datasets/tasks (e.g. the
+# real-world config under .../single_lift_mushroom_real). DATA_ENV must still match the config's
+# `env:` (it resolves the dataset path + logdir); pass both together.
+CFG_DIR=${CFG_DIR:-$REPO/gentle_manip/dppo/cfg/single_lift_mushroom_soft_pcd}
+CFG_NAME=${CFG_NAME:-pre_diffusion_pointnet}
 
 # The pretrain config resolves the dataset path + logdir from these (${oc.env:...}); export them
 # so the job is self-contained regardless of the login-shell profile.
