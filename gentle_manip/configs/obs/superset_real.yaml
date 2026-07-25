@@ -1,0 +1,25 @@
+# [obs] SUPERSET (record-everything) obs for REAL collection — mirrors superset_soft.yaml without the sim-only privileged section.
+# Used by: demos/record.py (real teleop demo collection)
+# Status: active
+#
+# REAL COUNTERPART of superset_soft.yaml. The point_cloud block is kept identical
+# so a sim-trained policy can be evaluated/deployed with the same processing params
+# as the demos were collected with — no hidden drift between the two files.
+#
+# privileged is intentionally absent: PolicyEnv raises if privileged is set with task=None
+# (real side). Everything a real robot can observe is here; sim-only state goes in
+# superset_soft.yaml.
+#
+# When updating crop bounds / max_points / outlier_removal, update BOTH files together.
+include_joint_pos: false
+include_joint_vel: false
+quat_noise_std: 0.003
+
+point_cloud:
+  cameras: ["cam_ext"]
+  crop_min: [0.2, -0.215, 0.004]
+  crop_max: [0.71,   0.215,  0.45]
+  max_points: 1024
+  outlier_removal:
+    voxel_size: 0.01
+    min_neighbors: 23

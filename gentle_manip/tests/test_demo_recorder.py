@@ -208,8 +208,8 @@ def test_config_snapshot_written_next_to_dataset(tmp_path):
                        collection_config=cfg)
     rec.run()
     path = rec.write()
-    sidecar = path.with_name(path.stem + "_config.yaml")
-    assert sidecar.exists()                              # reproducibility snapshot next to the pkl
+    sidecar = path.parent / "config.yaml"              # lives in the run dir
+    assert sidecar.exists()
     loaded = yaml.safe_load(open(sidecar))
     assert loaded["setup"]["robot"]["ip"] == "1.2.3.4"
     assert loaded["control"]["speed"] == 0.35
@@ -219,25 +219,32 @@ def test_no_config_snapshot_when_none(tmp_path):
     rec = make_recorder([set(), {SAVE}, {QUIT}], tmp_path)   # collection_config defaults to None
     rec.run()
     path = rec.write()
-    assert not path.with_name(path.stem + "_config.yaml").exists()
+    assert not (path.parent / "config.yaml").exists()
 
 
 def test_episode_flushed_immediately(tmp_path):
     import pickle, re
-    # SAVE then QUIT — file must exist after run() WITHOUT a final write() call.
-    rec = make_recorder([set(), set(), {SAVE}, {QUIT}], tmp_path)
+    # SAVE then QUIT — shard must exist after run() WITHOUT a final write() call.
+    # Use shard_size=1 so the first saved episode immediately flushes to disk.
+    rec = DemoRecorder(
+        env=MockEnv(), teleop=FakeTeleop((0, 0, 0.01, 0, 0, 0, 0)),
+        keyboard=ScriptedKeyboard([set(), set(), {SAVE}, {QUIT}]),
+        task_name="unit", out_dir=tmp_path, rate_hz=0.0, shard_size=1,
+    )
     rec.run()
-    assert rec._path is not None and rec._path.exists()
-    data = pickle.load(open(rec._path, "rb"))
+    assert rec._run_dir_path is not None
+    shard = rec._run_dir_path / "shard_0000.pkl"
+    assert shard.exists()
+    data = pickle.load(open(shard, "rb"))
     assert len(data["episodes"]) == 1
-    # filename is YY-MM-DD-xyz.pkl
-    assert re.fullmatch(r"\d{2}-\d{2}-\d{2}-[a-z]{3}\.pkl", rec._path.name)
+    # run dir name is YY-MM-DD-xyz
+    assert re.fullmatch(r"\d{2}-\d{2}-\d{2}-[a-z]{3}", rec._run_dir_path.name)
 
 
 def test_no_file_until_first_save(tmp_path):
     rec = make_recorder([set(), {QUIT}], tmp_path)   # step but never save
     rec.run()
-    assert rec._path is None
+    assert rec._run_dir_path is None
     assert not any(tmp_path.rglob("*.pkl"))
 
 

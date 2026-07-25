@@ -132,7 +132,10 @@ def main() -> None:
     p.add_argument("--pose-scale", type=float, default=1.0,
                    help="<1 shrinks the 6 delta-pose dims for slower/gentler motion")
     p.add_argument("--record", type=Path, default=None,
-                   help="save the run in the demo pickle schema (for sim2real obs comparison)")
+                   help="save the run in the demo pickle schema (for sim2real obs comparison). "
+                        "With --shard-size>0 this is a DIRECTORY of shard_XXXX.pkl instead of one pkl")
+    p.add_argument("--shard-size", type=int, default=10,
+                   help="episodes per shard pkl (0 = single pkl); keeps each read/write small")
     p.add_argument("--device", default="cuda:0")
     args = p.parse_args()
 
@@ -146,7 +149,8 @@ def main() -> None:
         args.ckpt, args.normalization, cond_steps=args.cond_steps, act_steps=args.act_steps,
         ft_denoising_steps=args.ft_denoising_steps, device=args.device)
     run_deploy_loop(env, policy, args.max_steps, args.rate,
-                    pose_scale=args.pose_scale, record_path=args.record)
+                    pose_scale=args.pose_scale, record_path=args.record,
+                    shard_size=args.shard_size)
 
 
 if __name__ == "__main__":

@@ -27,16 +27,35 @@ cd "$REPO"
 #   SIM_EXPERIMENT (server task/reward+DR), EVAL_EXPERIMENT (eval-cfg experiment snapshot),
 #   FT_DENOISING (ft_denoising_steps: 0 for a BC base ckpt, 10 for a finetuned ckpt),
 #   GM_SIM_SUBSTEPS / GM_MPM_SAMPLER (sim substeps + MPM sampler, read by scene_builder).
-SIM_EXPERIMENT=${SIM_EXPERIMENT:-single_lift_mushroom_soft}   # default base (measures stress)
-EVAL_EXPERIMENT=${EVAL_EXPERIMENT:-}                          # if set -> hydra experiment=<...> on the eval cfg
+# CANONICAL eval sim is pinned in a CONFIG FILE, not reconstructed via env-vars: the default
+# experiment single_lift_mushroom_soft_eval fixes sim_substeps=235 / mpm_grid_density=250 in its
+# task config, so EVERY policy is evaluated on the same reference sim regardless of how it trained.
+# Do NOT pass GM_SIM_SUBSTEPS for a canonical eval (the eval task pins the fidelity); only override
+# for a deliberate off-reference probe. Only ft_denoising (policy: 0=BC, 10=finetuned) + CKPT vary.
+SIM_EXPERIMENT=${SIM_EXPERIMENT:-single_lift_mushroom_soft_eval}   # server sim: pinned 235/250
+EVAL_EXPERIMENT=${EVAL_EXPERIMENT:-single_lift_mushroom_soft_eval} # eval-cfg experiment snapshot (same)
+export GM_MPM_SAMPLER=${GM_MPM_SAMPLER:-regular}             # pinned sampler (aarch64 reference)
 FT_DENOISING=${FT_DENOISING:-0}                              # 0 = eval BC base; 10 = eval finetuned denoising
 VIEW=student
 NUM_ENVS=5                                      # canonical EvalSpec; MUST match cfg n_envs
-PORT=5570
+# Unique per job: several checkpoint evals often run in parallel, and if two land on the SAME
+# node a fixed port makes the second server fail to bind (or worse, the client attaches to the
+# other job's sim). The value is arbitrary, but it MUST be given to BOTH ends: the server takes
+# --port, and the eval client reads cfg env.specific.port (default 5570) — so the override
+# env.specific.port="$PORT" below is REQUIRED, not optional. Without it the two only agree by
+# the coincidence that both defaulted to 5570, and the client dies with "Connection refused".
+PORT=${PORT:-$((5570 + ${SLURM_JOB_ID:-0} % 400))}
 CKPT=${CKPT:-$REPO/logs/dppo/dppo-pretrain/2026-07-04_20-03-36_42/checkpoint/state_3000.pt}
 CFG_DIR=$REPO/gentle_manip/dppo/cfg/single_lift_mushroom_soft_pcd
-CFG_NAME=eval_diffusion_pointnet
-NORM=$REPO/dataset/dppo/single_lift_mushroom_soft_pcd/normalization.npz
+# Which eval PROTOCOL to run. The protocol (n_episodes, scene_group_size, seed) lives in a
+# CONFIG FILE, not in shell flags, so an eval can't silently drift:
+#   eval_diffusion_pointnet        canonical: 100 episodes, geometry rebuilt every 4 batches
+#   eval_diffusion_pointnet_200ep  variance check: 200 episodes, rebuilt every 2 batches
+CFG_NAME=${CFG_NAME:-eval_diffusion_pointnet}
+# The policy's TRAINING normalization — MUST match the dataset the checkpoint was trained on.
+# The eval cfg's default points at single_lift_mushroom_soft_pcd; override NORM for a policy
+# trained on a different dataset (e.g. ..._wide1k) or the obs are mis-scaled and results are junk.
+NORM=${NORM:-$REPO/dataset/dppo/single_lift_mushroom_soft_pcd/normalization.npz}
 
 export WANDB_MODE=offline
 export MUJOCO_GL=egl
@@ -46,7 +65,10 @@ echo "[sbatch] host=$(hostname) arch=$(uname -m) job=${SLURM_JOB_ID:-NA} eval ck
 [ -f "$CKPT" ] || { echo "[sbatch] MISSING checkpoint: $CKPT"; exit 1; }
 [ -f "$NORM" ] || { echo "[sbatch] MISSING normalization: $NORM"; exit 1; }
 
-SRV_LOG=$REPO/logs/slumr_logs/${SLURM_JOB_ID:-local}_simserver.log
+# Include EVAL_SUBDIR when set: several evals may run SEQUENTIALLY inside one job (pretrain
+# auto-eval), and a single shared filename would leave only the last one's server log for
+# debugging. Unique name = one server log per checkpoint.
+SRV_LOG=$REPO/logs/slumr_logs/${SLURM_JOB_ID:-local}${EVAL_SUBDIR:+_${EVAL_SUBDIR}}_simserver.log
 
 # ---- sim server (subprocess backend: eval drives deterministic per-group scene rebuilds) ----
 echo "[sbatch] launching sim server ($SIM_EXPERIMENT / $VIEW / $NUM_ENVS envs, --subprocess) on $PORT"
@@ -70,7 +92,11 @@ grep -q "SIM_SERVER_READY" "$SRV_LOG" || { echo "[sbatch] server not ready — t
 # batches / ALL envs (100 clips), NOT a subset. (The x86 ref run used record_batches=2; that
 # is a video subset only and does not change the success number.)
 # N_EPISODES: full canonical eval = 100 (20 batches); set smaller (e.g. 25) for a quick diagnostic.
-N_EPISODES=${N_EPISODES:-100}
+# UNSET = let the chosen config decide (100 for the canonical protocol, 200 for _200ep). Only
+# set N_EPISODES for a deliberate short diagnostic — forcing it here would silently override
+# whatever protocol CFG_NAME selected, which is exactly the drift the config files prevent.
+N_EPISODES=${N_EPISODES:-}
+NEP_OVR=(); [ -n "$N_EPISODES" ] && NEP_OVR=(n_episodes="$N_EPISODES")
 EVAL_EXP_OVR=(); [ -n "$EVAL_EXPERIMENT" ] && EVAL_EXP_OVR=(experiment="$EVAL_EXPERIMENT")
 # Unique output subdir (optional). By default the eval writes to <run>/eval/<datetime> where the
 # datetime has 1-SECOND resolution and is stamped when the eval PROCESS starts — so evaluating
@@ -84,10 +110,12 @@ if [ -n "${EVAL_SUBDIR:-}" ]; then
     LOGDIR_OVR=(logdir="$RUN_DIR/eval/$EVAL_SUBDIR")
     echo "[sbatch] unique eval logdir -> $RUN_DIR/eval/$EVAL_SUBDIR (EVAL_SUBDIR set)"
 fi
-echo "[sbatch] running eval of $CKPT (n_episodes=$N_EPISODES, ft_denoising=$FT_DENOISING, ${EVAL_EXP_OVR[*]:-exp=cfg-default})"
+echo "[sbatch] running eval of $CKPT (cfg=$CFG_NAME, n_episodes=${N_EPISODES:-<from cfg>}, ft_denoising=$FT_DENOISING, ${EVAL_EXP_OVR[*]:-exp=cfg-default})"
 uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.train \
     --config-path "$CFG_DIR" --config-name "$CFG_NAME" \
-    base_policy_path="$CKPT" ft_denoising_steps="$FT_DENOISING" record_batches=null n_episodes="$N_EPISODES" \
+    base_policy_path="$CKPT" normalization_path="$NORM" \
+    ft_denoising_steps="$FT_DENOISING" record_batches=null "${NEP_OVR[@]}" \
+    env.specific.port="$PORT" \
     "${EVAL_EXP_OVR[@]}" "${LOGDIR_OVR[@]}"
 
 echo "[sbatch] eval finished OK"

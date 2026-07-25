@@ -1,0 +1,14 @@
+# [task] REAL-WORLD mushroom single-lift — the physical task the real demos capture.
+# Used by: experiments (task:) -> real BC pretrain config snapshot (single_lift_mushroom_real)
+# Status: active
+#
+# Deliberately MINIMAL: sim-only fields (sim_substeps, mpm_grid_density, MPM stress/dist/lift
+# rewards) are OMITTED because they have no meaning for a real-robot dataset — there is no MPM
+# solver and no privileged reward in the real world. This file exists so the Experiment loader
+# can compose a `single_lift_mushroom_real` experiment for the config snapshot of real BC
+# pretrains; only the physically-meaningful lift criteria are recorded.
+success_z_min: 0.175          # lift-height band (m), same physical criterion as the sim task
+success_z_max: 0.225
+hold_steps: 30                # consecutive in-band steps for success (~1 s at 30 Hz)
+object_name: "mushroom"
+object_type: "real"           # real Agaricus; no MPM / no von_mises_stress

@@ -1,0 +1,28 @@
+# [experiment] EVAL experiment for REAL-DATA-trained policies — identical to
+#              single_lift_mushroom_soft_eval EXCEPT the action config.
+# Used by: dppo_eval.sbatch (SIM_EXPERIMENT + EVAL_EXPERIMENT) / serl_sim_server --experiment
+# Status: active (2026-07-24)
+#
+# The single_lift_mushroom_real demos were collected with the delta_pose_delta_gripper_FAST_ROT
+# action (rotation scales [0.008, 0.008, 0.03] vs the default [0.001, 0.001, 0.001] — 8-30x larger),
+# so a policy trained on them outputs normalized rotations expecting that scaling. Evaluating it in
+# sim with the DEFAULT action would shrink every commanded rotation 8-30x and cripple the policy.
+# This experiment swaps in the collection-time action so the sim applies the policy's outputs at the
+# magnitude it was trained for. Everything else (reference task 235/250, food_shape DR, l515 noise,
+# superset_soft obs, point_cloud student view) is UNCHANGED from the canonical eval, so real-vs-sim
+# geometry/perception stay apples-to-apple with every other policy evaluated on the reference sim.
+task: single_lift_mushroom_soft_eval
+action: delta_pose_delta_gripper_fast_rot     # <-- the ONLY change vs single_lift_mushroom_soft_eval
+dr: food_shape
+augmentation: l515_noise
+obs: superset_soft
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+rl:
+  random_steps: 200
+  training_starts: 400
+  batch_size: 256
+  discount: 0.92
+  utd_ratio: 2
+  critic_lr: 1.0e-4

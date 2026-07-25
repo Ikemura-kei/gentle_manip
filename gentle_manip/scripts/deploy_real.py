@@ -277,7 +277,8 @@ def _pc_health(obs: dict) -> str:
 
 
 def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float,
-                    pose_scale: float = 1.0, record_path: "Path | None" = None) -> None:
+                    pose_scale: float = 1.0, record_path: "Path | None" = None,
+                    shard_size: int = 0) -> None:
     """Receding-horizon deploy loop shared by real and sim deployment.
 
     env: PolicyEnv-like — reset()->obs dict, step(action)->(obs, ...). policy:
@@ -292,13 +293,21 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
     schema as recorded demos ({"episodes": [{"observations": {k: (T,...)}, "actions":
     (T,7)}]}), so visualize_demo / episode_player render real runs identically to sim
     demos — for sim2real obs comparison (esp. the point cloud).
+
+    shard_size: 0 (default) = write ALL episodes into the single pkl `record_path`
+    (legacy). >0 = treat `record_path` as a DIRECTORY and write `shard_XXXX.pkl` of at
+    most `shard_size` episodes each; full shards are flushed incrementally as episodes
+    complete (interrupt-safe — a crash keeps the finished shards, only the trailing
+    partial waits for exit), keeping each read/write small.
     """
     period = 1.0 / rate if rate > 0 else 0.0
     steps = 0
     record = record_path is not None
+    shard = record and shard_size and shard_size > 0
     episodes: list = []
     obs_buf: list = []
     act_buf: list = []
+    shards_done = 0                                    # count of fully-written shards (sharding mode)
 
     def _flush_episode() -> None:
         if not act_buf:
@@ -308,29 +317,54 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
         obs_buf.clear()
         act_buf.clear()
 
+    def _write_pkl(path: "Path", eps: list, shard_idx: "int | None" = None) -> None:
+        import pickle
+        from datetime import datetime, timezone
+        meta = {                                       # same schema as recorded demos
+            "task": "real_deploy", "source": "deploy_real",
+            "obs_keys": sorted(eps[0]["observations"].keys()),
+            "action_dim": int(eps[0]["actions"].shape[1]),
+            "rate_hz": rate, "created": datetime.now(timezone.utc).isoformat(),
+            "n_episodes": len(eps),
+        }
+        if shard_idx is not None:
+            meta["shard"] = f"shard_{shard_idx:04d}"
+        path.parent.mkdir(parents=True, exist_ok=True)  # safe for mid-run shard flush + final save
+        tmp = path.with_suffix(path.suffix + ".tmp")   # atomic write
+        with open(tmp, "wb") as f:
+            pickle.dump({"meta": meta, "episodes": eps}, f)
+        tmp.replace(path)
+
+    def _flush_full_shards() -> None:
+        """Write any newly-completed FULL shards (shard_size episodes each), so an interrupt
+        keeps the finished shards; only the trailing partial waits for _save()."""
+        nonlocal shards_done
+        while len(episodes) >= (shards_done + 1) * shard_size:
+            lo, hi = shards_done * shard_size, (shards_done + 1) * shard_size
+            _write_pkl(record_path / f"shard_{shards_done:04d}.pkl", episodes[lo:hi], shards_done)
+            print(f"  saved shard_{shards_done:04d} ({shard_size} episodes) → {record_path}/")
+            shards_done += 1
+
     def _save() -> None:
         if not record:
             return
-        import pickle
-        from datetime import datetime, timezone
         _flush_episode()
         if not episodes:
             return
-        record_path.parent.mkdir(parents=True, exist_ok=True)
-        dataset = {
-            "meta": {                                  # same schema as recorded demos
-                "task": "real_deploy",
-                "source": "deploy_real",
-                "obs_keys": sorted(episodes[0]["observations"].keys()),
-                "action_dim": int(episodes[0]["actions"].shape[1]),
-                "rate_hz": rate,
-                "created": datetime.now(timezone.utc).isoformat(),
-            },
-            "episodes": episodes,
-        }
-        with open(record_path, "wb") as f:
-            pickle.dump(dataset, f)
-        print(f"  saved {len(episodes)} real episode(s) → {record_path}")
+        if shard:
+            record_path.mkdir(parents=True, exist_ok=True)
+            _flush_full_shards()                       # any remaining full shards
+            if len(episodes) > shards_done * shard_size:          # trailing partial shard
+                n = len(episodes) - shards_done * shard_size
+                _write_pkl(record_path / f"shard_{shards_done:04d}.pkl",
+                           episodes[shards_done * shard_size:], shards_done)
+                print(f"  saved shard_{shards_done:04d} ({n} episodes) → {record_path}/")
+            n_sh = (len(episodes) + shard_size - 1) // shard_size
+            print(f"  recorded {len(episodes)} real episode(s) in {n_sh} shard(s) → {record_path}/")
+        else:
+            record_path.parent.mkdir(parents=True, exist_ok=True)
+            _write_pkl(record_path, episodes)
+            print(f"  saved {len(episodes)} real episode(s) → {record_path}")
 
     try:
         with KeyPoller() as keys:
@@ -371,6 +405,8 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
                             time.sleep(period - dt)
                 if reset_now:                                      # abandon chunk, re-home, fresh budget
                     _flush_episode()                               # close the recorded episode
+                    if shard:
+                        _flush_full_shards()                       # persist finished shards mid-run
                     obs = env.reset()
                     policy.reset(obs)
                     print("  " + _pc_health(obs))

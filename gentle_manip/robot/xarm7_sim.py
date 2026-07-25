@@ -165,6 +165,32 @@ class XArm7Sim:
         grip_cmd = np.repeat(q_grip[:, None], len(self.grip_dofs), axis=1)            # (B, 6)
         self.robot.control_dofs_position(grip_cmd, self.grip_dofs)
 
+    def set_ee_pose_hard(
+        self, target_pos: np.ndarray, target_quat: np.ndarray
+    ) -> None:
+        """Hard-set arm to an EE pose via IK + set_dofs_position (not control).
+
+        This teleports the arm instantly — use before a motion sequence where
+        you don't want the PD controller to drift back from the current pose.
+        Also opens the gripper to the calibrated open width.
+        """
+        baselink_pos = self._tcp_to_baselink(target_pos, target_quat)
+        qpos = _np(
+            self.robot.inverse_kinematics(
+                link=self.ee,
+                pos=baselink_pos.astype(np.float32),
+                quat=np.asarray(target_quat, dtype=np.float32),
+            )
+        )
+        self.robot.set_dofs_position(qpos[:, :7], self.arm_dofs)
+        self.robot.control_dofs_position(qpos[:, :7], self.arm_dofs)
+
+        grip = np.full(
+            (self.num_envs, len(self.grip_dofs)), cfg.GRIPPER_JOINT_OPEN, dtype=np.float32
+        )
+        self.robot.set_dofs_position(grip, self.grip_dofs)
+        self.robot.control_dofs_position(grip, self.grip_dofs)
+
     # ── state read (numpy; matches RawObs robot fields) ──────────────────────────
     def read_state(self) -> dict:
         q = _np(self.robot.get_dofs_position(self.dof_idx))    # (B, 13)

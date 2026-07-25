@@ -1,0 +1,26 @@
+# [task] Soft-MPM mushroom lift — COARSE sim (98/105) + BOOSTED success/lift + stress.scale=3.0.
+# Used by: experiments/single_lift_mushroom_soft_boost_ss3p0_coarse -> DPPO finetune
+# Status: experimental (2026-07-16)
+#
+success_z_min: 0.175
+success_z_max: 0.225
+hold_steps: 30
+object_name: mushroom
+object_type: soft
+sim_substeps: 98
+mpm_grid_density: 105
+object_spawn_z: 0.05
+success_scale: 2.0
+rewards:
+  stress:
+    scale: 3.0
+    cap: 1.5
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 0.1
+    decay: 8.0
+  lift:
+    scale: 0.2
+    grasp_gate_dist: 0.079
+    lift_target: 0.16

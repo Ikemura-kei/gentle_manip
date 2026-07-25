@@ -1,0 +1,36 @@
+# [obs] SUPERSET + object_focus: drop the arm body so the 1024-pt budget lands on the scene/object.
+# Used by: focus_object re-collect (collect_mushroom_demos_batched --obs) + eval (single_lift_mushroom_soft_eval_focus obs:)
+# Status: experimental
+#
+# Copy of superset_soft.yaml with `object_focus` added to point_cloud. Motivation (see
+# docs/focus_object_experiment.md): in the wide1k demos only ~25-30 of the 1024 points land on the
+# object at the grasp moment (~92% of the budget sits on the arm); object_focus reallocates the
+# budget by dropping the arm body (keep points low-z OR near the EE) BEFORE subsample.
+#
+# The point-cloud distribution changes vs superset_soft, so a policy trained on this MUST be both
+# COLLECTED and EVALUATED with it — it is NOT compatible with the non-focus superset_soft or its
+# existing checkpoints. Keep this a PARALLEL config; do not edit superset_soft.yaml in place.
+include_joint_pos: false
+include_joint_vel: false
+quat_noise_std: 0.003
+
+# Privileged (sim-only) — the state teacher's extra signal (unchanged from superset_soft).
+privileged:
+  object_pos: true
+  object_vel: true
+  stress: true
+
+# Point cloud (student input): real-parity denoiser + the arm-dropping object_focus filter.
+point_cloud:
+  cameras: ["cam_ext"]
+  crop_min: [0.2, -0.215, 0.004]
+  crop_max: [0.71,   0.215,  0.45]
+  max_points: 1024
+  outlier_removal:
+    voxel_size: 0.01
+    min_neighbors: 23
+  # Object focus — keep points that are low (z < z_lo, table+object) OR near the EE (within r_ee,
+  # gripper + grasped/lifted object); drop the arm body so the freed budget goes to the object.
+  object_focus:
+    z_lo: 0.12
+    r_ee: 0.13

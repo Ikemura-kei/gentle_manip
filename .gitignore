@@ -76,3 +76,13 @@ experiments.csv.tmp
 
 # MPM grid/substep sweep video outputs (examples/mushroom_grid_substep_sweep.py --video)
 examples/mushroom_sweep/
+
+# Isaac deformable capture dumps (play_deformables.py --dump; large npz + rendered videos)
+gentle_manip/isaac/captures/
+gentle_manip/isaac/viz_out/
+# Isaac converted assets (URDF->USD output; large, regenerable via the README recipe)
+gentle_manip/isaac/assets/
+
+# Scratch / writing files kept out of the repo
+tmp.csv
+paper_writing.txt

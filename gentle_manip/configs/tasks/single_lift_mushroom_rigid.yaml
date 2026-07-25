@@ -17,7 +17,7 @@ object_name: "mushroom"
 object_type: "rigid"     # <-- the only material difference from mushroom_lift
 
 # Rigid: no MPM CFL limit, so few substeps -> much faster than the soft mushroom's 210.
-sim_substeps: 20
+sim_substeps: 5
 mpm_grid_density: 250    # unused (no MPM entity) but kept for SceneSpec
 
 success_scale: 2.0

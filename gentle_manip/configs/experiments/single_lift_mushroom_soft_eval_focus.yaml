@@ -1,0 +1,24 @@
+# [experiment] focus_object EVAL — identical sim to single_lift_mushroom_soft_eval (235/250 + seeds),
+#              but obs = superset_soft_focus (arm-dropped cloud). For evaluating focus-trained policies.
+# Used by: serl_sim_server --experiment / dppo eval_diffusion_pointnet experiment=
+# Status: experimental
+#
+# SAME physics + scenario as single_lift_mushroom_soft_eval (task/dr/seeds unchanged → apples-to-apple
+# on the SIM); the ONLY difference is the obs processing (object_focus), so a focus-trained policy sees
+# the point-cloud distribution it trained on. Do NOT eval a non-focus policy through this (or a focus
+# policy through the plain eval) — the obs would mismatch. See docs/focus_object_experiment.md.
+task: single_lift_mushroom_soft_eval
+action: delta_pose_delta_gripper
+dr: food_shape
+augmentation: l515_noise
+obs: superset_soft_focus
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+rl:
+  random_steps: 200
+  training_starts: 400
+  batch_size: 256
+  discount: 0.92
+  utd_ratio: 2
+  critic_lr: 1.0e-4

@@ -1,0 +1,120 @@
+# [dppo-eval] HIGH-N variance-check eval: 200 episodes, geometry rebuilt every 2 batches.
+# Used by: third_party/dppo/script/run.py (EvalHarnessAgent) via gentle_manip.dppo.train
+# Status: experimental (variance study — NOT the canonical protocol)
+#
+# Identical to eval_diffusion_pointnet.yaml EXCEPT for two knobs, so any difference in the
+# numbers is attributable to sampling, not to a changed policy/sim/normalization:
+#   n_episodes       100 -> 200   (40 batches of 5 instead of 20)
+#   scene_group_size   4 -> 2     (rebuild geometry every 2 batches -> 20 distinct
+#                                  sizes/shapes across the run instead of 5)
+#
+# WHY: at n=100 a success rate carries SE ~= sqrt(p(1-p)/100) ~= 0.045, so two policies must
+# differ by ~0.13 before a single comparison is meaningful — and only 5 distinct object
+# geometries are sampled, so per-shape luck is a second, unquantified variance source on top
+# of the binomial one. This config attacks both: 2x the episodes (SE -> ~0.032) and 4x the
+# geometries. Cost is ~2.5x wall time (2x episodes + 20 sim relaunches at ~30-45 s each).
+#
+# NOT a strict extension of the 100-episode eval. The per-batch POSE seed (seed_for_batch(i)=
+# seed*100003+i) is unchanged, so batch i faces the same object pose/orientation/home in both.
+# But the GEOMETRY seed keys off the GROUP index: scene_seed_for_group(i // scene_group_size).
+# Halving scene_group_size (4 -> 2) changes that mapping, so only batches 0-1 (10 episodes) see
+# the same geometry as the canonical run; from batch 2 on the two evals sample DIFFERENT object
+# shapes. So the 200ep-vs-100ep delta is NOT pure variance reduction — it also reflects a
+# different geometry draw. Read the 200ep number as the more trustworthy ABSOLUTE estimate
+# (lower binomial SE, 4x the distinct shapes), not as "the 100ep number minus its noise".
+# (For a TRUE strict extension, keep scene_group_size=4 and only raise n_episodes.)
+#
+# Requires the sim server started with --subprocess (geometry rebuilds) --render-rgb --num-envs 5.
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${logdir}
+_target_: gentle_manip.dppo.eval_agent.EvalHarnessAgent
+
+name: ${env_name}_eval_diffusion_pointnet_200ep_ta${horizon_steps}_td${denoising_steps}
+logdir: ${eval_base:${base_policy_path}}/eval/${now:%Y-%m-%d}_${now:%H-%M-%S}
+base_policy_path: ???        # set on CLI: a pre_diffusion_pointnet (BC) or finetuned checkpoint
+normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_mushroom_soft_pcd/normalization.npz
+experiment: single_lift_mushroom_soft_eval   # pinned reference sim (substeps 235 / grid 250)
+
+seed: 42
+device: cuda:0
+env_name: single_lift_mushroom_soft_pcd
+obs_dim: 8
+action_dim: 7
+denoising_steps: 20
+ft_denoising_steps: 0        # 0 = BC base policy; 10 = a DPPO-finetuned checkpoint
+cond_steps: 2
+pc_cond_steps: 1
+n_points: 1024
+visual_feature_dim: 256
+horizon_steps: 4
+act_steps: 4
+use_ddim: False              # full 20-step denoising for an honest eval
+ddim_steps: ${ft_denoising_steps}
+
+# HIGH-N spec — 200 episodes / 5 sub-envs = 40 batches.
+n_episodes: 200
+scene_group_size: 2          # rebuild geometry every 2 batches -> 20 distinct sizes/shapes
+record_batches: null         # null = ALL batches, ALL envs -> one clip per episode (200 videos)
+n_steps: 75
+render_num: 5
+
+env:
+  n_envs: 5                  # MUST match serl_sim_server --num-envs
+  name: ${env_name}
+  env_type: genesis
+  max_episode_steps: 300
+  reset_at_iteration: False
+  save_video: True
+  use_image_obs: True
+  best_reward_threshold_for_success: 0.2
+  specific:
+    obs_steps: ${cond_steps}
+    act_steps: ${act_steps}
+    normalization_path: ${normalization_path}
+    port: 5570
+    obs_keys: [ee_pos, ee_quat, gripper_width]
+    pointcloud_key: point_cloud
+
+shape_meta:
+  obs:
+    state:
+      shape: [8]
+    point_cloud:
+      shape: [1024, 3]
+  action:
+    shape: [7]
+
+wandb: null
+
+model:
+  _target_: model.diffusion.diffusion_eval.DiffusionEval
+  ft_denoising_steps: ${ft_denoising_steps}
+  predict_epsilon: True
+  denoised_clip_value: 1.0
+  randn_clip_value: 3
+  use_ddim: ${use_ddim}
+  ddim_steps: ${ddim_steps}
+  network_path: ${base_policy_path}
+  network:
+    _target_: gentle_manip.dppo.pointnet_diffusion.PointNetDiffusionMLP
+    action_dim: ${action_dim}
+    horizon_steps: ${horizon_steps}
+    cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+    pc_cond_steps: ${pc_cond_steps}
+    visual_feature_dim: ${visual_feature_dim}
+    time_dim: 16
+    mlp_dims: [512, 512, 512]
+    activation_type: ReLU
+    residual_style: True
+    pointnet:
+      in_channels: 3
+      use_layernorm: True
+      final_norm: layernorm
+  horizon_steps: ${horizon_steps}
+  obs_dim: ${obs_dim}
+  action_dim: ${action_dim}
+  denoising_steps: ${denoising_steps}
+  device: ${device}

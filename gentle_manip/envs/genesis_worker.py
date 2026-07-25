@@ -55,6 +55,7 @@ class GenesisWorker:
         show_fps: bool = True,
         robot_overrides: Optional[dict] = None,
         render_obs_cameras: bool = True,
+        env_spacing: float = 2.5,
     ) -> None:
         self.num_envs = int(num_envs)
         self.settle_steps = int(settle_steps)
@@ -68,7 +69,7 @@ class GenesisWorker:
             spec, num_envs, show_viewer=show_viewer,
             coup_friction=coup_friction, constraint_timeconst=constraint_timeconst,
             noslip_iterations=noslip_iterations, show_fps=show_fps,
-            robot_overrides=robot_overrides,
+            robot_overrides=robot_overrides, env_spacing=env_spacing,
         )
         rigid_grasp = any(t == "rigid" for t in self.handle.object_types)
         self.robot = XArm7Sim(self.handle.robot, num_envs, overrides=robot_overrides,
@@ -133,15 +134,49 @@ class GenesisWorker:
         self.handle.scene.step()
         return self.read_state()
 
+    def set_ee_pose(
+        self,
+        pos: np.ndarray,
+        quat_wxyz: np.ndarray,
+        settle: int = 30,
+    ) -> None:
+        """Teleport the robot EE to (pos, quat_wxyz) via IK and settle.
+
+        pos:       (num_envs, 3) target TCP position in world frame.
+        quat_wxyz: (num_envs, 4) target TCP orientation, wxyz convention.
+        settle:    number of sim steps to run after the hard-set so the arm
+                   is physically at rest at the target pose.
+
+        Used for grasp synthesis: instantly place the arm at a pre-grasp pose
+        before executing the approach/close/lift motion sequence.
+        """
+        self.robot.set_ee_pose_hard(
+            np.asarray(pos, dtype=np.float32),
+            np.asarray(quat_wxyz, dtype=np.float32),
+        )
+        for _ in range(settle):
+            self.handle.scene.step()
+
+    def set_object_pos(self, pos: np.ndarray) -> None:
+        """Hard-set the first object's position. pos: (num_envs, 3) or (3,)."""
+        pos = np.asarray(pos, dtype=np.float32)
+        if pos.ndim == 1:
+            pos = np.tile(pos[None], (self.num_envs, 1))
+        self.handle.objects[0].set_pos(pos, zero_velocity=True)
+
     def render_rgb(self, all_envs: bool = False):
         """RGB frame(s) uint8 from the first built camera. all_envs=False -> env-0 (H,W,3);
-        all_envs=True -> ALL envs (N,H,W,3), one per-env camera each imaging its own env (used
-        for per-trajectory eval video = one clip per episode). None if no camera was built.
+        all_envs=True -> ALL envs (N,H,W,3). None if no camera was built.
         Works in-process AND as the subprocess 'render' command (survives relaunch scene DR)."""
         cams = getattr(self.handle, "cameras", {})
         if not cams:
             return None
-        cam_list = next(iter(cams.values()))      # per-env camera list for the first camera
+        cam_list = next(iter(cams.values()))
+        if getattr(self.handle, "batch_render_cameras", False):
+            frames = _batched_render(cam_list[0], self.handle.scene, rgb=True, depth=False)
+            frames = _np(frames[0]).astype(np.uint8)   # (B, H, W, 3)
+            return frames if all_envs else frames[0]
+        # Per-env path (soft scenes) — unchanged
         if all_envs:
             return np.stack([_np(c.render(rgb=True, depth=False)[0]).astype(np.uint8)
                              for c in cam_list])   # (N, H, W, 3)
@@ -164,17 +199,31 @@ class GenesisWorker:
 
         depth_images, intrinsics, extrinsics = {}, {}, {}
         cam_items = self.handle.cameras.items() if self.render_obs_cameras else []
-        for name, cam_list in cam_items:
-            # One bound camera per env; each images its own env from the same
-            # relative pose, so env-0's K/extrinsic apply to every env's depth
-            # (cloud lands in the base frame — see dev script).
-            depth_images[name] = np.stack(
-                [_np(c.render(rgb=False, depth=True)[1]).astype(np.float32) for c in cam_list]
-            )  # (B, H, W)
-            intrinsics[name] = np.asarray(cam_list[0].intrinsics, dtype=np.float32)
-            extrinsics[name] = np.linalg.inv(
-                np.asarray(cam_list[0].extrinsics, dtype=np.float32)
-            ).astype(np.float32)  # world_T_cam
+
+        if getattr(self.handle, "batch_render_cameras", False):
+            # All-rigid scene: ONE global camera per name, single GPU render call.
+            # Back-project with the env-local extrinsic → point cloud lands in
+            # env-local coordinates, identical to the per-env path below.
+            for name, cam_list in cam_items:
+                cam = cam_list[0]
+                _, depth = _batched_render(cam, self.handle.scene, rgb=False, depth=True)
+                depth_images[name] = _np(depth).astype(np.float32)   # (B, H, W)
+                intrinsics[name] = np.asarray(cam.intrinsics, dtype=np.float32)
+                raw_extr = np.asarray(cam.extrinsics, dtype=np.float32)
+                if raw_extr.ndim == 3:
+                    raw_extr = raw_extr[0]    # batched cam may return (B, 4, 4)
+                extrinsics[name] = np.linalg.inv(raw_extr).astype(np.float32)  # world_T_cam
+        else:
+            # Per-env path (soft/MPM scenes) — one bound camera per env.
+            # env-0's K/extrinsic apply to every env's depth (shared env-local frame).
+            for name, cam_list in cam_items:
+                depth_images[name] = np.stack(
+                    [_np(c.render(rgb=False, depth=True)[1]).astype(np.float32) for c in cam_list]
+                )  # (B, H, W)
+                intrinsics[name] = np.asarray(cam_list[0].intrinsics, dtype=np.float32)
+                extrinsics[name] = np.linalg.inv(
+                    np.asarray(cam_list[0].extrinsics, dtype=np.float32)
+                ).astype(np.float32)  # world_T_cam
 
         # Representative object → SimFeedback fields. particle_positions are large
         # and unused by the reward components, so we don't ship them every step.
@@ -195,6 +244,41 @@ class GenesisWorker:
         state["camera_intrinsics"] = intrinsics
         state["camera_extrinsics"] = extrinsics
         return state
+
+
+def _batched_render(cam, scene, *, rgb: bool, depth: bool):
+    """Render a global (non-env-bound) camera for all envs in one rasterizer call.
+
+    Genesis keeps the camera transform in env-local coordinates. With
+    ``env_separate_rigid=True``, each env's rigid geometry is rendered at its
+    world position (local_pos + envs_offset). We temporarily shift the camera
+    translation by each env's offset so the camera "follows" the geometry, then
+    restore it afterwards. This is the pattern from gs_sim_backend_batched_cam_dev.py.
+
+    Returns ``(rgb_tensor, depth_tensor)``; either may be None if not requested.
+    The depth tensor has shape ``(B, H, W)`` and the RGB tensor ``(B, H, W, 3)``.
+    """
+    import torch
+    ctx = scene.visualizer.context
+    ctx.update(force_render=True)
+
+    orig = cam._transform.clone()
+    offsets = torch.as_tensor(
+        ctx.scene.envs_offset[ctx.rendered_envs_idx],
+        dtype=cam._transform.dtype,
+        device=cam._transform.device,
+    )
+    cam._transform[..., :3, 3] += offsets
+    scene.visualizer.rasterizer.update_camera(cam)
+    try:
+        out = scene.visualizer.rasterizer.render_camera(cam, rgb=rgb, depth=depth)
+    finally:
+        cam._transform[:] = orig
+        scene.visualizer.rasterizer.update_camera(cam)
+    # render_camera returns (rgb, depth, normal, …); normalise to a 2-tuple
+    rgb_out   = out[0] if rgb   else None
+    depth_out = out[1] if depth else None
+    return rgb_out, depth_out
 
 
 def _init_genesis() -> None:

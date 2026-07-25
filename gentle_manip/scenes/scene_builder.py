@@ -1,10 +1,19 @@
 """SceneSpec -> built Genesis scene. The ONLY module that creates a Genesis scene.
 
 Ports the validated prototype (examples/gs_sim_backend_dev.py): plane + XArm7 URDF
-+ per-env MPM soft object + per-env bound depth cameras, built for ``num_envs``
-parallel envs. Per-env cameras (one bound to each env via env_idx) are the path
-that renders each env's own arm — see the dev script for why the single batched
-camera can't. Genesis import is local so the module stays sim-only.
++ soft/rigid objects + cameras, built for ``num_envs`` parallel envs.
+
+Camera strategy — chosen automatically based on scene contents:
+  - **Soft (MPM) present**: per-env bound cameras (``env_idx=j``), one per env.
+    The batched rasterizer cannot separate MPM particle geometry per-env, so each
+    camera must be bound to its env. ``env_separate_rigid`` is left off.
+  - **All-rigid**: ONE global camera (no ``env_idx``) + ``env_separate_rigid=True``.
+    A single rasterizer call renders all envs in one GPU pass, returning depth of
+    shape (B, H, W). This is substantially faster when N envs > ~4.
+
+``BuiltScene.batch_render_cameras`` signals which mode was chosen.
+``GenesisWorker`` gates its render path on that flag — the soft-body path is
+completely unchanged.
 
 Returns a BuiltScene handle; GenesisWorker drives reset/step/render off it.
 """
@@ -41,9 +50,13 @@ class BuiltScene:
     robot: Any                                   # RigidEntity (XArm7 URDF)
     objects: List[Any]                           # soft (MPM) and/or rigid entities
     object_types: List[str]                      # "soft" | "rigid", parallel to objects
-    cameras: Dict[str, List[Any]]                # cam name -> [per-env genesis cameras]
+    cameras: Dict[str, List[Any]]                # cam name -> [per-env cameras] OR [one global camera]
     num_envs: int
     spec: SceneSpec
+    # True = one global (batched) camera per name (all-rigid scenes only).
+    # False = N per-env cameras bound via env_idx (required when any object is soft/MPM).
+    # GenesisWorker gates its render path on this flag.
+    batch_render_cameras: bool = False
     # Built-state cache for per-env reset repositioning (pose-DR): exactly one of
     # the two entries per object is populated, matching its object_type.
     object_base_particles: List[Optional[np.ndarray]] = field(default_factory=list)  # soft: (B, n_p, 3)
@@ -77,7 +90,17 @@ def build_scene(
     # friction only matters for the finger<->object rigid pair. So gate on that. Note:
     # rigid_friction must stay moderate (~0.7) — too high reintroduces the penetration.
     has_rigid = any(o.object_type == "rigid" for o in spec.objects)
+    has_soft  = any(o.object_type == "soft"  for o in spec.objects)
     noslip = noslip_iterations if has_rigid else 0
+
+    # Batched rendering: one global camera renders ALL envs in a single GPU pass
+    # (requires env_separate_rigid=True in VisOptions). Only safe when no MPM/soft
+    # objects are in the scene — the rasterizer cannot separate MPM geometry per-env,
+    # so soft scenes must keep the per-env bound-camera path.
+    use_batch_render = not has_soft
+    if use_batch_render:
+        print(f"[scene_builder] all-rigid scene → batched camera rendering (env_separate_rigid=True)",
+              flush=True)
 
     # Opt-in env overrides for cluster experiments (unset -> shared config unchanged):
     #   GM_SIM_SUBSTEPS  -> MPM/rigid substeps (stability sweeps, per-run without editing YAML)
@@ -105,10 +128,14 @@ def build_scene(
         viewer_options=gs.options.ViewerOptions(
             camera_pos=(1.8, -1.2, 1.4), camera_lookat=(0.45, 0.0, 0.15), camera_fov=35,
         ),
-        # Per-env bound cameras need every env in rendered_envs_idx; env_separate_rigid
-        # stays off (it conflicts with a bound env_idx — see dev script).
+        # rendered_envs_idx must cover all envs for both camera modes.
+        # env_separate_rigid=True enables the batched rasterizer path for all-rigid
+        # scenes — do NOT set it when any MPM object is present (it conflicts with
+        # bound env_idx cameras and can mis-render soft geometry).
         vis_options=gs.options.VisOptions(
-            visualize_mpm_boundary=False, rendered_envs_idx=list(range(num_envs))
+            visualize_mpm_boundary=False,
+            rendered_envs_idx=list(range(num_envs)),
+            env_separate_rigid=use_batch_render,
         ),
         show_viewer=show_viewer,
     )
@@ -138,11 +165,15 @@ def build_scene(
         # set, else a primitive box. entry.mesh_path (a shape-DR deformed .obj) overrides
         # the registry default. Same morph drives rigid or MPM material below.
         mesh_file = entry.mesh_path or odef.mesh_path
+        # spawn_z override (else registry default_pos z) — raise the object to clear the MPM
+        # domain's inward safety padding at coarse grid_density.
+        _pos = odef.default_pos if entry.spawn_z is None else (
+            odef.default_pos[0], odef.default_pos[1], float(entry.spawn_z))
         if mesh_file is not None:
-            morph = gs.morphs.Mesh(file=mesh_file, pos=odef.default_pos,
+            morph = gs.morphs.Mesh(file=mesh_file, pos=_pos,
                                    scale=entry.scale, euler=(0, 0, 0))
         else:
-            morph = gs.morphs.Box(size=size, pos=odef.default_pos, euler=(0, 0, 0))
+            morph = gs.morphs.Box(size=size, pos=_pos, euler=(0, 0, 0))
         if entry.object_type == "rigid":
             # No von_mises_stress (rigid solver, no particles) — SimFeedback simply
             # omits the key for this object; see genesis_worker.read_state.
@@ -169,11 +200,21 @@ def build_scene(
     cameras: Dict[str, List[Any]] = {}
     for cam in spec.cameras:
         w, h = cam.resolution
-        cameras[cam.name] = [
-            scene.add_camera(res=(w, h), pos=tuple(cam.pos), lookat=tuple(cam.lookat),
-                             fov=cam.fov, GUI=False, env_idx=j)
-            for j in range(num_envs)
-        ]
+        if use_batch_render:
+            # ONE global camera (no env_idx) — GenesisWorker shifts it to each
+            # env's world offset at render time and calls the rasterizer once.
+            cameras[cam.name] = [
+                scene.add_camera(res=(w, h), pos=tuple(cam.pos), lookat=tuple(cam.lookat),
+                                 fov=cam.fov, GUI=False)
+            ]
+        else:
+            # Per-env bound cameras: each is fixed in its env's local frame.
+            # Required when any MPM/soft object is in the scene.
+            cameras[cam.name] = [
+                scene.add_camera(res=(w, h), pos=tuple(cam.pos), lookat=tuple(cam.lookat),
+                                 fov=cam.fov, GUI=False, env_idx=j)
+                for j in range(num_envs)
+            ]
 
     scene.build(n_envs=num_envs, env_spacing=(env_spacing, env_spacing),
                 center_envs_at_origin=False)
@@ -192,5 +233,7 @@ def build_scene(
 
     return BuiltScene(
         scene=scene, robot=robot, objects=objects, object_types=object_types, cameras=cameras,
-        num_envs=num_envs, spec=spec, object_base_particles=base_particles, object_base_pose=base_pose,
+        num_envs=num_envs, spec=spec,
+        batch_render_cameras=use_batch_render,
+        object_base_particles=base_particles, object_base_pose=base_pose,
     )

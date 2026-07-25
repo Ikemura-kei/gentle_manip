@@ -1,0 +1,37 @@
+# [obs] 1-cam point cloud — speed-optimised sim training config.
+# Used by: bench_rigid_batch_render.py, rigid/soft sim training runs
+# Status: active
+#
+# Derived from point_cloud_1cam_outlier.yaml but adapted for sim:
+#   - depth_max: 1.0  (workspace ≤0.79m; cuts env-leaking from parallel Genesis
+#                      envs at ~2.8m and any floor hits at large camera angles)
+#   - NO outlier_removal (designed for real L515 noise; with pixel_sample_n the
+#                         sim cloud is too sparse for min_neighbors=23 — arm voxels
+#                         drop below threshold and the arm disappears)
+#   - pixel_sample_n: 32768 (sample from depth-valid pixels only, before backproject)
+#
+# How pixel_sample_n works:
+#   1. Filter depth image to valid-depth pixels (depth in [depth_min, depth_max]).
+#      Background (depth=0/inf) + far points (>1m) excluded — reduces pool from
+#      ~307k to ~38k pixels within 1m.
+#   2. Randomly sample 32768 from those ~38k valid-depth pixels.
+#   3. Only those pixels are backprojected → (N, 32768, 3) tensor.
+#   After 3D crop: ~1440 in-crop pts/env → subsample to 1024 ✓
+#   Arm visible: ~43% of valid pixels survive → arm gets adequate density.
+include_joint_pos: false
+include_joint_vel: false
+
+quat_noise_std: 0.003
+
+point_cloud:
+  cameras: ["cam_ext"]
+  crop_min: [0.2, -0.215, 0.004]
+  crop_max: [0.71,  0.215, 0.45]
+  max_points: 1024
+
+  # Camera-frame depth filter: discard points beyond 1m (workspace ≤0.79m,
+  # so this is pure noise / env-leaking territory for sim).
+  depth_max: 1.0
+
+  # Pre-select 32768 pixels from depth-valid pixels before backprojection.
+  pixel_sample_n: 32768
