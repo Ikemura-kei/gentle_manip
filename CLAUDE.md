@@ -236,6 +236,44 @@ state-dict round-trip (empty `ParameterDict` at construction can't absorb new ke
 `load_state_dict`) — call `policy.at.set_normalizer(policy.normalizer)` again after
 `workspace.load_payload(...)`, exactly as upstream's own `eval_real_robot_flexiv.py` does.
 
+### Tactile-DP3 baseline + real deploy (`gentle_manip/baselines/tactile_dp3/`)
+
+A second, lighter tactile baseline (distinct from RDP): SimpleDP3 (point cloud + 8-dim
+state) **plus both GelSight delta-images through a shared CNN branch** → diffusion policy
+(`model.py::TactileDiffusionPolicy`). Unlike RDP it IS deployable through the normal
+`PolicyEnv`/`RawObs` seam. Pipeline: `convert_tactile_demo_to_zarr.py` (pkl→zarr, resize
+tactile to 128 + delta vs each episode's frame 0, streams one episode at a time so the
+12 GB pkls fit; uses `_NumpyCompatUnpickler` so numpy-2 pickles read in the 3.8 env) →
+`train_tactile_dp3.py --config configs/tactile_dp3/{cube,mushroom}.yaml` (modality
+ablations via `use_point_cloud`/`use_tactile`, both default True; `--init-from` warm-starts)
+→ deploy. **The full training cfg is saved INSIDE every checkpoint** (`payload["cfg"]`),
+so deploy/eval never needs the yaml.
+
+**Deploy on the real XArm7** (runs in `envs/dp3`, no IPC):
+```bash
+uv run --project envs/dp3 python gentle_manip/scripts/deploy_real.py \
+  --ckpt logs/tactile_dp3/checkpoints/<task>/<variant>/best.ckpt --policy-type tactile
+```
+`--policy-type tactile` auto-selects `configs/setup/real_lab_tactile.yaml` +
+`configs/obs/real_tactile.yaml`. `TactileDP3PolicyAdapter` loads our plain checkpoint dict
+directly (EMA weights), and computes each tactile delta vs the frame captured at
+`reset()`/home — so the arm MUST be homed open/pre-contact for that baseline to be valid.
+A `use_tactile:false` ckpt still needs the tactile obs keys present (the model reads then
+ignores them), so a point-cloud-only sanity run still needs the rig connected.
+
+Two gaps fixed the first time this path ran live (it was train-only before): `envs/dp3`
+lacked **opencv** (TactileSensor V4L2 capture → added `opencv-python-headless`), and
+`deploy_real.py` never passed **`tactile_shape`** to `PolicyEnv` (now derived from the
+backend GelSight `output_size`).
+
+**Checkpoint/data reality (2026-07-25):** cube `no_tactile` AND full-tactile (`cube/final`)
+both deploy and grasp well on the real robot; mushroom is weak — trained on only **10 real
+mushroom demos** (`ufk`), all there is. The other pkls in `dataset/demos/mushroom_lift_tactile/`
+(`lzw`=30, `sxp`=20) are actually **cube** demos with a stale task name — do NOT pool them
+into a mushroom retrain. More mushroom demos are the real lever (or `--init-from` a cube
+checkpoint to transfer the lift skill). Render any `dataset/real_deploy/*.pkl` deploy
+recording (point cloud | tactile-L | tactile-R, per episode) for inspection.
+
 **System prereqs for teleop (demo collection):** `pygame` needs a display on the
 robot host. SpaceMouse mode also needs `libhidapi` + a udev rule giving hidraw
 access to the 3Dconnexion device (else run as root); keyboard mode needs neither.
