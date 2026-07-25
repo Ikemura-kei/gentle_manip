@@ -23,6 +23,22 @@ class PointCloudConfig:
     focus_z_lo: Optional[float] = None
     focus_r_ee: float = 0.13
 
+    # Depth range (camera-frame z, meters). Points outside [depth_min, depth_max] are
+    # discarded before backprojection. depth_max=1.0 is enough for our workspace
+    # (farthest in-crop point ≤0.79m); it also eliminates env-leaking from parallel
+    # Genesis envs (neighbour at ~2.8m) and floor hits at large camera angles.
+    depth_min: float = 0.01
+    depth_max: float = 3.0
+
+    # Speed optimisation: randomly pre-select this many pixel positions from the depth
+    # image BEFORE backprojection. Reduces the intermediate tensor from (N, H*W, 3) to
+    # (N, pixel_sample_n, 3) — ~20x smaller for a 640×480 image. The final random
+    # subsample to max_points is unaffected in quality (same distribution). The same
+    # pixel subset is shared across all envs. None = disabled (process all pixels,
+    # identical to prior behaviour). Recommended for training: 8 * max_points so after
+    # crop (~30% of pixels survive) there are still ~2.5× the max_points target.
+    pixel_sample_n: Optional[int] = None
+
 
 @dataclass
 class VoxelConfig:
@@ -162,6 +178,9 @@ class ObsConfig:
                 outlier_min_neighbors=out_d.get("min_neighbors", 2),
                 focus_z_lo=foc_d.get("z_lo"),
                 focus_r_ee=foc_d.get("r_ee", 0.13),
+                depth_min=float(pc_d.get("depth_min", 0.01)),
+                depth_max=float(pc_d.get("depth_max", 3.0)),
+                pixel_sample_n=pc_d.get("pixel_sample_n"),
             )
 
         voxel = None

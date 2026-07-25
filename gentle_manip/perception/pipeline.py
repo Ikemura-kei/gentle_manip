@@ -214,12 +214,19 @@ class PerceptionPipeline:
             points: (num_envs, sum(H_i * W_i), 3)
             valid:  (num_envs, sum(H_i * W_i)) bool
         """
+        pc_cfg = self.cfg.point_cloud
+        pixel_sample_n = pc_cfg.pixel_sample_n if pc_cfg is not None else None
+        depth_min = pc_cfg.depth_min if pc_cfg is not None else 0.01
+        depth_max = pc_cfg.depth_max if pc_cfg is not None else 3.0
         all_pts, all_valid = [], []
         for cam in cameras:
             pts, valid = depth_to_pointcloud(
                 raw.depth_images[cam],
                 raw.camera_intrinsics[cam],
                 raw.camera_extrinsics[cam],
+                depth_min=depth_min,
+                depth_max=depth_max,
+                pixel_sample_n=pixel_sample_n,
             )
             all_pts.append(pts)
             all_valid.append(valid)
