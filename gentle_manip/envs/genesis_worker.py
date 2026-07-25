@@ -134,6 +134,36 @@ class GenesisWorker:
         self.handle.scene.step()
         return self.read_state()
 
+    def set_ee_pose(
+        self,
+        pos: np.ndarray,
+        quat_wxyz: np.ndarray,
+        settle: int = 30,
+    ) -> None:
+        """Teleport the robot EE to (pos, quat_wxyz) via IK and settle.
+
+        pos:       (num_envs, 3) target TCP position in world frame.
+        quat_wxyz: (num_envs, 4) target TCP orientation, wxyz convention.
+        settle:    number of sim steps to run after the hard-set so the arm
+                   is physically at rest at the target pose.
+
+        Used for grasp synthesis: instantly place the arm at a pre-grasp pose
+        before executing the approach/close/lift motion sequence.
+        """
+        self.robot.set_ee_pose_hard(
+            np.asarray(pos, dtype=np.float32),
+            np.asarray(quat_wxyz, dtype=np.float32),
+        )
+        for _ in range(settle):
+            self.handle.scene.step()
+
+    def set_object_pos(self, pos: np.ndarray) -> None:
+        """Hard-set the first object's position. pos: (num_envs, 3) or (3,)."""
+        pos = np.asarray(pos, dtype=np.float32)
+        if pos.ndim == 1:
+            pos = np.tile(pos[None], (self.num_envs, 1))
+        self.handle.objects[0].set_pos(pos, zero_velocity=True)
+
     def render_rgb(self, all_envs: bool = False):
         """RGB frame(s) uint8 from the first built camera. all_envs=False -> env-0 (H,W,3);
         all_envs=True -> ALL envs (N,H,W,3). None if no camera was built.
