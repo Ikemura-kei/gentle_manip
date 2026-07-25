@@ -97,12 +97,17 @@ def synthesize(
     maxfevals: int,
 ) -> np.ndarray:
     """Run CMA-ES. Returns best x = [tx, ty, tz, roll, pitch, yaw, width]."""
-    # Search region: ±1.5× bounding-box around object centroid
-    t_lb = (obj_pos - 1.5 * OBJ_SIZE).tolist()
-    t_ub = (obj_pos + 1.5 * OBJ_SIZE).tolist()
+    # XY: ±1.5× bounding-box around object centroid.
+    # Z: keep TCP between FINGER_TO_TCP_Z above the object (so the finger tip reaches
+    # the object) and 0.25 m above it. This avoids IK-failing poses where the TCP is
+    # too low (arm over-extended) or too high (finger never reaches).
+    t_lb_xy = (obj_pos[:2] - 1.5 * OBJ_SIZE[:2]).tolist()
+    t_ub_xy = (obj_pos[:2] + 1.5 * OBJ_SIZE[:2]).tolist()
+    tcp_z_min = float(obj_pos[2]) + FINGER_TO_TCP_Z - 0.04   # finger tip ~ object centroid
+    tcp_z_max = float(obj_pos[2]) + 0.25                      # arm stays comfortably reachable
     # roll ≈ π (gripper pointing down), pitch/yaw small, width 28–88 mm
-    lb = t_lb + [0.8 * np.pi, -0.25 * np.pi, -0.25 * np.pi, 0.028]
-    ub = t_ub + [1.0 * np.pi,  0.25 * np.pi,  0.25 * np.pi, 0.088]
+    lb = t_lb_xy + [tcp_z_min, 0.8 * np.pi, -0.25 * np.pi, -0.25 * np.pi, 0.028]
+    ub = t_ub_xy + [tcp_z_max, 1.0 * np.pi,  0.25 * np.pi,  0.25 * np.pi, 0.088]
     x0 = [(l + u) / 2 for l, u in zip(lb, ub)]
 
     def objective(x):
@@ -140,9 +145,16 @@ def execute(worker: GenesisWorker, best_x: np.ndarray, num_envs: int) -> bool:
     width_open = np.full(num_envs, 0.08,         dtype=np.float32)
     width_cls  = np.full(num_envs, width_grasp,  dtype=np.float32)
 
-    # Pre-grasp: directly above the synthesized grasp position
-    pre_pos = grasp_pos.copy(); pre_pos[2] += PRE_GRASP_Z
+    # Pre-grasp: retract along the NEGATIVE TCP z-axis so the fingers approach
+    # the mushroom from the correct direction (not straight down in world z).
+    # With a tilted grasp (e.g. pitch=45°), a world-z descent would sweep the
+    # finger bodies through the mushroom cap and push it away before closure.
+    tcp_rot     = Rot.from_euler('xyz', best_x[3:6])
+    tcp_z_world = tcp_rot.as_matrix()[:, 2].astype(np.float32)   # TCP z-axis in world
+    pre_pos = grasp_pos - PRE_GRASP_Z * tcp_z_world
     pre_b   = np.tile(pre_pos[None], (num_envs, 1))
+    print(f"  tcp_z_world = {np.round(tcp_z_world, 3)}")
+    print(f"  pre_grasp   = {np.round(pre_pos, 4)}")
 
     print(f"  [1/4] Teleporting to pre-grasp  z={pre_pos[2]:.3f} m …")
     worker.set_ee_pose(pre_b, quat_b, settle=60)
