@@ -437,7 +437,21 @@ def main() -> None:
     action_config = ActionConfig.from_dict(_load_yaml(_resolve_config(args.action_config)))
 
     backend = RealBackend(setup)
-    env = PolicyEnv(backend, obs_config, action_config, task=None, max_episode_steps=10 ** 9)
+
+    # PolicyEnv needs the tactile image (H, W) up front to declare the obs space when the
+    # obs config includes tactile (GelSight output_size is (w, h); the space wants (H, W)).
+    tactile_shape = None
+    if obs_config.tactile is not None:
+        sensor = obs_config.tactile.sensors[0]
+        osz = backend.tactiles[sensor].output_size
+        if osz is not None:
+            w, h = osz
+            tactile_shape = (h, w)
+        else:                                              # native resolution — read one frame
+            tactile_shape = backend.tactiles[sensor].latest()[1].shape[:2]
+
+    env = PolicyEnv(backend, obs_config, action_config, task=None,
+                    max_episode_steps=10 ** 9, tactile_shape=tactile_shape)
     if args.policy_type == "tactile":
         policy = TactileDP3PolicyAdapter(str(args.ckpt), device=args.device)
     else:

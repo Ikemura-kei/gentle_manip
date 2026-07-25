@@ -40,6 +40,7 @@ dependencies = [
     "gymnasium",
     "pyyaml",
     "pytest",  # gentle_manip/tests/test_tactile_dp3_*.py, test_convert_tactile_demo_to_zarr.py
+    "opencv-python-headless",  # TactileSensor V4L2 capture + resize (real tactile deploy: deploy_real.py --policy-type tactile)
     # DP3 stack (versions per DP3 INSTALL.md)
     "zarr==2.12.0",
     "numcodecs",
