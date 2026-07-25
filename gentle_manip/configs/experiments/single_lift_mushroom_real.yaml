@@ -1,0 +1,20 @@
+# [experiment] REAL-WORLD mushroom-lift — composition for the real BC-pretrain config snapshot.
+# Used by: gentle_manip.dppo.hydra_snapshot (ExperimentSnapshot) — referenced by the real pretrain
+#          config (cfg/single_lift_mushroom_real/pre_diffusion_pointnet.yaml `experiment:` field).
+# Status: active (2026-07-24)
+#
+# This exists so a real BC pretrain snapshots WHAT it trained on (HARD REQ #7). Before this file,
+# the snapshot + auto-EXPERIMENT.md were SILENTLY SKIPPED (the config referenced an experiment that
+# didn't exist), so the first real runs (mhaoi/qawtp/aydbe/goyip) got neither.
+#
+# The deployable pipeline is what matters here — the obs the policy consumes and the action it emits:
+#   obs    = superset_real  (real cam_ext point cloud + proprio; the student view is point_cloud)
+#   action = delta_pose_delta_gripper_fast_rot  (the collection-time action; rotation scales
+#            0.008/0.008/0.03 — the SAME action the fast_rot SIM-eval experiment applies, so a
+#            real policy is driven at the magnitude it was trained for in both worlds)
+# dr / augmentation are omitted: they are sim-only concepts (real data already carries real noise).
+task: single_lift_mushroom_real
+action: delta_pose_delta_gripper_fast_rot
+obs: superset_real
+views:
+  student: [point_cloud]

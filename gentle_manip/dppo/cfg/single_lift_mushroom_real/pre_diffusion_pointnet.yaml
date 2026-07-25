@@ -58,8 +58,8 @@ train:
     min_lr: 1e-5
   epoch_start_ema: 10
   update_ema_freq: 5
-  save_model_freq: 1000
-  val_freq: 10     # validate every 10 epochs; logged as "loss - val" in wandb
+  save_model_freq: 500
+  val_freq: 30     # validate every 30 epochs; logged as "loss - val" in wandb
 
 model:
   _target_: model.diffusion.diffusion.DiffusionModel
