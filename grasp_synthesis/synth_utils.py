@@ -22,10 +22,10 @@ import cma
 
 # ── Gripper geometry constants (verbatim from old pipeline) ──────────────────
 FINGER_SLOPE    = -0.23529411763  # z-offset change per unit width change
-FINGER_TO_TCP_Z =  0.10645        # finger-tip z below TCP origin
-FINGER_GRIP_OFF =  0.021          # finger body half-width (m)
+FINGER_TO_TCP_Z =  -0.069863        # finger-tip z below TCP origin
+FINGER_GRIP_OFF =  0.0261          # finger body half-width (m)
 
-N_FINGER_SAMPLE = 30              # surface points sampled per finger for SDF queries
+N_FINGER_SAMPLE = 60              # surface points sampled per finger for SDF queries
 
 
 # ── SDF ──────────────────────────────────────────────────────────────────────
@@ -88,15 +88,12 @@ def finger_world_pts(
     tcp_rot = Rot.from_euler('xyz', [x[3], x[4], x[5]])
     w = float(x[6])
 
-    z_off = FINGER_TO_TCP_Z + FINGER_SLOPE * (0.044 - w / 2.0)
-    t_left = np.array([0.0, -(w / 2.0 + FINGER_GRIP_OFF), z_off])
-    t_right = t_left + np.array([0.0, -(w + 2.0 * FINGER_GRIP_OFF), 0.0])
-
-    # Right finger is physically mirrored: 180° around TCP z-axis.
-    R_right = Rot.from_quat([0.0, 0.0, 1.0, 0.0])  # xyzw, 180° around z
+    z_off = FINGER_TO_TCP_Z - FINGER_SLOPE * (0.044 - w / 2.0)
+    t_left = np.array([0.0, (w / 2.0 + FINGER_GRIP_OFF), z_off])
+    t_right = np.array([0.0, -(w / 2.0 + FINGER_GRIP_OFF), z_off])
 
     left_pts_tcp  = np.asarray(left_pts_local,  np.float64) + t_left
-    right_pts_tcp = R_right.apply(np.asarray(right_pts_local, np.float64)) + t_right
+    right_pts_tcp  = np.asarray(right_pts_local,  np.float64) + t_right
 
     left_world  = tcp_rot.apply(left_pts_tcp)  + tcp_pos
     right_world = tcp_rot.apply(right_pts_tcp) + tcp_pos
@@ -111,11 +108,12 @@ def grasp_cost(
     right_pts_local: np.ndarray,
     sdf_fn,
     obj_pos: np.ndarray,
+    obj_quat_wxyz: np.ndarray | None = None,
     *,
     w_near: float = 0.02,
-    w_pen: float  = 100.0,
+    w_pen: float  = 120.0,
     w_align: float = 30.0,
-    w_tcp_h: float = 10.0,
+    w_ground: float = 100.0,
 ) -> float:
     """Grasp quality cost to minimize.
 
@@ -124,19 +122,26 @@ def grasp_cost(
       penetration — mean negative SDF (finger points inside object = very bad)
       align       — straddle check: penalizes if both finger centroids are on the
                     same side of the object (object not between the fingers)
-      tcp_height  — TCP below 3 cm above table = bad (world z)
+      ground      — mean penetration of finger points below z=0 (ground plane);
+                    ground SDF = pt_z, so negative pt_z means below the ground
 
-    Assumes the object has identity orientation (axis-aligned). Object frame is
-    just world frame translated to obj_pos.
+    obj_quat_wxyz: (4,) actual object orientation after settling (wxyz convention).
+    If provided, finger world points are rotated into the object's local frame
+    before the SDF query so the cost is correct when the object is tilted/upside-down.
     """
-    tcp_pos  = np.asarray(x[:3], dtype=np.float64)
     obj_pos  = np.asarray(obj_pos, dtype=np.float64)
 
     left_w, right_w = finger_world_pts(x, left_pts_local, right_pts_local)
 
-    # Transform finger points to object frame (identity rotation assumed)
-    left_obj  = left_w  - obj_pos
-    right_obj = right_w - obj_pos
+    # Transform finger points to object local frame, accounting for actual orientation.
+    if obj_quat_wxyz is not None:
+        q = np.asarray(obj_quat_wxyz, np.float64)
+        obj_rot_inv = Rot.from_quat([q[1], q[2], q[3], q[0]]).inv()  # wxyz→xyzw, then invert
+        left_obj  = obj_rot_inv.apply(left_w  - obj_pos)
+        right_obj = obj_rot_inv.apply(right_w - obj_pos)
+    else:
+        left_obj  = left_w  - obj_pos
+        right_obj = right_w - obj_pos
 
     sdf_L = sdf_fn(left_obj)
     sdf_R = sdf_fn(right_obj)
@@ -146,19 +151,17 @@ def grasp_cost(
     penetration = w_pen  * float(np.mean(np.maximum(-sdf_all, 0.0)))
 
     # Alignment (straddle check): object should be BETWEEN the two finger centroids.
-    # Grasp axis goes from left centroid to right centroid.
-    # Left centroid should project NEGATIVELY along the axis; right should project POSITIVELY.
-    # If both project on the same side, the object is not being grasped from both sides.
     grasp_axis = right_obj.mean(0) - left_obj.mean(0)
     grasp_axis /= np.linalg.norm(grasp_axis) + 1e-8
     left_proj  = float(np.dot(left_obj.mean(0),  grasp_axis))
     right_proj = float(np.dot(right_obj.mean(0), grasp_axis))
-    # Cost is > 0 only when fingers are on the SAME side of the object
     align_cost = w_align * (max(0.0, left_proj) + max(0.0, -right_proj))
 
-    tcp_h_cost = w_tcp_h * float(np.maximum(0.0, 0.03 - tcp_pos[2]))
+    # Ground penetration: finger points below z=0 (world). Ground SDF = z-coordinate.
+    all_world_z = np.concatenate([left_w[:, 2], right_w[:, 2]])
+    ground_cost = w_ground * float(np.mean(np.maximum(-all_world_z, 0.0)))
 
-    return nearness + penetration + align_cost + tcp_h_cost
+    return nearness + penetration + align_cost + ground_cost
 
 
 # ── CMA-ES wrapper ────────────────────────────────────────────────────────────
@@ -180,7 +183,8 @@ def run_cmaes(
         'maxfevals': maxfevals,
         'CMA_stds': stds.tolist(),
         'seed': seed,
-        'verbose': -9,
+        'verbose': 1,
+        'verb_disp': 50,
     }
     es = cma.CMAEvolutionStrategy(list(x0), sigma0, opts)
     es.optimize(objective_fn)

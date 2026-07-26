@@ -1,0 +1,13 @@
+# [dr] Per-reset DR for rigid mushroom lift — pose + full orientation (matches data collection).
+# Used by: experiments (dr:) single_lift_mushroom_rigid_eval -> eval + DPPO training
+# Status: active
+#
+# Matches the CMA-ES demo collection parameters (collect_demos_synth.py defaults):
+#   xy_range=0.04, pitch_roll_range_deg=45, full yaw (360°).
+# Use this for both BC pretraining (via sim server) and eval so the policy sees the
+# same distribution it was trained on.  The wider pitch/roll (45° vs sim_demo's 15°)
+# is the whole point of the rigid orientation experiment.
+object_pos_xy: 0.04           # half-range (m) — matches --xy-range 0.04 in data collection
+robot_init_pos_xyz: 0.02      # per-env arm-home jitter (unchanged from sim_demo)
+object_yaw_deg: 180           # full 360° yaw (U(-180,180))
+object_pitch_roll_deg: 45     # ±45° pitch & roll — matches --pitch-roll-range 45 in data collection
