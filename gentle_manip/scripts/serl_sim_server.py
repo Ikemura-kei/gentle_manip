@@ -79,8 +79,12 @@ def main() -> None:
     # — the SERL actor drives episodes synchronously across all envs).
     backend = SimBackend(task.scene_spec, num_envs=args.num_envs, use_subprocess=use_subprocess, show_viewer=False,
                          render_cameras=obs_cfg.needs_cameras(), record_camera=want_frame_cam,
-                         config={"sim": {"settle_steps": args.settle_steps,
-                                         "scene_dr_every": args.scene_dr_every}, "dr": dr_cfg})
+                         config={"sim": {
+                                     "settle_steps":     exp.task_cfg.get("settle_steps",     args.settle_steps),
+                                     "settle_max_steps": exp.task_cfg.get("settle_max_steps", 200),
+                                     "settle_vel_thresh": exp.task_cfg.get("settle_vel_thresh", 0.005),
+                                     "scene_dr_every":   args.scene_dr_every,
+                                 }, "dr": dr_cfg})
     env = PolicyEnv(backend, obs_cfg, exp.action_config, task=task,
                     max_episode_steps=10 ** 9, augmentation=aug)
 

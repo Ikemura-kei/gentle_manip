@@ -75,6 +75,8 @@ class SimBackend:
             use_subprocess = True          # relaunch-based scene DR needs GenesisProcess.restart
         worker_kwargs = dict(
             settle_steps=int(sim_cfg.get("settle_steps", 30)),
+            settle_max_steps=int(sim_cfg.get("settle_max_steps", 200)),
+            settle_vel_thresh=float(sim_cfg.get("settle_vel_thresh", 0.005)),
             coup_friction=float(coup if coup is not None else sim_cfg.get("coup_friction", 4.0)),
             robot_overrides=robot_overrides,
             # A record-only camera is built but not depth-rendered each step.

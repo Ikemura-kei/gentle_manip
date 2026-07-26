@@ -48,7 +48,9 @@ class GenesisWorker:
         num_envs: int,
         *,
         show_viewer: bool = False,
-        settle_steps: int = 30,
+        settle_steps: int = 40,
+        settle_max_steps: int = 200,
+        settle_vel_thresh: float = 0.003,
         coup_friction: float = 4.0,
         constraint_timeconst: float = 0.01,
         noslip_iterations: int = 3,
@@ -59,6 +61,8 @@ class GenesisWorker:
     ) -> None:
         self.num_envs = int(num_envs)
         self.settle_steps = int(settle_steps)
+        self.settle_max_steps = int(settle_max_steps)
+        self.settle_vel_thresh = float(settle_vel_thresh)
         # When False the scene cameras are still built (so they can be RGB-rendered
         # on demand, e.g. for occasional policy-behaviour clips) but read_state does
         # NOT render their depth every step — keeps the state teacher render-free/fast.
@@ -124,9 +128,37 @@ class GenesisWorker:
                     shift[:, 0, :2] = np.asarray(object_dxy, dtype=np.float32)
                 obj.set_particles_pos(parts + shift)
 
+        self._settle()
+        return self.read_state()
+
+    def _settle(self) -> None:
+        """Run sim steps until all rigid objects come to rest (vel < thresh) or
+        settle_max_steps is reached. Soft-body objects fall through to the fixed
+        settle_steps minimum (no cheap velocity proxy). The minimum settle_steps
+        always runs first so the scene physically separates from the spawn pose."""
+        has_rigid = any(t == "rigid" for t in self.handle.object_types)
+
+        # Minimum fixed warmup — always run regardless of object type.
         for _ in range(self.settle_steps):
             self.handle.scene.step()
-        return self.read_state()
+
+        if not has_rigid:
+            return   # soft bodies: fixed steps only
+
+        # Additional steps until all rigid objects are below vel threshold.
+        rigid_objs = [obj for obj, t in zip(self.handle.objects, self.handle.object_types)
+                      if t == "rigid"]
+        for _ in range(self.settle_max_steps - self.settle_steps):
+            # get_vel() returns (num_envs, 6) [lin_xyz, ang_xyz] or (num_envs, 3) depending
+            # on genesis version — handle both; we take the max speed across all envs & objs.
+            max_speed = 0.0
+            for obj in rigid_objs:
+                v = obj.get_vel()
+                vel = v.cpu().numpy() if hasattr(v, "cpu") else np.asarray(v)
+                max_speed = max(max_speed, float(np.abs(vel).max()))
+            if max_speed < self.settle_vel_thresh:
+                break
+            self.handle.scene.step()
 
     def step(self, target_pos, target_quat, target_gripper) -> dict:
         """Drive the arm/gripper to the target, advance one sim step, read state."""

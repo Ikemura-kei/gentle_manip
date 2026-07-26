@@ -4,24 +4,12 @@ Collects demonstrations by: reset with pose DR → per-env CMA-ES synthesis →
 scripted execution, recording (obs, action, reward) tuples in exactly the
 same format as demos/record.py.  Drop-in data source for DP3 training.
 
-Key differences from demos/record.py:
-  - Runs in envs/sim (Python 3.12 + Genesis), not envs/deploy.
-  - No teleop device — grasps are synthesized automatically.
-  - Actions are inverted from the scripted trajectory (delta commands that
-    reproduce each planned motion step).
-  - --setup absent (sim, no hardware).  --obs-config / --action-config /
-    --task-name / --out-dir / --shard-size / --description match record.py.
-  - Rewards are 0 (matching teleop task=None).
-  - Sim runs at 30 Hz (dt=1/30); rate_hz=30 in the dataset meta.
-
-Constraint: the scene always builds cam_ext (pos=(0.9,0.35,0.55), fov=50°,
-640×480).  The obs config must reference camera names present in the scene
-(point_cloud_1cam.yaml with cam_ext works out of the box).
+Config comes entirely from --experiment (task / obs / action / DR), mirroring
+how the training server and eval harness are configured.
 
 Usage:
     uv run --project envs/sim python grasp_synthesis/collect_demos_synth.py \\
-        --obs-config gentle_manip/configs/obs/point_cloud_1cam.yaml \\
-        --task-name single_lift_mushroom_rigid \\
+        --experiment single_lift_mushroom_rigid_eval \\
         --n-episodes 50 --n-envs 5
 """
 from __future__ import annotations
@@ -35,6 +23,7 @@ import string
 import subprocess
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -51,26 +40,25 @@ for _p in (str(ROOT), str(GRASP_DIR)):
 # headless by default; MUJOCO_GL=glfw in the shell to get the viewer
 os.environ.setdefault("MUJOCO_GL", "egl")
 
-from synth_utils import (  # noqa: E402
-    build_object_sdf, sample_finger_surface, grasp_cost, run_cmaes,
+from synth_utils import (  # noqa: E402  (build_object_sdf/grasp_cost/run_cmaes imported inside _synth_worker)
+    sample_finger_surface,
     FINGER_TO_TCP_Z,
 )
-from gentle_manip.scenes.scene_spec import CameraEntry, FixtureEntry, ObjectEntry, SceneSpec
+from gentle_manip.experiment import Experiment
+from gentle_manip.tasks.single_lift import SingleLiftTask
 from gentle_manip.envs.genesis_worker import GenesisWorker
 from gentle_manip.envs.raw_obs import RawObs
 from gentle_manip.perception.pipeline import PerceptionPipeline
-from gentle_manip.perception.obs_config import ObsConfig
-from gentle_manip.actions.action_config import ActionConfig
+from gentle_manip.domain_randomization.dr_config import DRConfig
 
 
 # ── Constants (keep in sync with run_grasp_synth.py) ─────────────────────────
 
-RATE_HZ       = 30           # sim dt = 1/RATE_HZ → control rate in meta
-N_HOME_TO_PRE = 105          # home → grasp pose interpolation steps
-N_SETTLE      = 4           # hold at grasp pose before closing
-N_GRASP       = 95           # gripper close steps
-N_LIFT        = 90          # lift steps
-N_HOLD        = 60           # hold at lift height (success eval window)
+N_HOME_TO_PRE = 86          # home → grasp pose interpolation steps
+N_SETTLE      = 3           # hold at grasp pose before closing
+N_GRASP       = 37           # gripper close steps
+N_LIFT        = 70          # lift steps
+N_HOLD        = 12           # hold at lift height (success eval window)
 LIFT_HEIGHT   = 0.2         # metres above grasp position
 OBJ_SIZE      = np.array([0.05, 0.05, 0.04])   # rough mushroom AABB half-size
 
@@ -96,49 +84,39 @@ def _git_commit() -> str:
         return ""
 
 
-# ── Scene ─────────────────────────────────────────────────────────────────────
-
-def _build_spec() -> SceneSpec:
-    return SceneSpec(
-        objects=[ObjectEntry(name="mushroom", object_type="rigid")],
-        fixtures=[FixtureEntry(fixture_type="table")],
-        cameras=[CameraEntry(
-            name="cam_ext",
-            pos=(0.9, 0.35, 0.55),
-            lookat=(0.4, 0.0, 0.1),
-            fov=50.0,
-            resolution=(640, 480),
-        )],
-        sim_dt=1 / RATE_HZ,
-        sim_substeps=10,
-    )
-
-
 # ── Synthesis ─────────────────────────────────────────────────────────────────
 
-def _synthesize_one(
-    obj_pos: np.ndarray,
-    obj_quat_wxyz: np.ndarray,
-    sdf_fn,
-    left_pts: np.ndarray,
-    right_pts: np.ndarray,
-    maxfevals: int,
-) -> np.ndarray:
-    """CMA-ES grasp synthesis for one env. Returns best_x (7,)."""
+def _synth_bounds(obj_pos: np.ndarray):
+    """Compute CMA-ES search bounds from object position."""
     t_lb_xy = (obj_pos[:2] - 1.5 * OBJ_SIZE[:2]).tolist()
     t_ub_xy = (obj_pos[:2] + 1.5 * OBJ_SIZE[:2]).tolist()
     tcp_z_min = float(obj_pos[2]) + FINGER_TO_TCP_Z - 0.04
     tcp_z_max = float(obj_pos[2]) + 0.25
-    lb = t_lb_xy + [tcp_z_min, 0.8 * np.pi, -0.25 * np.pi, -0.25 * np.pi, 0.01]
-    ub = t_ub_xy + [tcp_z_max, 1.0 * np.pi,  0.25 * np.pi,  0.25 * np.pi, 0.08]
+    lb = t_lb_xy + [tcp_z_min, -1.0 * np.pi, -0.12 * np.pi, -0.49 * np.pi, 0.01]
+    ub = t_ub_xy + [tcp_z_max,  1.0 * np.pi,  0.12 * np.pi,  0.49 * np.pi, 0.08]
+    return lb, ub
+
+
+def _synth_worker(payload: tuple) -> tuple:
+    """Module-level CMA-ES worker — runs in a subprocess, builds its own SDF.
+
+    Defined at module level so ProcessPoolExecutor can pickle it.  Each worker
+    process (forked before CUDA init) is CPU-only; trimesh BVH is safe because
+    no two workers share memory.
+
+    payload: (mesh_path, obj_pos, obj_quat_wxyz, left_pts, right_pts, maxfevals, lb, ub)
+    returns: (best_x (7,), score float)
+    """
+    mesh_path, obj_pos, obj_quat_wxyz, left_pts, right_pts, maxfevals, lb, ub = payload
+    from synth_utils import build_object_sdf, grasp_cost, run_cmaes  # local import: safe in subprocess
+    sdf_fn = build_object_sdf(mesh_path)
     x0 = [(lo + hi) / 2 for lo, hi in zip(lb, ub)]
 
     def objective(x):
         return grasp_cost(x, left_pts, right_pts, sdf_fn, obj_pos, obj_quat_wxyz)
 
     best_x, score = run_cmaes(objective, x0, 1.0, lb, ub, maxfevals)
-    print(f"    cost={score:.4f}  tcp={best_x[:3].round(4)}  w={best_x[6]*1e3:.1f} mm")
-    return best_x
+    return best_x, score
 
 
 # ── Action inversion ──────────────────────────────────────────────────────────
@@ -313,9 +291,11 @@ def execute_and_collect(
     for _ in range(N_SETTLE):
         cur_obs_list = _step(pos_b, quat_b, width_open)
 
-    # ── Phase 2: close gripper ──
-    for _ in range(N_GRASP):
-        cur_obs_list = _step(pos_b, quat_b, width_cls)
+    # ── Phase 2: close gripper (gradual — speed = Δwidth / N_GRASP per step) ──
+    for j in range(N_GRASP):
+        alpha = (j + 1) / N_GRASP
+        cur_obs_list = _step(pos_b, quat_b,
+                             width_open + alpha * (width_cls - width_open))
 
     # ── Phase 3: lift ──
     lift_b = grasp_pos.copy(); lift_b[:, 2] += LIFT_HEIGHT
@@ -350,14 +330,14 @@ def _make_run_dir(out_dir: Path, task_name: str) -> Path:
 
 
 def _write_shard(run_dir: Path, episodes: List[dict],
-                 task: str, idx: int) -> Path:
+                 task: str, idx: int, rate_hz: float) -> Path:
     first = episodes[0]
     payload = {
         "meta": {
             "task": task,
             "obs_keys": sorted(first["observations"].keys()),
             "action_dim": int(first["actions"].shape[1]),
-            "rate_hz": float(RATE_HZ),
+            "rate_hz": rate_hz,
         },
         "episodes": episodes,
     }
@@ -399,90 +379,93 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
 
-    # record.py-compatible args
-    p.add_argument("--obs-config",    type=Path,
-                   default=ROOT / "gentle_manip/configs/obs/point_cloud_1cam.yaml",
-                   help="obs config (must reference only cam_ext)")
-    p.add_argument("--action-config", type=Path,
-                   default=ROOT / "gentle_manip/configs/action/delta_pose_delta_gripper.yaml")
-    p.add_argument("--task-name",   required=True,
-                   help="e.g. single_lift_mushroom_rigid")
-    p.add_argument("--out-dir",     type=Path, default=Path("dataset") / "demos")
-    p.add_argument("--shard-size",  type=int, default=5,
+    p.add_argument("--experiment", required=True,
+                   help="experiment name under configs/experiments/ "
+                        "(e.g. single_lift_mushroom_rigid_eval) — source of task, obs, "
+                        "action, and DR config")
+    p.add_argument("--task-name",  default=None,
+                   help="override output dataset name (default: experiment's task field)")
+    p.add_argument("--out-dir",    type=Path, default=Path("dataset") / "demos")
+    p.add_argument("--shard-size", type=int, default=5,
                    help="episodes per shard file (merged into data.pkl at end)")
     p.add_argument("--description", type=str, default="",
                    help="free-text annotation saved in config.yaml")
 
-    # Synth-specific args
-    p.add_argument("--n-episodes",  type=int, default=50,
+    p.add_argument("--n-episodes", type=int, default=50,
                    help="total successful episodes to collect")
-    p.add_argument("--n-envs",      type=int, default=5,
-                   help="parallel envs per batch (CMA-ES runs sequentially per env)")
-    p.add_argument("--maxfevals",   type=int, default=1100,
+    p.add_argument("--n-envs",     type=int, default=5,
+                   help="parallel envs per batch")
+    p.add_argument("--maxfevals",  type=int, default=901,
                    help="CMA-ES function evaluations per env per batch")
-    p.add_argument("--settle",      type=int, default=30,
-                   help="genesis worker base settle steps after reset")
-    p.add_argument("--seed",        type=int, default=0,
+    p.add_argument("--settle",            type=int,   default=None,
+                   help="override settle_steps from task config")
+    p.add_argument("--settle-max",        type=int,   default=None,
+                   help="override settle_max_steps from task config")
+    p.add_argument("--settle-vel-thresh", type=float, default=None,
+                   help="override settle_vel_thresh from task config (m/s)")
+    p.add_argument("--seed",       type=int, default=0,
                    help="RNG seed for pose DR")
-    p.add_argument("--xy-range",    type=float, default=0.04,
-                   help="per-env xy jitter range (m)")
-    p.add_argument("--pitch-roll-range", type=float, default=45.0,
-                   help="per-env pitch/roll DR range (degrees); yaw is always full 360°")
     p.add_argument("--keep-failures", action="store_true",
                    help="also save episodes where the grasp failed (default: success only)")
     p.add_argument("--record-video", action="store_true",
                    help="write per-episode mp4 videos to <out-dir>/videos/ (slower)")
     args = p.parse_args()
 
-    def _load_yaml(path: Path) -> dict:
-        rp = path if path.is_file() else ROOT / path
-        with open(rp) as f:
-            return yaml.safe_load(f)
+    # ── Load everything from the experiment config (same as training / eval) ──
+    exp        = Experiment.load(args.experiment)
+    task       = SingleLiftTask(exp.task_cfg)
+    spec       = task.scene_spec
+    obs_config = exp.collection_obs()
+    action_config = exp.action_config
+    dr_cfg     = DRConfig.from_dict(exp.dr)
+    scales     = np.asarray(action_config.scales, dtype=np.float64)
+    task_name  = args.task_name or exp._raw.get("task", args.experiment)
+    rate_hz    = 1.0 / spec.sim_dt
 
-    obs_d    = _load_yaml(args.obs_config)
-    action_d = _load_yaml(args.action_config)
-    obs_config    = ObsConfig.from_dict(obs_d)
-    action_config = ActionConfig.from_dict(action_d)
-    scales = np.asarray(action_config.scales, dtype=np.float64)
+    # Settle params: task config → CLI override.
+    settle_steps     = args.settle           or int(exp.task_cfg.get("settle_steps",     30))
+    settle_max_steps = args.settle_max       or int(exp.task_cfg.get("settle_max_steps", 200))
+    settle_vel_thresh = args.settle_vel_thresh or float(exp.task_cfg.get("settle_vel_thresh", 0.005))
 
     perception = PerceptionPipeline(obs_config)
 
     collection_config = {
-        "task_name":  args.task_name,
+        "task_name":   task_name,
         "description": args.description,
-        "source":     "cmaes_synth",
-        "git_commit": _git_commit(),
-        "sources":    {"obs": str(args.obs_config), "action": str(args.action_config)},
-        "control":    {
-            "rate_hz": RATE_HZ, "n_envs": args.n_envs, "maxfevals": args.maxfevals,
-            "n_episodes": args.n_episodes, "xy_range": args.xy_range,
-            "pitch_roll_range_deg": args.pitch_roll_range,
-        },
-        "obs": obs_d, "action": action_d,
+        "source":      "cmaes_synth",
+        "git_commit":  _git_commit(),
+        "experiment":  args.experiment,
+        "control":     {"n_envs": args.n_envs, "maxfevals": args.maxfevals,
+                        "n_episodes": args.n_episodes},
+        "dr": exp.dr,
     }
 
-    print(f"\n=== collect_demos_synth"
+    print(f"\n=== collect_demos_synth  experiment={args.experiment}"
           f" — target {args.n_episodes} episodes, {args.n_envs} envs/batch")
 
     # ── Build scene + worker ──
-    spec   = _build_spec()
     worker = GenesisWorker(spec, num_envs=args.n_envs,
                            show_viewer=False,
-                           settle_steps=args.settle,
-                           render_obs_cameras=True)   # depth rendered each step
+                           settle_steps=settle_steps,
+                           settle_max_steps=settle_max_steps,
+                           settle_vel_thresh=settle_vel_thresh,
+                           render_obs_cameras=True)
 
-    # SDF + finger geometry (built once; reads the actual post-DR mesh if any)
+    # ── Everything below is CPU-only (trimesh BVH + scipy CMA-ES) ──
+    # Mesh path and finger geometry are gathered from Genesis, then handed off to
+    # subprocess workers that each build their own SDF — no CUDA involved.
     actual_mesh = worker.handle.spec.objects[0].mesh_path or MUSHROOM_MESH
-    print(f"  Mesh: {Path(actual_mesh).name}")
-    sdf_fn    = build_object_sdf(actual_mesh)
     left_pts  = sample_finger_surface(LEFT_FINGER,  n=300)
     right_pts = sample_finger_surface(RIGHT_FINGER, n=300)
 
+    # Process pool reused across all batches (N workers, one per env).
+    executor = ProcessPoolExecutor(max_workers=args.n_envs)
+    print(f"  Mesh: {Path(actual_mesh).name}")
+
     rng = np.random.default_rng(args.seed)
-    pr  = np.radians(args.pitch_roll_range)
 
     # ── Output dir + config snapshot ──
-    run_dir  = _make_run_dir(args.out_dir, args.task_name)
+    run_dir  = _make_run_dir(args.out_dir, task_name)
     cfg_path = run_dir / "config.yaml"
     with open(cfg_path, "w") as f:
         yaml.safe_dump(collection_config, f, sort_keys=False)
@@ -500,13 +483,9 @@ def main() -> None:
         n = args.n_envs
         print(f"\n── Batch {batch_idx}  [{total_saved}/{args.n_episodes} saved] ──")
 
-        # ── Reset with per-env pose DR ──
-        object_dxy = rng.uniform(-args.xy_range, args.xy_range, (n, 2)).astype(np.float32)
-        object_euler = np.stack([
-            rng.uniform(-pr,      pr,      n),   # roll
-            rng.uniform(-pr,      pr,      n),   # pitch
-            rng.uniform(-np.pi,   np.pi,   n),   # yaw — full 360°
-        ], axis=1).astype(np.float32)
+        # ── Reset with per-env pose DR (ranges from experiment DR config) ──
+        object_dxy   = dr_cfg.sample_object_dxy(rng, n)
+        object_euler = dr_cfg.sample_object_euler(rng, n)
         worker.reset(object_dxy=object_dxy, object_euler=object_euler)
 
         # Extra settling until object velocity is small
@@ -526,13 +505,19 @@ def main() -> None:
         obj_pos_all  = init_state["object_center"].astype(np.float64)  # (N, 3)
         obj_quat_all = _np(obj.get_quat()).astype(np.float64)           # (N, 4) wxyz
 
-        # ── Per-env CMA-ES grasp synthesis (sequential — trimesh BVH not thread-safe) ──
-        all_best_x = []
+        # ── Per-env CMA-ES grasp synthesis (parallel — one subprocess per env) ──
+        payloads = []
         for i in range(n):
-            print(f"  Env {i}: obj_pos={obj_pos_all[i].round(4)}")
-            bx = _synthesize_one(obj_pos_all[i], obj_quat_all[i],
-                                 sdf_fn, left_pts, right_pts, args.maxfevals)
-            all_best_x.append(bx)
+            lb, ub = _synth_bounds(obj_pos_all[i])
+            payloads.append((actual_mesh, obj_pos_all[i], obj_quat_all[i],
+                             left_pts, right_pts, args.maxfevals, lb, ub))
+        futures = [executor.submit(_synth_worker, p) for p in payloads]
+        all_best_x = []
+        for i, fut in enumerate(futures):
+            best_x, score = fut.result()
+            all_best_x.append(best_x)
+            print(f"  Env {i}: cost={score:.4f}  tcp={best_x[:3].round(4)}"
+                  f"  w={best_x[6]*1e3:.1f} mm")
 
         # ── Execute scripted trajectory + collect data ──
         print(f"  Executing …")
@@ -561,17 +546,16 @@ def main() -> None:
             print(f"    ep {total_saved}: env {i}  {'✓' if success[i] else '✗'}  "
                   f"T={episode['actions'].shape[0]}")
 
-            # Write video for this episode
             if args.record_video and frame_bufs[i]:
                 import imageio
                 vid_dir = run_dir / "videos"
                 vid_dir.mkdir(exist_ok=True)
                 vid_path = vid_dir / f"ep{total_saved:04d}_env{i}_{tag}.mp4"
-                imageio.mimwrite(str(vid_path), frame_bufs[i], fps=RATE_HZ, quality=8)
+                imageio.mimwrite(str(vid_path), frame_bufs[i], fps=round(rate_hz), quality=8)
                 print(f"    video → {vid_path.name}")
 
             if len(shard_buf) >= args.shard_size:
-                sp = _write_shard(run_dir, shard_buf, args.task_name, shard_idx)
+                sp = _write_shard(run_dir, shard_buf, task_name, shard_idx, rate_hz)
                 print(f"  Shard {shard_idx} → {sp.name}")
                 shard_idx += 1
                 shard_buf = []
@@ -581,12 +565,13 @@ def main() -> None:
 
     # ── Flush + merge ──
     if shard_buf:
-        _write_shard(run_dir, shard_buf, args.task_name, shard_idx)
+        _write_shard(run_dir, shard_buf, task_name, shard_idx, rate_hz)
 
     data_path = _merge_shards(run_dir)
     elapsed   = time.time() - t0
     print(f"\n=== Done — {total_saved} episodes  {elapsed/60:.1f} min")
     print(f"    {data_path}")
+    executor.shutdown(wait=False)
     worker.close()
 
 

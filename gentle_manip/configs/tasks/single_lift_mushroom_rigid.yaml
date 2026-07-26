@@ -20,6 +20,12 @@ object_type: "rigid"     # <-- the only material difference from mushroom_lift
 sim_substeps: 5
 mpm_grid_density: 250    # unused (no MPM entity) but kept for SceneSpec
 
+# Rigid objects roll for many more steps than soft — wait until velocity drops below
+# thresh rather than a fixed count. 30 warmup steps + up to 200 extra (vel-gated).
+settle_steps: 30
+settle_max_steps: 200
+settle_vel_thresh: 0.005  # m/s — stop waiting once all rigid objects are below this
+
 success_scale: 2.0
 
 rewards:
