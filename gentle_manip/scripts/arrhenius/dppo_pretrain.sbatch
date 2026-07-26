@@ -136,9 +136,15 @@ echo "[sbatch] pretrain done (job ${SLURM_JOB_ID:-NA}) rc=$TRAIN_RC"
 # Runs the evals INLINE (bash the eval script) rather than sbatch-ing one job per checkpoint:
 # this job already holds a GPU node, and on a busy partition re-queueing costs hours per
 # checkpoint. Cost: this job's walltime must cover training + ~1.5h x n_checkpoints.
-# Each eval uses the canonical reference sim (235/250, regular sampler) and THIS dataset's
-# normalization — the checkpoint was trained on it, and passing the wrong one silently
-# mis-scales the observations.
+# Each eval uses THIS dataset's normalization (the checkpoint was trained on it; the wrong one
+# silently mis-scales the obs) and the eval EXPERIMENT below — which MUST match the policy's task:
+#   AUTO_EVAL_EXP (default single_lift_mushroom_soft_eval, the soft 235/250 reference). Set it to
+#   the matching task's eval experiment for a non-soft policy, e.g. single_lift_mushroom_rigid_eval
+#   for a rigid-trained policy (rigid object, substeps 5, rigid_orientation DR, superset_rigid obs).
+#   Evaluating a rigid policy on the SOFT experiment is a task mismatch (deformable object / wrong
+#   obs+DR) and produces meaningless numbers. AUTO_EVAL_TAG names the eval subdir (default eval235).
+AUTO_EVAL_EXP=${AUTO_EVAL_EXP:-single_lift_mushroom_soft_eval}
+AUTO_EVAL_TAG=${AUTO_EVAL_TAG:-eval235}
 if [ "${GM_AUTO_EVAL:-0}" = "1" ] && [ "$TRAIN_RC" = "0" ] && [ "$SMOKE" != "1" ]; then
     RD=$(grep -oE '/nobackup/[^ ]+/dppo-pretrain/[^ ]+/config/' "$TRAINER_LOG" | head -1 | sed 's#/config/##')
     NORM_AE=$DPPO_DATA_DIR/$DATA_ENV/normalization.npz
@@ -158,9 +164,9 @@ if [ "${GM_AUTO_EVAL:-0}" = "1" ] && [ "$TRAIN_RC" = "0" ] && [ "$SMOKE" != "1" 
             echo "[sbatch] === auto-eval $CKN ==="
             # subshell + `|| true`: one failed checkpoint eval must not abort the rest
             ( CKPT="$CK" NORM="$NORM_AE" FT_DENOISING=0 N_EPISODES="${AUTO_EVAL_EPISODES:-100}" \
-              EVAL_SUBDIR="${CKN}_eval235" \
-              SIM_EXPERIMENT=single_lift_mushroom_soft_eval \
-              EVAL_EXPERIMENT=single_lift_mushroom_soft_eval \
+              EVAL_SUBDIR="${CKN}_${AUTO_EVAL_TAG}" \
+              SIM_EXPERIMENT="$AUTO_EVAL_EXP" \
+              EVAL_EXPERIMENT="$AUTO_EVAL_EXP" \
               bash "$REPO/gentle_manip/scripts/arrhenius/dppo_eval.sbatch" ) || \
                 echo "[sbatch] auto-eval FAILED for $CKN (continuing)"
         done
