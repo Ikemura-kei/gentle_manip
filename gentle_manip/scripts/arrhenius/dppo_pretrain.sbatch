@@ -65,6 +65,15 @@ else
 fi
 # first_cycle_steps auto-tracks train.n_epochs in the config (single cosine cycle, no warm restart).
 
+# A DATA_ENV with a '/' (dataset in a subdir, e.g. single_lift_mushroom_rigid/mah) is fine for the
+# dataset path + logdir, but the config's wandb project is `gentle-manip-${env}` and wandb REJECTS
+# '/' in project names (job dies at wandb.init). Auto-sanitize: set a slash-free project unless the
+# caller already pinned wandb.project. (last-wins ordering: this must come BEFORE GM_EXTRA_OVERRIDES.)
+if [[ "$DATA_ENV" == */* ]] && [[ "${GM_EXTRA_OVERRIDES:-}" != *"wandb.project"* ]]; then
+    OVERRIDES+=(wandb.project="gentle-manip-${DATA_ENV//\//_}")
+    echo "[sbatch] DATA_ENV has '/': wandb.project -> gentle-manip-${DATA_ENV//\//_} (wandb forbids '/')"
+fi
+
 # Per-run extra hydra overrides (space-separated key=val), appended so they WIN (last wins).
 if [ -n "${GM_EXTRA_OVERRIDES:-}" ]; then
     # shellcheck disable=SC2206  (intentional word-split into array elements)
