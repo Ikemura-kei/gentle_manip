@@ -145,6 +145,10 @@ echo "[sbatch] pretrain done (job ${SLURM_JOB_ID:-NA}) rc=$TRAIN_RC"
 #   obs+DR) and produces meaningless numbers. AUTO_EVAL_TAG names the eval subdir (default eval235).
 AUTO_EVAL_EXP=${AUTO_EVAL_EXP:-single_lift_mushroom_soft_eval}
 AUTO_EVAL_TAG=${AUTO_EVAL_TAG:-eval235}
+# Eval CONFIG dir: must match the task (rigid eval config differs — max_episode_steps 400 vs 300,
+# n_episodes, scene_group_size). Default soft; set AUTO_EVAL_CFG_DIR to the rigid eval config dir
+# for a rigid policy. Empty -> dppo_eval.sbatch's own default (soft).
+AUTO_EVAL_CFG_DIR=${AUTO_EVAL_CFG_DIR:-}
 if [ "${GM_AUTO_EVAL:-0}" = "1" ] && [ "$TRAIN_RC" = "0" ] && [ "$SMOKE" != "1" ]; then
     RD=$(grep -oE '/nobackup/[^ ]+/dppo-pretrain/[^ ]+/config/' "$TRAINER_LOG" | head -1 | sed 's#/config/##')
     NORM_AE=$DPPO_DATA_DIR/$DATA_ENV/normalization.npz
@@ -167,6 +171,7 @@ if [ "${GM_AUTO_EVAL:-0}" = "1" ] && [ "$TRAIN_RC" = "0" ] && [ "$SMOKE" != "1" 
               EVAL_SUBDIR="${CKN}_${AUTO_EVAL_TAG}" \
               SIM_EXPERIMENT="$AUTO_EVAL_EXP" \
               EVAL_EXPERIMENT="$AUTO_EVAL_EXP" \
+              ${AUTO_EVAL_CFG_DIR:+CFG_DIR="$AUTO_EVAL_CFG_DIR"} \
               bash "$REPO/gentle_manip/scripts/arrhenius/dppo_eval.sbatch" ) || \
                 echo "[sbatch] auto-eval FAILED for $CKN (continuing)"
         done

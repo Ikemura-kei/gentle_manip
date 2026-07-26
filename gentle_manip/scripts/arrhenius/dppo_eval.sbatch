@@ -46,7 +46,11 @@ NUM_ENVS=5                                      # canonical EvalSpec; MUST match
 # the coincidence that both defaulted to 5570, and the client dies with "Connection refused".
 PORT=${PORT:-$((5570 + ${SLURM_JOB_ID:-0} % 400))}
 CKPT=${CKPT:-$REPO/logs/dppo/dppo-pretrain/2026-07-04_20-03-36_42/checkpoint/state_3000.pt}
-CFG_DIR=$REPO/gentle_manip/dppo/cfg/single_lift_mushroom_soft_pcd
+# Config DIR is overridable: a rigid policy needs the rigid eval config (its task params differ
+# from soft — e.g. max_episode_steps 400 vs 300 [rigid demos ~354 steps; the soft 300 truncates
+# rollouts and undercounts success], n_episodes 200, scene_group_size 0). The network arch +
+# shape_meta match across configs, so a checkpoint loads under either; the TASK params do not.
+CFG_DIR=${CFG_DIR:-$REPO/gentle_manip/dppo/cfg/single_lift_mushroom_soft_pcd}
 # Which eval PROTOCOL to run. The protocol (n_episodes, scene_group_size, seed) lives in a
 # CONFIG FILE, not in shell flags, so an eval can't silently drift:
 #   eval_diffusion_pointnet        canonical: 100 episodes, geometry rebuilt every 4 batches
