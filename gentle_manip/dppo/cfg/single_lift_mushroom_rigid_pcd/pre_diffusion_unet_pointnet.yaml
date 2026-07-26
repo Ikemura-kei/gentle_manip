@@ -1,0 +1,108 @@
+# [dppo-pretrain] BC-pretrain a PointNet diffusion policy with a U-NET head (rigid mushroom lift).
+# Used by: third_party/dppo/script/run.py (TrainDiffusionAgent) via gentle_manip.dppo.train
+# Status: experimental (architecture probe)
+#
+# Identical to pre_diffusion_pointnet.yaml EXCEPT the diffusion actor's HEAD: a 1D temporal
+# U-Net (PointNetDiffusionUNet, wrapping DPPO's Unet1D) instead of the flat MLP. Same DP3-style
+# PointNet encoder, same obs/action dims, same dataset/trainer/eval. This is essentially the
+# canonical DP3 architecture (PointNet encoder + conditional 1D U-Net). U-Net hyperparams mirror
+# DPPO's proven robomimic-lift config for the SAME horizon_steps=4 / action_dim=7
+# (dim 40, dim_mults [1,2] -> one downsample 4->2, kernel 5, n_groups 8, cond_predict_scale).
+#
+# Launch (cluster): DATA_ENV=single_lift_mushroom_rigid/sma CFG_NAME=pre_diffusion_unet_pointnet ...
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${logdir}
+  callbacks:
+    experiment_snapshot:
+      _target_: gentle_manip.dppo.hydra_snapshot.ExperimentSnapshot
+_target_: agent.pretrain.train_diffusion_agent.TrainDiffusionAgent
+
+name: ${env}_pre_diffusion_unet_pointnet_ta${horizon_steps}_td${denoising_steps}
+logdir: ${oc.env:DPPO_LOG_DIR}/dppo-pretrain/${env}/${exp_id:}
+train_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/train.npz
+val_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/val.npz
+experiment: single_lift_mushroom_rigid_eval   # env snapshot (task+obs+dr); rigid, no stress
+
+seed: 42
+device: cuda:0
+env: single_lift_mushroom_rigid_pcd
+obs_dim: 8                    # ee_pos3 + ee_quat4 + gripper1
+action_dim: 7
+denoising_steps: 20
+horizon_steps: 4
+cond_steps: 2
+pc_cond_steps: 1
+n_points: 1024
+visual_feature_dim: 256
+
+wandb:
+  entity: ${oc.env:DPPO_WANDB_ENTITY,null}
+  project: gentle-manip-${env}
+  run: ${exp_id:}
+  group: dppo-pretrain
+
+train:
+  n_epochs: 4000
+  batch_size: 128
+  learning_rate: 1e-4
+  weight_decay: 1e-6
+  lr_scheduler:
+    first_cycle_steps: ${train.n_epochs}
+    warmup_steps: 100
+    min_lr: 1e-5
+  epoch_start_ema: 10
+  update_ema_freq: 5
+  save_model_freq: 500
+  val_freq: 10
+
+model:
+  _target_: model.diffusion.diffusion.DiffusionModel
+  predict_epsilon: True
+  denoised_clip_value: 1.0
+  network:
+    _target_: gentle_manip.dppo.pointnet_diffusion.PointNetDiffusionUNet
+    action_dim: ${action_dim}
+    horizon_steps: ${horizon_steps}
+    cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+    pc_cond_steps: ${pc_cond_steps}
+    visual_feature_dim: ${visual_feature_dim}
+    # U-Net head (mirrors DPPO robomimic-lift, same horizon/action dims):
+    diffusion_step_embed_dim: 32
+    dim: 40
+    dim_mults: [1, 2]           # 1 downsample: horizon 4 -> 2 (must divide horizon_steps)
+    kernel_size: 5
+    n_groups: 8
+    cond_predict_scale: True
+    activation_type: Mish
+    smaller_encoder: False
+    pointnet:
+      in_channels: 3
+      use_layernorm: True
+      final_norm: layernorm
+  horizon_steps: ${horizon_steps}
+  obs_dim: ${obs_dim}
+  action_dim: ${action_dim}
+  denoising_steps: ${denoising_steps}
+  device: ${device}
+
+ema:
+  decay: 0.995
+
+train_dataset:
+  _target_: gentle_manip.dppo.pointcloud_dataset.StitchedSequencePointCloudDataset
+  dataset_path: ${train_dataset_path}
+  horizon_steps: ${horizon_steps}
+  cond_steps: ${cond_steps}
+  pc_cond_steps: ${pc_cond_steps}
+  device: ${device}
+
+val_dataset:
+  _target_: gentle_manip.dppo.pointcloud_dataset.StitchedSequencePointCloudDataset
+  dataset_path: ${val_dataset_path}
+  horizon_steps: ${horizon_steps}
+  cond_steps: ${cond_steps}
+  pc_cond_steps: ${pc_cond_steps}
+  device: ${device}

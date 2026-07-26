@@ -28,6 +28,7 @@ import torch.nn as nn
 from model.common.critic import CriticObs
 from model.common.mlp import MLP, ResidualMLP
 from model.diffusion.modules import SinusoidalPosEmb
+from model.diffusion.unet import Unet1D
 
 
 class PointNetEncoderXYZ(nn.Module):
@@ -102,6 +103,54 @@ class PointNetDiffusionMLP(nn.Module):
         time_emb = self.time_embedding(time.view(B, 1)).view(B, self.time_dim)
         x = torch.cat([x, time_emb, cond_encoded], dim=-1)
         return self.mlp_mean(x).view(B, Ta, Da)
+
+
+class PointNetDiffusionUNet(nn.Module):
+    """Diffusion denoiser with a 1D temporal U-Net head (DPPO's Unet1D — the architecture the
+    original Diffusion Policy and DP3 use) in place of PointNetDiffusionMLP's flat MLP head.
+
+    Same obs encoder (PointNetEncoderXYZ) and same forward(x, time, cond) contract as the MLP
+    head, so the DiffusionModel/PPODiffusion wrapper, dataset, trainer and eval harness are all
+    unchanged — only network._target_ + the U-Net hyperparams differ in the config. The U-Net
+    denoises the action CHUNK (channels = action_dim, length = horizon_steps) and is FiLM-
+    conditioned, per residual block, on the fused [pointnet_feat ⊕ flattened proprio]. We reuse
+    the tested Unet1D verbatim by handing it that fused vector as its cond["state"] (identical to
+    VisionUnet1D's [time ⊕ state ⊕ visual] conditioning, just pre-concatenated).
+
+    horizon_steps sets the temporal length the U-Net down/up-samples: with dim_mults=[1,2] there
+    is ONE downsample, so horizon_steps must be even (ours = 4 -> 4->2). Add levels (e.g. [1,2,4])
+    only if the horizon is long enough to halve that many times.
+    """
+
+    def __init__(self, action_dim, horizon_steps, cond_dim,
+                 pointnet=None, pc_cond_steps=1, visual_feature_dim=256,
+                 diffusion_step_embed_dim=32, dim=40, dim_mults=(1, 2),
+                 kernel_size=5, n_groups=8, cond_predict_scale=True,
+                 activation_type="Mish", cond_mlp_dims=None, smaller_encoder=False, **kwargs):
+        super().__init__()
+        pn = dict(pointnet or {})
+        pn.setdefault("out_channels", visual_feature_dim)
+        self.backbone = PointNetEncoderXYZ(**pn)
+        self.pc_cond_steps = pc_cond_steps
+        # Unet1D FiLM-conditions on cond["state"]; we feed it the fused [pointnet_feat ⊕ proprio],
+        # so its cond_dim is the concatenated width (visual_feature_dim + flattened proprio dim).
+        self.unet = Unet1D(
+            action_dim=action_dim,
+            cond_dim=visual_feature_dim + cond_dim,
+            diffusion_step_embed_dim=diffusion_step_embed_dim,
+            dim=dim, dim_mults=tuple(dim_mults),
+            kernel_size=kernel_size, n_groups=n_groups,
+            cond_predict_scale=cond_predict_scale, activation_type=activation_type,
+            cond_mlp_dims=cond_mlp_dims, smaller_encoder=smaller_encoder,
+        )
+
+    def forward(self, x, time, cond: Dict[str, torch.Tensor], **kwargs):
+        """x: (B, Ta, Da); time: (B,); cond: {state:(B,To,Do), point_cloud:(B,Tpc,N,3)}."""
+        B = x.shape[0]
+        state = cond["state"].view(B, -1)
+        feat = _encode_clouds(self.backbone, cond["point_cloud"], self.pc_cond_steps)
+        fused = torch.cat([feat, state], dim=-1)          # (B, visual_feature_dim + cond_dim)
+        return self.unet(x, time, {"state": fused})
 
 
 class PointNetCritic(CriticObs):
