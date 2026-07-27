@@ -85,11 +85,24 @@ def tet_quadrature(verts: np.ndarray, tets: np.ndarray) -> Tuple[np.ndarray, np.
 
 
 def build_elastic_object(mesh_or_path: MeshLike, cfg: Optional[MetricConfig] = None,
+                         *, with_stress_maps: bool = True, prepare: bool = False,
+                         voxel_div: int = 32, target_tets: int = 5000,
                          **tet_kwargs) -> ElasticObject:
-    """M1: tetrahedralize, recenter to COM, compute volume + second moment.
-    (M4 later fills the affine stress maps A, B on the returned object.)"""
+    """M1–M4: tetrahedralize, recenter to COM, compute geometry moments and (by default)
+    the per-object affine body-stress map A. The FEM factorization, body-force map P and
+    body-load basis Lb are stashed on the returned object so the per-grasp contact map B
+    can be built later (contact_stress_map). Set with_stress_maps=False for geometry only.
+
+    prepare=True first conditions the mesh for FEM (watertight voxel-remesh at `voxel_div`
+    resolution, see preprocess.prepare_mesh) and sizes the tets to ~target_tets — use it for
+    scanned / non-watertight meshes (mushroom, bunny, …) so TetGen stays fast and the FEM/SDP
+    stay tractable. Raise voxel_div to preserve thin features (ears); it also controls cost."""
     cfg = cfg or MetricConfig()
     mesh = load_mesh(mesh_or_path)
+    if prepare:
+        from .preprocess import prepare_mesh, tet_switches
+        mesh = prepare_mesh(mesh, voxel_div=voxel_div)
+        tet_kwargs.setdefault("switches", tet_switches(mesh, target_tets=target_tets))
     verts, tets = tetrahedralize(mesh, **tet_kwargs)
 
     V, com, _ = geometry_moments(verts, tets)
@@ -98,7 +111,18 @@ def build_elastic_object(mesh_or_path: MeshLike, cfg: Optional[MetricConfig] = N
     scale = float(np.cbrt(max(V, 1e-30)))                  # characteristic length
     assert np.linalg.norm(com2) < 1e-8 * max(scale, 1.0), f"recenter failed: ‖COM‖={np.linalg.norm(com2):.2e}"
 
-    return ElasticObject(
+    obj = ElasticObject(
         verts=verts_c, tets=tets, volume=V2, com=com, second_moment=S, nu=cfg.nu,
         elem_centroids=tet_centroids(verts_c, tets),
     )
+    if with_stress_maps:
+        from .bodyforce import body_force_map
+        from .fem import FEM
+        from .stressmap import body_load_basis, body_stress_map
+
+        fem = FEM(verts_c, tets, nu=cfg.nu)
+        P = body_force_map(V2, S)
+        Lb = body_load_basis(verts_c, tets, fem.vol)
+        obj.A = body_stress_map(fem, P, Lb)                # (M, 6, 6)
+        obj.fem, obj.P, obj.Lb = fem, P, Lb                # stashed for contact_stress_map (B)
+    return obj

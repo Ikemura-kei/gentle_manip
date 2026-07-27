@@ -38,6 +38,8 @@ dependencies = [
     "meshio",
     "cvxpy",
     "clarabel",   # free SOCP+SDP conic solver for the support-point SDP
+    "shapely",        # mesh cropping (crop_mesh cap triangulation)
+    "mapbox-earcut",  # polygon triangulation engine for the cap
     # torch — cu126 for this lab box (see header note to change for your HW).
     "torch==2.8.0",
     "torchvision==0.23.0",

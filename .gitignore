@@ -74,6 +74,9 @@ gentle_manip/isaac/viz_out/
 # Isaac converted assets (URDF->USD output; large, regenerable via the README recipe)
 gentle_manip/isaac/assets/
 
+# smgrasp FEM stress-viz outputs (PNG/MP4/VTU renders — regenerable via the viz_* demos)
+grasp_synthesis/viz_out/
+
 # Scratch / writing files kept out of the repo
 tmp.csv
 paper_writing.txt
