@@ -1,0 +1,22 @@
+# [obs] SUPERSET real obs with tactile — cam_ext point cloud + both GelSight Mini sensors.
+# Used by: demos/record.py (tactile demo collection on real robot)
+# Status: active
+#
+# Extends superset_real.yaml with the two GelSight Mini tactile streams.
+# Point cloud is identical to superset_real.yaml (cam_ext only, same crop/max_points/
+# outlier_removal) so the point-cloud channel stays consistent with the sim-trained policy.
+include_joint_pos: false
+include_joint_vel: false
+quat_noise_std: 0.003
+
+point_cloud:
+  cameras: ["cam_ext"]
+  crop_min: [0.2, -0.215, 0.004]
+  crop_max: [0.71,   0.215,  0.45]
+  max_points: 1024
+  outlier_removal:
+    voxel_size: 0.01
+    min_neighbors: 23
+
+tactile:
+  sensors: ["tactile_left", "tactile_right"]

@@ -38,6 +38,49 @@ def wrench_map(points: np.ndarray) -> np.ndarray:
     return G
 
 
+def support_point_active(obj, contacts, d, cfg: Optional[MetricConfig] = None, *,
+                         B: np.ndarray, tet_idx: Optional[np.ndarray] = None,
+                         n_seed: int = 40, max_iter: int = 40, tol: float = 1e-3,
+                         solver: Optional[str] = None) -> dict:
+    """M5b — support_point with the progressive active set (§5.4 / Algorithm 3).
+
+    Most stress LMIs are inactive at the optimum, so instead of constraining all M elements we
+    solve with a small working set, then repeatedly add the single most-stressed excluded element
+    and re-solve until none violates the cap. Returns the SAME optimum as the full solve (the
+    dropped constraints were slack) but with |working set| ≪ M — the tractability lever for meshes
+    with thousands of tets. The initial set is a spatial spread (by centroid) so the first solve is
+    bounded in every force direction."""
+    from .fem import voigt_to_tensor
+
+    cfg = cfg or MetricConfig()
+    A = obj.A
+    alle = np.arange(A.shape[0])
+    if cfg.mask_contact_elems and tet_idx is not None:
+        alle = np.setdiff1d(alle, np.unique(tet_idx))
+
+    cent = obj.elem_centroids[alle]                           # spread the seed over the volume
+    order = np.lexsort((cent[:, 2], cent[:, 1], cent[:, 0]))
+    seed = alle[order[np.linspace(0, len(order) - 1, min(len(order), n_seed)).astype(int)]]
+    S = set(int(j) for j in seed)
+
+    res, it = None, 0
+    for it in range(max_iter):
+        res = support_point(obj, contacts, d, cfg, B=B, tet_idx=tet_idx,
+                            elements=np.array(sorted(S)), solver=solver)
+        if res["w"] is None:
+            break
+        L = (np.einsum("mij,j->mi", A[alle], res["w"])
+             + np.einsum("mij,j->mi", B[alle], res["f"].reshape(-1)))
+        smax = np.abs(np.linalg.eigvalsh(voigt_to_tensor(L))).max(axis=1)   # per-element max |σ|
+        k = int(np.argmax(smax))
+        if smax[k] <= 1.0 + tol or int(alle[k]) in S:         # nothing violates the cap -> optimal
+            break
+        S.add(int(alle[k]))
+    if res is not None:
+        res["active"], res["active_iters"] = sorted(S), it
+    return res
+
+
 def sample_sphere(n: int, dim: int = 6, seed: int = 0) -> np.ndarray:
     """n approximately-uniform unit directions on S^{dim-1}."""
     rng = np.random.default_rng(seed)
@@ -47,6 +90,7 @@ def sample_sphere(n: int, dim: int = 6, seed: int = 0) -> np.ndarray:
 
 def q_sm(obj, contacts, cfg: Optional[MetricConfig] = None, *, n_dirs: Optional[int] = None,
          eps: Optional[float] = None, max_iter: int = 60, elements: Optional[np.ndarray] = None,
+         stress_cap: bool = True, fn_limit: float = 1.0, active: bool = True,
          return_details: bool = False):
     """M6 — the stress-minimization grasp metric Q_SM (grasp_synthesis/CLAUDE.md §3.5).
 
@@ -63,11 +107,16 @@ def q_sm(obj, contacts, cfg: Optional[MetricConfig] = None, *, n_dirs: Optional[
     eps = eps if eps is not None else cfg.eps
     sqrtW = np.real(sqrtm(cfg.wrench_metric()))
 
-    B, tet_idx = contact_stress_map(obj.fem, np.asarray(contacts.points, float))
-    kw = dict(cfg=cfg, B=B, tet_idx=tet_idx, elements=elements)
+    B, tet_idx = (contact_stress_map(obj.fem, np.asarray(contacts.points, float))
+                  if stress_cap else (None, None))            # Q1 mode needs no stress map
+    kw = dict(cfg=cfg, B=B, tet_idx=tet_idx, elements=elements,
+              stress_cap=stress_cap, fn_limit=fn_limit)
 
     def support_y(d):                                          # support point in y = √W w space
-        r = support_point(obj, contacts, d, **kw)
+        if stress_cap and active:
+            r = support_point_active(obj, contacts, d, cfg, B=B, tet_idx=tet_idx)
+        else:
+            r = support_point(obj, contacts, d, **kw)
         return None if r["w"] is None else sqrtW @ r["w"]
 
     ys = [y for d in sample_sphere(n_dirs) if (y := support_y(d)) is not None]
@@ -101,14 +150,26 @@ def q_sm(obj, contacts, cfg: Optional[MetricConfig] = None, *, n_dirs: Optional[
     return (Q, {"iters": it, "n_points": len(ys)}) if return_details else Q
 
 
+def q1(obj, contacts, cfg: Optional[MetricConfig] = None, **kw):
+    """Ferrari–Canny Q1 — the shape-BLIND force-closure metric: the same outer loop as q_sm but with
+    the per-element stress LMIs replaced by a per-contact normal-force cap (nᵢ·fᵢ ≤ 1). Used in M7 to
+    show that Q1 is symmetric where Q_SM is shape-aware."""
+    return q_sm(obj, contacts, cfg, stress_cap=False, **kw)
+
+
 def support_point(obj, contacts, d, cfg: Optional[MetricConfig] = None, *,
                   B: Optional[np.ndarray] = None, tet_idx: Optional[np.ndarray] = None,
-                  elements: Optional[np.ndarray] = None, solver: Optional[str] = None) -> dict:
-    """Solve the support-point SDP for direction d. Returns dict(status, value, w, f, B, tet_idx).
+                  elements: Optional[np.ndarray] = None, solver: Optional[str] = None,
+                  stress_cap: bool = True, fn_limit: float = 1.0) -> dict:
+    """Solve the support-point program for direction d. Returns dict(status, value, w, f, B, tet_idx).
 
-    B / tet_idx (the per-contact stress map) are computed once if not supplied — pass them back in
-    across many directions (same contacts) to avoid recomputing. `elements` restricts the stress
-    constraints to a working set (active set); default = all elements minus contact-adjacent (§6.2)."""
+    stress_cap=True (Q_SM): bound the wrench by the two-sided stress LMIs −I ⪯ A_j w + B_j f ⪯ I.
+    stress_cap=False (Q1 / Ferrari–Canny): drop the stress LMIs and instead cap each contact's normal
+    force nᵢ·fᵢ ≤ fn_limit — the shape-BLIND force-closure support point, for comparison (M7).
+
+    B / tet_idx (the per-contact stress map, stress_cap only) are computed once if not supplied —
+    pass them back in across directions to avoid recomputing. `elements` restricts the stress LMIs to
+    a working set (active set); default = all elements minus contact-adjacent (§6.2)."""
     import cvxpy as cp
 
     cfg = cfg or MetricConfig()
@@ -117,13 +178,14 @@ def support_point(obj, contacts, d, cfg: Optional[MetricConfig] = None, *,
     mu = float(contacts.mu)
     N = len(pts)
 
-    if B is None:
-        B, tet_idx = contact_stress_map(obj.fem, pts)
-    A = obj.A
-    if elements is None:
-        elements = np.arange(A.shape[0])
-    if cfg.mask_contact_elems and tet_idx is not None:
-        elements = np.setdiff1d(elements, np.unique(tet_idx))     # drop contact-adjacent (§6.2)
+    if stress_cap:
+        if B is None:
+            B, tet_idx = contact_stress_map(obj.fem, pts)
+        A = obj.A
+        if elements is None:
+            elements = np.arange(A.shape[0])
+        if cfg.mask_contact_elems and tet_idx is not None:
+            elements = np.setdiff1d(elements, np.unique(tet_idx))     # drop contact-adjacent (§6.2)
 
     obj_vec = np.real(sqrtm(cfg.wrench_metric())) @ np.asarray(d, float).reshape(6)
     G = wrench_map(pts)
@@ -135,10 +197,14 @@ def support_point(obj, contacts, d, cfg: Optional[MetricConfig] = None, *,
     for i in range(N):
         ni, fi = normals[i], f[3 * i:3 * i + 3]
         cons.append(cp.SOC(mu * (ni @ fi), (I3 - np.outer(ni, ni)) @ fi))
-    for j in elements:
-        L = A[j] @ w + B[j] @ f                                    # (6,) Voigt stress
-        sig = cp.bmat([[L[0], L[3], L[5]], [L[3], L[1], L[4]], [L[5], L[4], L[2]]])
-        cons += [sig + I3 >> 0, I3 - sig >> 0]                     # −I ⪯ σ ⪯ I
+    if stress_cap:
+        for j in elements:
+            L = A[j] @ w + B[j] @ f                                # (6,) Voigt stress
+            sig = cp.bmat([[L[0], L[3], L[5]], [L[3], L[1], L[4]], [L[5], L[4], L[2]]])
+            cons += [sig + I3 >> 0, I3 - sig >> 0]                 # −I ⪯ σ ⪯ I
+    else:
+        for i in range(N):                                        # Q1 force normalization
+            cons.append(normals[i] @ f[3 * i:3 * i + 3] <= fn_limit)
 
     prob = cp.Problem(cp.Maximize(obj_vec @ w), cons)
     prob.solve(solver=solver or cp.CLARABEL)

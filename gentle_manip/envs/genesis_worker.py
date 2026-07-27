@@ -239,7 +239,10 @@ class GenesisWorker:
             for name, cam_list in cam_items:
                 cam = cam_list[0]
                 _, depth = _batched_render(cam, self.handle.scene, rgb=False, depth=True)
-                depth_images[name] = _np(depth).astype(np.float32)   # (B, H, W)
+                d = _np(depth).astype(np.float32)
+                if d.ndim == 2:
+                    d = d[None]   # rasterizer squeezed B=1 → restore (1, H, W)
+                depth_images[name] = d   # (B, H, W)
                 intrinsics[name] = np.asarray(cam.intrinsics, dtype=np.float32)
                 raw_extr = np.asarray(cam.extrinsics, dtype=np.float32)
                 if raw_extr.ndim == 3:

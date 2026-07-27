@@ -32,7 +32,7 @@ STATE_VIEW = ["ee_pos", "ee_quat", "gripper_width", "priv_object_pos", "priv_obj
 # Use with superset_rigid_full_state.yaml (object_quat + object_dr_params enabled).
 STATE_VIEW_FULL = ["ee_pos", "ee_quat", "gripper_width",
                    "priv_object_pos", "priv_object_rot6d",
-                   "priv_object_vel", "priv_object_dr_params"]
+                   "priv_object_dr_params"]
 # PROPRIO view — deployable state for the point-cloud (student) pipeline: no privileged obs,
 # the PointNet consumes the cloud instead. MUST match the sim server's student-view obs order.
 PROPRIO_VIEW = ["ee_pos", "ee_quat", "gripper_width"]

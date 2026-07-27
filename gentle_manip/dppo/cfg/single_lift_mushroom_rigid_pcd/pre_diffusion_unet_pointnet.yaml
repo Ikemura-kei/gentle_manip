@@ -24,7 +24,7 @@ name: ${env}_pre_diffusion_unet_pointnet_ta${horizon_steps}_td${denoising_steps}
 logdir: ${oc.env:DPPO_LOG_DIR}/dppo-pretrain/${env}/${exp_id:}
 train_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/train.npz
 val_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/val.npz
-experiment: single_lift_mushroom_rigid_eval   # env snapshot (task+obs+dr); rigid, no stress
+experiment: single_lift_mushroom_rigid   # env snapshot (task+obs+dr); rigid, no stress
 
 seed: 42
 device: cuda:0

@@ -1,5 +1,5 @@
 # [dr] Per-reset DR for rigid mushroom lift — pose + full orientation (matches data collection).
-# Used by: experiments (dr:) single_lift_mushroom_rigid_eval -> eval + DPPO training
+# Used by: experiments (dr:) single_lift_mushroom_rigid -> eval + DPPO training
 # Status: active
 #
 # Matches the CMA-ES demo collection parameters (collect_demos_synth.py defaults):
@@ -11,3 +11,13 @@ object_pos_xy: 0.04           # half-range (m) — matches --xy-range 0.04 in da
 robot_init_pos_xyz: 0.02      # per-env arm-home jitter (unchanged from sim_demo)
 object_yaw_deg: 180           # full 360° yaw (U(-180,180))
 object_pitch_roll_deg: 45     # ±45° pitch & roll — matches --pitch-roll-range 45 in data collection
+
+# Per-scene SIZE + SHAPE DR (object geometry) — re-randomized per scene rebuild. In collection
+# (collect_demos_synth.py --scene-dr-every) each rebuild deforms+scales the mushroom mesh; in eval
+# the harness drives it deterministically per scene group. Recorded into priv_object_dr_params
+# ([scale, bend_deg]). Ranges match configs/dr/food_shape.yaml (the earlier sim demo collection).
+object_scale:      [1.0, 1.5]   # uniform object scale
+object_bend_deg:   [-25, 25]     # curvature along the long axis (deg)
+object_twist_deg:  [-20, 20]     # twist about the long axis (deg)
+object_taper:      [-0.15, 0.15] # end-to-end thickness change (fraction)
+object_axis_scale: [0.95, 1.15]    # anisotropic scale on ONE random x/y/z axis

@@ -2,7 +2,7 @@
 # Used by: collect_demos_synth.py --experiment / serl_sim_server --experiment / dppo eval
 # Status: active
 #
-# Same as single_lift_mushroom_rigid_eval.yaml but uses superset_rigid_full_state for the obs,
+# Same as single_lift_mushroom_rigid.yaml but uses superset_rigid_full_state for the obs,
 # which additionally records object orientation (priv_object_rot6d, 6D) and DR shape params
 # (priv_object_dr_params = [scale, bend_deg]).  Point cloud is still in the superset so the
 # same demos can train a point-cloud student later without re-collecting.

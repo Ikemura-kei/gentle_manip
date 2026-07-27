@@ -8,7 +8,7 @@
 #
 # Start the sim server BEFORE running eval (rigid is fast, no --subprocess needed):
 #   uv run --project envs/sim python -m gentle_manip.scripts.serl_sim_server \
-#       --experiment single_lift_mushroom_rigid_eval --view student \
+#       --experiment single_lift_mushroom_rigid --view student \
 #       --num-envs 5 --render-rgb
 #
 # Then run eval:
@@ -27,7 +27,7 @@ name: ${env_name}_eval_diffusion_unet_pointnet_ta${horizon_steps}_td${denoising_
 logdir: ${eval_base:${base_policy_path}}/eval/${now:%Y-%m-%d}_${now:%H-%M-%S}
 base_policy_path: ???
 normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_mushroom_rigid_pcd/normalization.npz
-experiment: single_lift_mushroom_rigid_eval   # env snapshot; rigid + orientation DR
+experiment: single_lift_mushroom_rigid   # env snapshot; rigid + orientation DR
 
 seed: 42
 device: cuda:0

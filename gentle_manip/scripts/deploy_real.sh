@@ -29,18 +29,37 @@
 #   --record dataset/real_deploy/tmp \
 #   --shard-size 10
 
+# ── BC pretrain on SIM RIGID demos (single_lift_mushroom_rigid, sma dataset) ─────────────────
+# action config = delta_pose_delta_gripper_fast_rot.yaml (CMA-ES collection used fast_rot scales).
+# ft-denoising-steps 0 = pure BC checkpoint (no PPO finetune).
+# normalization from the sim rigid sma dataset.
+# obs-config = point_cloud_1cam_outlier.yaml (matches superset_rigid training crop/1024/outlier).
+#
+ckpt=logs/dppo/dppo-pretrain/single_lift_mushroom_rigid/sma/apioc/checkpoint/state_2000.pt
+normalization=dataset/dppo/single_lift_mushroom_rigid/sma/normalization.npz
+
+uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+  --ckpt ${ckpt} \
+  --ft-denoising-steps 0 \
+  --normalization ${normalization} \
+  --obs-config gentle_manip/configs/obs/point_cloud_1cam_outlier.yaml \
+  --action-config gentle_manip/configs/action/delta_pose_delta_gripper_fast_rot.yaml \
+  --pose-scale 0.999 \
+  --record dataset/real_deploy/rigid_sma_apioc2000 \
+  --shard-size 10
+
 # ── DPPO finetune (sim-trained BC + PPO finetune, single_lift_mushroom_soft_pcd) ─────────────
 # action config = delta_pose_delta_gripper.yaml (standard; sim demos used standard scales).
 # normalization from the SIM dataset (single_lift_mushroom_soft_pcd_wide1k_n150), not real.
 # ft-denoising-steps 10 = finetuned checkpoint (enables the shortened DDPM chain).
-ckpt=logs/dppo/dppo-finetune/single_lift_mushroom_soft_pcd/luqsl/checkpoint/state_249.pt
-normalization=dataset/dppo/single_lift_mushroom_soft_pcd_wide1k_n150/normalization.npz
+# ckpt=logs/dppo/dppo-finetune/single_lift_mushroom_soft_pcd/luqsl/checkpoint/state_249.pt
+# normalization=dataset/dppo/single_lift_mushroom_soft_pcd_wide1k_n150/normalization.npz
 
-uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-  --ckpt ${ckpt} \
-  --ft-denoising-steps 10 \
-  --normalization ${normalization} \
-  --action-config gentle_manip/configs/action/delta_pose_delta_gripper.yaml \
-  --pose-scale 0.999 \
-  --record dataset/real_deploy/luqsl249 \
-  --shard-size 10
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} \
+#   --ft-denoising-steps 10 \
+#   --normalization ${normalization} \
+#   --action-config gentle_manip/configs/action/delta_pose_delta_gripper.yaml \
+#   --pose-scale 0.999 \
+#   --record dataset/real_deploy/luqsl249 \
+#   --shard-size 10

@@ -9,7 +9,7 @@ how the training server and eval harness are configured.
 
 Usage:
     uv run --project envs/sim python grasp_synthesis/collect_demos_synth.py \\
-        --experiment single_lift_mushroom_rigid_eval \\
+        --experiment single_lift_mushroom_rigid \\
         --n-episodes 50 --n-envs 5
 """
 from __future__ import annotations
@@ -18,9 +18,11 @@ import argparse
 import datetime
 import os
 import pickle
+import dataclasses
 import random
 import string
 import subprocess
+import tempfile
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor
@@ -177,6 +179,76 @@ def _state_to_raw_obs(state: dict) -> RawObs:
     )
 
 
+# ── Scene-level DR (object SIZE + SHAPE) ──────────────────────────────────────
+
+def _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir):
+    """Per-scene SIZE + SHAPE DR for the (rigid) object — mirrors
+    SimBackend._apply_scene_dr, but BAKES the uniform scale into the exported mesh
+    (not the ObjectEntry.scale field) so the CMA-ES SDF, which loads the mesh file
+    directly, matches the geometry Genesis actually simulates.
+
+    Always deforms from the NOMINAL mesh (idempotent — no chaining across rebuilds).
+    Returns (new_spec, scene_dr) with scene_dr = {"scale", "bend_deg"} for
+    priv_object_dr_params. If the DR config declares no shape/scale fields, returns
+    the nominal spec unchanged (scene DR is then a no-op).
+    """
+    import trimesh
+    from gentle_manip.assets import mesh_deform
+    from gentle_manip.assets.registry import get_object_def
+
+    o = nominal_spec.objects[0]
+    nominal_scale = float(o.scale or 1.0)
+    shp = dr_cfg.sample_shape_scale(rng)                     # {} if no shape/scale fields set
+    if not shp:
+        return nominal_spec, {"scale": nominal_scale, "bend_deg": 0.0}
+
+    nominal_mesh = o.mesh_path or get_object_def(o.name).mesh_path
+    mesh = trimesh.load(str(nominal_mesh), process=False, force="mesh")
+    shape = {k: shp[k] for k in ("bend", "twist", "taper", "rbf", "axis_scale", "axis_scale_ax")
+             if k in shp}
+    if shape:
+        mesh = mesh_deform.deform_mesh(mesh, shape, rng)     # bend/twist/taper/axis_scale (radians)
+    mesh.apply_scale(nominal_scale * float(shp.get("scale", 1.0)))   # bake uniform scale in
+    dst = Path(deform_dir) / f"{Path(nominal_mesh).stem}_dr_{rng.integers(1_000_000):06d}.obj"
+    mesh.export(str(dst))
+
+    new_obj  = dataclasses.replace(o, mesh_path=str(dst), scale=1.0)
+    new_spec = dataclasses.replace(nominal_spec, objects=[new_obj, *nominal_spec.objects[1:]])
+    scene_dr = {"scale": float(shp.get("scale", 1.0)),
+                "bend_deg": float(np.rad2deg(shp.get("bend", 0.0)))}
+    return new_spec, scene_dr
+
+
+# ── Privileged obs (sim-only state-teacher fields) ────────────────────────────
+
+def _privileged_obs_batch(object_center, object_quat, dr_vec, priv_cfg) -> dict:
+    """Sim-only privileged fields from raw worker state — mirrors
+    PolicyEnv._privileged_obs exactly, but sourced from GenesisWorker state
+    (object_center + object_quat) since this collector bypasses PolicyEnv.
+
+    object_center: (N, 3); object_quat: (N, 4) wxyz; dr_vec: (2,) [scale, bend_deg].
+    Returns a dict of (N, ...) arrays for whichever priv fields the config enables.
+    """
+    out = {}
+    oc = np.asarray(object_center, dtype=np.float32)                    # (N, 3)
+    if priv_cfg.object_pos:
+        out["priv_object_pos"] = oc
+    if getattr(priv_cfg, "object_quat", False) or priv_cfg.object_rot6d:
+        wxyz = np.asarray(object_quat, dtype=np.float32)               # (N, 4)
+        if getattr(priv_cfg, "object_quat", False):
+            out["priv_object_quat"] = wxyz
+        if priv_cfg.object_rot6d:
+            xyzw = np.concatenate([wxyz[:, 1:], wxyz[:, :1]], axis=1)
+            mat  = Rot.from_quat(xyzw).as_matrix()                     # (N, 3, 3)
+            out["priv_object_rot6d"] = np.concatenate(
+                [mat[:, :, 0], mat[:, :, 1]], axis=-1                   # first two cols (Zhou 2019)
+            ).astype(np.float32)
+    if priv_cfg.object_dr_params:
+        out["priv_object_dr_params"] = np.tile(
+            np.asarray(dr_vec, np.float32)[None], (oc.shape[0], 1))     # (N, 2)
+    return out
+
+
 # ── Trajectory conversion ─────────────────────────────────────────────────────
 
 def _x_to_targets(x: np.ndarray, num_envs: int):
@@ -199,6 +271,8 @@ def execute_and_collect(
     perception:   PerceptionPipeline,
     scales:       np.ndarray,      # (7,) action scales
     record_video: bool = False,
+    priv_cfg=None,                 # PrivilegedConfig or None — sim-only state-teacher fields
+    dr_vec=None,                   # (2,) [scale, bend_deg] for priv_object_dr_params
 ) -> Tuple[List[List[dict]], List[List[np.ndarray]], List[List[float]], np.ndarray, List[List]]:
     """Execute scripted grasp trajectory; record (obs, action, reward) per env.
 
@@ -265,9 +339,12 @@ def execute_and_collect(
                 for i in range(num_envs):
                     frame_bufs[i].append(frames[i])
 
-        # Build obs from next state
+        # Build obs from next state (+ sim-only privileged fields from the object state)
         raw_next = _state_to_raw_obs(state)
         next_obs_batch = perception.process(raw_next)
+        if priv_cfg is not None:
+            next_obs_batch.update(_privileged_obs_batch(
+                state["object_center"], state["object_quat"], dr_vec, priv_cfg))
         next_obs_list = [{k: next_obs_batch[k][i] for k in next_obs_batch}
                          for i in range(num_envs)]
 
@@ -382,7 +459,7 @@ def main() -> None:
 
     p.add_argument("--experiment", required=True,
                    help="experiment name under configs/experiments/ "
-                        "(e.g. single_lift_mushroom_rigid_eval) — source of task, obs, "
+                        "(e.g. single_lift_mushroom_rigid) — source of task, obs, "
                         "action, and DR config")
     p.add_argument("--task-name",  default=None,
                    help="override output dataset name (default: experiment's task field)")
@@ -398,6 +475,10 @@ def main() -> None:
                    help="parallel envs per batch")
     p.add_argument("--maxfevals",  type=int, default=901,
                    help="CMA-ES function evaluations per env per batch")
+    p.add_argument("--scene-dr-every", type=int, default=1,
+                   help="re-randomize object SIZE+SHAPE every N batches by rebuilding the worker "
+                        "(needs shape/scale fields in the experiment DR config; 0 = off, nominal "
+                        "geometry). Geometry is shared across a batch's envs (batched build).")
     p.add_argument("--settle",            type=int,   default=None,
                    help="override settle_steps from task config")
     p.add_argument("--settle-max",        type=int,   default=None,
@@ -417,6 +498,7 @@ def main() -> None:
     task       = SingleLiftTask(exp.task_cfg)
     spec       = task.scene_spec
     obs_config = exp.collection_obs()
+    priv_cfg   = obs_config.privileged        # sim-only state-teacher fields (None if not requested)
     action_config = exp.action_config
     dr_cfg     = DRConfig.from_dict(exp.dr)
     scales     = np.asarray(action_config.scales, dtype=np.float64)
@@ -437,33 +519,50 @@ def main() -> None:
         "git_commit":  _git_commit(),
         "experiment":  args.experiment,
         "control":     {"n_envs": args.n_envs, "maxfevals": args.maxfevals,
-                        "n_episodes": args.n_episodes},
+                        "n_episodes": args.n_episodes, "scene_dr_every": args.scene_dr_every,
+                        "seed": args.seed},
         "dr": exp.dr,
     }
 
     print(f"\n=== collect_demos_synth  experiment={args.experiment}"
           f" — target {args.n_episodes} episodes, {args.n_envs} envs/batch")
 
-    # ── Build scene + worker ──
-    worker = GenesisWorker(spec, num_envs=args.n_envs,
-                           show_viewer=False,
-                           settle_steps=settle_steps,
-                           settle_max_steps=settle_max_steps,
-                           settle_vel_thresh=settle_vel_thresh,
-                           render_obs_cameras=True)
+    rng = np.random.default_rng(args.seed)   # DR RNG (pose + scene) — must precede the first build
+
+    # ── Build scene + worker (with per-scene SIZE+SHAPE DR) ──
+    # Scene DR re-randomizes object geometry by REBUILDING the worker every N batches (GenesisWorker
+    # has no in-process geometry re-randomize; a fresh build is the only path). Verified memory-stable
+    # across rebuilds (gs.destroy reclaims each build). Geometry is shared across a batch's envs.
+    nominal_spec   = spec
+    do_scene_dr    = args.scene_dr_every > 0 and dr_cfg.has_scene_dr()
+    deform_dir     = tempfile.mkdtemp(prefix="gm_synth_deform_") if do_scene_dr else None
+
+    def _make_worker():
+        """Build a GenesisWorker; if scene DR is on, on a freshly deformed+scaled mesh.
+        Returns (worker, scene_dr_dict, actual_mesh_path)."""
+        if do_scene_dr:
+            spec_dr, sdr = _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir)
+        else:
+            spec_dr, sdr = nominal_spec, {"scale": float(nominal_spec.objects[0].scale or 1.0),
+                                          "bend_deg": 0.0}
+        w = GenesisWorker(spec_dr, num_envs=args.n_envs, show_viewer=False,
+                          settle_steps=settle_steps, settle_max_steps=settle_max_steps,
+                          settle_vel_thresh=settle_vel_thresh, render_obs_cameras=True)
+        return w, sdr, (w.handle.spec.objects[0].mesh_path or MUSHROOM_MESH)
+
+    worker, scene_dr, actual_mesh = _make_worker()
+    if do_scene_dr:
+        print(f"  scene DR ON (every {args.scene_dr_every} batch(es)) — deformed meshes → {deform_dir}")
 
     # ── Everything below is CPU-only (trimesh BVH + scipy CMA-ES) ──
     # Mesh path and finger geometry are gathered from Genesis, then handed off to
     # subprocess workers that each build their own SDF — no CUDA involved.
-    actual_mesh = worker.handle.spec.objects[0].mesh_path or MUSHROOM_MESH
     left_pts  = sample_finger_surface(LEFT_FINGER,  n=300)
     right_pts = sample_finger_surface(RIGHT_FINGER, n=300)
 
     # Process pool reused across all batches (N workers, one per env).
     executor = ProcessPoolExecutor(max_workers=args.n_envs)
     print(f"  Mesh: {Path(actual_mesh).name}")
-
-    rng = np.random.default_rng(args.seed)
 
     # ── Output dir + config snapshot ──
     run_dir  = _make_run_dir(args.out_dir, task_name)
@@ -483,12 +582,21 @@ def main() -> None:
     while total_saved < args.n_episodes:
         batch_idx += 1
         n = args.n_envs
-        print(f"\n── Batch {batch_idx}  [{total_saved}/{args.n_episodes} saved] ──")
+
+        # ── Scene DR: rebuild the worker with fresh object SIZE+SHAPE every N batches ──
+        if do_scene_dr and batch_idx > 1 and (batch_idx - 1) % args.scene_dr_every == 0:
+            worker.close()
+            worker, scene_dr, actual_mesh = _make_worker()
+
+        print(f"\n── Batch {batch_idx}  [{total_saved}/{args.n_episodes} saved]"
+              + (f"  scale={scene_dr['scale']:.3f} bend={scene_dr['bend_deg']:+.1f}°"
+                 if do_scene_dr else "") + " ──")
 
         # ── Reset with per-env pose DR (ranges from experiment DR config) ──
         object_dxy   = dr_cfg.sample_object_dxy(rng, n)
         object_euler = dr_cfg.sample_object_euler(rng, n)
-        worker.reset(object_dxy=object_dxy, object_euler=object_euler)
+        home_offset  = dr_cfg.sample_home_offset(rng, n)   # per-env arm-home jitter (sim-only DR)
+        worker.reset(object_dxy=object_dxy, object_euler=object_euler, home_offset=home_offset)
 
         # Extra settling until object velocity is small
         obj = worker.handle.objects[0]
@@ -503,6 +611,13 @@ def main() -> None:
         init_state     = worker.read_state()
         raw_init       = _state_to_raw_obs(init_state)
         init_obs_batch = perception.process(raw_init)
+        # Episode scene-DR vector [scale, bend_deg] for priv_object_dr_params (mirrors
+        # SimBackend._episode_dr_vec). scene_dr may re-randomize this per batch (below).
+        dr_vec = np.array([float(scene_dr.get("scale", 1.0)),
+                           float(scene_dr.get("bend_deg", 0.0))], dtype=np.float32)
+        if priv_cfg is not None:
+            init_obs_batch.update(_privileged_obs_batch(
+                init_state["object_center"], init_state["object_quat"], dr_vec, priv_cfg))
 
         obj_pos_all  = init_state["object_center"].astype(np.float64)  # (N, 3)
         obj_quat_all = _np(obj.get_quat()).astype(np.float64)           # (N, 4) wxyz
@@ -526,7 +641,7 @@ def main() -> None:
         print(f"  Executing …")
         obs_bufs, act_bufs, rew_bufs, success, frame_bufs = execute_and_collect(
             worker, all_best_x, init_obs_batch, perception, scales,
-            record_video=args.record_video,
+            record_video=args.record_video, priv_cfg=priv_cfg, dr_vec=dr_vec,
         )
         print(f"  Success: {success.tolist()}")
 

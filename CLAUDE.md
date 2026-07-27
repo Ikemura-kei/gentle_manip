@@ -549,7 +549,7 @@ nearby poses in SO(3) to nearby 6D vectors with no antipodal jumps.
 
 **DPPO conversion views** (`gentle_manip/dppo/convert_demos.py`):
 - `STATE_VIEW` — `[ee_pos, ee_quat, gripper_width, priv_object_pos, priv_object_vel]` (14-dim)
-- `STATE_VIEW_FULL` — adds `priv_object_rot6d` + `priv_object_dr_params` (22-dim); use with
+- `STATE_VIEW_FULL` — `[ee_pos, ee_quat, gripper_width, priv_object_pos, priv_object_rot6d, priv_object_dr_params]` (19-dim); use with
   `superset_rigid_full_state.yaml`
 - `PROPRIO_VIEW` — `[ee_pos, ee_quat, gripper_width]` (8-dim); point-cloud student input
 Pass `--point-cloud point_cloud` to also store the raw cloud in the same `.npz` so the same
@@ -855,6 +855,22 @@ Key files from old code and where they map:
 
 ## Conventions
 
+- **`Experiment` is the single source of truth — every script loads it the same way.**
+  Any script that touches the sim (training, eval, data collection, analysis) MUST derive
+  task / obs / DR / action / augmentation from `Experiment.load(args.experiment)` — never
+  hardcode ranges or re-parse those fields independently. The canonical pattern:
+  ```python
+  exp     = Experiment.load(args.experiment)       # configs/experiments/<name>.yaml
+  dr_cfg  = DRConfig.from_dict(exp.dr)             # object_pos_xy, yaw/pitch-roll, home offset, shape DR
+  obs_cfg = exp.view_obs(args.view)                # teacher / student / … sub-view of the superset
+  act_cfg = ActionConfig.from_dict(exp.action)     # scales + clip
+  task    = TASK_MAP[exp.task_name]()              # reward + success logic
+  ```
+  The experiment name is the only thing that should differ between a training run, an eval
+  run, and a collection run on the same task. Experiment configs for rigid have NO `_eval`
+  suffix — there is no train/eval split because rigid has no MPM fidelity parameter to pin
+  (unlike soft, where `single_lift_mushroom_soft_eval.yaml` locks `sim_substeps`).
+  State-based variants use the `_state` suffix (e.g. `single_lift_mushroom_rigid_state`).
 - **Every training run gets a short global ID + registry entry.** `gentle_manip/utils/experiment_registry.py` mints a unique **5-letter ID** (e.g. `cqwxw`) that names the TRAINING run dir (`logs/<algo>/<task>/<id>/`) and is recorded in the project-root `experiments.csv` (id, algo, task, name, run_dir, created, commit, status). SERL calls `new_id()`+`add_entry()` in `train_serl.py`; DPPO uses the `${exp_id:}` OmegaConf resolver (registered in `dppo/train.py`) inside the logdir template, and the `ExperimentSnapshot` hydra callback writes the row. The wandb run name == the ID. **Eval runs keep datetime naming** (they nest under the policy's run dir) and are NOT registered. Reconcile the table with disk (drop deleted runs, back-fill orphans) via `python -m gentle_manip.scripts.reconcile_experiments` (`--list` just prints it).
 - **Every training run writes an `EXPERIMENT.md`** into its run dir (`logs/<algo>/<task>/<run>/`) — applies to ANY training (SERL, DP3, …), not just SERL. It records the git commit, **motivation**, **hypothesis**, key config, and empty **Observations** + **Final summary** sections to be filled during/after the run (by the agent when monitoring/stopping, and by the user adding insights). Helpers in `gentle_manip/utils/run_paths.py`: `write_experiment_md(...)` at launch, `append_experiment_note(run_dir, note)` during, and fill the Final summary (duration, learner steps, replay-buffer size at end, return/succeed, verdict) when the run ends. `train_serl.py` takes `--motivation` / `--hypothesis` and writes it automatically; wire the same into any new trainer. This is the single place to track *why* each run happened and *what it showed*.
 - **Task / dataset naming — HARD RULE:** `{single,multi}_{task}_{object}_{soft,rigid,real}`.
