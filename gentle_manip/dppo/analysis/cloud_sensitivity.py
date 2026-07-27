@@ -8,8 +8,8 @@ self-predictive in demos) but it can't locate the object in closed loop.
 
 This measures, on real demo observations, how much the sampled action changes when we PERTURB
 the point cloud (proprio held fixed), for the U-Net vs the MLP head:
-  - shuffle/destroy: replace the cloud with a shuffled copy -> if the policy uses geometry, the
-    action should move; if it ignores the cloud, it won't.
+  - shuffle: INVALID as a vision test -> PointNet max-pool is permutation-invariant, so shuffling
+    point ORDER is a no-op on the feature. Kept only for the record; use cloud_translate instead.
   - translate: shift the whole cloud by +dx in x -> a vision-using policy should shift its reach.
   - CONTROL: perturb the proprio state instead -> both heads should respond (sanity that the
     probe + models are live).
@@ -27,9 +27,14 @@ import numpy as np
 import torch
 from hydra import compose, initialize_config_dir
 import hydra
+from omegaconf import OmegaConf
 
 import gentle_manip.dppo.train as _gm_train  # noqa: F401  (registers exp_id/eval_base resolvers)
 from gentle_manip.dppo.pointcloud_dataset import StitchedSequencePointCloudDataset
+
+# The configs use ${eval:'...'} for cond_dim; DPPO registers this in script/run.py, which we
+# don't import here. Register it ourselves (same as run.py) so compose() resolves the config.
+OmegaConf.register_new_resolver("eval", eval, replace=True)
 
 REPO = "/nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip"
 CFG_DIR = f"{REPO}/gentle_manip/dppo/cfg/single_lift_mushroom_rigid_pcd"
