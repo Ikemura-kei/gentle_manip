@@ -41,7 +41,7 @@ def main():
     obj = build_elastic_object(head, switches=sw)
     print(f"tetgen({sw}) -> {len(obj.tets)} tets, {len(obj.verts)} nodes")
 
-    ears = find_ear_contacts(obj, up=1, top_frac=0.62)        # y up; ears = top of the cropped head
+    ears = find_ear_contacts(obj, up=1, top_frac=0.8)         # y up; high enough to exclude the eyes
     print(f"ear tips (cm): {(ears * 100).round(2).tolist()}  "
           f"separation={np.linalg.norm(ears[1] - ears[0]) * 100:.1f} cm")
 

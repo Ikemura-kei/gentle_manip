@@ -62,21 +62,27 @@ def squeeze_at(obj, points: np.ndarray, force: Optional[float] = None):
     return pts, f, u, fem.element_stress(u)
 
 
-def find_ear_contacts(obj, up: int = 1, top_frac: float = 0.8) -> np.ndarray:
-    """Two OUTER-surface contact points on the ears of a bunny-like mesh, for an inward squeeze.
+def find_ear_contacts(obj, up: int = 1, top_frac: float = 0.75) -> np.ndarray:
+    """Two OUTER-surface contact points, ONE per ear, for an inward squeeze of a bunny-like mesh.
 
-    Take the upper region (top_frac of the up-axis range), find its principal HORIZONTAL axis
-    (the ears' splay direction), and return the two points that are most extreme along that axis
-    — i.e. the outer face of each ear, where a gripper finger presses. Pressing these toward each
-    other (squeeze_at) then loads the ears from OUTSIDE inward (not from the inner gap). Returns (2,3)."""
+    Take the upper region (top_frac of the up-axis range — set it high enough to exclude the eyes),
+    find its principal HORIZONTAL axis (the ears' splay direction), SPLIT the region in two along
+    that axis (median), and in EACH half take the point most extreme along the axis — i.e. the outer
+    face of that ear. Splitting first guarantees one contact per ear (a global two-extreme pick can
+    put both on one ear / the head); pressing them toward each other loads the ears from OUTSIDE in.
+    Returns (2,3)."""
     v = obj.verts
     a = v[:, up]
-    top = v[a > a.min() + top_frac * (a.max() - a.min())]      # ear zone only
+    top = v[a > a.min() + top_frac * (a.max() - a.min())]      # ear zone only (exclude eyes/head)
     horiz = [i for i in range(3) if i != up]
-    P = top[:, horiz] - top[:, horiz].mean(0)
-    _, vecs = np.linalg.eigh(P.T @ P)
-    proj = P @ vecs[:, -1]                                     # principal horizontal (splay) axis
-    return np.stack([top[int(np.argmin(proj))], top[int(np.argmax(proj))]])  # outer face of each ear
+    ctr = top[:, horiz].mean(0)
+    axis = np.linalg.eigh((top[:, horiz] - ctr).T @ (top[:, horiz] - ctr))[1][:, -1]  # splay axis
+    proj = (top[:, horiz] - ctr) @ axis
+    med = np.median(proj)
+    left, right = top[proj < med], top[proj >= med]            # the two ears
+    lp = (left[:, horiz] - ctr) @ axis
+    rp = (right[:, horiz] - ctr) @ axis
+    return np.stack([left[int(np.argmin(lp))], right[int(np.argmax(rp))]])  # outer face of each ear
 
 
 find_ear_tips = find_ear_contacts                             # back-compat alias
