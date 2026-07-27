@@ -47,7 +47,8 @@ ddim_steps: ${ft_denoising_steps}
 
 # Canonical eval spec — fixed, do not change between policies.
 n_episodes: 200
-scene_group_size: 0          # rigid: no shape/material DR → fixed geometry; only pose/orientation vary
+scene_group_size: 4          # rigid_orientation now carries object shape/size DR -> rebuild every 4
+                             # batches (~10 shapes / 200 ep). (was 0 pre-shape-DR.) Needs --subprocess.
                              # (set >0 only if you add food_shape DR to this experiment later)
 record_batches: null         # record all 100 episodes (one clip per episode)
 n_steps: 100                 # 100 * act_steps(4) = 400 sim steps = max_episode_steps
