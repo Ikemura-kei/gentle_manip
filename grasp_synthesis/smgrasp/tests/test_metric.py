@@ -105,3 +105,20 @@ def test_qsm_monotone_in_friction(cube):
     q_lo = q_sm(cube, _closure(0.3), n_dirs=12)
     q_hi = q_sm(cube, _closure(0.9), n_dirs=12)
     assert q_hi >= q_lo - 1e-3
+
+
+# ── M5b — active set (Algorithm 3) + Q1 mode ─────────────────────────────────
+def test_active_set_matches_full_solve(cube, antipodal):
+    from smgrasp.metric import support_point_active
+    from smgrasp.stressmap import contact_stress_map
+    B, ti = contact_stress_map(cube.fem, antipodal.points)
+    d = np.array([1.0, 0, 0, 0, 0, 0])
+    full = support_point(cube, antipodal, d, B=B, tet_idx=ti)["value"]
+    act = support_point_active(cube, antipodal, d, B=B, tet_idx=ti)
+    assert act["value"] == pytest.approx(full, abs=1e-4)     # same optimum, dropped LMIs were slack
+    assert len(act["active"]) <= len(cube.tets)
+
+
+def test_q1_mode_positive_for_closure(cube):
+    from smgrasp.metric import q1
+    assert q1(cube, _closure(0.5), n_dirs=12) > 0            # Ferrari-Canny Q1 > 0 for closure
