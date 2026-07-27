@@ -139,6 +139,11 @@ class SimBackend:
         self._target_pos = state["ee_pos"].astype(np.float64).copy()
         self._target_quat = state["ee_quat"].astype(np.float64).copy()
         self._target_gripper = state["gripper_width"].astype(np.float64).copy()
+        # Cache scene DR params ([scale, bend_deg]) for the episode; used by privileged obs.
+        sp = self.scene_params()
+        self._episode_dr_vec = np.array(
+            [sp.get("scale", 1.0), sp.get("bend_deg", 0.0)], dtype=np.float32
+        )
         return self._build_raw_obs(state)
 
     def material_params(self) -> dict:
@@ -293,6 +298,10 @@ class SimBackend:
             return None
         s = self._last_state
         extra = {} if s["von_mises_stress"] is None else {"von_mises_stress": s["von_mises_stress"]}
+        if s.get("object_quat") is not None:
+            extra["object_quat"] = s["object_quat"]           # (N, 4) wxyz, rigid only
+        if hasattr(self, "_episode_dr_vec"):
+            extra["object_dr_vec"] = self._episode_dr_vec     # (2,) [scale, bend_deg], episode const
         return SimFeedback(
             ee_pos=s["ee_pos"],
             gripper_width=s["gripper_width"],

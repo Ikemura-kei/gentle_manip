@@ -514,7 +514,46 @@ class ObsConfig:
     images:      Optional[ImageConfig]      = None  # which RGB cameras to pass through
     tactile:     Optional[TactileConfig]    = None  # GelSight Mini sensors (real only)
     quat_noise_std: float = 0.0                     # tiny shared sim+real ee_quat jitter (renormalized)
+    privileged: Optional[PrivilegedConfig]  = None  # sim teacher only — see below
 ```
+
+**`PrivilegedConfig`** (`perception/obs_config.py`) — sim-only fields computed by `PolicyEnv`
+from `SimFeedback` (NOT the shared pipeline, so real/student obs can never contain them).
+Requires a task. Set in the YAML under a `privileged:` key.
+
+```python
+@dataclass
+class PrivilegedConfig:
+    object_pos:       bool = False  # priv_object_pos  (N,3)  — true object centre each step
+    object_quat:      bool = False  # priv_object_quat (N,4)  — wxyz; available but prefer rot6d
+    object_rot6d:     bool = False  # priv_object_rot6d (N,6) — 6D (Zhou et al. 2019): first two
+                                    #   columns of rotation matrix. Continuous + singularity-free;
+                                    #   better than quat for wide rotation ranges (e.g. ±45° pitch/roll
+                                    #   + full yaw). Use this instead of object_quat for state policies.
+    object_vel:       bool = False  # priv_object_vel  (N,3)  — per-step displacement (finite diff)
+    object_dr_params: bool = False  # priv_object_dr_params (N,2) — [scale, bend_deg], episode
+                                    #   constant from scene DR; defaults [1.0, 0.0] when no shape DR.
+                                    #   Tells the policy what shape variant it's manipulating.
+    stress:           bool = False  # priv_stress      (N,2)  — [mean, top10] / yield (soft only)
+```
+
+`object_quat` vs `object_rot6d`: for the EE quaternion (small workspace range) the sign-flip
+discontinuity is benign. For the **object** with wide rotation DR, use `object_rot6d` — it maps
+nearby poses in SO(3) to nearby 6D vectors with no antipodal jumps.
+
+**Obs configs** — relevant presets:
+- `superset_rigid.yaml` — rigid superset: object_pos + object_vel + point cloud (no quat/DR params)
+- `superset_rigid_full_state.yaml` — adds `object_rot6d` + `object_dr_params`; point cloud retained
+  for student training. Full state dim: **22** (ee_pos(3)+ee_quat(4)+grip(1)+obj_pos(3)+obj_rot6d(6)+obj_vel(3)+obj_dr(2)).
+- `state_privileged.yaml` — state teacher (no camera): object_pos + object_vel + stress (soft)
+
+**DPPO conversion views** (`gentle_manip/dppo/convert_demos.py`):
+- `STATE_VIEW` — `[ee_pos, ee_quat, gripper_width, priv_object_pos, priv_object_vel]` (14-dim)
+- `STATE_VIEW_FULL` — adds `priv_object_rot6d` + `priv_object_dr_params` (22-dim); use with
+  `superset_rigid_full_state.yaml`
+- `PROPRIO_VIEW` — `[ee_pos, ee_quat, gripper_width]` (8-dim); point-cloud student input
+Pass `--point-cloud point_cloud` to also store the raw cloud in the same `.npz` so the same
+demo dataset trains both a state policy and a cloud student without re-collecting.
 
 **Point-cloud quality filters** (`perception/pointcloud_ops.py`, config-gated in
 `PointCloudConfig`, applied in the shared pipeline AFTER crop, BEFORE subsample so the

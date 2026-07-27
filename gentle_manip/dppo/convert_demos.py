@@ -28,6 +28,11 @@ import numpy as np
 
 # Default STATE view — MUST match the sim server's obs order (serl_sim_server teacher view).
 STATE_VIEW = ["ee_pos", "ee_quat", "gripper_width", "priv_object_pos", "priv_object_vel"]
+# Full privileged state: adds object orientation + DR params (scale, bend_deg) to STATE_VIEW.
+# Use with superset_rigid_full_state.yaml (object_quat + object_dr_params enabled).
+STATE_VIEW_FULL = ["ee_pos", "ee_quat", "gripper_width",
+                   "priv_object_pos", "priv_object_rot6d",
+                   "priv_object_vel", "priv_object_dr_params"]
 # PROPRIO view — deployable state for the point-cloud (student) pipeline: no privileged obs,
 # the PointNet consumes the cloud instead. MUST match the sim server's student-view obs order.
 PROPRIO_VIEW = ["ee_pos", "ee_quat", "gripper_width"]
@@ -127,8 +132,28 @@ def main() -> None:
     ap.add_argument("--point-cloud", dest="pc_key", nargs="?", const="point_cloud", default=None,
                     help="also store a raw point-cloud modality (student view); default key 'point_cloud'")
     ap.add_argument("--val-split", type=float, default=0.1)
+    ap.add_argument("--experiment", default=None,
+                    help="derive obs-key order from Experiment.load(name).view_obs(--view). "
+                         "Guarantees BC pretraining and online env use the identical key order. "
+                         "Takes precedence over --obs-keys.")
+    ap.add_argument("--view", default="teacher",
+                    help="which experiment view to use with --experiment (default: teacher)")
     args = ap.parse_args()
-    obs_keys = args.obs_keys or (PROPRIO_VIEW if args.pc_key else STATE_VIEW)
+
+    if args.experiment:
+        from gentle_manip.experiment import Experiment
+        exp = Experiment.load(args.experiment)
+        view_cfg = exp.view_obs(args.view)
+        # obs_keys() returns only flat (non-image, non-cloud) keys for teacher/state views.
+        obs_keys = [k for k in view_cfg.obs_keys()
+                    if k not in ("point_cloud", "voxel_grid")
+                    and not k.startswith("image_")
+                    and not k.startswith("tactile_")]
+        print(f"  obs-keys from experiment '{args.experiment}' view '{args.view}':")
+        print(f"    {obs_keys}")
+    else:
+        obs_keys = args.obs_keys or (PROPRIO_VIEW if args.pc_key else STATE_VIEW)
+
     paths = _find_demo_pkls(args.demos)
     print(f"converting {len(paths)} demo file(s): {[str(p) for p in paths]}")
     meta = convert(paths, args.out, obs_keys=obs_keys, pointcloud_key=args.pc_key,

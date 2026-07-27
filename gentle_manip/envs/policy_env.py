@@ -142,8 +142,14 @@ class PolicyEnv:
             extra = {}
             if self._priv.object_pos:
                 extra["priv_object_pos"] = Box(-np.inf, np.inf, (3,), np.float32)
+            if self._priv.object_quat:
+                extra["priv_object_quat"] = Box(-1.0, 1.0, (4,), np.float32)
+            if self._priv.object_rot6d:
+                extra["priv_object_rot6d"] = Box(-1.0, 1.0, (6,), np.float32)
             if self._priv.object_vel:
                 extra["priv_object_vel"] = Box(-np.inf, np.inf, (3,), np.float32)
+            if self._priv.object_dr_params:
+                extra["priv_object_dr_params"] = Box(-np.inf, np.inf, (2,), np.float32)
             if self._priv.stress:
                 extra["priv_stress"] = Box(0.0, np.inf, (2,), np.float32)
             space = Dict({**space.spaces, **extra})
@@ -288,13 +294,28 @@ class PolicyEnv:
     def _privileged_obs(self, sf: SimFeedback) -> dict:
         """Sim-only privileged fields from SimFeedback (state-teacher obs)."""
         out = {}
-        oc = np.asarray(sf.object_center, dtype=np.float32)        # (N, 3) true object pose
+        oc = np.asarray(sf.object_center, dtype=np.float32)        # (N, 3) true object position
         if self._priv.object_pos:
             out["priv_object_pos"] = oc
+        if self._priv.object_quat or self._priv.object_rot6d:
+            wxyz = np.asarray(sf.extra["object_quat"], dtype=np.float32)  # (N, 4)
+            if self._priv.object_quat:
+                out["priv_object_quat"] = wxyz
+            if self._priv.object_rot6d:
+                from scipy.spatial.transform import Rotation as _R
+                xyzw = np.concatenate([wxyz[:, 1:], wxyz[:, :1]], axis=1)
+                mat  = _R.from_quat(xyzw).as_matrix()              # (N, 3, 3)
+                # First two columns of R: continuous, singularity-free (Zhou et al. 2019)
+                out["priv_object_rot6d"] = np.concatenate(
+                    [mat[:, :, 0], mat[:, :, 1]], axis=-1           # (N, 6)
+                ).astype(np.float32)
         if self._priv.object_vel:
             vel = np.zeros_like(oc) if self._prev_obj_center is None else (oc - self._prev_obj_center)
             out["priv_object_vel"] = vel.astype(np.float32)        # per-step displacement
             self._prev_obj_center = oc
+        if self._priv.object_dr_params:
+            dr_vec = np.asarray(sf.extra.get("object_dr_vec", [1.0, 0.0]), dtype=np.float32)
+            out["priv_object_dr_params"] = np.tile(dr_vec[None], (self.num_envs, 1))  # (N, 2)
         if self._priv.stress:
             stress = sf.extra["von_mises_stress"]                  # (N, n_particles)
             mean_s = np.mean(stress, axis=-1)

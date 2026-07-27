@@ -265,6 +265,7 @@ class GenesisWorker:
             # base-link position. von_mises_stress is None — SimBackend omits the
             # key entirely so stress-reward KeyErrors propagate, per CLAUDE.md.
             state["object_center"] = _np(obj.get_pos()).astype(np.float32)      # (B, 3)
+            state["object_quat"]   = _np(obj.get_quat()).astype(np.float32)    # (B, 4) wxyz
             state["von_mises_stress"] = None
         else:
             st = obj.get_state()

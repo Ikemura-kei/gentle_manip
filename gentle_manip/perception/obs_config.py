@@ -65,9 +65,14 @@ class PrivilegedConfig:
     deployable point-cloud student later). Computed by PolicyEnv from SimFeedback —
     NOT the shared PerceptionPipeline — so real deployment can never produce them.
     Requires a task (sim). The student/real obs config must NOT set privileged."""
-    object_pos: bool = False     # SimFeedback.object_center (num_envs, 3) — true object pose
-    object_vel: bool = False     # finite-diff object velocity (num_envs, 3)
-    stress: bool = False         # normalized von Mises [mean/yield, top10/yield] (num_envs, 2)
+    object_pos: bool = False      # SimFeedback.object_center (num_envs, 3) — true object position
+    object_quat: bool = False     # object orientation (num_envs, 4) wxyz — rigid only
+    object_rot6d: bool = False    # object orientation as 6D (Zhou et al. 2019): first two columns
+                                  # of rotation matrix concatenated → (num_envs, 6). Continuous,
+                                  # singularity-free, better than quat for wide rotation ranges.
+    object_vel: bool = False      # finite-diff object velocity (num_envs, 3)
+    object_dr_params: bool = False  # episode-constant DR vector (num_envs, 2): [scale, bend_deg]
+    stress: bool = False          # normalized von Mises [mean/yield, top10/yield] (num_envs, 2)
 
 
 @dataclass
@@ -151,8 +156,14 @@ class ObsConfig:
         if self.privileged is not None:
             if self.privileged.object_pos:
                 keys.append("priv_object_pos")
+            if self.privileged.object_quat:
+                keys.append("priv_object_quat")
+            if self.privileged.object_rot6d:
+                keys.append("priv_object_rot6d")
             if self.privileged.object_vel:
                 keys.append("priv_object_vel")
+            if self.privileged.object_dr_params:
+                keys.append("priv_object_dr_params")
             if self.privileged.stress:
                 keys.append("priv_stress")
         return keys
@@ -206,7 +217,10 @@ class ObsConfig:
             pv = d["privileged"] or {}
             privileged = PrivilegedConfig(
                 object_pos=bool(pv.get("object_pos", False)),
+                object_quat=bool(pv.get("object_quat", False)),
+                object_rot6d=bool(pv.get("object_rot6d", False)),
                 object_vel=bool(pv.get("object_vel", False)),
+                object_dr_params=bool(pv.get("object_dr_params", False)),
                 stress=bool(pv.get("stress", False)),
             )
 

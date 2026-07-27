@@ -1,0 +1,39 @@
+# [obs] SUPERSET obs for RIGID objects — full privileged state + point cloud.
+# Used by: demo collection (--experiment) when training a state-based policy on rigid objects
+# Status: active
+#
+# Extends superset_rigid.yaml with object ORIENTATION (priv_object_quat) and DR shape params
+# (priv_object_dr_params = [scale, bend_deg]).  The point cloud is retained so the same demo
+# dataset can be used to train a point-cloud student later (subset_demo / --obs-keys).
+#
+# Privileged state vector (flat, for DPPO training with STATE_VIEW_FULL):
+#   ee_pos(3) + ee_quat(4) + gripper_width(1) +
+#   priv_object_pos(3) + priv_object_rot6d(6) +
+#   priv_object_vel(3) + priv_object_dr_params(2)  =  22 dims
+#
+# Convert with:
+#   python -m gentle_manip.dppo.convert_demos data.pkl --out <dir> \
+#     --obs-keys ee_pos ee_quat gripper_width \
+#                priv_object_pos priv_object_rot6d priv_object_vel priv_object_dr_params \
+#     --point-cloud point_cloud
+include_joint_pos: false
+include_joint_vel: false
+quat_noise_std: 0.003
+
+privileged:
+  object_pos: true
+  object_rot6d: true         # object orientation as 6D (Zhou et al. 2019) — continuous,
+                             # singularity-free; better than quat for wide rotation ranges
+  object_vel: true
+  object_dr_params: true     # [scale, bend_deg] — episode constant; 0.0/1.0 when no shape DR
+  stress: false              # rigid → no von Mises
+
+# Point cloud retained for future student training on the same demos.
+point_cloud:
+  cameras: ["cam_ext"]
+  crop_min: [0.2, -0.215, 0.004]
+  crop_max: [0.71,   0.215,  0.45]
+  max_points: 1024
+  outlier_removal:
+    voxel_size: 0.01
+    min_neighbors: 23

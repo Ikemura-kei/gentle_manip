@@ -1,0 +1,30 @@
+# [experiment] State-based policy experiment for RIGID mushroom lift.
+# Used by: collect_demos_synth.py --experiment / serl_sim_server --experiment / dppo eval
+# Status: active
+#
+# Same as single_lift_mushroom_rigid_eval.yaml but uses superset_rigid_full_state for the obs,
+# which additionally records object orientation (priv_object_rot6d, 6D) and DR shape params
+# (priv_object_dr_params = [scale, bend_deg]).  Point cloud is still in the superset so the
+# same demos can train a point-cloud student later without re-collecting.
+#
+# BC pretraining: convert with STATE_VIEW_FULL (22-dim state-only) —
+#   python -m gentle_manip.dppo.convert_demos data.pkl --out <dir> \
+#     --obs-keys ee_pos ee_quat gripper_width \
+#                priv_object_pos priv_object_rot6d priv_object_vel priv_object_dr_params \
+#     --point-cloud point_cloud
+task: single_lift_mushroom_rigid
+action: delta_pose_delta_gripper_fast_rot
+dr: rigid_orientation         # ±45° pitch/roll, full yaw, xy=0.04 — matches data collection
+augmentation: l515_noise
+
+obs: superset_rigid_full_state  # privileged full state (rot6d + dr_params) + point cloud
+views:
+  teacher: [privileged]         # state-only training view: all priv_* fields, no point cloud
+  student: [point_cloud]        # future student: ee_pos + ee_quat + gripper + point_cloud
+
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400
