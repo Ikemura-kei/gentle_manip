@@ -33,6 +33,11 @@ dependencies = [
     "matplotlib",
     "pygame",  # keyboard teleop for the in-process sim viewer (examples/sim_teleop_keyboard.py)
     "cma",     # CMA-ES optimizer for grasp synthesis
+    # smgrasp — stress-minimization grasp metric Q_SM (grasp_synthesis/smgrasp):
+    # tetgen+trimesh come via gentle-manip[sim]; add the FEM/convex-opt/IO stack here.
+    "meshio",
+    "cvxpy",
+    "clarabel",   # free SOCP+SDP conic solver for the support-point SDP
     # torch — cu126 for this lab box (see header note to change for your HW).
     "torch==2.8.0",
     "torchvision==0.23.0",
