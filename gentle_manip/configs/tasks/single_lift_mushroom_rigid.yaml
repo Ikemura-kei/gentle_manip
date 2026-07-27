@@ -24,7 +24,7 @@ mpm_grid_density: 250    # unused (no MPM entity) but kept for SceneSpec
 # thresh rather than a fixed count. 30 warmup steps + up to 200 extra (vel-gated).
 settle_steps: 30
 settle_max_steps: 200
-settle_vel_thresh: 0.005  # m/s — stop waiting once all rigid objects are below this
+settle_vel_thresh: 0.0005  # m/s — stop waiting once all rigid objects are below this
 
 success_scale: 2.0
 

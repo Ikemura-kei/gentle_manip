@@ -114,6 +114,7 @@ def grasp_cost(
     w_pen: float  = 120.0,
     w_align: float = 30.0,
     w_ground: float = 100.0,
+    w_sky: float = 50.0,
 ) -> float:
     """Grasp quality cost to minimize.
 
@@ -122,8 +123,8 @@ def grasp_cost(
       penetration — mean negative SDF (finger points inside object = very bad)
       align       — straddle check: penalizes if both finger centroids are on the
                     same side of the object (object not between the fingers)
-      ground      — mean penetration of finger points below z=0 (ground plane);
-                    ground SDF = pt_z, so negative pt_z means below the ground
+      ground      — mean penetration of finger points below z=0.002 (ground plane)
+      sky         — penalizes upward-facing approach (TCP z-axis pointing up)
 
     obj_quat_wxyz: (4,) actual object orientation after settling (wxyz convention).
     If provided, finger world points are rotated into the object's local frame
@@ -157,11 +158,15 @@ def grasp_cost(
     right_proj = float(np.dot(right_obj.mean(0), grasp_axis))
     align_cost = w_align * (max(0.0, left_proj) + max(0.0, -right_proj))
 
-    # Ground penetration: finger points below z=0 (world). Ground SDF = z-coordinate.
+    # Ground penetration: finger points below z=0.0035 (3.5 mm buffer above ground).
     all_world_z = np.concatenate([left_w[:, 2], right_w[:, 2]])
-    ground_cost = w_ground * float(np.mean(np.maximum(-all_world_z, 0.0)))
+    ground_cost = w_ground * float(np.mean(np.maximum(0.0035 - all_world_z, 0.0)))
 
-    return nearness + penetration + align_cost + ground_cost
+    # Sky-facing: penalize upward approach direction (TCP z-axis pointing up).
+    tcp_z_world = Rot.from_euler('xyz', x[3:6]).apply([0.0, 0.0, 1.0])
+    sky_cost = w_sky * max(0.0, float(tcp_z_world[2]))
+
+    return nearness + penetration + align_cost + ground_cost + sky_cost
 
 
 # ── CMA-ES wrapper ────────────────────────────────────────────────────────────
@@ -174,10 +179,21 @@ def run_cmaes(
     bounds_ub: list,
     maxfevals: int = 800,
     seed: int = 2567,
+    log_dir: str | None = None,
 ) -> tuple[np.ndarray, float]:
-    """CMA-ES minimization. Returns (best_x, best_score)."""
+    """CMA-ES minimization. Returns (best_x, best_score).
+
+    log_dir: directory for CMA-ES log files (e.g. run_dir/cmaes_logs).
+             None (default) suppresses all file output.
+    """
     ranges = np.asarray(bounds_ub) - np.asarray(bounds_lb)
     stds = np.maximum(0.25 * ranges, 1e-6)
+    import os
+    if log_dir is not None:
+        os.makedirs(log_dir, exist_ok=True)
+        verb_prefix = str(log_dir) + "/"
+    else:
+        verb_prefix = ""   # empty string disables all file output in pycma
     opts = {
         'bounds': [list(bounds_lb), list(bounds_ub)],
         'maxfevals': maxfevals,
@@ -185,6 +201,7 @@ def run_cmaes(
         'seed': seed,
         'verbose': 1,
         'verb_disp': 50,
+        'verb_filenameprefix': verb_prefix,
     }
     es = cma.CMAEvolutionStrategy(list(x0), sigma0, opts)
     es.optimize(objective_fn)

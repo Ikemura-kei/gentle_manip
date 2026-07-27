@@ -27,6 +27,7 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import imageio
 import numpy as np
 import yaml
 from scipy.spatial.transform import Rotation as Rot, Slerp
@@ -54,9 +55,9 @@ from gentle_manip.domain_randomization.dr_config import DRConfig
 
 # ── Constants (keep in sync with run_grasp_synth.py) ─────────────────────────
 
-N_HOME_TO_PRE = 86          # home → grasp pose interpolation steps
-N_SETTLE      = 3           # hold at grasp pose before closing
-N_GRASP       = 37           # gripper close steps
+N_HOME_TO_PRE = 87          # home → grasp pose interpolation steps
+N_SETTLE      = 1           # hold at grasp pose before closing
+N_GRASP       = 39           # gripper close steps
 N_LIFT        = 70          # lift steps
 N_HOLD        = 12           # hold at lift height (success eval window)
 LIFT_HEIGHT   = 0.2         # metres above grasp position
@@ -104,10 +105,10 @@ def _synth_worker(payload: tuple) -> tuple:
     process (forked before CUDA init) is CPU-only; trimesh BVH is safe because
     no two workers share memory.
 
-    payload: (mesh_path, obj_pos, obj_quat_wxyz, left_pts, right_pts, maxfevals, lb, ub)
+    payload: (mesh_path, obj_pos, obj_quat_wxyz, left_pts, right_pts, maxfevals, lb, ub, log_dir)
     returns: (best_x (7,), score float)
     """
-    mesh_path, obj_pos, obj_quat_wxyz, left_pts, right_pts, maxfevals, lb, ub = payload
+    mesh_path, obj_pos, obj_quat_wxyz, left_pts, right_pts, maxfevals, lb, ub, log_dir = payload
     from synth_utils import build_object_sdf, grasp_cost, run_cmaes  # local import: safe in subprocess
     sdf_fn = build_object_sdf(mesh_path)
     x0 = [(lo + hi) / 2 for lo, hi in zip(lb, ub)]
@@ -115,7 +116,7 @@ def _synth_worker(payload: tuple) -> tuple:
     def objective(x):
         return grasp_cost(x, left_pts, right_pts, sdf_fn, obj_pos, obj_quat_wxyz)
 
-    best_x, score = run_cmaes(objective, x0, 1.0, lb, ub, maxfevals)
+    best_x, score = run_cmaes(objective, x0, 1.0, lb, ub, maxfevals, log_dir=log_dir)
     return best_x, score
 
 
@@ -215,7 +216,7 @@ def execute_and_collect(
     grasp_pos = pos_b.copy()
 
     width_open = np.full(num_envs, 0.08, np.float32)
-    width_cls  = np.array([p[2] - 0.001 for p in poses], np.float32)
+    width_cls  = np.array([p[2] - 0.0025 for p in poses], np.float32)
 
     home_pos  = np.tile(worker.robot.home_pos[None].astype(np.float32),  (num_envs, 1))
     home_quat = np.tile(worker.robot.home_quat[None].astype(np.float32), (num_envs, 1))
@@ -425,7 +426,7 @@ def main() -> None:
     # Settle params: task config → CLI override.
     settle_steps     = args.settle           or int(exp.task_cfg.get("settle_steps",     30))
     settle_max_steps = args.settle_max       or int(exp.task_cfg.get("settle_max_steps", 200))
-    settle_vel_thresh = args.settle_vel_thresh or float(exp.task_cfg.get("settle_vel_thresh", 0.005))
+    settle_vel_thresh = args.settle_vel_thresh or float(exp.task_cfg.get("settle_vel_thresh", 0.002))
 
     perception = PerceptionPipeline(obs_config)
 
@@ -472,7 +473,8 @@ def main() -> None:
     print(f"  Config → {cfg_path.resolve()}")
     print(f"  Data   → {run_dir.resolve()}/data.pkl  (shards flushed every {args.shard_size} ep)")
 
-    total_saved = 0
+    total_saved  = 0
+    total_failed = 0
     batch_idx   = 0
     shard_buf:  List[dict] = []
     shard_idx   = 0
@@ -510,7 +512,8 @@ def main() -> None:
         for i in range(n):
             lb, ub = _synth_bounds(obj_pos_all[i])
             payloads.append((actual_mesh, obj_pos_all[i], obj_quat_all[i],
-                             left_pts, right_pts, args.maxfevals, lb, ub))
+                             left_pts, right_pts, args.maxfevals, lb, ub,
+                             str(run_dir / "cmaes_logs")))
         futures = [executor.submit(_synth_worker, p) for p in payloads]
         all_best_x = []
         for i, fut in enumerate(futures):
@@ -529,8 +532,18 @@ def main() -> None:
 
         # ── Package and shard successful (or all) episodes ──
         for i in range(n):
-            if not success[i] and not args.keep_failures:
-                continue
+            # Always save failure video (if recording) before skipping demo data.
+            if not success[i]:
+                total_failed += 1
+                if args.record_video and frame_bufs[i]:
+                    vid_dir = run_dir / "videos_failed"
+                    vid_dir.mkdir(exist_ok=True)
+                    vid_path = vid_dir / f"fail{total_failed:04d}_b{batch_idx}_env{i}.mp4"
+                    imageio.mimwrite(str(vid_path), frame_bufs[i], fps=round(rate_hz), quality=8)
+                    print(f"    fail video → {vid_path.name}")
+                if not args.keep_failures:
+                    continue
+
             obs_list = obs_bufs[i]
             if not obs_list:
                 continue
@@ -542,15 +555,13 @@ def main() -> None:
             }
             shard_buf.append(episode)
             total_saved += 1
-            tag = "success" if success[i] else "fail"
             print(f"    ep {total_saved}: env {i}  {'✓' if success[i] else '✗'}  "
                   f"T={episode['actions'].shape[0]}")
 
             if args.record_video and frame_bufs[i]:
-                import imageio
                 vid_dir = run_dir / "videos"
                 vid_dir.mkdir(exist_ok=True)
-                vid_path = vid_dir / f"ep{total_saved:04d}_env{i}_{tag}.mp4"
+                vid_path = vid_dir / f"ep{total_saved:04d}_env{i}_success.mp4"
                 imageio.mimwrite(str(vid_path), frame_bufs[i], fps=round(rate_hz), quality=8)
                 print(f"    video → {vid_path.name}")
 
@@ -569,8 +580,30 @@ def main() -> None:
 
     data_path = _merge_shards(run_dir)
     elapsed   = time.time() - t0
-    print(f"\n=== Done — {total_saved} episodes  {elapsed/60:.1f} min")
-    print(f"    {data_path}")
+
+    total_attempts = total_saved + total_failed
+    success_rate   = total_saved / total_attempts if total_attempts > 0 else 0.0
+
+    print(f"\n=== Done ===")
+    print(f"  Episodes saved   : {total_saved}")
+    print(f"  Episodes failed  : {total_failed}")
+    print(f"  Total attempts   : {total_attempts}")
+    print(f"  Success rate     : {success_rate*100:.1f}%")
+    print(f"  Elapsed          : {elapsed/60:.1f} min")
+    print(f"  Data             : {data_path}")
+
+    stats = {
+        "episodes_saved":  total_saved,
+        "episodes_failed": total_failed,
+        "total_attempts":  total_attempts,
+        "success_rate":    round(success_rate, 4),
+        "elapsed_min":     round(elapsed / 60, 2),
+    }
+    stats_path = run_dir / "stats.yaml"
+    with open(stats_path, "w") as f:
+        yaml.dump(stats, f, default_flow_style=False)
+    print(f"  Stats            : {stats_path}")
+
     executor.shutdown(wait=False)
     worker.close()
 
