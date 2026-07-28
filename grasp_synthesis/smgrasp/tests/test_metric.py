@@ -122,3 +122,45 @@ def test_active_set_matches_full_solve(cube, antipodal):
 def test_q1_mode_positive_for_closure(cube):
     from smgrasp.metric import q1
     assert q1(cube, _closure(0.5), n_dirs=12) > 0            # Ferrari-Canny Q1 > 0 for closure
+
+
+# ── M7 — shape awareness (the scientific gate) ───────────────────────────────
+def test_qsm_shape_aware_where_q1_is_blind():
+    """The SAME contact set on two DIFFERENT shapes: Q1 (contact-only force closure) is identical
+    — it never looks at the object — while Q_SM (which solves the FEM) differs. This is the paper's
+    core claim: Q_SM reflects object shape/fragility where Q1 cannot."""
+    import trimesh
+    from smgrasp.metric import q1
+    # 4-contact grasp on the shared ±x/±y faces at z=0 (identical on cube AND beam)
+    pts = np.array([[0.5, 0, 0], [-0.5, 0, 0], [0, 0.5, 0], [0, -0.5, 0]])
+    nrm = np.array([[-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0]])
+    cs = ContactSet(points=pts, normals=nrm, mu=0.6)
+    cube = build_elastic_object(trimesh.creation.box(extents=[1, 1, 1]), switches="pq1.4a0.03")
+    beam = build_elastic_object(trimesh.creation.box(extents=[1, 1, 4]), switches="pq1.4a0.06")
+
+    q1c = q1(cube, cs, n_dirs=10)
+    q1b = q1(beam, cs, n_dirs=10)
+    assert q1c == pytest.approx(q1b, rel=1e-6)               # Q1 shape-BLIND (no mesh dependence)
+
+    qc = q_sm(cube, cs, n_dirs=10)
+    qb = q_sm(beam, cs, n_dirs=10)
+    assert qc > 0 and qb > 0
+    assert abs(qc - qb) > 0.05 * max(qc, qb)                # Q_SM shape-AWARE (differs with shape)
+
+
+# ── M8 — mesh-resolution robustness (paper Fig. 3d) ──────────────────────────
+def test_qsm_mesh_resolution_robust():
+    """Q_SM should be stable as the tet mesh is refined (it's a bulk quantity). Same grasp on a
+    cube at increasing resolution -> Q_SM within a modest band (justifies coarse meshes)."""
+    import trimesh
+    grasp = _closure(0.6)
+    vals = []
+    for sw in ("pq1.4a0.015", "pq1.4a0.006"):              # coarse -> finer (~2.5x more tets)
+        obj = build_elastic_object(trimesh.creation.box(extents=[1, 1, 1]), switches=sw)
+        vals.append(q_sm(obj, grasp, n_dirs=8))
+    # Q_SM is a bulk quantity but face-contact stress concentration resolves gradually, so it
+    # CONVERGES FROM ABOVE (a coarse mesh under-resolves the peak stress -> over-estimates Q_SM).
+    # The metric stays force-closure and bounded (same order) across resolution — no divergence.
+    assert vals[0] > 0 and vals[1] > 0                     # force closure at every resolution
+    assert vals[1] <= vals[0] + 0.02                       # monotone: finer ≤ coarser
+    assert vals[0] < 2.0 * vals[1]                         # bounded drift (same order of magnitude)

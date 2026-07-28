@@ -103,7 +103,7 @@ def q_sm(obj, contacts, cfg: Optional[MetricConfig] = None, *, n_dirs: Optional[
     from scipy.spatial import ConvexHull
 
     cfg = cfg or MetricConfig()
-    n_dirs = n_dirs or cfg.n_dirs
+    n_dirs = max(n_dirs or cfg.n_dirs, 7)                      # need >= dim+1 points for a 6-D hull
     eps = eps if eps is not None else cfg.eps
     sqrtW = np.real(sqrtm(cfg.wrench_metric()))
 

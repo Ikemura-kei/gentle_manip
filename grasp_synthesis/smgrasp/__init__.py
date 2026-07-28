@@ -15,7 +15,9 @@ from .geometry import (
     tet_quadrature,
     tetrahedralize,
 )
-from .metric import q_sm, support_point, wrench_map
+from .metric import q1, q_sm, support_point, wrench_map
+from .contact import sample_contacts
+from .planner import plan_grasp
 
 __all__ = [
     "ContactSet",
@@ -26,6 +28,9 @@ __all__ = [
     "load_mesh",
     "tetrahedralize",
     "q_sm",
+    "q1",
     "support_point",
     "wrench_map",
+    "sample_contacts",
+    "plan_grasp",
 ]
