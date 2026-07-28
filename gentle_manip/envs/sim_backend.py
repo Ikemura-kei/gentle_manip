@@ -266,24 +266,39 @@ class SimBackend:
 
     def step(self, scaled_action: np.ndarray) -> RawObs:
         action = np.asarray(scaled_action, dtype=np.float64).reshape(self.num_envs, -1)
-        dpos, drot, dgrip = action[:, :3], action[:, 3:6], action[:, 6]
 
-        # Translation: accumulate then clip to the workspace box (per env).
-        self._target_pos = np.clip(
-            self._target_pos + dpos, cfg.EE_BOUNDS_MIN, cfg.EE_BOUNDS_MAX
-        )
+        if action.shape[-1] == 8:
+            # ActionPipeline absolute mode: pos(3) + quat_wxyz(4) + gripper(1), ready
+            # to set directly (no accumulation). Still clip to the workspace box for
+            # safety even though ActionPipeline already mapped into pos_min/pos_max.
+            pos, quat, grip = action[:, :3], action[:, 3:7], action[:, 7]
+            self._target_pos = np.clip(pos, cfg.EE_BOUNDS_MIN, cfg.EE_BOUNDS_MAX)
+            neg = quat[:, 0] < 0
+            quat = quat.copy()
+            quat[neg] = -quat[neg]                                  # keep w >= 0
+            self._target_quat = quat
+            self._target_gripper = np.clip(grip, 0.0, self._gripper_max)
+        else:
+            # ActionPipeline delta mode (default): dpos(3) + drot(3) + dgripper(1),
+            # accumulated onto the running target.
+            dpos, drot, dgrip = action[:, :3], action[:, 3:6], action[:, 6]
 
-        # Orientation: compose the delta rotation (base-frame premultiply), batched.
-        q = self._target_quat
-        R_cur = Rotation.from_quat(np.column_stack([q[:, 1], q[:, 2], q[:, 3], q[:, 0]]))
-        xyzw = (Rotation.from_rotvec(drot) * R_cur).as_quat()       # (B, 4) xyzw
-        wxyz = np.column_stack([xyzw[:, 3], xyzw[:, 0], xyzw[:, 1], xyzw[:, 2]])
-        neg = wxyz[:, 0] < 0
-        wxyz[neg] = -wxyz[neg]                                      # keep w >= 0
-        self._target_quat = wxyz
+            # Translation: accumulate then clip to the workspace box (per env).
+            self._target_pos = np.clip(
+                self._target_pos + dpos, cfg.EE_BOUNDS_MIN, cfg.EE_BOUNDS_MAX
+            )
 
-        # Gripper: accumulate then clip to [0, open width].
-        self._target_gripper = np.clip(self._target_gripper + dgrip, 0.0, self._gripper_max)
+            # Orientation: compose the delta rotation (base-frame premultiply), batched.
+            q = self._target_quat
+            R_cur = Rotation.from_quat(np.column_stack([q[:, 1], q[:, 2], q[:, 3], q[:, 0]]))
+            xyzw = (Rotation.from_rotvec(drot) * R_cur).as_quat()       # (B, 4) xyzw
+            wxyz = np.column_stack([xyzw[:, 3], xyzw[:, 0], xyzw[:, 1], xyzw[:, 2]])
+            neg = wxyz[:, 0] < 0
+            wxyz[neg] = -wxyz[neg]                                      # keep w >= 0
+            self._target_quat = wxyz
+
+            # Gripper: accumulate then clip to [0, open width].
+            self._target_gripper = np.clip(self._target_gripper + dgrip, 0.0, self._gripper_max)
 
         state = self.process.step(
             self._target_pos.astype(np.float32),

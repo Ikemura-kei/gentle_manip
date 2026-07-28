@@ -115,27 +115,42 @@ class RealBackend:
 
     def step(self, scaled_action: np.ndarray) -> RawObs:
         action = np.asarray(scaled_action, dtype=np.float64).reshape(-1)
-        dpos, drot, dgrip = action[:3], action[3:6], action[6]
 
-        # Translation: accumulate then clip to the workspace box.
-        self._target_pos = np.clip(
-            self._target_pos + dpos, self._bounds_min, self._bounds_max
-        )
+        if action.shape[-1] == 8:
+            # ActionPipeline absolute mode: pos(3) + quat_wxyz(4) + gripper(1), ready
+            # to set directly (no accumulation). Still clip to the workspace box for
+            # safety even though ActionPipeline already mapped into pos_min/pos_max.
+            pos, quat, grip = action[:3], action[3:7], action[7]
+            self._target_pos = np.clip(pos, self._bounds_min, self._bounds_max)
+            quat = np.array(quat, dtype=np.float64)
+            if quat[0] < 0:
+                quat = -quat
+            self._target_quat = quat
+            self._target_gripper = float(np.clip(grip, 0.0, self._gripper_max))
+        else:
+            # ActionPipeline delta mode (default): dpos(3) + drot(3) + dgripper(1),
+            # accumulated onto the running target.
+            dpos, drot, dgrip = action[:3], action[3:6], action[6]
 
-        # Orientation: compose the delta rotation (base-frame premultiply).
-        # Deltas are tiny (~1e-3 rad) so base vs tool composition is locally
-        # equivalent; verify handedness on the hardware smoke test.
-        R_cur = Rotation.from_quat(
-            [self._target_quat[1], self._target_quat[2], self._target_quat[3], self._target_quat[0]]
-        )
-        R_new = Rotation.from_rotvec(drot) * R_cur
-        x, y, z, w = R_new.as_quat()
-        self._target_quat = np.array([w, x, y, z], dtype=np.float64)
-        if self._target_quat[0] < 0:
-            self._target_quat = -self._target_quat
+            # Translation: accumulate then clip to the workspace box.
+            self._target_pos = np.clip(
+                self._target_pos + dpos, self._bounds_min, self._bounds_max
+            )
 
-        # Gripper: accumulate then clip to [0, open width].
-        self._target_gripper = float(np.clip(self._target_gripper + dgrip, 0.0, self._gripper_max))
+            # Orientation: compose the delta rotation (base-frame premultiply).
+            # Deltas are tiny (~1e-3 rad) so base vs tool composition is locally
+            # equivalent; verify handedness on the hardware smoke test.
+            R_cur = Rotation.from_quat(
+                [self._target_quat[1], self._target_quat[2], self._target_quat[3], self._target_quat[0]]
+            )
+            R_new = Rotation.from_rotvec(drot) * R_cur
+            x, y, z, w = R_new.as_quat()
+            self._target_quat = np.array([w, x, y, z], dtype=np.float64)
+            if self._target_quat[0] < 0:
+                self._target_quat = -self._target_quat
+
+            # Gripper: accumulate then clip to [0, open width].
+            self._target_gripper = float(np.clip(self._target_gripper + dgrip, 0.0, self._gripper_max))
 
         self.robot.set_ee_pose(self._target_pos, self._target_quat)
         self.robot.set_gripper_width(self._target_gripper)

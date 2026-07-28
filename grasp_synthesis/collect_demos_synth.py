@@ -47,6 +47,7 @@ from synth_utils import (  # noqa: E402  (build_object_sdf/grasp_cost/run_cmaes 
     sample_finger_surface,
     FINGER_TO_TCP_Z,
 )
+from gentle_manip.actions.action_config import ActionConfig
 from gentle_manip.experiment import Experiment
 from gentle_manip.tasks.single_lift import SingleLiftTask
 from gentle_manip.envs.genesis_worker import GenesisWorker
@@ -161,6 +162,43 @@ def _invert_actions(
     return np.concatenate([a_pos, a_rot, a_grip], axis=1).astype(np.float32)
 
 
+def _invert_actions_absolute(
+    cur_pos:  np.ndarray,  # (N, 3) current commanded absolute pos
+    cur_quat: np.ndarray,  # (N, 4) wxyz current commanded absolute quat
+    cur_grip: np.ndarray,  # (N,) current commanded absolute gripper width
+    action_config: ActionConfig,
+) -> np.ndarray:
+    """Compute (N, 10) normalized absolute actions that ActionPipeline (mode="absolute")
+    would map back to (cur_pos, cur_quat, cur_grip). No `prev_*` needed — absolute mode
+    has no accumulation history, each step is an independent forward transform.
+
+    Mirrors ActionPipeline._process_absolute's inverse exactly:
+      pos/gripper: un-map the linear [pos_min,pos_max]/[gripper_min,gripper_max] scaling.
+      rot6d: the first two columns of R = Rotation.from_quat(cur_quat).as_matrix() are
+        already exactly orthonormal, so Gram-Schmidt on them is a no-op — the rot6d
+        "inverse" is just those two columns directly, no optimization/search needed.
+    """
+    n = cur_pos.shape[0]
+    lo, hi = action_config.clip
+    span = hi - lo
+    pos_min = np.asarray(action_config.pos_min, dtype=np.float64)
+    pos_max = np.asarray(action_config.pos_max, dtype=np.float64)
+
+    t_pos = (cur_pos - pos_min) / (pos_max - pos_min)
+    a_pos = np.clip(lo + t_pos * span, lo, hi)
+
+    t_grip = (cur_grip - action_config.gripper_min) / (action_config.gripper_max - action_config.gripper_min)
+    a_grip = np.clip(lo + t_grip * span, lo, hi).reshape(n, 1)
+
+    a_rot6d = np.zeros((n, 6), dtype=np.float64)
+    for i in range(n):
+        xyzw = [cur_quat[i, 1], cur_quat[i, 2], cur_quat[i, 3], cur_quat[i, 0]]
+        mat = Rot.from_quat(xyzw).as_matrix()
+        a_rot6d[i] = np.concatenate([mat[:, 0], mat[:, 1]])
+
+    return np.concatenate([a_pos, a_rot6d, a_grip], axis=1).astype(np.float32)
+
+
 # ── RawObs builder ────────────────────────────────────────────────────────────
 
 def _state_to_raw_obs(state: dict) -> RawObs:
@@ -269,20 +307,28 @@ def execute_and_collect(
     all_best_x:   List[np.ndarray],
     init_obs_batch: dict,          # batched obs from reset, keyed by obs name → (N, ...)
     perception:   PerceptionPipeline,
-    scales:       np.ndarray,      # (7,) action scales
+    action_config: ActionConfig,   # mode="delta" uses .scales; mode="absolute" uses
+                                   # pos_min/pos_max/gripper_min/gripper_max/clip
     record_video: bool = False,
     priv_cfg=None,                 # PrivilegedConfig or None — sim-only state-teacher fields
     dr_vec=None,                   # (2,) [scale, bend_deg] for priv_object_dr_params
 ) -> Tuple[List[List[dict]], List[List[np.ndarray]], List[List[float]], np.ndarray, List[List]]:
     """Execute scripted grasp trajectory; record (obs, action, reward) per env.
 
+    The scripted trajectory itself (positions/quats/gripper widths, all physical
+    units) is IDENTICAL regardless of action_config.mode — only how each step's
+    *recorded action* is derived (delta-inverted vs absolute-inverted) differs.
+
     Returns:
         obs_bufs:    list[N] of obs-dict lists (T steps, unbatched per-env)
-        act_bufs:    list[N] of (7,) float32 action arrays (T steps each)
+        act_bufs:    list[N] of float32 action arrays (T steps each; 7-dim delta or
+                     10-dim absolute, matching action_config.action_dim)
         rew_bufs:    list[N] of float rewards (0.0 throughout)
         success:     (N,) bool — True if final object z > grasp_z + 0.5*LIFT_HEIGHT
         frame_bufs:  list[N] of (H,W,3) uint8 frame lists; empty lists if record_video=False
     """
+    scales = (np.asarray(action_config.scales, dtype=np.float64)
+              if action_config.mode != "absolute" else None)
     num_envs = worker.num_envs
     poses    = [_x_to_targets(x, 1) for x in all_best_x]
     pos_b    = np.concatenate([p[0] for p in poses], axis=0).astype(np.float32)  # (N, 3)
@@ -325,9 +371,13 @@ def execute_and_collect(
     def _step(cur_pos, cur_quat, cur_grip):
         nonlocal prev_pos, prev_quat, prev_grip
 
-        # Invert scripted delta → normalized action
-        actions = _invert_actions(prev_pos, cur_pos, prev_quat, cur_quat,
-                                  prev_grip, cur_grip, scales)  # (N, 7)
+        # Invert scripted target → normalized action (delta needs prev_*; absolute
+        # is a stateless per-step transform of the current target alone).
+        if action_config.mode == "absolute":
+            actions = _invert_actions_absolute(cur_pos, cur_quat, cur_grip, action_config)  # (N, 10)
+        else:
+            actions = _invert_actions(prev_pos, cur_pos, prev_quat, cur_quat,
+                                      prev_grip, cur_grip, scales)  # (N, 7)
 
         # Advance sim (depth rendered because render_obs_cameras=True)
         state = worker.step(cur_pos, cur_quat, cur_grip)
@@ -501,7 +551,6 @@ def main() -> None:
     priv_cfg   = obs_config.privileged        # sim-only state-teacher fields (None if not requested)
     action_config = exp.action_config
     dr_cfg     = DRConfig.from_dict(exp.dr)
-    scales     = np.asarray(action_config.scales, dtype=np.float64)
     task_name  = args.task_name or exp._raw.get("task", args.experiment)
     rate_hz    = 1.0 / spec.sim_dt
 
@@ -640,7 +689,7 @@ def main() -> None:
         # ── Execute scripted trajectory + collect data ──
         print(f"  Executing …")
         obs_bufs, act_bufs, rew_bufs, success, frame_bufs = execute_and_collect(
-            worker, all_best_x, init_obs_batch, perception, scales,
+            worker, all_best_x, init_obs_batch, perception, action_config,
             record_video=args.record_video, priv_cfg=priv_cfg, dr_vec=dr_vec,
         )
         print(f"  Success: {success.tolist()}")
