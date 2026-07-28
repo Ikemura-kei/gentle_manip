@@ -36,7 +36,9 @@ SIM_EXPERIMENT=${SIM_EXPERIMENT:-single_lift_mushroom_soft_eval}   # server sim:
 EVAL_EXPERIMENT=${EVAL_EXPERIMENT:-single_lift_mushroom_soft_eval} # eval-cfg experiment snapshot (same)
 export GM_MPM_SAMPLER=${GM_MPM_SAMPLER:-regular}             # pinned sampler (aarch64 reference)
 FT_DENOISING=${FT_DENOISING:-0}                              # 0 = eval BC base; 10 = eval finetuned denoising
-VIEW=student
+VIEW=${VIEW:-student}                           # student = point-cloud policy; teacher = privileged
+                                                 # full-state policy (no cameras) -- set VIEW=teacher
+                                                 # for a state-only (no point-cloud) eval config.
 NUM_ENVS=5                                      # canonical EvalSpec; MUST match cfg n_envs
 # Unique per job: several checkpoint evals often run in parallel, and if two land on the SAME
 # node a fixed port makes the second server fail to bind (or worse, the client attaches to the
@@ -75,6 +77,12 @@ echo "[sbatch] host=$(hostname) arch=$(uname -m) job=${SLURM_JOB_ID:-NA} eval ck
 SRV_LOG=$REPO/logs/slumr_logs/${SLURM_JOB_ID:-local}${EVAL_SUBDIR:+_${EVAL_SUBDIR}}_simserver.log
 
 # ---- sim server (subprocess backend: eval drives deterministic per-group scene rebuilds) ----
+# cfg_dir printed on its OWN line (not just cfg=$CFG_NAME below) so a resubmit (e.g. the eval
+# hang-detection watchdog) can grep the EXACT config dir the dying job used, instead of assuming
+# the rigid_pcd default -- CFG_DIR varies now that state-only configs exist (single_lift_mushroom_
+# rigid_state), and guessing wrong makes the resubmit fail with "Cannot find primary config".
+echo "[sbatch] cfg_dir=$CFG_DIR"
+echo "[sbatch] view=$VIEW"
 echo "[sbatch] launching sim server ($SIM_EXPERIMENT / $VIEW / $NUM_ENVS envs, --subprocess) on $PORT"
 uv run --project envs/sim_arrhenius --no-sync python -m gentle_manip.scripts.serl_sim_server \
     --experiment "$SIM_EXPERIMENT" --view "$VIEW" --num-envs "$NUM_ENVS" \

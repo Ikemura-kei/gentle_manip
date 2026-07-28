@@ -22,6 +22,7 @@ _target_: agent.pretrain.train_diffusion_agent.TrainDiffusionAgent
 name: ${env}_pre_diffusion_mlp_ta${horizon_steps}_td${denoising_steps}
 logdir: ${oc.env:DPPO_LOG_DIR}/dppo-pretrain/${name}/${now:%Y-%m-%d}_${now:%H-%M-%S}_${seed}
 train_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/train.npz
+val_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/val.npz
 experiment: single_lift_mushroom_rigid_state  # env definition snapshot (task+obs+action+dr+reward)
 
 seed: 42
@@ -47,6 +48,7 @@ train:
   epoch_start_ema: 10
   update_ema_freq: 5
   save_model_freq: 500
+  val_freq: 10
 
 model:
   _target_: model.diffusion.diffusion.DiffusionModel
@@ -75,6 +77,13 @@ ema:
 train_dataset:
   _target_: agent.dataset.sequence.StitchedSequenceDataset
   dataset_path: ${train_dataset_path}
+  horizon_steps: ${horizon_steps}
+  cond_steps: ${cond_steps}
+  device: ${device}
+
+val_dataset:
+  _target_: agent.dataset.sequence.StitchedSequenceDataset
+  dataset_path: ${val_dataset_path}
   horizon_steps: ${horizon_steps}
   cond_steps: ${cond_steps}
   device: ${device}

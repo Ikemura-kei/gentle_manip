@@ -69,7 +69,12 @@ fi
 # dataset path + logdir, but the config's wandb project is `gentle-manip-${env}` and wandb REJECTS
 # '/' in project names (job dies at wandb.init). Auto-sanitize: set a slash-free project unless the
 # caller already pinned wandb.project. (last-wins ordering: this must come BEFORE GM_EXTRA_OVERRIDES.)
-if [[ "$DATA_ENV" == */* ]] && [[ "${GM_EXTRA_OVERRIDES:-}" != *"wandb.project"* ]]; then
+# Skip entirely for a config with `wandb: null` (e.g. the state-only pre_diffusion_mlp.yaml) --
+# wandb is disabled there on purpose (train_agent only calls wandb.init when cfg.wandb is not
+# None), and forcing wandb.project would either error on the null node ("=") or, worse, silently
+# turn cfg.wandb into a dict missing entity/run and crash at wandb.init() ("++").
+if [[ "$DATA_ENV" == */* ]] && [[ "${GM_EXTRA_OVERRIDES:-}" != *"wandb.project"* ]] \
+   && ! grep -qE '^wandb:[[:space:]]*null' "$CFG_DIR/$CFG_NAME.yaml"; then
     OVERRIDES+=(wandb.project="gentle-manip-${DATA_ENV//\//_}")
     echo "[sbatch] DATA_ENV has '/': wandb.project -> gentle-manip-${DATA_ENV//\//_} (wandb forbids '/')"
 fi
