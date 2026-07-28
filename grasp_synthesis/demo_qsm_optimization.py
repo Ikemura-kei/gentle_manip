@@ -46,13 +46,23 @@ def main():
     ap.add_argument("--maxfevals", type=int, default=60)
     ap.add_argument("--n-dirs", type=int, default=10)
     ap.add_argument("--prepare", action="store_true")
+    ap.add_argument("--voxel-div", type=int, default=16, help="coarser -> fewer tets (faster Q_SM)")
     ap.add_argument("--target-tets", type=int, default=5000)
     ap.add_argument("--up-axis", default="z")
+    ap.add_argument("--crop-frac", type=float, default=0.0,
+                    help="keep the top fraction along the up-axis (e.g. 0.55 = bunny head)")
+    ap.add_argument("--sigma", type=float, default=0.3, help="CMA-ES initial step (bigger = explore)")
+    ap.add_argument("--mu", type=float, default=0.7, help="Coulomb friction coefficient")
     args = ap.parse_args()
 
     raw = __import__("trimesh").load(args.mesh, process=False, force="mesh")
+    if args.crop_frac > 0:
+        from smgrasp.preprocess import crop_mesh
+        up = {"x": 0, "y": 1, "z": 2}[args.up_axis]
+        raw = crop_mesh(raw, axis=up, keep_frac=args.crop_frac, keep="above")
+        print(f"cropped head: {len(raw.faces)} faces, watertight={raw.is_watertight}", flush=True)
     if args.prepare:
-        mesh = prepare_mesh(raw, voxel_div=30)
+        mesh = prepare_mesh(raw, voxel_div=args.voxel_div)
         obj = build_elastic_object(mesh, switches=tet_switches(mesh, target_tets=args.target_tets))
     else:
         mesh = raw
@@ -60,8 +70,8 @@ def main():
     pad = 0.2 * float(mesh.extents.max())
     print(f"object: {len(obj.tets)} tets; planning ...", flush=True)
 
-    res = plan_grasp(obj, mesh, maxfevals=args.maxfevals, n_dirs=args.n_dirs, pad_half=pad, mu=0.7,
-                     sigma=0.3, verbose=True, record_history=True)
+    res = plan_grasp(obj, mesh, maxfevals=args.maxfevals, n_dirs=args.n_dirs, pad_half=pad, mu=args.mu,
+                     sigma=args.sigma, verbose=True, record_history=True)
     hist = res["history"]
     print(f"\nBEST Q_SM={res['q_sm']:.4f} over {res['evals']} evals, {len(hist)} feasible", flush=True)
     if not hist:
@@ -92,12 +102,16 @@ def main():
     imageio.mimsave(vid, frames, fps=6)
     print("  ->", vid, flush=True)
 
-    # final still: the best grasp
-    from smgrasp.viz import render_png
+    # the best grasp: a still + a TURNTABLE video that clearly shows the grasp point (like bunny_ears)
+    from smgrasp.viz import render_png, render_rotation_video
     bpts, bf, bsig, bpatch = _squeeze_stress(obj, {"contacts": res["contacts"], "x": res["x"]})
+    ttl = f"{name}: Q_SM-optimal grasp (Q_SM={res['q_sm']:.3f})"
     png = render_png(obj, bsig, str(OUT / f"{name}_qsm_best.png"), points=bpatch, forces=bf,
-                     up_axis=args.up_axis, title=f"{name}: Q_SM-optimal grasp (Q_SM={res['q_sm']:.3f})")
+                     up_axis=args.up_axis, title=ttl)
     print("  ->", png, flush=True)
+    bvid = render_rotation_video(obj, bsig, str(OUT / f"{name}_qsm_best.mp4"), points=bpatch, forces=bf,
+                                 up_axis=args.up_axis, n_frames=45, elev=14, title=ttl)
+    print("  ->", bvid, flush=True)
 
 
 if __name__ == "__main__":
