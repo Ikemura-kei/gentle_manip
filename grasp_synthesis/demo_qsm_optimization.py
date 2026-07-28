@@ -53,6 +53,7 @@ def main():
                     help="keep the top fraction along the up-axis (e.g. 0.55 = bunny head)")
     ap.add_argument("--sigma", type=float, default=0.3, help="CMA-ES initial step (bigger = explore)")
     ap.add_argument("--mu", type=float, default=0.7, help="Coulomb friction coefficient")
+    ap.add_argument("--out-name", default=None, help="output basename (default: mesh stem)")
     args = ap.parse_args()
 
     raw = __import__("trimesh").load(args.mesh, process=False, force="mesh")
@@ -62,7 +63,7 @@ def main():
         raw = crop_mesh(raw, axis=up, keep_frac=args.crop_frac, keep="above")
         print(f"cropped head: {len(raw.faces)} faces, watertight={raw.is_watertight}", flush=True)
     if args.prepare:
-        mesh = prepare_mesh(raw, voxel_div=args.voxel_div)
+        mesh = prepare_mesh(raw, voxel_div=args.voxel_div, force_remesh=True)   # coarsen for tet control
         obj = build_elastic_object(mesh, switches=tet_switches(mesh, target_tets=args.target_tets))
     else:
         mesh = raw
@@ -83,7 +84,7 @@ def main():
     tri, parent = boundary_faces(obj.tets)
     norm = plt.Normalize(0.0, vmax)
     cmap = plt.get_cmap(PAPER_CMAP)
-    name = Path(args.mesh).stem
+    name = args.out_name or Path(args.mesh).stem
 
     fig = plt.figure(figsize=(6, 6)); ax = fig.add_subplot(111, projection="3d")
     frames = []
