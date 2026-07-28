@@ -43,7 +43,7 @@ def main():
         obj = build_elastic_object(mesh)
     print(f"object: {len(obj.tets)} tets", flush=True)
 
-    pad = 0.02 * float(mesh.extents.max())
+    pad = 0.2 * float(mesh.extents.max())
     res = plan_grasp(obj, mesh, maxfevals=args.maxfevals, n_dirs=args.n_dirs,
                      pad_half=pad, mu=0.6, verbose=True)
     print(f"\nBEST grasp: Q_SM={res['q_sm']:.4f}  after {res['evals']} evals", flush=True)

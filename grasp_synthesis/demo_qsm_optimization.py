@@ -57,7 +57,7 @@ def main():
     else:
         mesh = raw
         obj = build_elastic_object(mesh, switches=tet_switches(mesh, target_tets=args.target_tets))
-    pad = 0.02 * float(mesh.extents.max())
+    pad = 0.2 * float(mesh.extents.max())
     print(f"object: {len(obj.tets)} tets; planning ...", flush=True)
 
     res = plan_grasp(obj, mesh, maxfevals=args.maxfevals, n_dirs=args.n_dirs, pad_half=pad, mu=0.7,
