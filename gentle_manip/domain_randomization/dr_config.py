@@ -24,6 +24,9 @@ class DRConfig:
     # ── per-reset (no rebuild) ────────────────────────────────────────────────
     object_pos_xy: float = 0.0          # half-range (m); per-env uniform object x/y jitter
     robot_init_pos_xyz: float = 0.0     # half-range (m); per-env uniform jitter on the reset home EE xyz
+    robot_init_offset_xyz: Optional[tuple] = None  # FIXED (dx,dy,dz) offset (m) added to the reset home
+                                        # EE pose, SAME for all envs (a fixed home at a shifted location).
+                                        # Combine with robot_init_pos_xyz>0 to jitter AROUND the shifted home.
     object_yaw_deg: float = 0.0         # half-range (deg); per-env uniform object YAW (about world z). 180 = full
     object_pitch_roll_deg: float = 0.0  # half-range (deg); per-env uniform object PITCH & ROLL tilt (small, e.g. 15)
 
@@ -51,6 +54,7 @@ class DRConfig:
 
     def has_reset_dr(self) -> bool:
         return (self.object_pos_xy > 0 or self.robot_init_pos_xyz > 0
+                or self.robot_init_offset_xyz is not None
                 or self.object_yaw_deg > 0 or self.object_pitch_roll_deg > 0)
 
     def has_scene_dr(self) -> bool:
@@ -98,12 +102,20 @@ class DRConfig:
         return e
 
     def sample_home_offset(self, rng: np.random.Generator, num_envs: int) -> Optional[np.ndarray]:
-        """Per-env (dx, dy, dz) uniform offset (+/- half-range) for the reset home EE
-        pose, or None if disabled."""
-        if self.robot_init_pos_xyz <= 0:
-            return None
-        v = self.robot_init_pos_xyz
-        return rng.uniform(-v, v, (num_envs, 3)).astype(np.float32)
+        """Per-env (dx, dy, dz) offset for the reset home EE pose, or None if disabled.
+        = fixed robot_init_offset_xyz (same for all envs) + uniform jitter (+/- robot_init_pos_xyz).
+        Either component may be off: offset-only = a fixed shifted home; jitter-only = the original
+        symmetric jitter around the default; both = jitter around the shifted home; neither = None."""
+        center = None
+        if self.robot_init_offset_xyz is not None:
+            center = np.asarray(self.robot_init_offset_xyz, dtype=np.float32).reshape(1, 3)
+        if self.robot_init_pos_xyz > 0:
+            v = self.robot_init_pos_xyz
+            jit = rng.uniform(-v, v, (num_envs, 3)).astype(np.float32)
+            return jit if center is None else (center + jit).astype(np.float32)
+        if center is not None:
+            return np.tile(center, (num_envs, 1)).astype(np.float32)
+        return None
 
     def sample_scene(self, rng: np.random.Generator) -> Dict[str, float]:
         """Sample the per-scene params that are randomized (single value each — material

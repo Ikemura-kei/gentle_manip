@@ -1,4 +1,4 @@
-# [experiment] (FIXED-HOME: robot init pose NOT randomized; shape/size DR kept) CANONICAL EVALUATION experiment for RIGID mushroom lift with orientation DR.
+# [experiment] (FIXED-HOME + OFFSET [0.01,-0.01,-0.005]: robot init pose NOT randomized; shape/size DR kept) CANONICAL EVALUATION experiment for RIGID mushroom lift with orientation DR.
 # Used by: dppo eval (eval_diffusion_pointnet.yaml experiment:) / serl_sim_server --experiment
 # Status: active
 #
@@ -9,7 +9,7 @@
 # has no material/shape DR), so scene_group_size=0 in the eval config.
 task: single_lift_mushroom_rigid
 action: delta_pose_delta_gripper_fast_rot
-dr: rigid_orientation_fixedhome         # ±45° pitch/roll, full yaw — matches data collection
+dr: rigid_orientation_fixedhome_offset         # ±45° pitch/roll, full yaw — matches data collection
 augmentation: l515_noise      # sim-only point-cloud noise augmentation
 
 obs: superset_rigid           # privileged + point_cloud (no stress; rigid body)

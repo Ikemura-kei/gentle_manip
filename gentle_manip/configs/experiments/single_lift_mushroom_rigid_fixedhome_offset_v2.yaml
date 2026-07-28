@@ -9,7 +9,7 @@
 # has no material/shape DR), so scene_group_size=0 in the eval config.
 task: single_lift_mushroom_rigid
 action: delta_pose_delta_gripper_fast_rot
-dr: rigid_orientation_fixedhome         # ±45° pitch/roll, full yaw — matches data collection
+dr: rigid_orientation_fixedhome_offset_v2         # ±45° pitch/roll, full yaw — matches data collection
 augmentation: l515_noise      # sim-only point-cloud noise augmentation
 
 obs: superset_rigid           # privileged + point_cloud (no stress; rigid body)

@@ -47,8 +47,10 @@ ddim_steps: ${ft_denoising_steps}
 
 # Canonical eval spec — fixed, do not change between policies.
 n_episodes: 200
-scene_group_size: 0          # rigid: no shape/material DR → fixed geometry; only pose/orientation vary
-                             # (set >0 only if you add food_shape DR to this experiment later)
+scene_group_size: 4          # rigid_orientation NOW carries object shape/size DR (scale/bend/twist/
+                             # taper/axis_scale), so rebuild geometry every 4 batches -> ~10 distinct
+                             # shapes across 200 ep (was 0 back when rigid had no shape DR). Needs the
+                             # sim server --subprocess (dppo_eval.sbatch always passes it).
 record_batches: null         # record all 100 episodes (one clip per episode)
 n_steps: 100                 # 100 * act_steps(4) = 400 sim steps = max_episode_steps
 render_num: 5

@@ -9,6 +9,7 @@
 # is the whole point of the rigid orientation experiment.
 object_pos_xy: 0.04           # half-range (m) — matches --xy-range 0.04 in data collection
 robot_init_pos_xyz: 0.0       # FIXED init gripper pos (was 0.02); demos never varied it
+robot_init_offset_xyz: [0.018375843763352, 0.011304597370327, -0.006303971633315]
 object_yaw_deg: 180           # full 360° yaw (U(-180,180))
 object_pitch_roll_deg: 45     # ±45° pitch & roll — matches --pitch-roll-range 45 in data collection
 
