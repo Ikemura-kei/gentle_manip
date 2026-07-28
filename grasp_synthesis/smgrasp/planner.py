@@ -33,8 +33,11 @@ def grasp_contacts(mesh, x, *, com=None, pad_half=0.015, mu=0.5, n_per_patch=6):
 
 def plan_grasp(obj, mesh, cfg: Optional[MetricConfig] = None, *, x0=None, sigma: float = 0.3,
                maxfevals: int = 200, pad_half: float = 0.015, mu: float = 0.5, n_per_patch: int = 6,
-               n_dirs: int = 12, penalty: float = 10.0, seed: int = 0, verbose: bool = False) -> dict:
-    """Maximize Q_SM over parallel-jaw poses with CMA-ES. Returns dict(x, q_sm, contacts, evals)."""
+               n_dirs: int = 12, penalty: float = 10.0, seed: int = 0, verbose: bool = False,
+               record_history: bool = False) -> dict:
+    """Maximize Q_SM over parallel-jaw poses with CMA-ES. Returns dict(x, q_sm, contacts, evals).
+    record_history=True also returns `history`: one entry per FEASIBLE evaluation
+    {eval, q, q_best, x, contacts} — for visualizing the search."""
     import cma
 
     from .geometry import load_mesh
@@ -43,8 +46,10 @@ def plan_grasp(obj, mesh, cfg: Optional[MetricConfig] = None, *, x0=None, sigma:
     com = obj.com
 
     best = {"q": -np.inf, "x": None, "cs": None}               # track the best FEASIBLE grasp directly
+    history, n_eval = [], [0]
 
     def neg_qsm(x):
+        n_eval[0] += 1
         cs = grasp_contacts(mesh, x, com=com, pad_half=pad_half, mu=mu, n_per_patch=n_per_patch)
         if cs is None or cs.n_contacts < 3:
             return penalty
@@ -53,6 +58,9 @@ def plan_grasp(obj, mesh, cfg: Optional[MetricConfig] = None, *, x0=None, sigma:
             return penalty
         if q > best["q"]:
             best.update(q=float(q), x=np.asarray(x, float).copy(), cs=cs)
+        if record_history:
+            history.append({"eval": n_eval[0], "q": float(q), "q_best": best["q"],
+                            "x": np.asarray(x, float).copy(), "contacts": cs})
         return -q
 
     if x0 is None:
@@ -63,5 +71,8 @@ def plan_grasp(obj, mesh, cfg: Optional[MetricConfig] = None, *, x0=None, sigma:
                                   {"maxfevals": maxfevals, "bounds": bounds, "seed": seed,
                                    "verbose": -9 if not verbose else 1})
     es.optimize(neg_qsm)
-    return {"x": best["x"], "q_sm": best["q"], "contacts": best["cs"],
-            "evals": int(es.result.evaluations)}
+    out = {"x": best["x"], "q_sm": best["q"], "contacts": best["cs"],
+           "evals": int(es.result.evaluations)}
+    if record_history:
+        out["history"] = history
+    return out
