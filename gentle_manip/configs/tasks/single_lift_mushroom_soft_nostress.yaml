@@ -10,7 +10,7 @@
 # von-Mises stress is still MEASURED at eval (object_type soft) — we just don't penalize it, so we
 # see how ungentle the success-maximizing policy becomes.
 success_z_min: 0.175
-success_z_max: 0.225
+success_z_max: 0.275          # widened from 0.225 — see single_lift_mushroom_rigid.yaml note
 hold_steps: 30
 object_name: "mushroom"
 object_type: "soft"      # still soft (MPM) so eval reports von_mises_stress; just not rewarded

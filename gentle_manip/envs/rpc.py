@@ -146,6 +146,8 @@ def serve_env(env, host: str = "127.0.0.1", port: int = 5555, ready_msg: str = "
                             "done": bool(np.asarray(done).all()),
                             "success": [bool(i.get("success", False)) for i in info],
                         }
+                        if info and "obj_z" in info[0]:            # object height (diagnostic; any task)
+                            resp["obj_z"] = [float(i["obj_z"]) for i in info]
                         if info and "stress_max" in info[0]:      # soft body: per-env von-Mises
                             for key in ("stress_max", "stress_mean", "stress_top10", "stress_top20"):
                                 if key in info[0]:
@@ -254,6 +256,9 @@ class SimEnvClient:
         reward = np.asarray(header.get("reward", [0.0]), dtype=np.float32)
         done = np.asarray([header.get("done", False)], dtype=bool)
         info = [{"success": s} for s in header.get("success", [False])]
+        if header.get("obj_z") is not None:                                  # diagnostic (any task)
+            for k, d in enumerate(info):
+                d["obj_z"] = float(header["obj_z"][k])
         if header.get("stress_max") is not None:                            # soft body only
             for key in ("stress_max", "stress_mean", "stress_top10", "stress_top20"):
                 vals = header.get(key)

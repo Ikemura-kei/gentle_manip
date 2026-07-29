@@ -71,6 +71,23 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
     if dump_pcd:
         Path(dump_pcd).mkdir(parents=True, exist_ok=True)
 
+    # Load once (reused for the config snapshot at the end too) — the task's absolute
+    # success z-band, if any, lets us report "ever_in_band" (object EVER entered
+    # [z_min,z_max], no hold_steps requirement) alongside "ever_success" (entered AND
+    # held hold_steps consecutive steps). The gap between the two tells you whether a
+    # policy that reaches the target is failing to STABLY HOLD it there, vs never
+    # reaching it at all.
+    exp_for_band = None
+    z_min = z_max = None
+    if experiment_name:
+        try:
+            from gentle_manip.experiment import Experiment
+            exp_for_band = Experiment.load(experiment_name)
+            z_min = exp_for_band.task_cfg.get("success_z_min")
+            z_max = exp_for_band.task_cfg.get("success_z_max")
+        except Exception as e:
+            print(f"[eval] could not load experiment for success z-band: {e}", flush=True)
+
     for i in range(spec.n_batches):
         # Per-group scene DR: rebuild the object geometry (size/shape/material) every K batches from
         # a deterministic group seed (identical across evals -> apples-to-apples across sizes/shapes).
@@ -100,6 +117,7 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
         # _stress_summary): stress_mean / max / top10 / top20 (over particles, per step).
         SKEYS = ["stress_mean", "stress_max", "stress_top10", "stress_top20"]
         buf = {k: [[] for _ in range(n)] for k in SKEYS}
+        z_buf = [[] for _ in range(n)]     # object height per step (diagnostic; any task)
 
         for t in range(spec.max_policy_steps):
             if dump_pcd and isinstance(obs, dict) and "point_cloud" in obs:   # capture the obs the policy ACTS on
@@ -122,6 +140,11 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
                     v = np.asarray(v, float).reshape(n)
                     for j in range(n):
                         buf[k][j].append(float(v[j]))
+            oz = info.get("obj_z")
+            if oz is not None:
+                oz = np.asarray(oz, float).reshape(n)
+                for j in range(n):
+                    z_buf[j].append(float(oz[j]))
 
         if dump_pcd:                                   # save one npz per episode (batch i, env j)
             for j in range(n):
@@ -143,11 +166,21 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
         def _tmean(seq):                                  # plain time-mean — BACKUP only
             return float(np.mean(seq)) if seq else None
 
+        # ever_in_band: object EVER within [z_min,z_max] at ANY single step, with NO
+        # hold_steps requirement — the loose counterpart to ever_success (entered AND
+        # held). Computed straight from the z_buf time series already collected above;
+        # None (blank column) for tasks with no absolute z-band (z_min/z_max unset).
+        if z_min is not None and z_max is not None:
+            ever_in_band = [any(z_min <= z <= z_max for z in z_buf[j]) for j in range(n)]
+        else:
+            ever_in_band = [None] * n
+
         for j in range(n):
             b = {k: buf[k][j] for k in SKEYS}
             records.append({
                 "episode": i * n + j, "batch": i, "env": j, "scenario_seed": seed_i,
                 "success": int(bool(final[j])), "ever_success": int(bool(ever[j])),
+                "ever_in_band": (int(bool(ever_in_band[j])) if ever_in_band[j] is not None else None),
                 "first_success_step": int(first_step[j]), "steps": spec.max_policy_steps,
                 "episode_reward": float(ep_reward[j]),
                 # 8 metrics = 4 spatial x {tmax (worst instant), ttop20 (interaction-window mean)}
@@ -161,10 +194,17 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
                 "stress_top20_ttop20": _ttop20(b["stress_top20"]),
                 # backup: plain time-mean of the spatial-mean == old stress_mean (compare to old evals)
                 "stress_mean_tmean": _tmean(b["stress_mean"]),
+                # object height diagnostic (any task with SimFeedback.object_center): peak reached,
+                # and the value at the LAST step — cross-reference against the task's success
+                # z-band (e.g. success_z_min/max) to tell "never got there" apart from "got there,
+                # overshot / didn't hold" for a policy that LOOKS successful in video but scores 0.
+                "obj_z_max": _tmax(z_buf[j]),
+                "obj_z_final": (z_buf[j][-1] if z_buf[j] else None),
                 **dr_cols[j],
             })
+        band_msg = f" in_band={np.mean([v for v in ever_in_band if v is not None] or [0]):.2f}" if z_min is not None else ""
         print(f"[eval] batch {i + 1}/{spec.n_batches} seed={seed_i} "
-              f"success={final.mean():.2f} ever={ever.mean():.2f}", flush=True)
+              f"success={final.mean():.2f} ever={ever.mean():.2f}{band_msg}", flush=True)
 
     write_episodes_csv(records, out_dir / "episodes.csv")
     summary = aggregate(records, checkpoint=str(checkpoint) if checkpoint else None,
@@ -178,7 +218,7 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
         try:
             from gentle_manip.experiment import Experiment
             from gentle_manip.utils.run_paths import snapshot_experiment
-            snapshot_experiment(Experiment.load(experiment_name), out_dir)
+            snapshot_experiment(exp_for_band or Experiment.load(experiment_name), out_dir)
         except Exception as e:
             print(f"[eval] env cfg snapshot skipped: {e}", flush=True)
 

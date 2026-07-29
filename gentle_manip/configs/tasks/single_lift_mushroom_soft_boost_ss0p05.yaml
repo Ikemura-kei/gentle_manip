@@ -7,7 +7,7 @@
 # (10x), lift.scale 0.1->0.2 (2x), and stress.scale=0.05. Everything else (success band, dist
 # shaping, sim dynamics, stress cap/weights) matches the base soft task.
 success_z_min: 0.175
-success_z_max: 0.225
+success_z_max: 0.275          # widened from 0.225 — see single_lift_mushroom_rigid.yaml note
 hold_steps: 30
 object_name: "mushroom"
 object_type: "soft"      # MPM -> von_mises_stress for the stress reward

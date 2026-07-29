@@ -20,9 +20,17 @@ grasp pose ──▶ sample_contacts ──▶ ContactSet ──▶ q_sm(obj, co
 
 - **M1–M4** geometry moments → wrench→body-force map → linear-tet FEM (inertia-relief free-body
   solve) → affine per-element stress maps `σ = A·w + B·f`. Each stage validated analytically.
-- **M5/M5b** support-point SDP+SOCP (cvxpy+clarabel) with the **active set** (Algorithm 3): most
-  stress LMIs are slack, so a small working set gives the exact optimum ~37× faster (verified:
-  full 29.9 s → active 0.8 s on a 4056-tet mesh). This is what makes `Q_SM` tractable on real meshes.
+- **M5/M5b** support-point SDP+SOCP with the **active set** (Algorithm 3): most stress LMIs are
+  slack, so a small working set gives the exact optimum ~37× faster (verified: full 29.9 s →
+  active 0.8 s on a 4056-tet mesh). This is what makes `Q_SM` tractable on real meshes.
+- **Solver backend — direct Clarabel (default).** `support_point` hand-assembles the conic program
+  (`ZeroCone` wrench balance, per-contact `SecondOrderCone` friction, two `PSDTriangleCone(3)` stress
+  LMIs per active element) and calls Clarabel's native API — NO cvxpy. Profiling showed cvxpy's
+  per-solve re-canonicalization (DCP checks + SDP→SOC cone conversion + matrix stuffing) was ~96% of
+  the cost and the solver itself only ~4%; a single `q_sm` makes ~900 solves, all with identical
+  structure. Result: **35× faster** (885-tet cube q_sm 520.9 s → 14.7 s), bit-identical `w`/`Q_SM`
+  to the cvxpy path (validated across directions, stress-cap AND Q1). Pass `solver="cvxpy"` to
+  `support_point` to force the old cvxpy build (kept for validation).
 - **M6** convex-hull outer loop → `Q_SM` (> 0 iff force closure).
 - **M7** shape-awareness gate: for the SAME contacts on different shapes, `Q1` is identical (it
   never looks at the object) while `Q_SM` differs — Q_SM reflects fragility where Q1 cannot.

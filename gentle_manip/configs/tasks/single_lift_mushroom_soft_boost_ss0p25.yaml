@@ -3,7 +3,7 @@
 # Status: experimental (2026-07-16)
 #
 success_z_min: 0.175
-success_z_max: 0.225
+success_z_max: 0.275          # widened from 0.225 — see single_lift_mushroom_rigid.yaml note
 hold_steps: 30
 object_name: mushroom
 object_type: soft

@@ -398,3 +398,71 @@ Because the user's translation bounds already start CMA-ES within ±1.5·object_
 the object, a cold start is usually fine. If CMA-ES fails to find contact, retain a
 *small* `w_nearness` purely as landscape shaping (not as a quality signal) to shepherd
 the search onto the contact manifold; Q_SM then dominates once in contact.
+
+---
+
+## 10. Implementation notes & findings (post-M10)
+
+### 10.1 Solver backend — direct Clarabel (default; ~35× faster than cvxpy)
+`metric.support_point` hand-assembles the conic program and calls **Clarabel's native Python API
+directly** (`_support_clarabel`), bypassing cvxpy. Profiling a single `q_sm` (885-tet cube, ~936
+solves) showed cvxpy's per-solve **re-canonicalization** (DCP checks + SDP→SOC cone conversion +
+matrix stuffing) was **~96%** of the time and the Clarabel solver itself only ~4% — the problem
+structure is identical across all solves; cvxpy re-derived it every call. Direct assembly →
+**520.9 s → 14.7 s (35×)** on that mesh, and even larger at higher tet counts (a 4640-tet bunny,
+128 CMA-ES evals + renders: **~2 min**, was hours). Results are **bit-identical** to the cvxpy path
+(|Δw|=0 stress-cap; ~1e-15 Q1), validated across directions and both modes. `solver="cvxpy"` still
+forces the old build for validation. Assembly detail: variables `x=[w(6); f(3N)]`, cones in order
+`ZeroCone(6)` (wrench balance) · per-contact `SecondOrderCone(4)` (friction) · two
+`PSDTriangleCone(3)` per active element (`−I⪯σ⪯I` via the √2-scaled column-major svec, see
+`_VOIGT_TO_SVEC`). Clarabel status `Solved`/`AlmostSolved` → normalized to cvxpy's
+`optimal`/`optimal_inaccurate`; `AlmostSolved` **must** be accepted as usable (rejecting it drops
+valid support points → <7 points → degenerate hull → spurious −inf).
+
+**Next speedup levers (bigger ROI than GPU — profile showed Clarabel is now 77%, assembly 15%):**
+reduce the ~936 solves/eval by warm-starting the active set across nearby directions; reuse the
+constant equality+friction sparse blocks across solves; CPU-multiprocess the CMA-ES population.
+**GPU is a poor fit** — the solves are sequentially dependent (active-set growth + hull refinement)
+and each SDP is tiny (3×3 LMIs), so a GPU only helps if a batched conic solver runs the independent
+CMA-ES *population* together — large build, modest payoff. Do the CPU levers first.
+
+### 10.2 Two-pad parallel-jaw grasps on ORGANIC objects give Q_SM ≈ 0 (force-closure limit)
+Across mushroom, bunny, and bunny head, the Q_SM-optimal 2-patch parallel-jaw grasp converges to
+**Q_SM ≈ 0** — verified thoroughly: 3× search budget (128 evals), finer wrench-hull (n_dirs 12–16),
+μ up to 1.5, all closing axes. The **cube** (flat, near-antipodal faces) is the only test object
+that clears it (Q_SM ≈ 0.05). This is the metric correctly reporting physics, **not** a search or
+tuning failure: under the **point-contact-with-friction** model (paper Eq. 1) two patches on a
+curved surface cannot span the moment axes of wrench space, so the resistible-wrench hull is
+**degenerate** — the origin sits *exactly on its boundary* (some wrench direction has zero
+resistance). More friction only widens the tangential-force cone; it adds **zero moment resistance**,
+which is why μ sweeps do nothing.
+
+### 10.3 Option B — torque-downweighted wrench metric `W=diag(1,1,1,c,c,c)` — does NOT rescue organics
+`experiments/wrench_metric_sweep.py` sweeps the torque weight `c` on a **fixed** feasible grasp per
+object (isolates the metric from the search). Geometry: `Q_SM` = Euclidean inradius of the `y=√W·w`
+hull, so the torque extent in y is `√c ·(w-space torque extent a)`. Result:
+
+| object | W=I Q_SM | c=0.03 | c=1 | c=10 | c=1000 |
+|---|---|---|---|---|---|
+| **cube** (control) | +0.049 | +0.008 | +0.049 | +0.118 | **+0.148** (plateau) |
+| bunny | −0.000 | −0.000 | −0.000 | −0.000 | −0.000 |
+| bunny head | −0.000 | −0.000 | −0.000 | −0.000 | −0.000 |
+| mushroom | −0.000 | −0.000 | −0.000 | −0.000 | +0.000 |
+
+The cube (full-dimensional hull) rises monotonically to a force-limited plateau as torque is
+downweighted (large `c`) — B works there. The organics stay **pinned at 0** for every `c` (tiny
+negative drift = numerical noise): because their hull is degenerate, and **no reweighting of a
+metric can move the origin off a boundary it already lies on.** Conclusion: a metric knob cannot
+manufacture the moment resistance the *contact model* lacks.
+
+### 10.4 The real way out — Option A: soft-finger contact model (TODO, not yet built)
+The physically-correct reason two real (rubber/compliant) pads DO grasp a mushroom: the pad
+deforms into an **area** contact that resists a torsional moment about the contact normal. Add a
+per-contact normal-torque DOF `τᵢ` with a soft-finger friction cone `‖(f_t/μ, τ/μ_t)‖ ≤ f_n`
+(Howe & Cutkosky) — a genuinely new torque-resisting DOF, so the hull becomes full-dimensional and
+Q_SM > 0. **Do it correctly:** the pad torque `τ·n` must enter BOTH the wrench balance (`wrench_map`
+gains a torque column per contact) AND the stress map `B` (a point-moment contact-load column) —
+otherwise Q_SM under-counts twist-induced fragility. `μ_t` becomes a config knob. (Cheaper but less
+principled alternatives: torque-downweighted `W` only helps near-force-closure grasps as shown
+above; or a task-wrench metric that scores resistance to gravity + bounded disturbance instead of
+the full 6-D unit ball.)

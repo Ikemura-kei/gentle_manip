@@ -28,6 +28,90 @@ def skew(x: np.ndarray) -> np.ndarray:
     return np.array([[0.0, -x[2], x[1]], [x[2], 0.0, -x[0]], [-x[1], x[0], 0.0]])
 
 
+# Voigt (xx,yy,zz,xy,yz,zx) -> Clarabel PSD-triangle svec (column-major upper triangle, off-diagonals
+# scaled by √2): [S11, √2 S12, S22, √2 S13, √2 S23, S33]. σ = [[L0,L3,L5],[L3,L1,L4],[L5,L4,L2]].
+_S2 = np.sqrt(2.0)
+_VOIGT_TO_SVEC = np.array([
+    [1, 0, 0, 0, 0, 0],          # S11 = L0
+    [0, 0, 0, _S2, 0, 0],        # √2 S12 = √2 L3
+    [0, 1, 0, 0, 0, 0],          # S22 = L1
+    [0, 0, 0, 0, 0, _S2],        # √2 S13 = √2 L5
+    [0, 0, 0, 0, _S2, 0],        # √2 S23 = √2 L4
+    [0, 0, 1, 0, 0, 0],          # S33 = L2
+], float)
+_SVEC_I = np.array([1.0, 0.0, 1.0, 0.0, 0.0, 1.0])   # svec of the 3x3 identity
+
+
+def _support_clarabel(obj, contacts, d, cfg, *, B, tet_idx, elements, stress_cap, fn_limit, sqrtW):
+    """Direct Clarabel solve of the support-point program — hand-assembled conic data, NO cvxpy
+    canonicalization (which the profile showed to be ~96% of the cost). Same optimum as
+    support_point's cvxpy path. Variables x = [w(6); f(3N)]; minimize -(√W d)ᵀw.
+
+    Cones, in order: ZeroCone(6) wrench balance; per-contact SecondOrderCone(4) friction;
+    then either PSDTriangleCone(3)×2 per active element (stress LMIs) or NonnegativeCone(N) (Q1)."""
+    import clarabel
+    from scipy import sparse
+
+    pts = np.asarray(contacts.points, float)
+    normals = np.asarray(contacts.normals, float)
+    mu = float(contacts.mu)
+    N = len(pts)
+    n = 6 + 3 * N
+    I3 = np.eye(3)
+
+    A_blocks, b_parts, cones = [], [], []
+
+    # (1) wrench balance  w + G f = 0  ->  [I6 | G] x + s = 0, s ∈ Zero(6)
+    eq = np.zeros((6, n)); eq[:, :6] = np.eye(6); eq[:, 6:] = wrench_map(pts)
+    A_blocks.append(eq); b_parts.append(np.zeros(6)); cones.append(clarabel.ZeroConeT(6))
+
+    # (2) friction cones: s = (μ nᵢ·fᵢ ; (I-nnᵀ)fᵢ) ∈ SOC(4)  ->  A = -Mᵢ, b = 0
+    for i in range(N):
+        ni = normals[i]
+        Mi = np.zeros((4, n)); cols = slice(6 + 3 * i, 6 + 3 * i + 3)
+        Mi[0, cols] = mu * ni
+        Mi[1:4, cols] = I3 - np.outer(ni, ni)
+        A_blocks.append(-Mi); b_parts.append(np.zeros(4)); cones.append(clarabel.SecondOrderConeT(4))
+
+    # (3) stress LMIs  -I ⪯ σ ⪯ I  (svec form), two PSD blocks per active element
+    if stress_cap:
+        A = obj.A
+        for j in elements:
+            Lmap = np.empty((6, n)); Lmap[:, :6] = A[j]; Lmap[:, 6:] = B[j]  # L = A_j w + B_j f
+            P = _VOIGT_TO_SVEC @ Lmap                                        # svec(σ) is linear in x
+            A_blocks.append(-P); b_parts.append(_SVEC_I.copy())              # svec(σ+I) ⪰ 0
+            cones.append(clarabel.PSDTriangleConeT(3))
+            A_blocks.append(P); b_parts.append(_SVEC_I.copy())              # svec(I-σ) ⪰ 0
+            cones.append(clarabel.PSDTriangleConeT(3))
+    else:                                                                    # Q1: nᵢ·fᵢ ≤ fn_limit
+        nn = np.zeros((N, n))
+        for i in range(N):
+            nn[i, 6 + 3 * i:6 + 3 * i + 3] = normals[i]
+        A_blocks.append(nn); b_parts.append(np.full(N, fn_limit)); cones.append(clarabel.NonnegativeConeT(N))
+
+    Amat = sparse.csc_matrix(np.vstack(A_blocks))
+    bvec = np.concatenate(b_parts)
+    q = np.concatenate([-(sqrtW @ np.asarray(d, float).reshape(6)), np.zeros(3 * N)])
+    Pmat = sparse.csc_matrix((n, n))
+
+    settings = clarabel.DefaultSettings()
+    settings.verbose = False
+    sol = clarabel.DefaultSolver(Pmat, q, Amat, bvec, cones, settings).solve()
+    st = str(sol.status)
+    # normalize Clarabel status -> the cvxpy vocabulary the callers/tests use
+    status = {"Solved": "optimal", "AlmostSolved": "optimal_inaccurate"}.get(st, st.lower())
+    ok = st in ("Solved", "AlmostSolved")                # AlmostSolved == cvxpy's optimal_inaccurate (usable)
+    x = np.asarray(sol.x) if ok else None
+    return {
+        "status": status,
+        "value": None if x is None else float(-q[:6] @ x[:6]),
+        "w": None if x is None else x[:6].copy(),
+        "f": None if x is None else x[6:].reshape(N, 3),
+        "B": B,
+        "tet_idx": tet_idx,
+    }
+
+
 def wrench_map(points: np.ndarray) -> np.ndarray:
     """G (6, 3N): net wrench of the contact forces, G @ f = (Σ fᵢ ; Σ xᵢ × fᵢ)."""
     pts = np.asarray(points, float).reshape(-1, 3)
@@ -169,9 +253,11 @@ def support_point(obj, contacts, d, cfg: Optional[MetricConfig] = None, *,
 
     B / tet_idx (the per-contact stress map, stress_cap only) are computed once if not supplied —
     pass them back in across directions to avoid recomputing. `elements` restricts the stress LMIs to
-    a working set (active set); default = all elements minus contact-adjacent (§6.2)."""
-    import cvxpy as cp
+    a working set (active set); default = all elements minus contact-adjacent (§6.2).
 
+    Backend: `solver=None`/"clarabel" uses the hand-assembled direct-Clarabel path (default, fast —
+    no cvxpy canonicalization); any other value (e.g. "cvxpy") forces the cvxpy build (kept for
+    validation / other solvers)."""
     cfg = cfg or MetricConfig()
     pts = np.asarray(contacts.points, float)
     normals = np.asarray(contacts.normals, float)
@@ -187,7 +273,13 @@ def support_point(obj, contacts, d, cfg: Optional[MetricConfig] = None, *,
         if cfg.mask_contact_elems and tet_idx is not None:
             elements = np.setdiff1d(elements, np.unique(tet_idx))     # drop contact-adjacent (§6.2)
 
-    obj_vec = np.real(sqrtm(cfg.wrench_metric())) @ np.asarray(d, float).reshape(6)
+    sqrtW = np.real(sqrtm(cfg.wrench_metric()))
+    if solver in (None, "clarabel", "CLARABEL"):
+        return _support_clarabel(obj, contacts, d, cfg, B=B, tet_idx=tet_idx, elements=elements,
+                                 stress_cap=stress_cap, fn_limit=fn_limit, sqrtW=sqrtW)
+
+    import cvxpy as cp
+    obj_vec = sqrtW @ np.asarray(d, float).reshape(6)
     G = wrench_map(pts)
     I3 = np.eye(3)
 
@@ -207,7 +299,7 @@ def support_point(obj, contacts, d, cfg: Optional[MetricConfig] = None, *,
             cons.append(normals[i] @ f[3 * i:3 * i + 3] <= fn_limit)
 
     prob = cp.Problem(cp.Maximize(obj_vec @ w), cons)
-    prob.solve(solver=solver or cp.CLARABEL)
+    prob.solve(solver=cp.CLARABEL)     # `solver` here only selects the backend (cvxpy); cvxpy uses Clarabel
     return {
         "status": prob.status,
         "value": prob.value,

@@ -28,6 +28,8 @@ class EvalVenv(Protocol):
         """Execute one action chunk. Returns (obs, reward(num_envs,), terminated(num_envs,),
         truncated(num_envs,), info). info carries per-env eval signals:
           info["success"]     (num_envs,) bool   — task success this policy-step
+          info["obj_z"]       (num_envs,) float  — object center height this step (diagnostic;
+                                                    any task with SimFeedback.object_center)
           info["stress_max"]  (num_envs,) float  — peak von-Mises this step (soft; else absent)
           info["stress_mean"] (num_envs,) float  — mean von-Mises this step (soft; else absent)
         """

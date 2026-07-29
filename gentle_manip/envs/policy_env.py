@@ -219,6 +219,11 @@ class PolicyEnv:
             vm = np.asarray(sim_feedback.extra["von_mises_stress"])   # (num_envs, n_particles)
             stress = _stress_summary(vm)   # dict: max, mean, top10, top20 (per env, this step)
 
+        # Object height BEFORE the horizon reset (same reason as stress above — this is the
+        # value success/reward were just computed from; the post-reset sim_feedback below
+        # reflects the FRESH episode, not this step's outcome).
+        obj_z = np.asarray(sim_feedback.object_center)[:, 2] if sim_feedback is not None else None
+
         timeout = self._episode_step >= self.max_episode_steps
         dones = np.full(self.num_envs, timeout, dtype=bool)
 
@@ -232,6 +237,9 @@ class PolicyEnv:
             {"success": bool(success[i]), "time_out": bool(timeout)}
             for i in range(self.num_envs)
         ]
+        if obj_z is not None:
+            for i in range(self.num_envs):
+                infos[i]["obj_z"] = float(obj_z[i])
         if stress is not None:
             for i in range(self.num_envs):
                 infos[i]["stress_max"] = float(stress["max"][i])

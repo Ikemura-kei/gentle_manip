@@ -19,6 +19,12 @@ import numpy as np
 # jitter, object material) — the audit trail that makes runs comparable. Blank when a given DR
 # is disabled; mat_* are constant during eval (material not per-episode randomized).
 CSV_FIELDS = ["episode", "batch", "env", "scenario_seed", "success", "ever_success",
+              # ever_in_band: object EVER within the task's [success_z_min,success_z_max] at
+              # any single step, WITHOUT the hold_steps-consecutive requirement — the loose
+              # counterpart to ever_success. The gap (ever_in_band - ever_success) measures
+              # how often the policy reaches the target but fails to hold it stably there.
+              # Blank for tasks with no absolute z-band.
+              "ever_in_band",
               "first_success_step", "steps", "episode_reward",
               # 9 stress metrics: 4 spatial (mean/max/top10/top20 over particles) x {tmax, ttop20
               # over time} + mean_tmean backup. tmax=worst instant; ttop20=mean of hottest 20%% of
@@ -26,6 +32,9 @@ CSV_FIELDS = ["episode", "batch", "env", "scenario_seed", "success", "ever_succe
               "stress_mean_tmax", "stress_mean_ttop20", "stress_max_tmax", "stress_max_ttop20",
               "stress_top10_tmax", "stress_top10_ttop20", "stress_top20_tmax", "stress_top20_ttop20",
               "stress_mean_tmean",
+              # object height diagnostic (any task with SimFeedback.object_center) — peak reached
+              # and value at the final step; cross-reference against the task's success z-band.
+              "obj_z_max", "obj_z_final",
               "obj_dx", "obj_dy", "obj_roll", "obj_pitch", "obj_yaw",
               "home_dx", "home_dy", "home_dz", "mat_E", "mat_nu", "mat_rho", "mat_yield",
               "obj_scale", "obj_bend_deg", "obj_twist_deg", "obj_taper", "obj_rbf",
@@ -87,6 +96,9 @@ def aggregate(records: List[Dict[str, Any]], **meta) -> Dict[str, Any]:
     succ_recs = [r for r in records if bool(r["success"])]
     n_succ_stress = int(_clean([r.get("stress_max_tmax") for r in succ_recs]).size)
 
+    # ever_in_band: blank/None for tasks with no absolute success z-band (see harness.py).
+    in_band_vals = [r.get("ever_in_band") for r in records if r.get("ever_in_band") is not None]
+
     out = {
         **meta,
         "n_episodes": n,
@@ -95,6 +107,10 @@ def aggregate(records: List[Dict[str, Any]], **meta) -> Dict[str, Any]:
         "mean_episode_reward": float(np.mean([r["episode_reward"] for r in records])) if n else 0.0,
         "is_soft_task": has_stress,
     }
+    if in_band_vals:
+        out["ever_in_band_rate"] = float(np.mean([bool(v) for v in in_band_vals]))
+        # the diagnostic gap: reaches the target vs. reaches AND holds it stably
+        out["hold_failure_gap"] = out["ever_in_band_rate"] - out["ever_success_rate"]
     if has_stress:
         out["stress_n_success"] = n_succ_stress
         for col, want_pct in STRESS_COLS:

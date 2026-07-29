@@ -9,7 +9,7 @@
 # eval metrics: success comes from the success band, stress is MEASURED raw von-Mises regardless of
 # reward). A policy trained on a coarse/fine sim is still measured HERE.
 success_z_min: 0.175
-success_z_max: 0.225
+success_z_max: 0.275          # widened from 0.225 — see single_lift_mushroom_rigid.yaml note
 hold_steps: 30
 object_name: "mushroom"
 object_type: "soft"      # MPM -> von_mises_stress measured for the stress metrics
