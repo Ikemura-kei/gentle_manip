@@ -39,8 +39,12 @@ PORT=5570                              # MUST match cfg env.specific.port
 # obs are mis-scaled and the finetune is junk. NORM is now actually passed to the trainer below
 # (previously only preflight-checked — harmless only because base+norm defaulted to the same set).
 CKPT=${CKPT:-$REPO/logs/dppo/dppo-pretrain/2026-07-04_20-03-36_42/checkpoint/state_3000.pt}
-CFG_DIR=$REPO/gentle_manip/dppo/cfg/single_lift_mushroom_soft_pcd
-CFG_NAME=ft_ppo_diffusion_pointnet_modex_nostress
+# CFG_DIR/CFG_NAME MUST be overridable (${VAR:-default}, matching dppo_pretrain.sbatch and
+# dppo_eval.sbatch) -- a hardcoded plain assignment silently ignores a caller's CFG_DIR/CFG_NAME
+# env vars, so a non-soft finetune (different task/action_dim) loads the wrong architecture and
+# crashes on a checkpoint state_dict size mismatch instead of running the intended config.
+CFG_DIR=${CFG_DIR:-$REPO/gentle_manip/dppo/cfg/single_lift_mushroom_soft_pcd}
+CFG_NAME=${CFG_NAME:-ft_ppo_diffusion_pointnet_modex_nostress}
 NORM=${NORM:-$REPO/dataset/dppo/single_lift_mushroom_soft_pcd/normalization.npz}
 
 export WANDB_MODE=${WANDB_MODE:-online}  # GH200 compute nodes DO have outbound internet (verified);

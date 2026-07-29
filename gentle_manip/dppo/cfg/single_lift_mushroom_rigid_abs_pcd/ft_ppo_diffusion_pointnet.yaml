@@ -1,0 +1,168 @@
+# [dppo-finetune] PPO-finetune the PointNet diffusion policy on the LIVE rigid mushroom sim,
+# ABSOLUTE action control (abs_pose_abs_gripper, action_dim=10).
+# Used by: third_party/dppo/script/run.py (TrainPPOImgDiffusionAgent) via gentle_manip.dppo.train
+# Status: active
+#
+# Drives the batched genesis sim via env_type="genesis" with a point_cloud modality
+# (pointcloud_key). A serl_sim_server --experiment single_lift_mushroom_rigid_abs_action --view
+# student must be serving on env.specific.port with matching n_envs. No stress (rigid). Uses the
+# generic image finetune agent (handles arbitrary shape_meta.obs keys; image aug is skipped for
+# clouds). base_policy_path = a pre_diffusion_pointnet (MLP head) checkpoint from THIS dir's
+# pretrain config (action_dim=10). Run with envs/dppo.
+#
+# PPO hyperparameters below are the rello run's resolved values (dppo-finetune/single_lift_
+# mushroom_soft_pcd/rello/.hydra/config.yaml) — "parameter wise use the rello setup", carried
+# over EXCLUDING rello's soft-specific reward-boost experiment override (stress/lift scale
+# tuning has no rigid analog: rigid has no stress term at all).
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${logdir}
+  callbacks:                    # snapshot the env (experiment) config -> <run>/config/
+    experiment_snapshot:
+      _target_: gentle_manip.dppo.hydra_snapshot.ExperimentSnapshot
+_target_: agent.finetune.train_ppo_diffusion_img_agent.TrainPPOImgDiffusionAgent
+
+name: ${env_name}_ppo_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}_tdf${ft_denoising_steps}
+logdir: ${oc.env:DPPO_LOG_DIR}/dppo-finetune/${env_name}/${exp_id:}
+base_policy_path: ???        # set on CLI: a pre_diffusion_pointnet (this dir) checkpoint .pt
+normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_mushroom_rigid_abs_pcd/normalization.npz
+experiment: single_lift_mushroom_rigid_abs_action   # env definition (task+obs+action+dr) snapshot
+
+seed: 42
+device: cuda:0
+env_name: single_lift_mushroom_rigid_abs_pcd
+obs_dim: 8
+action_dim: 10                # abs pos3 + 6D rotation6 + gripper1
+denoising_steps: 20
+ft_denoising_steps: 10
+cond_steps: 2
+pc_cond_steps: 1
+n_points: 1024
+visual_feature_dim: 256
+horizon_steps: 4
+act_steps: 4
+
+env:
+  n_envs: 12                  # MUST match serl_sim_server --num-envs (rello's n_envs)
+  name: ${env_name}
+  env_type: genesis
+  max_episode_steps: 400      # rigid convention (demos ~354 steps), not soft's 300
+  reset_at_iteration: False
+  save_video: True            # record env-0 rollout video (needs the server --render-rgb)
+  use_image_obs: True         # routes obs_trajs through the generic (dict-obs) img agent path
+  best_reward_threshold_for_success: 0.2   # rigid convention (matches eval configs), not soft's 100
+  specific:
+    obs_steps: ${cond_steps}
+    act_steps: ${act_steps}
+    normalization_path: ${normalization_path}
+    port: 5570
+    obs_keys: [ee_pos, ee_quat, gripper_width]
+    pointcloud_key: point_cloud
+
+shape_meta:
+  obs:
+    state:
+      shape: [8]
+    point_cloud:
+      shape: [1024, 3]
+  action:
+    shape: [10]
+
+wandb:
+  entity: ${oc.env:DPPO_WANDB_ENTITY,null}
+  project: gentle-manip-${env_name}
+  run: ${exp_id:}
+  group: dppo-finetune
+
+train:
+  n_train_itr: 250
+  n_critic_warmup_itr: 0
+  # n_steps MUST equal max_episode_steps/act_steps (400/4=100) -- NOT rello's 75. rello's soft
+  # config had max_episode_steps=300, so 300/4=75=n_steps landed exactly on the rollout window;
+  # here 400/4=100 != 75, so no single rollout window ever contains two reset markers and the
+  # agent's own episode-segmenting logic (agent/finetune/train_ppo_diffusion_img_agent.py) can
+  # never register a completed episode -- avg_episode_reward stays 0.0000 forever regardless of
+  # policy quality ("No episode completed within the iteration!" every itr). Confirmed via a live
+  # run (hlvbu/oobsj, scancelled after 92 iters of exactly-zero logged reward).
+  n_steps: 100
+  gamma: 0.999
+  augment: False              # point clouds: no image RandomShiftsAug
+  grad_accumulate: 1
+  max_grad_norm: 1.0
+  actor_lr: 1e-5
+  actor_weight_decay: 0
+  actor_lr_scheduler:
+    first_cycle_steps: 250
+    warmup_steps: 10
+    min_lr: 2e-6
+  critic_lr: 1e-3
+  critic_weight_decay: 0
+  critic_lr_scheduler:
+    first_cycle_steps: 250
+    warmup_steps: 10
+    min_lr: 2e-5
+  save_model_freq: 25
+  val_freq: 25
+  eval_fixed_seed: 77
+  eval_scene_dr: True
+  eval_n_batches: 5
+  render:
+    freq: 99999                # in-training eval OFF (rello: force_train, periodic eval skipped)
+    num: 12
+  reward_scale_running: True
+  reward_scale_const: 1.0
+  gae_lambda: 0.95
+  batch_size: 256
+  update_epochs: 1
+  vf_coef: 0.5
+  target_kl: 1
+  logprob_batch_size: 504
+  # force_train NOT declared here (matches the soft_pcd template rello used) -- the sbatch
+  # script adds it via `+train.force_train=true` (default, GM_INTRAIN_EVAL!=1); declaring it
+  # directly here would make that "+" add fail ("An item is already at 'train.force_train'").
+
+model:
+  _target_: model.diffusion.diffusion_ppo.PPODiffusion
+  gamma_denoising: 0.99
+  clip_ploss_coef: 0.01
+  clip_ploss_coef_base: 0.001
+  clip_ploss_coef_rate: 3
+  randn_clip_value: 3
+  min_sampling_denoising_std: 0.1
+  min_logprob_denoising_std: 0.1
+  network_path: ${base_policy_path}
+  actor:
+    _target_: gentle_manip.dppo.pointnet_diffusion.PointNetDiffusionMLP
+    action_dim: ${action_dim}
+    horizon_steps: ${horizon_steps}
+    cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+    pc_cond_steps: ${pc_cond_steps}
+    visual_feature_dim: ${visual_feature_dim}
+    time_dim: 16
+    mlp_dims: [512, 512, 512]
+    activation_type: ReLU
+    residual_style: True
+    pointnet:
+      in_channels: 3
+      use_layernorm: True
+      final_norm: layernorm
+  critic:
+    _target_: gentle_manip.dppo.pointnet_diffusion.PointNetCritic
+    cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+    pc_cond_steps: ${pc_cond_steps}
+    visual_feature_dim: ${visual_feature_dim}
+    mlp_dims: [256, 256, 256]
+    activation_type: Mish
+    residual_style: True
+    pointnet:
+      in_channels: 3
+      use_layernorm: True
+      final_norm: layernorm
+  ft_denoising_steps: ${ft_denoising_steps}
+  horizon_steps: ${horizon_steps}
+  obs_dim: ${obs_dim}
+  action_dim: ${action_dim}
+  denoising_steps: ${denoising_steps}
+  device: ${device}
