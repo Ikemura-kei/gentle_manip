@@ -115,11 +115,36 @@ def _face_colors(obj, sigma_voigt, cmap):
     return obj.verts[tri], plt.get_cmap(cmap)(norm(fc)), norm
 
 
-def _draw(ax, tris, colors, obj, points, forces, *, edges=True):
+def gripper_pads(center, axis, width, pad_half):
+    """Two square parallel-jaw pad footprints (each 4 corners) at center ± (width/2)·axis, in the
+    plane perpendicular to the closing axis. For drawing the gripper jaws at a grasp pose."""
+    a = np.asarray(axis, float); a /= np.linalg.norm(a) + 1e-12
+    t = np.array([1.0, 0, 0]) if abs(a[0]) < 0.9 else np.array([0.0, 1, 0])
+    u = np.cross(a, t); u /= np.linalg.norm(u); v = np.cross(a, u)
+    center = np.asarray(center, float)
+    corners = [(-1, -1), (1, -1), (1, 1), (-1, 1)]
+    quads = []
+    for sign in (+1.0, -1.0):
+        c = center + sign * (width / 2.0) * a
+        quads.append([c + s1 * pad_half * u + s2 * pad_half * v for s1, s2 in corners])
+    return quads
+
+
+def _draw(ax, tris, colors, obj, points, forces, *, edges=True, pads=None):
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
+    polys = list(tris)
+    facecolors = np.asarray(colors, float)
+    if facecolors.ndim == 2 and facecolors.shape[1] == 3:        # RGB -> RGBA
+        facecolors = np.hstack([facecolors, np.ones((len(facecolors), 1))])
+    if pads is not None:                                         # merge the two gripper jaws into the
+        polys = polys + [np.asarray(q, float) for q in pads]     # SAME collection so matplotlib's
+        gray = np.tile([0.15, 0.15, 0.15, 1.0], (len(pads), 1))  # per-face zsort occludes them
+        facecolors = np.vstack([facecolors, gray])               # correctly against the object (a
+                                                                 # separate collection would z-order
+                                                                 # as one unit and vanish behind it)
     ax.add_collection3d(Poly3DCollection(
-        tris, facecolors=colors, edgecolors=("k" if edges else "none"),
+        polys, facecolors=facecolors, edgecolors=("k" if edges else "none"),
         linewidths=0.08 if edges else 0.0))
     if points is not None:
         ax.scatter(points[:, 0], points[:, 1], points[:, 2], c="k", s=45,
@@ -143,7 +168,7 @@ def _view(ax, elev, azim, up_axis):
 
 
 def render_png(obj, sigma_voigt: np.ndarray, out: str, *, points: Optional[np.ndarray] = None,
-               forces: Optional[np.ndarray] = None, title: str = "von Mises stress",
+               forces: Optional[np.ndarray] = None, pads=None, title: str = "von Mises stress",
                cmap: str = PAPER_CMAP, up_axis: str = "z", views=((20, -60), (20, 120))) -> str:
     import matplotlib
     matplotlib.use("Agg")
@@ -153,7 +178,7 @@ def render_png(obj, sigma_voigt: np.ndarray, out: str, *, points: Optional[np.nd
     fig = plt.figure(figsize=(6.0 * len(views), 5.6))
     for k, (elev, azim) in enumerate(views):
         ax = fig.add_subplot(1, len(views), k + 1, projection="3d")
-        _draw(ax, tris, colors, obj, points, forces)
+        _draw(ax, tris, colors, obj, points, forces, pads=pads)
         _view(ax, elev, azim, up_axis)
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm); sm.set_array([])
     fig.colorbar(sm, ax=fig.axes, shrink=0.6, label="von Mises stress (E=1 units)")
@@ -166,7 +191,7 @@ def render_png(obj, sigma_voigt: np.ndarray, out: str, *, points: Optional[np.nd
 
 def render_rotation_video(obj, sigma_voigt: np.ndarray, out: str, *,
                           points: Optional[np.ndarray] = None, forces: Optional[np.ndarray] = None,
-                          cmap: str = PAPER_CMAP, n_frames: int = 60, fps: int = 20,
+                          pads=None, cmap: str = PAPER_CMAP, n_frames: int = 60, fps: int = 20,
                           elev: float = 18.0, up_axis: str = "z", title: str = "") -> str:
     """Turntable video (azimuth 0→360) of the stress-colored mesh. Reuses one collection."""
     import matplotlib
@@ -178,7 +203,7 @@ def render_rotation_video(obj, sigma_voigt: np.ndarray, out: str, *,
     edges = len(tris) < 4000                                   # edges only help on coarse meshes
     fig = plt.figure(figsize=(6, 6))
     ax = fig.add_subplot(111, projection="3d")
-    _draw(ax, tris, colors, obj, points, forces, edges=edges)
+    _draw(ax, tris, colors, obj, points, forces, edges=edges, pads=pads)
     if title:
         ax.set_title(title, fontsize=12)
     frames = []

@@ -108,10 +108,12 @@ def _synth_worker(payload: tuple) -> tuple:
     process (forked before CUDA init) is CPU-only; trimesh BVH is safe because
     no two workers share memory.
 
-    payload: (mesh_path, obj_pos, obj_quat_wxyz, left_pts, right_pts, maxfevals, lb, ub, log_dir)
+    payload: (mesh_path, obj_pos, obj_quat_wxyz, left_pts, right_pts, maxfevals, lb, ub,
+              log_dir, seed)
     returns: (best_x (7,), score float)
     """
-    mesh_path, obj_pos, obj_quat_wxyz, left_pts, right_pts, maxfevals, lb, ub, log_dir = payload
+    (mesh_path, obj_pos, obj_quat_wxyz, left_pts, right_pts, maxfevals, lb, ub,
+     log_dir, seed) = payload
     from synth_utils import build_object_sdf, grasp_cost, run_cmaes  # local import: safe in subprocess
     sdf_fn = build_object_sdf(mesh_path)
     x0 = [(lo + hi) / 2 for lo, hi in zip(lb, ub)]
@@ -119,7 +121,7 @@ def _synth_worker(payload: tuple) -> tuple:
     def objective(x):
         return grasp_cost(x, left_pts, right_pts, sdf_fn, obj_pos, obj_quat_wxyz)
 
-    best_x, score = run_cmaes(objective, x0, 1.0, lb, ub, maxfevals, log_dir=log_dir)
+    best_x, score = run_cmaes(objective, x0, 1.0, lb, ub, maxfevals, seed=seed, log_dir=log_dir)
     return best_x, score
 
 
@@ -303,7 +305,80 @@ def _x_to_targets(x: np.ndarray, num_envs: int):
             width)
 
 
-# ── Episode execution + collection ───────────────────────────────────────────
+# ── Per-env phase FSM ─────────────────────────────────────────────────────────
+# Ordered phases every env progresses through independently. Duration is currently
+# the same fixed constant for every env (so, with no retry logic yet, all envs still
+# finish at the same global timestep — this refactor changes HOW the per-step target
+# is computed, not the observable trajectory). The per-env (phase_idx, phase_step)
+# state is what a later retry/robustness pass would rewind (e.g. jump phase_idx back
+# to "approach" or "grasp" for an env whose object slipped), independent of every
+# other env's progress.
+N_FIRM = 8   # "firm" phase duration (steps) — gradual extra close IF triggered, else a no-op hold
+PHASES = [
+    ("approach", N_HOME_TO_PRE),   # home → pre-grasp pose (slerp + lerp)
+    ("settle",   N_SETTLE),        # hold at grasp pose, gripper still open
+    ("grasp",    N_GRASP),         # close gripper (gradual)
+    ("firm",     N_FIRM),          # robustness idea #1: extra squeeze IF the grip came out weak
+    ("lift",     N_LIFT),          # lift to LIFT_HEIGHT above the grasp point
+    ("hold",     N_HOLD),          # hold at lift height (success eval window)
+]
+N_PHASES  = len(PHASES)
+_GRASP_IDX = [name for name, _ in PHASES].index("grasp")   # boundary the firm-check fires at
+
+# ── Robustness idea #1: force-based grasp firming ─────────────────────────────
+# At the moment an env finishes "grasp" (checked ONCE, per env, at the grasp->firm
+# boundary), read its just-measured contact force. If the grip came out weak (< 1N —
+# CMA-ES's SDF-based cost is a geometric proxy, not a physics guarantee of a firm
+# grip), close an EXTRA FIRM_EXTRA_CLOSE_M over the "firm" phase before lifting.
+# Bounded to fire once per env (a one-way linear FSM check, not a retry loop).
+FIRM_FORCE_THRESH_N  = 1.0     # below this measured contact force -> needs firming
+FIRM_EXTRA_CLOSE_M   = 0.0025  # additional close distance (meters) if triggered
+
+# ── Post-processing: trim long held-command runs ──────────────────────────────
+HELD_RUN_MAX  = 8   # runs longer than this get trimmed
+HELD_RUN_KEEP = 4   # ...down to this many frames (keep the first N, discard the rest)
+HELD_RUN_EPS  = 1e-5
+
+
+def _trim_long_holds(act_list, *parallel_lists, max_run=HELD_RUN_MAX,
+                     keep=HELD_RUN_KEEP, eps=HELD_RUN_EPS):
+    """Collapse runs of MORE THAN `max_run` consecutive near-identical actions down
+    to `keep` frames (keep the first `keep` of the run, discard the rest). The SAME
+    kept-index selection is applied to every list in `parallel_lists` (obs/rewards/
+    frames), so everything stays aligned after trimming.
+
+    Only meaningful for ABSOLUTE-mode actions: a held absolute target repeats the
+    EXACT SAME command every frame it's held, so a long hold is many redundant
+    identical frames. Delta-mode actions are already ~0 while held (representing
+    "no movement", not a literal repeated command) — that's a different situation
+    this trim should NOT touch, so callers must gate this on action_config.mode.
+
+    A parallel list whose length doesn't match `act_list` (e.g. `frame_bufs[i]` is
+    `[]` when --record-video wasn't passed) is passed through UNCHANGED rather than
+    index-trimmed — it isn't step-aligned with the actions in the first place.
+    """
+    T = len(act_list)
+    if T == 0:
+        return (act_list,) + parallel_lists
+    acts = np.stack(act_list)
+    keep_mask = np.ones(T, dtype=bool)
+
+    run_start = 0
+    for t in range(1, T + 1):
+        same = t < T and np.linalg.norm(acts[t] - acts[run_start]) < eps
+        if not same:
+            run_len = t - run_start
+            if run_len > max_run:
+                keep_mask[run_start + keep: t] = False   # drop the tail of this run
+            run_start = t
+
+    idx = np.where(keep_mask)[0]
+    trimmed_acts     = [act_list[i] for i in idx]
+    trimmed_parallel = tuple(
+        ([lst[i] for i in idx] if len(lst) == T else lst) for lst in parallel_lists
+    )
+    return (trimmed_acts,) + trimmed_parallel
+
 
 def execute_and_collect(
     worker:       GenesisWorker,
@@ -316,15 +391,28 @@ def execute_and_collect(
     priv_cfg=None,                 # PrivilegedConfig or None — sim-only state-teacher fields
     dr_vec=None,                   # (2,) [scale, bend_deg] for priv_object_dr_params
 ) -> Tuple[List[List[dict]], List[List[np.ndarray]], List[List[float]], np.ndarray, List[List]]:
-    """Execute scripted grasp trajectory; record (obs, action, reward) per env.
+    """Execute the scripted grasp trajectory with DECOUPLED per-env phase control;
+    record (obs, action, reward) per env.
+
+    Every env independently tracks its own (phase_idx, phase_step) through PHASES.
+    Each timestep, every env's target (pos, quat, gripper) is computed from ITS OWN
+    phase state (not a single shared alpha/phase for the whole batch) — command
+    sending is still one batched worker.step() call per timestep (Genesis requires
+    this), only the per-env ROW going into that call now varies independently.
+
+    An env that has finished all its phases (DONE) is frozen at its hold target
+    (so it doesn't disturb the sim while other envs keep going) and STOPS being
+    recorded — its obs/action buffers simply stop growing, so episode length can
+    now differ per env (obs_bufs[i]/act_bufs[i] length = however many steps env i
+    was actually active for). The loop runs until every env reaches DONE.
 
     The scripted trajectory itself (positions/quats/gripper widths, all physical
     units) is IDENTICAL regardless of action_config.mode — only how each step's
     *recorded action* is derived (delta-inverted vs absolute-inverted) differs.
 
     Returns:
-        obs_bufs:    list[N] of obs-dict lists (T steps, unbatched per-env)
-        act_bufs:    list[N] of float32 action arrays (T steps each; 7-dim delta or
+        obs_bufs:    list[N] of obs-dict lists (T_i steps per env, unbatched)
+        act_bufs:    list[N] of float32 action arrays (T_i steps each; 7-dim delta or
                      10-dim absolute, matching action_config.action_dim)
         rew_bufs:    list[N] of float rewards (0.0 throughout)
         success:     (N,) bool — True if final object z > grasp_z + 0.5*LIFT_HEIGHT
@@ -337,9 +425,13 @@ def execute_and_collect(
     pos_b    = np.concatenate([p[0] for p in poses], axis=0).astype(np.float32)  # (N, 3)
     quat_b   = np.concatenate([p[1] for p in poses], axis=0).astype(np.float32)  # (N, 4)
     grasp_pos = pos_b.copy()
+    lift_b   = grasp_pos.copy(); lift_b[:, 2] += LIFT_HEIGHT
 
     width_open = np.full(num_envs, 0.08, np.float32)
     width_cls  = np.array([p[2] - 0.0025 for p in poses], np.float32)
+    # Mutable — "firm" phase tightens this once per env (idea #1); "lift"/"hold"/
+    # a frozen (DONE) env all read the FINAL width, which is width_cls unless firmed.
+    grip_target = width_cls.copy()
 
     home_pos  = np.tile(worker.robot.home_pos[None].astype(np.float32),  (num_envs, 1))
     home_quat = np.tile(worker.robot.home_quat[None].astype(np.float32), (num_envs, 1))
@@ -349,14 +441,45 @@ def execute_and_collect(
     slerps = [Slerp([0., 1.], Rot.concatenate([home_r, _wxyz_to_rot(quat_b[i])]))
               for i in range(num_envs)]
 
-    def _interp_quat(alpha: float) -> np.ndarray:
-        rows = []
-        for s in slerps:
-            xyzw = s(alpha).as_quat()
-            rows.append([xyzw[3], xyzw[0], xyzw[1], xyzw[2]])
-        return np.array(rows, np.float32)
+    def _env_target(i: int, phase_idx: int, phase_step: int):
+        """(pos, quat_wxyz, grip) for env i at its OWN (phase_idx, phase_step)."""
+        name, dur = PHASES[phase_idx]
+        if name == "approach":
+            alpha = (phase_step + 1) / dur
+            pos = home_pos[i] + alpha * (pos_b[i] - home_pos[i])
+            xyzw = slerps[i](alpha).as_quat()
+            quat = np.array([xyzw[3], xyzw[0], xyzw[1], xyzw[2]], np.float32)
+            grip = width_open[i]
+        elif name == "settle":
+            pos, quat, grip = pos_b[i], quat_b[i], width_open[i]
+        elif name == "grasp":
+            alpha = (phase_step + 1) / dur
+            pos, quat = pos_b[i], quat_b[i]
+            grip = width_open[i] + alpha * (width_cls[i] - width_open[i])
+        elif name == "firm":
+            # Idea #1: reaching this phase AT ALL means the grasp->firm check (main
+            # loop) found this env's grip too weak — envs that were already fine skip
+            # "firm" entirely (phase_idx jumps straight to "lift", no artificial no-op
+            # steps to generate-then-trim). So here it's always a real extra close.
+            pos, quat = pos_b[i], quat_b[i]
+            alpha = (phase_step + 1) / dur
+            grip_target[i] = max(0.0, width_cls[i] - alpha * FIRM_EXTRA_CLOSE_M)
+            grip = grip_target[i]
+        elif name == "lift":
+            alpha = (phase_step + 1) / dur
+            pos = pos_b[i] + alpha * (lift_b[i] - pos_b[i])
+            quat, grip = quat_b[i], grip_target[i]
+        else:  # "hold"
+            pos, quat, grip = lift_b[i], quat_b[i], grip_target[i]
+        return pos, quat, grip
 
-    # Per-env buffers
+    def _frozen_target(i: int):
+        """Command for a DONE env — hold steady so it doesn't disturb the sim
+        while other envs keep progressing (identical to its final hold target)."""
+        return lift_b[i], quat_b[i], grip_target[i]
+
+    # Per-env buffers — lengths WILL differ across envs once retry logic diverges
+    # phase durations; for now (no retry) every env still finishes at the same step.
     obs_bufs:   List[List[dict]]       = [[] for _ in range(num_envs)]
     act_bufs:   List[List[np.ndarray]] = [[] for _ in range(num_envs)]
     rew_bufs:   List[List[float]]      = [[] for _ in range(num_envs)]
@@ -371,7 +494,11 @@ def execute_and_collect(
     prev_quat = home_quat.copy()
     prev_grip = width_open.copy()
 
-    def _step(cur_pos, cur_quat, cur_grip):
+    # Per-env FSM state
+    phase_idx  = np.zeros(num_envs, dtype=np.int64)
+    phase_step = np.zeros(num_envs, dtype=np.int64)
+
+    def _step(cur_pos, cur_quat, cur_grip, record_mask):
         nonlocal prev_pos, prev_quat, prev_grip
 
         # Invert scripted target → normalized action (delta needs prev_*; absolute
@@ -385,12 +512,14 @@ def execute_and_collect(
         # Advance sim (depth rendered because render_obs_cameras=True)
         state = worker.step(cur_pos, cur_quat, cur_grip)
 
-        # RGB frames (optional)
+        # RGB frames (optional) — only for envs still being recorded, so per-env
+        # video length matches its recorded episode length.
         if record_video:
             frames = worker.render_rgb(all_envs=True)   # (N, H, W, 3) uint8
             if frames is not None:
                 for i in range(num_envs):
-                    frame_bufs[i].append(frames[i])
+                    if record_mask[i]:
+                        frame_bufs[i].append(frames[i])
 
         # Build obs from next state (+ sim-only privileged fields from the object state)
         raw_next = _state_to_raw_obs(state)
@@ -402,46 +531,77 @@ def execute_and_collect(
         next_obs_list = [{k: next_obs_batch[k][i] for k in next_obs_batch}
                          for i in range(num_envs)]
 
-        # Record (obs_t, action_t, reward_t=0)
+        # Record (obs_t, action_t, reward_t=0) — ONLY for envs still active this step.
+        # A DONE env's buffers simply stop growing here.
         for i in range(num_envs):
-            obs_bufs[i].append(cur_obs_list[i])
-            act_bufs[i].append(actions[i])
-            rew_bufs[i].append(0.0)
+            if record_mask[i]:
+                obs_bufs[i].append(cur_obs_list[i])
+                act_bufs[i].append(actions[i])
+                rew_bufs[i].append(0.0)
 
         prev_pos[:]  = cur_pos
         prev_quat[:] = cur_quat
         prev_grip[:] = cur_grip
-        return next_obs_list
+        return next_obs_list, state
 
-    # ── Phase 1: home → grasp ──
-    for j in range(N_HOME_TO_PRE):
-        alpha = (j + 1) / N_HOME_TO_PRE
-        cur_obs_list = _step(home_pos + alpha * (pos_b - home_pos),
-                             _interp_quat(alpha), width_open)
+    # ── Main loop: every env advances through PHASES independently ──
+    while np.any(phase_idx < N_PHASES):
+        active = phase_idx < N_PHASES   # (N,) bool — envs still progressing this step
 
-    # ── Phase 1b: settle at grasp pose (action ≈ 0) ──
-    for _ in range(N_SETTLE):
-        cur_obs_list = _step(pos_b, quat_b, width_open)
+        cur_pos_arr  = np.zeros((num_envs, 3), np.float32)
+        cur_quat_arr = np.zeros((num_envs, 4), np.float32)
+        cur_grip_arr = np.zeros(num_envs, np.float32)
+        for i in range(num_envs):
+            if active[i]:
+                pos, quat, grip = _env_target(i, int(phase_idx[i]), int(phase_step[i]))
+            else:
+                pos, quat, grip = _frozen_target(i)
+            cur_pos_arr[i], cur_quat_arr[i], cur_grip_arr[i] = pos, quat, grip
 
-    # ── Phase 2: close gripper (gradual — speed = Δwidth / N_GRASP per step) ──
-    for j in range(N_GRASP):
-        alpha = (j + 1) / N_GRASP
-        cur_obs_list = _step(pos_b, quat_b,
-                             width_open + alpha * (width_cls - width_open))
+        cur_obs_list, state = _step(cur_pos_arr, cur_quat_arr, cur_grip_arr, record_mask=active)
 
-    # ── Phase 3: lift ──
-    lift_b = grasp_pos.copy(); lift_b[:, 2] += LIFT_HEIGHT
-    for j in range(N_LIFT):
-        alpha = (j + 1) / N_LIFT
-        cur_obs_list = _step(pos_b + alpha * (lift_b - pos_b), quat_b, width_cls)
+        # Advance phase state for envs that were active this step.
+        # TODO(retry): this is where a robustness pass would check per-env
+        # success/failure (e.g. at the "lift"/"hold" -> DONE boundary) and, on
+        # failure, rewind phase_idx[i] to an earlier phase instead of advancing to
+        # DONE — independent of every other env's state.
+        phase_step[active] += 1
+        # phase_idx may already be N_PHASES (done envs) — clip before indexing PHASES;
+        # those entries are masked out by `active` anyway so the clipped value is unused.
+        durations = np.array([PHASES[min(int(p), N_PHASES - 1)][1] for p in phase_idx])
+        rolled_over = active & (phase_step >= durations)
 
-    # ── Phase 4: hold ──
-    for _ in range(N_HOLD):
-        cur_obs_list = _step(lift_b, quat_b, width_cls)
+        # Idea #1: force-based grasp firming. Check ONCE, exactly at the moment an
+        # env finishes "grasp" (about to enter "firm") — read this env's just-measured
+        # contact force. If it's already fine, SKIP "firm" entirely (jump straight to
+        # "lift", +2 instead of +1) rather than stepping through a no-op hold and
+        # relying on the trim pass to clean it up afterward — no artificial stops.
+        advance = np.ones(num_envs, dtype=np.int64)   # normal: one phase forward
+        leaving_grasp = rolled_over & (phase_idx == _GRASP_IDX)
+        if np.any(leaving_grasp):
+            cf = state.get("contact_force")
+            if cf is not None:
+                for i in np.where(leaving_grasp)[0]:
+                    if cf[i] < FIRM_FORCE_THRESH_N:
+                        print(f"    [firm] env {i}: grip force {cf[i]:.2f}N < "
+                              f"{FIRM_FORCE_THRESH_N}N -> closing {FIRM_EXTRA_CLOSE_M*1000:.1f}mm more")
+                    else:
+                        advance[i] = 2   # grip already fine -> skip "firm", straight to "lift"
+
+        phase_idx[rolled_over]  += advance[rolled_over]
+        phase_step[rolled_over]  = 0
 
     # Success check from final object position
     obj_z   = _np(worker.handle.objects[0].get_pos())[:, 2]
     success = obj_z > (grasp_pos[:, 2] + LIFT_HEIGHT * 0.5)
+
+    # Post-process: trim long held-command runs (absolute mode only — see
+    # _trim_long_holds docstring for why delta mode is excluded).
+    if action_config.mode == "absolute":
+        for i in range(num_envs):
+            act_bufs[i], obs_bufs[i], rew_bufs[i], frame_bufs[i] = _trim_long_holds(
+                act_bufs[i], obs_bufs[i], rew_bufs[i], frame_bufs[i])
+
     return obs_bufs, act_bufs, rew_bufs, success, frame_bufs
 
 
@@ -527,7 +687,7 @@ def main() -> None:
                    help="total successful episodes to collect")
     p.add_argument("--n-envs",     type=int, default=5,
                    help="parallel envs per batch")
-    p.add_argument("--maxfevals",  type=int, default=901,
+    p.add_argument("--maxfevals",  type=int, default=1145,
                    help="CMA-ES function evaluations per env per batch")
     p.add_argument("--scene-dr-every", type=int, default=1,
                    help="re-randomize object SIZE+SHAPE every N batches by rebuilding the worker "
@@ -581,6 +741,11 @@ def main() -> None:
           f" — target {args.n_episodes} episodes, {args.n_envs} envs/batch")
 
     rng = np.random.default_rng(args.seed)   # DR RNG (pose + scene) — must precede the first build
+    # Separate stream (distinct offset so it never shares draws with `rng` above, keeping
+    # DR reproducibility untouched) — makes CMA-ES's own search reproducible from --seed too
+    # (previously every _synth_worker call used run_cmaes's hardcoded default seed=2567, so
+    # ALL envs/batches shared the identical internal search sequence regardless of --seed).
+    cma_seed_rng = np.random.default_rng(args.seed + 1_000_000)
 
     # ── Build scene + worker (with per-scene SIZE+SHAPE DR) ──
     # Scene DR re-randomizes object geometry by REBUILDING the worker every N batches (GenesisWorker
@@ -680,9 +845,10 @@ def main() -> None:
         payloads = []
         for i in range(n):
             lb, ub = _synth_bounds(obj_pos_all[i])
+            cma_seed = int(cma_seed_rng.integers(1, 2**31 - 1))
             payloads.append((actual_mesh, obj_pos_all[i], obj_quat_all[i],
                              left_pts, right_pts, args.maxfevals, lb, ub,
-                             str(run_dir / "cmaes_logs")))
+                             str(run_dir / "cmaes_logs"), cma_seed))
         futures = [executor.submit(_synth_worker, p) for p in payloads]
         all_best_x = []
         for i, fut in enumerate(futures):

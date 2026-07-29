@@ -315,6 +315,8 @@ class SimBackend:
         extra = {} if s["von_mises_stress"] is None else {"von_mises_stress": s["von_mises_stress"]}
         if s.get("object_quat") is not None:
             extra["object_quat"] = s["object_quat"]           # (N, 4) wxyz, rigid only
+        if s.get("contact_force") is not None:
+            extra["contact_force"] = s["contact_force"]       # (N,) Newtons, rigid only
         if hasattr(self, "_episode_dr_vec"):
             extra["object_dr_vec"] = self._episode_dr_vec     # (2,) [scale, bend_deg], episode const
         return SimFeedback(

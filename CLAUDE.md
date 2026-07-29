@@ -430,8 +430,22 @@ class SimFeedback:
     # Examples of extra keys:
     #   extra["von_mises_stress"]    (num_envs, n_particles)  — soft bodies only
     #   extra["particle_positions"]  (num_envs, n_particles, 3)
-    #   extra["contact_force"]       (num_envs,)              — rigid surrogates
+    #   extra["contact_force"]       (num_envs,)              — rigid only (see below)
 ```
+
+**`extra["contact_force"]` (rigid bodies, IMPLEMENTED)** — sum of gripper-object contact
+force MAGNITUDES (Newtons), computed each step in `genesis_worker._gripper_object_contact_force`
+via Genesis's `robot_entity.get_contacts(with_entity=object_entity)` (per-contact-pair query,
+batched). A magnitude sum, not a signed vector sum, is deliberate: the two fingers' contact
+forces point roughly opposite directions, so a vector sum would mostly cancel and only show
+the small residual (gravity support) — hiding the squeeze force that's actually of interest.
+This is the rigid-body analogue of `von_mises_stress` for soft bodies: exposed as an opt-in
+observation via `PrivilegedConfig.contact_force` → `priv_contact_force` (num_envs, 1). `None`
+for soft objects (which use `von_mises_stress` instead). Sanity-checked against 8+ real CMA-ES
+grasp episodes (`examples/demo_analysis/contact_force_sanity.py`): flat at 0 during approach,
+sharp onset exactly at gripper-close, steady plateau through lift/hold — trend is clean.
+`examples/demo_analysis/force_grasp_showcase.py` pairs a recorded grasp video (`--record-video`)
+with a rolling contact-force plot (fixed axes, growing line) for any dataset that recorded it.
 
 **Important:** `SimFeedback` must only contain raw sim state (physics quantities). Task-derived state such as success must NOT be stored here — the sim is unaware of task logic. `BaseTask.compute_reward` calls `is_success` itself and adds the sparse bonus directly, keeping the boundary clean.
 
@@ -519,7 +533,9 @@ class ObsConfig:
 
 **`PrivilegedConfig`** (`perception/obs_config.py`) — sim-only fields computed by `PolicyEnv`
 from `SimFeedback` (NOT the shared pipeline, so real/student obs can never contain them).
-Requires a task. Set in the YAML under a `privileged:` key.
+Requires a task. Set in the YAML under a `privileged:` key. `grasp_synthesis/collect_demos_synth.py`
+bypasses `PolicyEnv` (CMA-ES data collection) so it mirrors this logic itself in
+`_privileged_obs_batch` — keep the two in sync when adding a field.
 
 ```python
 @dataclass
@@ -535,6 +551,9 @@ class PrivilegedConfig:
                                     #   constant from scene DR; defaults [1.0, 0.0] when no shape DR.
                                     #   Tells the policy what shape variant it's manipulating.
     stress:           bool = False  # priv_stress      (N,2)  — [mean, top10] / yield (soft only)
+    contact_force:    bool = False  # priv_contact_force (N,1) — sum of gripper-object contact
+                                    #   force magnitudes (Newtons, rigid only). The rigid-body
+                                    #   analogue of `stress`; see SimFeedback.extra["contact_force"].
 ```
 
 `object_quat` vs `object_rot6d`: for the EE quaternion (small workspace range) the sign-flip
@@ -544,7 +563,10 @@ nearby poses in SO(3) to nearby 6D vectors with no antipodal jumps.
 **Obs configs** — relevant presets:
 - `superset_rigid.yaml` — rigid superset: object_pos + object_vel + point cloud (no quat/DR params)
 - `superset_rigid_full_state.yaml` — adds `object_rot6d` + `object_dr_params`; point cloud retained
-  for student training. Full state dim: **22** (ee_pos(3)+ee_quat(4)+grip(1)+obj_pos(3)+obj_rot6d(6)+obj_vel(3)+obj_dr(2)).
+  for student training. Full state dim: **19** (ee_pos(3)+ee_quat(4)+grip(1)+obj_pos(3)+obj_rot6d(6)+obj_dr(2)).
+- `superset_rigid_full_state_force.yaml` — forks the above, `+ contact_force: true` → 20-dim.
+  Experimental config for sanity-checking `priv_contact_force`'s trend (see SimFeedback above);
+  paired with experiment `single_lift_mushroom_rigid_state_abs_action_force`.
 - `state_privileged.yaml` — state teacher (no camera): object_pos + object_vel + stress (soft)
 
 **DPPO conversion views** (`gentle_manip/dppo/convert_demos.py`):
@@ -572,8 +594,12 @@ freed budget is reallocated):
 Diagnostic: `examples/sim2real_diagnose/replay_demo_in_sim.py` replays a recorded real
 demo's actions in sim and compares every obs channel (ee/quat/gripper/point-cloud), with
 optional side-by-side real|sim cloud videos — the tool that localized both gaps above.
-`scripts/deploy_real.py --record` saves a real run in the demo schema for this comparison;
-`demos/record.py --show-pointcloud` shows the processed cloud live (LiveCloudViewer).
+`replay_deploy_in_sim.py` is the same idea for a real DEPLOYMENT run (`deploy_real_dppo.py
+--record` output) — loads task/obs/action from `Experiment.load(--experiment)`, no hardcoded
+ranges. `analyze_deploy_gap.py` is the real-data-only companion (action-following gap +
+point-cloud stats, no sim replay). `scripts/deploy_real.py --record` saves a real run in the
+demo schema for this comparison; `demos/record.py --show-pointcloud` shows the processed cloud
+live (LiveCloudViewer). Full script map: `docs/training_and_eval.md`.
 
 ### ActionConfig (`actions/action_config.py`)
 
@@ -582,9 +608,111 @@ Loaded from `configs/action/*.yaml` via `ActionConfig.from_dict()`.
 ```python
 @dataclass
 class ActionConfig:
-    scales: List[float]            # per-dim multipliers; length = action_dim
+    mode: str = "delta"            # "delta" (default) | "absolute" — see below
+    scales: List[float]            # per-dim multipliers; length = action_dim (delta mode)
     clip: Tuple[float, float]      # (min, max) applied before scaling, default (-1, 1)
+    pos_min: Tuple[float,...]      # absolute mode: workspace bounds the raw pos dims map into
+    pos_max: Tuple[float,...]      # (defaults mirror xarm7_config.EE_BOUNDS_MIN/MAX)
+    gripper_min: float             # absolute mode: physical gripper-width range (meters)
+    gripper_max: float
 ```
+
+**Two action modes** (`ActionPipeline`, `actions/pipeline.py`):
+- **`"delta"`** (default — every existing config/script with no `mode` key gets this,
+  unchanged): 7-dim raw output (dx,dy,dz,droll,dpitch,dyaw,dgripper) → clip → scale →
+  physical delta, accumulated by the backend onto a running target.
+- **`"absolute"`** (`configs/action/abs_pose_abs_gripper.yaml`): 10-dim raw output
+  (3 pos + 6D rotation + 1 gripper) → clip, then linearly map pos/gripper into
+  `[pos_min,pos_max]`/`[gripper_min,gripper_max]` and Gram-Schmidt-orthonormalize the 6D
+  rotation (Zhou et al. 2019 — same convention as `priv_object_rot6d`) into a quaternion →
+  8-dim physical (pos+quat+gripper) that the backend SETS directly (no accumulation).
+
+`SimBackend.step()`/`RealBackend.step()` dispatch on the **output width** (7 = delta,
+8 = absolute) — no constructor/signature changes anywhere, so this is fully backward
+compatible; a currently-running job using delta configs is unaffected even if a mid-run
+scene-DR relaunch (`GenesisProcess.restart`, spawn-based) re-imports code, since that only
+reloads the `GenesisWorker`-side physics, never `sim_backend.py`/`actions/*` (those live in
+the parent process, imported once at job start).
+
+`grasp_synthesis/collect_demos_synth.py` supports both modes transparently — its action
+INVERSION (scripted absolute target → recorded normalized action) branches on
+`action_config.mode`: `_invert_actions` (delta, needs `prev_*` history) vs
+`_invert_actions_absolute` (absolute, stateless per-step transform — no history needed,
+since there's no accumulation to invert).
+
+### CMA-ES grasp-synthesis collection robustness (`collect_demos_synth_v2.py`)
+
+**A near-perfect demonstrator matters**: at 65-75% CMA-ES grasp success (see e.g.
+`dataset/demos/.../stats.yaml`), the recorded demo distribution is biased toward whatever
+the scripted demonstrator can already do, capping the learned policy below that ceiling.
+`grasp_synthesis/collect_demos_synth_v2.py` is a fork of `collect_demos_synth.py` for
+robustness/retry work — **modify v2 only; the original stays untouched** as the stable
+baseline.
+
+**Decoupled per-env phase FSM (IMPLEMENTED).** The original executes all envs in lockstep
+(one shared `alpha` drives every env through home→grasp→lift→hold together). v2 replaces
+this with a per-env `(phase_idx, phase_step)` state machine over an ordered `PHASES` list —
+every env advances independently each timestep; command SENDING is still one batched
+`worker.step()` call (Genesis requires this), only the per-env ROW going into it now varies.
+An env that finishes early is frozen at its hold target and stops being recorded (its
+obs/action buffers simply stop growing — episode length is now per-env, not a shared `T`),
+while other envs keep progressing. This is the prerequisite infrastructure for any retry
+logic (an env can now diverge — rewind its own `phase_idx` — without stalling the batch).
+Verified behavior-preserving against the original at matched CMA-ES results: actions
+bit-identical, positions match to float noise. (Aside: `run_cmaes` isn't seeded from
+`--seed`, so CMA-ES occasionally converges to a different local optimum for the same env
+across repeated runs even with an identical `--seed` — a pre-existing property of both
+v1 and v2, not something the FSM refactor introduced; keep this in mind when doing
+before/after comparisons — a same-seed re-run is NOT guaranteed to reproduce identical
+per-env grasp poses.)
+
+**Post-processing: trim long held-command runs (IMPLEMENTED, absolute mode only).**
+`_trim_long_holds` collapses any run of MORE than 8 consecutive near-identical recorded
+actions down to 4 frames (keep the first 4, discard the rest) — an absolute-mode command
+held constant for many frames (e.g. the "hold" phase) is many redundant identical frames;
+gated to `action_config.mode == "absolute"` because a held DELTA action is already ~0
+(representing "no movement", not a literal repeated command — a different situation this
+should not touch).
+
+**Robustness/retry brainstorm** (the "TODO(retry)" comment at the phase-advance point in
+`execute_and_collect` is where these hook in):
+1. **Force-based grasp firming (IMPLEMENTED).** A `"firm"` phase inserted between
+   `"grasp"` and `"lift"` in `PHASES`. Checked ONCE per env, exactly at the grasp→firm
+   boundary: read that env's just-measured `state["contact_force"]` (always computed for
+   rigid tasks regardless of whether `priv_contact_force` is in the obs config — this is
+   an internal collector heuristic, not gated by what gets recorded as an observation).
+   If `< FIRM_FORCE_THRESH_N` (1.0 N), close an extra `FIRM_EXTRA_CLOSE_M` (2.5 mm) over
+   the phase before proceeding to lift; otherwise the phase is a no-op hold (gets merged
+   into the surrounding identical-command run and trimmed by the step above anyway).
+   Bounded to fire once (a linear FSM check, not a loop) — no over-squeeze risk. Verified
+   triggering correctly on genuinely weak grasps (0.0-0.25N at grasp completion is common
+   — CMA-ES's SDF-based cost is a geometric proxy, not a physics guarantee of a firm
+   grip); anecdotally rescued some borderline (~0.1-0.25N) cases into successful lifts,
+   but does not rescue a fully-missed grasp (0.0N, object not actually between the
+   fingers) — that needs idea 2. A clean statistical before/after read is confounded by
+   the CMA-ES non-determinism noted above; would need either a much larger sample or an
+   explicitly-seeded `run_cmaes` call for a rigorous A/B.
+2. **Lift-phase failure detection + regrasp (NOT YET IMPLEMENTED).** After lifting ~1cm,
+   if the object hasn't actually risen with the gripper (EE up, object still down = slip),
+   reopen slightly and either regrasp in place (cheap — same CMA-ES pose, object likely
+   hasn't moved much; try first) or fully replan (re-run CMA-ES for that one env — more
+   robust to the object having shifted, but real per-retry wall-clock cost; fall back to
+   this only if in-place regrasp fails too). Needs a bounded retry cap so one bad env
+   can't stall the batch or produce a runaway-length episode.
+3. **Deliberate induced failure for retry-coverage (NOT YET IMPLEMENTED).** With some
+   probability epsilon (e.g. 0.05), intentionally perturb the grasp to make it fail on
+   purpose (e.g. widen the commanded close width, so it grasp fails and idea 2's recovery
+   fires) — so the recorded demonstrations actually contain genuine failure+recovery
+   examples, not just always-succeeds trajectories. Otherwise a policy trained purely on
+   clean successes has never seen what to do after a slip, and won't know how to recover
+   at deployment even if idea 2's recovery logic exists in the collector. **Newly noted
+   variant:** instead of (or in addition to) a width perturbation, apply a small EXTERNAL
+   force/impulse directly to the object during grasp/lift to induce a realistic slip —
+   closer to how a real failure actually manifests physically (vs. an under-closed grip,
+   which is a control-side failure rather than a physical disturbance). Whichever
+   mechanism, keep it realistic enough that the learned recovery behavior transfers to
+   genuine real-world slips, not just the specific synthetic perturbation used to trigger
+   it in sim.
 
 ### Obs space / action space convention
 

@@ -152,6 +152,8 @@ class PolicyEnv:
                 extra["priv_object_dr_params"] = Box(-np.inf, np.inf, (2,), np.float32)
             if self._priv.stress:
                 extra["priv_stress"] = Box(0.0, np.inf, (2,), np.float32)
+            if self._priv.contact_force:
+                extra["priv_contact_force"] = Box(0.0, np.inf, (1,), np.float32)
             space = Dict({**space.spaces, **extra})
         self.observation_space = space
         self.action_space = self.action_pipeline.build_action_space()
@@ -323,6 +325,11 @@ class PolicyEnv:
             top10 = np.median(np.partition(stress, -k, axis=-1)[..., -k:], axis=-1)
             out["priv_stress"] = (np.stack([mean_s, top10], axis=-1)
                                   / self._yield_stress).astype(np.float32)   # (N, 2) fraction of yield
+        if self._priv.contact_force:
+            # Rigid-body grip-force surrogate (sum of gripper-object contact force
+            # magnitudes, Newtons) — the analogue of priv_stress for rigid tasks.
+            cf = np.asarray(sf.extra["contact_force"], dtype=np.float32)   # (N,)
+            out["priv_contact_force"] = cf[:, None]                       # (N, 1)
         return out
 
     def _require_sim_feedback(self) -> SimFeedback:

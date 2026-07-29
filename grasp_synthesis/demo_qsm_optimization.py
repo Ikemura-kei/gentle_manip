@@ -103,15 +103,19 @@ def main():
     imageio.mimsave(vid, frames, fps=6)
     print("  ->", vid, flush=True)
 
-    # the best grasp: a still + a TURNTABLE video that clearly shows the grasp point (like bunny_ears)
-    from smgrasp.viz import render_png, render_rotation_video
+    # the best grasp: a still + a TURNTABLE video showing the two GRIPPER PADS (jaws) at the pose
+    from smgrasp.viz import render_png, render_rotation_video, gripper_pads
     bpts, bf, bsig, bpatch = _squeeze_stress(obj, {"contacts": res["contacts"], "x": res["x"]})
+    gaxis = _axis(res["x"])
+    sep = float(abs((bpatch[1] - bpatch[0]) @ gaxis))
+    gwidth = sep + 2.0 * pad                                # jaws stand off ~pad outside each contact
+    gpads = gripper_pads(bpatch.mean(0), gaxis, gwidth, 1.3 * pad)   # plate-sized footprint
     ttl = f"{name}: Q_SM-optimal grasp (Q_SM={res['q_sm']:.3f})"
     png = render_png(obj, bsig, str(OUT / f"{name}_qsm_best.png"), points=bpatch, forces=bf,
-                     up_axis=args.up_axis, title=ttl)
+                     pads=gpads, up_axis=args.up_axis, title=ttl)
     print("  ->", png, flush=True)
     bvid = render_rotation_video(obj, bsig, str(OUT / f"{name}_qsm_best.mp4"), points=bpatch, forces=bf,
-                                 up_axis=args.up_axis, n_frames=45, elev=14, title=ttl)
+                                 pads=gpads, up_axis=args.up_axis, n_frames=45, elev=14, title=ttl)
     print("  ->", bvid, flush=True)
 
 

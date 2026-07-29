@@ -73,6 +73,10 @@ class PrivilegedConfig:
     object_vel: bool = False      # finite-diff object velocity (num_envs, 3)
     object_dr_params: bool = False  # episode-constant DR vector (num_envs, 2): [scale, bend_deg]
     stress: bool = False          # normalized von Mises [mean/yield, top10/yield] (num_envs, 2)
+    contact_force: bool = False   # rigid-body surrogate for stress (num_envs,) — sum of contact
+                                  # force magnitudes between the robot (gripper) and the object,
+                                  # Newtons. Rigid bodies have no von Mises stress; this is the
+                                  # analogous "how hard is the grip" scalar. Requires a rigid task.
 
 
 @dataclass
@@ -166,6 +170,8 @@ class ObsConfig:
                 keys.append("priv_object_dr_params")
             if self.privileged.stress:
                 keys.append("priv_stress")
+            if self.privileged.contact_force:
+                keys.append("priv_contact_force")
         return keys
 
     def validate(self) -> None:
@@ -222,6 +228,7 @@ class ObsConfig:
                 object_vel=bool(pv.get("object_vel", False)),
                 object_dr_params=bool(pv.get("object_dr_params", False)),
                 stress=bool(pv.get("stress", False)),
+                contact_force=bool(pv.get("contact_force", False)),
             )
 
         cfg = cls(

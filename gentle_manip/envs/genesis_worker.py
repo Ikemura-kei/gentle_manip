@@ -270,16 +270,38 @@ class GenesisWorker:
             state["object_center"] = _np(obj.get_pos()).astype(np.float32)      # (B, 3)
             state["object_quat"]   = _np(obj.get_quat()).astype(np.float32)    # (B, 4) wxyz
             state["von_mises_stress"] = None
+            state["contact_force"] = _gripper_object_contact_force(self.robot.robot, obj)  # (B,)
         else:
             st = obj.get_state()
             particle_pos = _np(st.pos)                                   # (B, n_p, 3)
             state["object_center"] = particle_pos.mean(axis=1).astype(np.float32)   # (B, 3)
             state["von_mises_stress"] = _np(st.von_mises).astype(np.float32)        # (B, n_p)
+            state["contact_force"] = None   # rigid-only surrogate; soft bodies use von_mises_stress
 
         state["depth_images"] = depth_images
         state["camera_intrinsics"] = intrinsics
         state["camera_extrinsics"] = extrinsics
         return state
+
+
+def _gripper_object_contact_force(robot_entity, object_entity) -> np.ndarray:
+    """Rigid-body grip-force surrogate: sum of contact-force MAGNITUDES between the
+    whole robot entity (in practice, whichever links are actually touching — the
+    gripper fingers) and the object entity, per env. Shape (B,), Newtons.
+
+    A magnitude sum (not a signed vector sum) is deliberate: the two fingers' contact
+    forces point in roughly opposite directions, so a vector sum would mostly cancel
+    and only show the small residual (gravity support) — hiding the squeeze force
+    that's actually of interest. This mirrors the existing von-Mises stress reward's
+    use of a severity scalar rather than a signed tensor.
+    """
+    contacts = robot_entity.get_contacts(with_entity=object_entity)
+    force = _np(contacts["force_a"])                        # (B, n_contacts, 3)
+    if force.shape[-2] == 0:
+        return np.zeros(force.shape[0], dtype=np.float32)
+    valid = _np(contacts.get("valid_mask", np.ones(force.shape[:-1], dtype=bool)))  # (B, n_contacts)
+    mag = np.linalg.norm(force, axis=-1) * valid            # (B, n_contacts)
+    return mag.sum(axis=-1).astype(np.float32)              # (B,)
 
 
 def _batched_render(cam, scene, *, rgb: bool, depth: bool):
