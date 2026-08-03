@@ -17,6 +17,8 @@ import yaml
 import gentle_manip
 from gentle_manip.demos.keyboard_pygame import DISCARD, QUIT, SAVE, PygameKeyboard
 from gentle_manip.demos.teleop_spacemouse import SpaceMouseTeleop
+from gentle_manip.actions.action_config import ActionConfig
+from gentle_manip.actions.pipeline import invert_absolute_action
 
 # Teleop demonstration collection on the real robot. The SpaceMouse command is a
 # normalized [-1,1] raw_action — the same thing a policy outputs — so it flows
@@ -44,7 +46,17 @@ class DemoRecorder:
                  video_dir: Optional[Path] = None, video_fps: int = 20,
                  video_episodes: int = 0, video_failed_episodes: int = 0,
                  cloud_viewer=None, collection_config: Optional[dict] = None,
-                 shard_size: int = 5) -> None:
+                 shard_size: int = 5,
+                 record_action_config: Optional[ActionConfig] = None) -> None:
+        # If set, the RECORDED action for each step is NOT the raw teleop action (which
+        # drives the env — still delta, unchanged) but the equivalent ABSOLUTE action
+        # (see invert_absolute_action) computed from the robot's ACTUAL resulting pose
+        # after the step. Lets you teleop with delta control (smoother/easier) while
+        # collecting a dataset directly usable to train an absolute-action policy — no
+        # separate conversion pass needed. Must be an ActionConfig with mode="absolute";
+        # only used for its pos_min/pos_max/gripper_min/gripper_max/clip fields (never
+        # passed to the env, so it never affects how the robot is actually driven).
+        self._record_action_config = record_action_config
         self.env = env
         self.teleop = teleop
         self.keyboard = keyboard
@@ -92,6 +104,11 @@ class DemoRecorder:
 
         self._obs_buf: List[Dict[str, np.ndarray]] = []
         self._act_buf: List[np.ndarray] = []
+        # Always the RAW DELTA teleop action, even when record_action_config makes
+        # _act_buf hold absolute actions instead -- idle detection (near-zero norm =
+        # no movement) only makes sense for deltas; an absolute command stays a large
+        # nonzero vector even while the operator is idling.
+        self._idle_act_buf: List[np.ndarray] = []
         self._rew_buf: List[float] = []
         self.episodes: List[dict] = []
         # Shard-based writing: episodes are flushed in groups of shard_size to small
@@ -181,10 +198,22 @@ class DemoRecorder:
 
         The env's per-step reward is logged too (0 when the env has task=None). This
         makes a demo directly usable for reward-based RL (RLPD); reward-free consumers
-        (DP3) simply ignore the "rewards" array."""
+        (DP3) simply ignore the "rewards" array.
+
+        `action` is what actually drives the env (still delta, unchanged). If
+        `record_action_config` is set, the SAVED action is instead the equivalent
+        absolute command inverted from the robot's ACTUAL resulting pose (obs_next) —
+        see invert_absolute_action / DemoRecorder.__init__."""
         obs_next, reward, _done, _info = self.env.step(action[None, :])
         self._obs_buf.append({k: np.asarray(v)[0] for k, v in obs.items()})  # drop num_envs
-        self._act_buf.append(action.copy())
+        self._idle_act_buf.append(action.copy())            # always the raw delta
+        if self._record_action_config is not None:
+            recorded = invert_absolute_action(
+                obs_next["ee_pos"], obs_next["ee_quat"], obs_next["gripper_width"],
+                self._record_action_config)[0]
+        else:
+            recorded = action.copy()
+        self._act_buf.append(recorded)
         self._rew_buf.append(float(np.asarray(reward).ravel()[0]))
         return obs_next
 
@@ -201,7 +230,8 @@ class DemoRecorder:
     # ── Episode buffer ────────────────────────────────────────────────────────
 
     def _save_episode(self) -> int:
-        obs_buf, act_buf, rew_buf = self._trim_idle(self._obs_buf, self._act_buf, self._rew_buf)
+        obs_buf, act_buf, rew_buf = self._trim_idle(
+            self._obs_buf, self._act_buf, self._idle_act_buf, self._rew_buf)
         n = len(act_buf)
         if n == 0:
             self._clear()
@@ -224,16 +254,18 @@ class DemoRecorder:
             self._flush()                      # single-file mode: rewrite whole file
         return n
 
-    def _trim_idle(self, obs_buf, act_buf, rew_buf):
+    def _trim_idle(self, obs_buf, act_buf, idle_act_buf, rew_buf):
         """Cap each consecutive idle run by position (leading/interior/trailing).
 
-        Idle = full action norm <= idle_threshold. Keeps the first `cap` frames of
-        each idle run (0 leading, max_interior_idle interior, keep_trailing_idle
-        trailing). idle_threshold <= 0 disables trimming.
+        Idle = full RAW DELTA action norm <= idle_threshold (idle_act_buf — always
+        delta, even when act_buf holds inverted absolute actions instead; see
+        DemoRecorder.__init__). Keeps the first `cap` frames of each idle run (0
+        leading, max_interior_idle interior, keep_trailing_idle trailing).
+        idle_threshold <= 0 disables trimming.
         """
         if self.idle_threshold <= 0 or not act_buf:
             return obs_buf, act_buf, rew_buf
-        idle = np.linalg.norm(np.stack(act_buf), axis=1) <= self.idle_threshold
+        idle = np.linalg.norm(np.stack(idle_act_buf), axis=1) <= self.idle_threshold
         T = len(act_buf)
         if idle.all():
             return [], [], []                  # whole episode idle → nothing to keep
@@ -267,6 +299,7 @@ class DemoRecorder:
     def _clear(self) -> None:
         self._obs_buf = []
         self._act_buf = []
+        self._idle_act_buf = []
         self._rew_buf = []
 
     # ── Output ────────────────────────────────────────────────────────────────
@@ -445,6 +478,13 @@ def main() -> None:
                    default=_PKG / "configs" / "obs" / "superset_real.yaml")
     p.add_argument("--action-config", type=Path,
                    default=_PKG / "configs" / "action" / "delta_pose_delta_gripper.yaml")
+    p.add_argument("--record-action-config", type=Path, default=None,
+                   help="an ABSOLUTE-mode action config (e.g. abs_pose_abs_gripper.yaml) — "
+                        "if set, teleop still drives the robot via --action-config (delta, "
+                        "smoother to operate) but the SAVED action is the equivalent absolute "
+                        "command inverted from the robot's actual resulting pose each step, so "
+                        "the dataset is directly usable to train an absolute-action policy with "
+                        "no separate conversion pass. Not used to drive the robot.")
     p.add_argument("--task-name", required=True)
     p.add_argument("--input", choices=["spacemouse", "spacemouse-kb", "keyboard"],
                    default="spacemouse",
@@ -480,13 +520,24 @@ def main() -> None:
     from gentle_manip.envs.real_backend import RealBackend
     from gentle_manip.envs.policy_env import PolicyEnv
     from gentle_manip.perception.obs_config import ObsConfig
-    from gentle_manip.actions.action_config import ActionConfig
 
     setup = _load_yaml(_resolve_config(args.setup))
     obs_d = _load_yaml(_resolve_config(args.obs_config))
     action_d = _load_yaml(_resolve_config(args.action_config))
     obs_config = ObsConfig.from_dict(obs_d)
     action_config = ActionConfig.from_dict(action_d)
+
+    record_action_config = None
+    record_action_d = None
+    if args.record_action_config is not None:
+        record_action_d = _load_yaml(_resolve_config(args.record_action_config))
+        record_action_config = ActionConfig.from_dict(record_action_d)
+        if record_action_config.mode != "absolute":
+            raise ValueError(
+                f"--record-action-config must be mode: absolute, got "
+                f"{record_action_config.mode!r} ({args.record_action_config})")
+        print(f"recording ABSOLUTE actions (inverted from actual pose) from "
+              f"{args.record_action_config} while teleop drives via {args.action_config}")
 
     # Reproducibility snapshot: the resolved configs + control knobs that shaped the data,
     # written next to the dataset as <stem>_config.yaml (mirrors collect_demos_sim.py).
@@ -496,12 +547,13 @@ def main() -> None:
         "input": args.input,
         "git_commit": _git_commit(),
         "sources": {"setup": str(args.setup), "obs": str(args.obs_config),
-                    "action": str(args.action_config)},
+                    "action": str(args.action_config),
+                    "record_action": str(args.record_action_config) if record_action_config else None},
         "control": {"rate_hz": args.rate, "speed": args.speed,
                     "gripper_value": args.gripper_value, "idle_threshold": args.idle_threshold,
                     "keep_trailing_idle": args.keep_trailing_idle,
                     "max_interior_idle": args.max_interior_idle},
-        "setup": setup, "obs": obs_d, "action": action_d,
+        "setup": setup, "obs": obs_d, "action": action_d, "record_action": record_action_d,
     }
 
     backend = RealBackend(setup)
@@ -557,6 +609,7 @@ def main() -> None:
         cloud_viewer=cloud_viewer,
         collection_config=collection_config,
         shard_size=args.shard_size,
+        record_action_config=record_action_config,
     )
     recorder.run()
     recorder.write()

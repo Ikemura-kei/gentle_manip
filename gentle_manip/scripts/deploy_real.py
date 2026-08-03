@@ -11,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 import yaml
+from scipy.spatial.transform import Rotation
 
 # Deploy a trained DP3 policy on the real XArm7 — runs in the unified 3.8 env
 # (envs/dp3), which has DP3 + pytorch3d AND the hardware SDKs, so the policy and
@@ -172,16 +173,47 @@ def _pc_health(obs: dict) -> str:
 
 def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float,
                     pose_scale: float = 1.0, record_path: "Path | None" = None,
-                    shard_size: int = 0) -> None:
+                    shard_size: int = 0, action_config=None,
+                    smooth_alpha: "float | None" = None,
+                    max_pos_step_m: "float | None" = None) -> None:
     """Receding-horizon deploy loop shared by real and sim deployment.
 
     env: PolicyEnv-like — reset()->obs dict, step(action)->(obs, ...). policy:
     DP3PolicyAdapter. Re-plans every policy.n_action_steps; k starts, SPACE re-homes,
     q quits. Owns env.close() on exit.
 
-    pose_scale (<1) shrinks the 6 delta-pose dims of every command for slower, gentler
-    motion (gripper dim is left at full range so grasps still close). The policy
-    re-plans from the actual state each chunk, so it still converges — just slower.
+    action_config: the same ActionConfig `main()` already loaded — used to read
+    `.mode` (delta/absolute) and, for the position cap below, `.pos_min/.pos_max/.clip`.
+    None (default) behaves like delta mode with no position cap, for callers that don't
+    pass one.
+
+    pose_scale (<1, DELTA MODE ONLY) shrinks the 6 delta-pose dims of every command for
+    slower, gentler motion (gripper dim is left at full range so grasps still close).
+    The policy re-plans from the actual state each chunk, so it still converges — just
+    slower. Meaningless for mode="absolute" (there scaling the raw [-1,1] target toward 0
+    pulls the commanded pose toward the workspace-normalization CENTER, not toward the
+    current pose — NOT gentler, just a different, wrong target) — it is a no-op there
+    regardless of the value passed in.
+
+    smooth_alpha (ABSOLUTE MODE ONLY, None = off): EMA / first-order low-pass filter on
+    the raw action chunk — smoothed = alpha*raw + (1-alpha)*prev_smoothed, applied per
+    step (not per chunk) and PERSISTED across re-plans (only reset at env reset/re-home),
+    so it actually attenuates step-to-step jitter in the commanded absolute pose instead
+    of just resampling it. Only pos(3)+rot6d(6) [dims 0:9] are smoothed — the gripper dim
+    is passed through raw so grasp/release stays decisive. Lower alpha = smoother/slower
+    to track a new target; start around 0.3 and tune from there. This is the "shakiness"
+    knob for absolute-pose policies — the delta-mode equivalent of pose_scale.
+
+    max_pos_step_m (ABSOLUTE MODE ONLY, None = off): HARD per-tick slew-rate cap on the
+    commanded position, in meters PER AXIS (not Euclidean norm) — unlike smooth_alpha
+    (a proportional low-pass that still lets a single huge outlier move the blended
+    target partway there immediately), this clamps the position delta from the
+    PREVIOUSLY SENT command to at most this many meters, so no single tick can ever
+    move the target further than that, no matter what the network outputs. Applied in
+    raw [-1,1] units (position maps affinely into [pos_min,pos_max], so clamping the raw
+    delta is exactly equivalent to clamping the physical delta) AFTER smooth_alpha, as a
+    final safety bound. Position only (rotation is already covered by smooth_alpha;
+    gripper is intentionally uncapped so grasp/release stays decisive).
 
     record_path: if set, save each (obs seen, action taken) step into the SAME pickle
     schema as recorded demos ({"episodes": [{"observations": {k: (T,...)}, "actions":
@@ -260,6 +292,85 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
             _write_pkl(record_path, episodes)
             print(f"  saved {len(episodes)} real episode(s) → {record_path}")
 
+    action_mode = action_config.mode if action_config is not None else "delta"
+    _abs_filters_on = action_mode == "absolute" and action_config is not None
+
+    # Raw<->physical position conversion constants (absolute mode only) — shared by both
+    # filters below so each can be SEEDED from the robot's ACTUAL current pose right after a
+    # reset/re-home. Without seeding, the very first predicted action has no "previous
+    # command" to blend/clamp against and would be sent raw/uncapped — exactly the "first
+    # action is abrupt compared to the initial position" gap.
+    _pos_min = _pos_max = _clip_lo = _clip_hi = _raw_pos_cap = None
+    if _abs_filters_on:
+        _pos_min = np.asarray(action_config.pos_min, np.float32)
+        _pos_max = np.asarray(action_config.pos_max, np.float32)
+        _clip_lo, _clip_hi = action_config.clip
+        if max_pos_step_m is not None:
+            _raw_pos_cap = float(max_pos_step_m) / (_pos_max - _pos_min) * (_clip_hi - _clip_lo)  # (3,)
+
+    def _current_raw_pose(obs: dict) -> np.ndarray:
+        """9-dim raw-space pose built from the robot's ACTUAL current state: dims 0:3 =
+        position, inverse-mapped through the same affine pos_min/pos_max transform
+        ActionPipeline uses; dims 3:9 = a valid 6D rotation rep from the current ee_quat
+        (first two columns of its rotation matrix — the priv_object_rot6d convention;
+        already orthonormal, so a Gram-Schmidt pass reproduces this exact rotation)."""
+        phys_pos = np.asarray(obs["ee_pos"], np.float32)[0]         # (3,), num_envs=1 squeeze
+        t = (phys_pos - _pos_min) / (_pos_max - _pos_min)
+        pos_raw = _clip_lo + t * (_clip_hi - _clip_lo)
+        quat_wxyz = np.asarray(obs["ee_quat"], np.float32)[0]
+        R = Rotation.from_quat(quat_wxyz[[1, 2, 3, 0]]).as_matrix()  # wxyz -> scipy's xyzw
+        rot6d = R[:, :2].reshape(-1, order="F")                     # [col0(3), col1(3)]
+        return np.concatenate([pos_raw, rot6d]).astype(np.float32)
+
+    # EMA low-pass filter state for absolute-mode smoothing (see run_deploy_loop docstring).
+    # Only pos(3)+rot6d(6) [dims 0:9] are smoothed — persists across chunk re-plans, reset
+    # (re-seeded from the actual pose) on env reset / re-home.
+    _SMOOTH_DIMS = slice(0, 9)
+    prev_smoothed = [None]                                          # boxed for closure mutation
+
+    def _smooth(action: np.ndarray) -> np.ndarray:
+        if action_mode != "absolute" or smooth_alpha is None:
+            return action
+        action = action.copy()
+        prev_smoothed[0] = (smooth_alpha * action[_SMOOTH_DIMS]
+                            + (1.0 - smooth_alpha) * prev_smoothed[0])
+        action[_SMOOTH_DIMS] = prev_smoothed[0]
+        return action
+
+    prev_pos_raw = [None]                                           # boxed for closure mutation
+    _last_clip_print = [0.0]                                        # wall-clock throttle (boxed)
+    _CLIP_PRINT_PERIOD_S = 0.5                                      # at most 2 prints/sec
+
+    def _cap_pos(action: np.ndarray) -> np.ndarray:
+        if _raw_pos_cap is None:
+            return action
+        action = action.copy()
+        raw_delta = action[0:3] - prev_pos_raw[0]
+        hit = np.abs(raw_delta) > _raw_pos_cap                      # per-axis: was this axis clamped?
+        if hit.any():
+            now = time.perf_counter()
+            if now - _last_clip_print[0] > _CLIP_PRINT_PERIOD_S:
+                axes = "".join(a for a, h in zip("xyz", hit) if h)
+                over_mm = (np.abs(raw_delta) - _raw_pos_cap)[hit] * 1000.0
+                print(f"  [pos-cap] clipped axis={axes}  over by {np.round(over_mm, 1)} mm "
+                      f"(cap={max_pos_step_m * 1000:.0f} mm/tick)", flush=True)
+                _last_clip_print[0] = now
+        delta = np.clip(raw_delta, -_raw_pos_cap, _raw_pos_cap)
+        action[0:3] = prev_pos_raw[0] + delta
+        prev_pos_raw[0] = action[0:3].copy()
+        return action
+
+    def _seed_abs_filters(obs: dict) -> None:
+        """Anchor both filters to the robot's ACTUAL current pose right after a reset/
+        re-home (see _current_raw_pose docstring for why this matters)."""
+        if not _abs_filters_on:
+            return
+        pose = _current_raw_pose(obs)
+        if smooth_alpha is not None:
+            prev_smoothed[0] = pose[_SMOOTH_DIMS].copy()
+        if _raw_pos_cap is not None:
+            prev_pos_raw[0] = pose[0:3].copy()
+
     try:
         with KeyPoller() as keys:
             controls = ("k = start   SPACE = reset episode (re-home)   q = quit"
@@ -268,15 +379,19 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
                   f"(re-plan every {policy.n_action_steps}).  {controls}")
             obs = env.reset()                                       # homes the robot
             policy.reset(obs)
+            _seed_abs_filters(obs)                                  # anchor filters to the actual home pose
             print("  " + _pc_health(obs))                           # cube-signal sanity at home
             _wait_for_start(keys)                                   # hold until 'k'
             while steps < max_steps:
-                chunk = policy.predict()                            # (n_action_steps, 7)
-                if pose_scale != 1.0:
+                chunk = policy.predict()                            # (n_action_steps, act_dim)
+                if steps < 2 and action_mode == "absolute":
+                    chunk[:, 9] = 1.0 # Force the first two steps to open gripper fully, so the robot doesn't start with a grasped cube (which would be a
+                if pose_scale != 1.0 and action_mode == "delta":
                     chunk = chunk.copy()
                     chunk[:, :6] *= pose_scale                      # slow pose; keep gripper full-range
                 reset_now = False
                 for action in chunk:
+                    action = _cap_pos(_smooth(action))                         # smooth+cap only after the first 20 steps (warmup)
                     key = keys.poll()
                     if key in (" ", "r"):
                         print("  manual reset — re-homing")
@@ -303,6 +418,7 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
                         _flush_full_shards()                       # persist finished shards mid-run
                     obs = env.reset()
                     policy.reset(obs)
+                    _seed_abs_filters(obs)                         # anchor filters to the actual re-homed pose
                     print("  " + _pc_health(obs))
                     steps = 0
                     _wait_for_start(keys)                          # hold until 'k' again
@@ -324,9 +440,17 @@ def main() -> None:
     p.add_argument("--max-steps", type=int, default=200)
     p.add_argument("--rate", type=float, default=30.0, help="control rate (Hz)")
     p.add_argument("--pose-scale", type=float, default=1.0,
-                   help="multiply the 6 delta-pose dims of every command (e.g. 0.5 = "
-                        "half-speed, gentler motion; gripper unaffected). Match this to "
-                        "the value you eval with in sim.")
+                   help="(delta mode only) multiply the 6 delta-pose dims of every command "
+                        "(e.g. 0.5 = half-speed, gentler motion; gripper unaffected). Match "
+                        "this to the value you eval with in sim. No-op in absolute mode.")
+    p.add_argument("--smooth-alpha", type=float, default=None,
+                   help="(absolute mode only) EMA low-pass filter alpha on the commanded "
+                        "pos+rotation (gripper dim excluded); lower = smoother/slower to "
+                        "track a new target. None = off.")
+    p.add_argument("--max-pos-step-m", type=float, default=None,
+                   help="(absolute mode only) hard per-tick cap, meters PER AXIS, on how far "
+                        "the commanded position may move from the previous command — a slew-"
+                        "rate limiter, independent of/in addition to --smooth-alpha. None = off.")
     p.add_argument("--record", type=Path, default=None,
                    help="save (obs, action) per step to this pickle in the demo schema, so "
                         "visualize_demo / episode_player can compare the real run against "
@@ -345,7 +469,8 @@ def main() -> None:
     policy = DP3PolicyAdapter(str(args.ckpt), device=args.device)
 
     run_deploy_loop(env, policy, args.max_steps, args.rate, pose_scale=args.pose_scale,
-                    record_path=args.record)
+                    record_path=args.record, action_config=action_config,
+                    smooth_alpha=args.smooth_alpha, max_pos_step_m=args.max_pos_step_m)
 
 
 if __name__ == "__main__":

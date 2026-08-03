@@ -64,6 +64,22 @@ class RealBackend:
             elif name == "cam_ext":
                 self._static_extrinsics[name] = np.asarray(cfg.WORLD_T_CAM_EXT, dtype=np.float32)
 
+        # POST-hoc world-frame shift (dx,dy,dz) applied to every camera's extrinsic
+        # translation — every backprojected point from that camera comes out shifted by
+        # exactly this vector (point = world_T_cam @ point_cam, so shifting world_T_cam's
+        # translation shifts every resulting point identically). A temporary diagnostic
+        # knob for testing a calibration/extrinsic-offset hypothesis without touching the
+        # calibrated world_T_cam constants themselves. Config: top-level `point_cloud_shift:
+        # [dx, dy, dz]` in the setup YAML; default off (all zeros -> no-op).
+        self._point_cloud_shift = np.asarray(
+            config.get("point_cloud_shift", [0.0, 0.0, 0.0]), dtype=np.float32)
+        if np.any(self._point_cloud_shift):
+            print(f"[RealBackend] point_cloud_shift active: {self._point_cloud_shift.tolist()} "
+                  f"(m, world frame) — remember this is a temporary diagnostic override", flush=True)
+            for name in self._static_extrinsics:
+                self._static_extrinsics[name] = self._static_extrinsics[name].copy()
+                self._static_extrinsics[name][:3, 3] += self._point_cloud_shift
+
         self._gripper_max = self.robot.default_gripper_width
 
         # EE workspace bounds: config override (e.g. raised z-min for the longer tactile fingers)
@@ -224,4 +240,5 @@ class RealBackend:
             ).as_matrix()
             world_T_ee[:3, 3] = ee_pos
             out["cam_wrist"] = world_T_ee @ np.asarray(cfg.EE_T_CAM_WRIST, dtype=np.float32)
+            out["cam_wrist"][:3, 3] += self._point_cloud_shift    # static cams already shifted at init
         return out

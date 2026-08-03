@@ -44,6 +44,17 @@ def _valid(pc):
     return pc[~np.all(pc == 0, axis=1)]
 
 
+# Named (elev, azim) camera angles for the multi-step point-cloud snapshot figure — spans
+# the workspace box (x:0.2-0.71, y:-0.215-0.215, z:0-0.45) from enough distinct directions
+# to catch a real-vs-sim offset that a single fixed angle (the old "iso" default) could hide.
+_VIEW_ANGLES = {
+    "iso":   (20, -60),    # original default — 3/4 angled view
+    "front": (0, -90),     # looking along -Y -> XZ profile (height vs depth)
+    "side":  (0, 0),       # looking along -X -> YZ profile (height vs left/right)
+    "top":   (89, -90),    # near top-down -> XY footprint
+}
+
+
 def _quat_angular_diff(q1, q2):
     dot = np.clip(np.abs(np.sum(q1 * q2, axis=-1)), 0.0, 1.0)
     return 2.0 * np.arccos(dot)
@@ -53,6 +64,62 @@ def _align_quat_sign(reference, query):
     sign = np.sign(np.sum(reference * query, axis=-1, keepdims=True))
     sign[sign == 0] = 1.0
     return query * sign
+
+
+def find_settled_spawn(env, backend, target_xy: np.ndarray, default_xy: np.ndarray,
+                      max_corrections: int = 5, max_random_tries: int = 6,
+                      tol: float = 0.006, rng=None):
+    """Search for an object_dxy whose POST-SETTLE resting XY lands within `tol` meters
+    of target_xy (not just the naive spawn-there-and-hope offset).
+
+    Rigid objects can be unstable in their "upright" spawn pose and topple/roll during
+    the settle phase (see single_lift_mushroom_rigid.yaml's settle_* comment) —
+    independent of spawn height (verified: dropping the object with less clearance
+    doesn't reduce this). Since we don't need the SETTLE PROCESS to match reality, only
+    the FINAL resting position (matching the real point cloud), we instead search for
+    whatever spawn offset happens to settle in the right place:
+      1. Start from the naive offset (target - default).
+      2. If the resting position misses by more than `tol`, correct the offset by the
+         observed error (assumes the settle-induced shift is roughly translation-
+         invariant near the current candidate — usually converges in 1-3 tries since
+         the topple direction/magnitude tends to be consistent).
+      3. If that doesn't converge within `max_corrections`, fall back to random
+         perturbations around the best candidate found so far (a small black-box
+         search) for `max_random_tries` more attempts.
+    Every attempt is a real env.reset() (full settle), so this is `env.step`-free but
+    NOT free — budget accordingly.
+
+    Returns (obs, offset_used, achieved_drift_m, n_tries).
+    """
+    rng = rng or np.random.default_rng(0)
+    offset = (target_xy - default_xy).astype(np.float32)
+    best = {"obs": None, "offset": None, "drift": np.inf}
+    n_tries = 0
+
+    def _try(off):
+        nonlocal n_tries
+        n_tries += 1
+        obs = env.reset(object_dxy=off[None, :])
+        settled_xy = np.asarray(backend.get_sim_feedback().object_center)[0, :2]
+        drift_vec = settled_xy - target_xy
+        drift = float(np.linalg.norm(drift_vec))
+        if drift < best["drift"]:
+            best.update(obs=obs, offset=off.copy(), drift=drift)
+        return obs, drift_vec, drift
+
+    for _ in range(max_corrections):
+        obs, drift_vec, drift = _try(offset)
+        if drift <= tol:
+            return obs, offset, drift, n_tries
+        offset = offset - drift_vec        # push the spawn point opposite the observed miss
+
+    for _ in range(max_random_tries):
+        cand = best["offset"] + rng.uniform(-0.02, 0.02, size=2).astype(np.float32)
+        obs, _drift_vec, drift = _try(cand)
+        if drift <= tol:
+            return obs, cand, drift, n_tries
+
+    return best["obs"], best["offset"], best["drift"], n_tries
 
 
 def load_shards(deploy_dir: Path) -> list:
@@ -92,6 +159,12 @@ def main():
                     help="override camera fov (default: task_cfg.cam_fov or 46.0)")
 
     ap.add_argument("--max-steps", type=int, default=0, help="0 = full episode")
+    ap.add_argument("--sim-pc-shift-x", type=float, default=0.0,
+                    help="POST-hoc shift (meters) applied to the sim point cloud's x "
+                         "coordinate, visualization-only (does not affect the sim rollout, "
+                         "ee/quat/gripper tracking, or any other metric) — a quick way to "
+                         "test an x-offset-alignment hypothesis between real (L515) and "
+                         "sim-rendered clouds without touching calibration/extrinsics.")
     ap.add_argument("--out-dir", default=None,
                     help="output dir (default: <deploy_dir>/sim_replay/<timestamp>/)")
     ap.add_argument("--show", action="store_true")
@@ -99,7 +172,41 @@ def main():
                     help="render side-by-side (real|sim) rolling cloud mp4 per episode")
     ap.add_argument("--video-episodes", type=int, default=2)
     ap.add_argument("--video-fps", type=int, default=15)
+    ap.add_argument("--overlay-video-views", default="iso,front,side,top",
+                    help="comma-sep camera angles for the rolling real+sim OVERLAY video — "
+                         "one mp4 PER view (traj_NN_cloud_overlay_video_<view>.mp4). "
+                         "front/side/top are the views normal to the xz/yz/xy planes "
+                         "respectively (see _VIEW_ANGLES). Render cost scales with the "
+                         "number of views (each is a separate full pass over the episode).")
+    ap.add_argument("--pc-views", default="iso,front,side,top",
+                     help="comma-sep named camera angles for the multi-step point-cloud "
+                          "snapshot figure (traj_NN_pointcloud.png), so you can see the "
+                          "real-vs-sim cloud difference from more than one angle. Choices: "
+                          "iso,front,side,top (see _VIEW_ANGLES).")
+    ap.add_argument("--search-spawn", action="store_true",
+                    help="instead of a single naive object_dxy=(cube_xy-default_xy) reset, "
+                         "search for a spawn offset whose POST-SETTLE resting XY actually "
+                         "lands near cube_xy (see find_settled_spawn) -- use when the object "
+                         "topples/rolls away from the intended spot during the settle phase "
+                         "regardless of spawn height. Costs extra env.reset() calls/episode.")
+    ap.add_argument("--search-tol", type=float, default=0.006,
+                    help="max acceptable object_xy_drift (meters) for --search-spawn to "
+                         "stop early")
+    ap.add_argument("--search-max-corrections", type=int, default=5)
+    ap.add_argument("--search-max-random-tries", type=int, default=6)
     args = ap.parse_args()
+
+    view_names = [v.strip() for v in args.pc_views.split(",") if v.strip()]
+    unknown = [v for v in view_names if v not in _VIEW_ANGLES]
+    if unknown:
+        raise ValueError(f"unknown --pc-views entries {unknown}; choices: {list(_VIEW_ANGLES)}")
+    n_views = len(view_names)
+
+    overlay_video_views = [v.strip() for v in args.overlay_video_views.split(",") if v.strip()]
+    unknown_ov = [v for v in overlay_video_views if v not in _VIEW_ANGLES]
+    if unknown_ov:
+        raise ValueError(f"unknown --overlay-video-views entries {unknown_ov}; "
+                          f"choices: {list(_VIEW_ANGLES)}")
 
     import matplotlib
     if not args.show:
@@ -183,7 +290,21 @@ def main():
             "resolution": list(cam.resolution),
         },
     }
+    run_config["sim_pc_shift_x"] = args.sim_pc_shift_x
     (out / "config.yaml").write_text(yaml.safe_dump(run_config, sort_keys=False))
+
+    def _sim_pc(sim_obs_t):
+        """sim_obs[t]'s point cloud, with the visualization-only x-shift applied (see
+        --sim-pc-shift-x). No-op when the shift is 0. Only shifts VALID (non-zero-padded)
+        rows — shifting a zero-padding row would turn it into a fake nonzero point and
+        break _valid()'s zero-padding filter downstream."""
+        pc = sim_obs_t["point_cloud"][0]
+        if args.sim_pc_shift_x == 0.0:
+            return pc
+        pc = pc.copy()
+        nz = ~np.all(pc == 0, axis=1)
+        pc[nz, 0] += args.sim_pc_shift_x
+        return pc
 
     # ── replay loop ────────────────────────────────────────────────────────────
     summary = []
@@ -203,7 +324,23 @@ def main():
         # Seed object XY from EE position at the grasp (lowest EE z in real trajectory).
         grasp_t = int(np.argmin(re_ee[:, 2]))
         cube_xy = re_ee[grasp_t, :2]
-        obs = env.reset(object_dxy=(cube_xy - default_xy)[None, :])
+
+        if args.search_spawn:
+            obs, _offset, obj_xy_drift, n_spawn_tries = find_settled_spawn(
+                env, backend, cube_xy, default_xy,
+                max_corrections=args.search_max_corrections,
+                max_random_tries=args.search_max_random_tries,
+                tol=args.search_tol)
+        else:
+            obs = env.reset(object_dxy=(cube_xy - default_xy)[None, :])
+            n_spawn_tries = 1
+            # Diagnostic: where the object ACTUALLY settled vs. where we told it to spawn.
+            # If the object free-falls + rolls during the post-spawn settle phase (rigid
+            # bodies can roll for a while — see single_lift_mushroom_rigid.yaml's settle_*
+            # comment), the resting position can drift away from cube_xy before the episode
+            # even starts, desyncing sim from the real point cloud it was seeded from.
+            obj_center = backend.get_sim_feedback().object_center[0]      # (3,), post-settle
+            obj_xy_drift = float(np.linalg.norm(obj_center[:2] - cube_xy))
 
         sim_obs = [obs]
         for t in range(T - 1):
@@ -219,7 +356,7 @@ def main():
 
         re_zm  = np.array([_valid(re_pc[t])[:, 2].mean()
                             if len(_valid(re_pc[t])) else 0.0 for t in range(T)])
-        sim_zm = np.array([_valid(sim_obs[t]["point_cloud"][0])[:, 2].mean()
+        sim_zm = np.array([_valid(_sim_pc(sim_obs[t]))[:, 2].mean()
                             for t in range(T)])
 
         ee_err         = np.abs(sim_ee - re_ee).mean(0)
@@ -227,14 +364,17 @@ def main():
         quat_elem_mean = quat_elem_err.mean(0)
         gw_err         = float(np.abs(sim_gw - re_gw).mean())
         zoff           = float(np.abs(sim_zm - re_zm).mean())
-        summary.append((ep_idx, ee_err, quat_ang_err, quat_elem_mean, gw_err, zoff))
+        summary.append((ep_idx, ee_err, quat_ang_err, quat_elem_mean, gw_err, zoff,
+                       obj_xy_drift, n_spawn_tries))
 
         print(
             f"ep {ep_idx}: T={T}  cube_xy={cube_xy.round(3)}"
             f"  ee_err(mm)={(ee_err*1000).round(1)}"
             f"  quat_ang(deg)={quat_ang_err:.2f}"
             f"  gw_err(mm)={gw_err*1000:.1f}"
-            f"  cloud_zoff(mm)={zoff*1000:.1f}",
+            f"  cloud_zoff(mm)={zoff*1000:.1f}"
+            f"  obj_xy_drift(mm)={obj_xy_drift*1000:.1f}"
+            + (f"  spawn_tries={n_spawn_tries}" if args.search_spawn else ""),
             flush=True,
         )
 
@@ -294,48 +434,66 @@ def main():
         plt.close(fig)
         print(f"  saved {fpath}", flush=True)
 
-        # ── cloud overlay at grasp ────────────────────────────────────────────
-        figo, a3 = plt.subplots(figsize=(7, 6), subplot_kw={"projection": "3d"})
+        # ── cloud overlay at grasp (multiple view angles) ──────────────────────
         rp = _valid(re_pc[grasp_t])
-        sp = _valid(sim_obs[grasp_t]["point_cloud"][0])
-        a3.scatter(rp[:, 0], rp[:, 1], rp[:, 2], s=2, c="tab:blue",
-                   alpha=0.4, label=f"real L515 ({len(rp)} pts)")
-        a3.scatter(sp[:, 0], sp[:, 1], sp[:, 2], s=2, c="tab:red",
-                   alpha=0.4, label=f"sim rendered ({len(sp)} pts)")
-        a3.set_title(f"cloud overlay @ grasp (t={grasp_t})")
-        a3.legend(fontsize=8)
-        a3.set_xlim(0.2, 0.71); a3.set_ylim(-0.215, 0.215); a3.set_zlim(0, 0.45)
-        a3.view_init(20, -60)
+        sp = _valid(_sim_pc(sim_obs[grasp_t]))
+        figo = plt.figure(figsize=(6 * n_views, 5.5))
+        for vi, view_name in enumerate(view_names):
+            elev, azim = _VIEW_ANGLES[view_name]
+            a3 = figo.add_subplot(1, n_views, vi + 1, projection="3d")
+            a3.scatter(rp[:, 0], rp[:, 1], rp[:, 2], s=2, c="tab:blue",
+                       alpha=0.4, label=f"real L515 ({len(rp)} pts)")
+            a3.scatter(sp[:, 0], sp[:, 1], sp[:, 2], s=2, c="tab:red",
+                       alpha=0.4, label=f"sim rendered ({len(sp)} pts)")
+            a3.set_title(f"[{view_name}]")
+            if vi == 0:
+                a3.legend(fontsize=8)
+            a3.set_xlim(0.2, 0.71); a3.set_ylim(-0.215, 0.215); a3.set_zlim(0, 0.45)
+            a3.view_init(elev, azim)
+        figo.suptitle(f"Deploy ep {ep_idx} [{args.experiment}] — cloud overlay @ grasp (t={grasp_t})")
+        figo.tight_layout()
         opath = out / f"traj_{ep_idx:02d}_cloud_overlay.png"
         figo.savefig(opath, dpi=110, bbox_inches="tight")
         plt.close(figo)
         print(f"  saved {opath}", flush=True)
 
-        # ── multi-step point-cloud snapshots ──────────────────────────────────
+        # ── multi-step point-cloud snapshots (multiple view angles) ───────────
+        # rows = snapshot moments, cols = (real, sim) PER view angle, so each moment
+        # can be visually cross-checked from more than one direction — a real-vs-sim
+        # offset that's invisible from one fixed angle (the old iso-only default) can
+        # show up clearly from another (e.g. a height offset is obvious "front", a
+        # lateral offset is obvious "top").
         snaps = sorted(set([0, T // 4, T // 2, 3 * T // 4, T - 1]))
-        figp = plt.figure(figsize=(11, 4 * len(snaps)))
+        figp = plt.figure(figsize=(6 * n_views, 3.6 * len(snaps)))
+        n_cols = 2 * n_views
         for r, t in enumerate(snaps):
-            for c, (tag, pc) in enumerate([
-                    ("real (L515)", re_pc[t]),
-                    ("sim (rendered)", sim_obs[t]["point_cloud"][0])]):
-                v = _valid(pc)
-                a = figp.add_subplot(len(snaps), 2, r * 2 + c + 1, projection="3d")
-                a.scatter(v[:, 0], v[:, 1], v[:, 2], s=2, c=v[:, 2],
-                          cmap="viridis", vmin=0.0, vmax=0.45, alpha=0.5)
-                a.set_title(f"{tag}  t={t}  ({len(v)} pts)")
-                a.set_xlim(0.2, 0.71); a.set_ylim(-0.215, 0.215); a.set_zlim(0, 0.45)
-                a.view_init(20, -60)
+            for vi, view_name in enumerate(view_names):
+                elev, azim = _VIEW_ANGLES[view_name]
+                for c, (tag, pc) in enumerate([
+                        ("real (L515)", re_pc[t]),
+                        ("sim (rendered)", _sim_pc(sim_obs[t]))]):
+                    v = _valid(pc)
+                    col = vi * 2 + c
+                    a = figp.add_subplot(len(snaps), n_cols, r * n_cols + col + 1, projection="3d")
+                    a.scatter(v[:, 0], v[:, 1], v[:, 2], s=2, c=v[:, 2],
+                              cmap="viridis", vmin=0.0, vmax=0.45, alpha=0.5)
+                    a.set_title(f"{tag}  t={t}  [{view_name}]  ({len(v)} pts)", fontsize=9)
+                    a.set_xlim(0.2, 0.71); a.set_ylim(-0.215, 0.215); a.set_zlim(0, 0.45)
+                    a.view_init(elev, azim)
         figp.suptitle(
-            f"Deploy ep {ep_idx} [{args.experiment}] — point cloud: real L515 vs sim")
+            f"Deploy ep {ep_idx} [{args.experiment}] — point cloud: real L515 vs sim  "
+            f"(views: {', '.join(view_names)})")
         figp.tight_layout()
         ppath = out / f"traj_{ep_idx:02d}_pointcloud.png"
         figp.savefig(ppath, dpi=110, bbox_inches="tight")
         plt.close(figp)
         print(f"  saved {ppath}", flush=True)
 
-        # ── optional rolling cloud video ──────────────────────────────────────
+        # ── optional rolling cloud videos (side-by-side AND overlaid) ──────────
         if args.video and videos_made < args.video_episodes:
             import imageio.v2 as imageio
+
+            # side-by-side: real | sim in separate subplots
             figv = plt.figure(figsize=(12, 5.5))
             axr = figv.add_subplot(1, 2, 1, projection="3d")
             axs = figv.add_subplot(1, 2, 2, projection="3d")
@@ -343,7 +501,7 @@ def main():
             for t in range(T):
                 for ax, tag, pc in [
                         (axr, "real (L515)", re_pc[t]),
-                        (axs, "sim (rendered)", sim_obs[t]["point_cloud"][0])]:
+                        (axs, "sim (rendered)", _sim_pc(sim_obs[t]))]:
                     ax.clear()
                     v = _valid(pc)
                     ax.scatter(v[:, 0], v[:, 1], v[:, 2], s=2, c=v[:, 2],
@@ -358,20 +516,53 @@ def main():
             vpath = out / f"traj_{ep_idx:02d}_cloud_video.mp4"
             imageio.mimsave(str(vpath), frames, fps=args.video_fps, macro_block_size=1)
             print(f"  saved {vpath} ({len(frames)} frames)", flush=True)
+
+            # overlaid: real (blue) + sim (red) in ONE subplot — the rolling version of
+            # the static traj_NN_cloud_overlay.png grasp snapshot, across the WHOLE episode,
+            # so a real-vs-sim offset that drifts over time (not just at the grasp instant)
+            # is directly visible rather than needing to compare two separate panels. One
+            # mp4 PER requested view (front/side/top = normal to the xz/yz/xy planes).
+            for view_name in overlay_video_views:
+                elev, azim = _VIEW_ANGLES[view_name]
+                figov = plt.figure(figsize=(7, 6))
+                axov = figov.add_subplot(111, projection="3d")
+                oframes = []
+                for t in range(T):
+                    axov.clear()
+                    rp_t = _valid(re_pc[t])
+                    sp_t = _valid(_sim_pc(sim_obs[t]))
+                    axov.scatter(rp_t[:, 0], rp_t[:, 1], rp_t[:, 2], s=2, c="tab:blue",
+                                 alpha=0.4, label=f"real L515 ({len(rp_t)} pts)")
+                    axov.scatter(sp_t[:, 0], sp_t[:, 1], sp_t[:, 2], s=2, c="tab:red",
+                                 alpha=0.4, label=f"sim rendered ({len(sp_t)} pts)")
+                    axov.set_xlim(0.2, 0.71); axov.set_ylim(-0.215, 0.215); axov.set_zlim(0, 0.45)
+                    axov.view_init(elev, azim)
+                    axov.legend(fontsize=8, loc="upper left")
+                    axov.set_title(f"Deploy ep {ep_idx} [{args.experiment}] — cloud overlay  "
+                                    f"t={t}/{T - 1}  [{view_name}]")
+                    figov.canvas.draw()
+                    oframes.append(np.asarray(figov.canvas.buffer_rgba())[..., :3].copy())
+                plt.close(figov)
+                ovpath = out / f"traj_{ep_idx:02d}_cloud_overlay_video_{view_name}.mp4"
+                imageio.mimsave(str(ovpath), oframes, fps=args.video_fps, macro_block_size=1)
+                print(f"  saved {ovpath} ({len(oframes)} frames)", flush=True)
+
             videos_made += 1
 
     env.close()
 
     # ── summary table ─────────────────────────────────────────────────────────
     print(f"\n=== sim-replay summary [{args.experiment}] fov={fov} ===", flush=True)
-    print(f"{'ep':>4}  {'ee_err xyz(mm)':>22}  {'quat_ang':>8}  {'gw_err':>7}  {'cloud_z':>7}",
-          flush=True)
-    for ep_idx, ee_err, quat_ang_err, _, gw_err, zoff in summary:
+    print(f"{'ep':>4}  {'ee_err xyz(mm)':>22}  {'quat_ang':>8}  {'gw_err':>7}  {'cloud_z':>7}"
+          f"  {'obj_drift':>9}  {'tries':>5}", flush=True)
+    for ep_idx, ee_err, quat_ang_err, _, gw_err, zoff, obj_xy_drift, n_spawn_tries in summary:
         print(
             f"{ep_idx:>4}  {str((ee_err*1000).round(1)):>22}"
             f"  {quat_ang_err:>7.2f}°"
             f"  {gw_err*1000:>6.1f}mm"
-            f"  {zoff*1000:>6.1f}mm",
+            f"  {zoff*1000:>6.1f}mm"
+            f"  {obj_xy_drift*1000:>7.1f}mm"
+            f"  {n_spawn_tries:>5}",
             flush=True,
         )
     print(f"\nAll outputs → {out}", flush=True)

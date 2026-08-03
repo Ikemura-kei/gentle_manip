@@ -37,3 +37,11 @@ cameras:
 # tactile:                       # GelSight Mini (real-only); absent on the current rig
 #   tactile_left:  {serial: "..."}
 #   tactile_right: {serial: "..."}
+
+# TEMPORARY diagnostic override (2026-07-30): testing an x-offset-alignment hypothesis
+# between real (L515) and sim-rendered point clouds (see examples/sim2real_diagnose/
+# replay_deploy_in_sim.py --sim-pc-shift-x). Shifts every camera's world_T_cam translation
+# by this vector, so every backprojected point comes out shifted the same way — a quick
+# real-side test without touching the calibrated world_T_cam constants. REMOVE once the
+# real offset is confirmed/ruled out (either fold it into a recalibration, or delete this).
+point_cloud_shift: [0.014, -0.015, 0.0]

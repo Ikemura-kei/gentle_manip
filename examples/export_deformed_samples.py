@@ -1,10 +1,16 @@
-"""Export sample DEFORMED mushroom meshes drawn from the food_shape DR ranges — to eyeball
-what the size/shape randomization actually produces. Writes an .obj + .stl per sample (params
-in the filename), a manifest.csv, and a side-view montage.png (long axis horizontal, bend axis
-vertical) so curvature/taper are visible at a glance.
+"""Export sample DEFORMED mushroom meshes drawn from a DR config's shape/size ranges — to
+eyeball what the size/shape randomization actually produces. Writes an .obj + .stl per sample
+(params in the filename), a manifest.csv, and a side-view montage.png (long axis horizontal,
+bend axis vertical) so curvature/taper are visible at a glance.
 
     uv run --project envs/sim python examples/export_deformed_samples.py --n 8
     # -> logs/deformed_mushroom_samples/{sampleNN_*.obj,.stl, manifest.csv, montage.png}
+
+    # DR ranges from a specific experiment (Experiment.load single source of truth) instead
+    # of the food_shape.yaml default — e.g. to match a training/collection run's exact ranges:
+    uv run --project envs/sim python examples/export_deformed_samples.py --n 5 \\
+        --experiment single_lift_mushroom_rigid_state_abs_action_force \\
+        --out examples/mushroom_meshes
 """
 from __future__ import annotations
 
@@ -35,10 +41,21 @@ def main() -> None:
     ap.add_argument("--n", type=int, default=8, help="number of samples")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", type=Path, default=_REPO / "logs" / "deformed_mushroom_samples")
+    ap.add_argument("--experiment", default=None,
+                    help="load DR ranges from configs/experiments/<name>.yaml (Experiment.load "
+                         "single source of truth) instead of the food_shape.yaml default. Use "
+                         "this to match a specific training/collection run's exact ranges.")
+    ap.add_argument("--object", default="mushroom", help="registry object name")
     args = ap.parse_args()
 
-    dr = DRConfig.from_dict(yaml.safe_load(_DR_CFG.read_text()))
-    nominal = trimesh.load(get_object_def("mushroom").mesh_path, process=False, force="mesh")
+    if args.experiment:
+        from gentle_manip.experiment import Experiment
+        exp = Experiment.load(args.experiment)
+        dr = DRConfig.from_dict(exp.dr)
+        print(f"[export] DR ranges from experiment {args.experiment!r}")
+    else:
+        dr = DRConfig.from_dict(yaml.safe_load(_DR_CFG.read_text()))
+    nominal = trimesh.load(get_object_def(args.object).mesh_path, process=False, force="mesh")
     rng = np.random.default_rng(args.seed)
     out = args.out
     out.mkdir(parents=True, exist_ok=True)

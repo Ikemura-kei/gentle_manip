@@ -146,6 +146,44 @@ def test_three_steps_then_save(tmp_path):
     assert set(ep["observations"]) == {"ee_pos", "gripper_width"}
 
 
+class QuatMockEnv(MockEnv):
+    """MockEnv + ee_quat, needed for the absolute-action-recording path."""
+
+    def _obs(self):
+        obs = super()._obs()
+        obs["ee_quat"] = np.array([[1.0, 0.0, 0.0, 0.0]], dtype=np.float32)  # identity
+        return obs
+
+
+def test_record_action_config_saves_absolute_not_delta(tmp_path):
+    """With record_action_config set: the env is still driven by the raw DELTA action
+    (unchanged), but the SAVED action is the inverted absolute command matching the
+    robot's actual resulting pose -- and idle detection still uses the delta norm."""
+    from gentle_manip.actions.action_config import ActionConfig
+
+    abs_cfg = ActionConfig.from_dict({
+        "mode": "absolute", "clip": [-1.0, 1.0],
+        "pos_min": [0.0, -0.5, -0.5], "pos_max": [1.0, 0.5, 0.5],
+        "gripper_min": 0.0, "gripper_max": 0.1,
+    })
+    rec = DemoRecorder(
+        env=QuatMockEnv(), teleop=FakeTeleop((0, 0, 0.01, 0, 0, 0, 0)),
+        keyboard=ScriptedKeyboard([set(), set(), {SAVE}, {QUIT}]),
+        task_name="unit", out_dir=tmp_path, rate_hz=0.0,
+        record_action_config=abs_cfg,
+    )
+    rec.run()
+    ep = rec.episodes[0]
+    assert ep["actions"].shape == (2, 10)              # absolute (10-dim), not delta (7-dim)
+    # ee_pos after step t is (0.4, 0.0, 0.01*(t+1)) -> normalized pos matches pos_min/max
+    expected_pos_raw = -1.0 + 2.0 * (np.array([0.4, 0.0, 0.01]) - [0.0, -0.5, -0.5]) / [1.0, 1.0, 1.0]
+    assert ep["actions"][0, 0:3] == pytest.approx(expected_pos_raw, abs=1e-5)
+    # idle detection must still see both steps as non-idle (delta z=0.01 > default
+    # idle_threshold) even though the SAVED action (absolute pos) is a large nonzero
+    # vector every step -- neither frame should have been trimmed.
+    assert ep["actions"].shape[0] == 2
+
+
 def test_discard_keeps_nothing(tmp_path):
     rec = make_recorder([set(), set(), {DISCARD}, {QUIT}], tmp_path)
     rec.run()
@@ -263,6 +301,7 @@ def bare_recorder(tmp_path, **kw):
 def fill(rec, actions):
     rec._obs_buf = [{"ee_pos": np.array([i, 0, 0], np.float32)} for i in range(len(actions))]
     rec._act_buf = [a.copy() for a in actions]
+    rec._idle_act_buf = [a.copy() for a in actions]   # idle detection always uses this buffer
 
 
 def test_leading_idle_dropped_trailing_kept(tmp_path):

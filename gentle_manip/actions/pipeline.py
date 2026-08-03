@@ -29,6 +29,48 @@ def _rot6d_to_quat(rot6d: np.ndarray) -> np.ndarray:
     return wxyz.astype(np.float32)
 
 
+def invert_absolute_action(pos: np.ndarray, quat: np.ndarray, gripper: np.ndarray,
+                           action_config: ActionConfig) -> np.ndarray:
+    """Inverse of ActionPipeline._process_absolute: given a physical (pos, quat_wxyz,
+    gripper) command, compute the (N, 10) raw [-1,1] action that an absolute-mode
+    ActionPipeline built from `action_config` would map back to it. No history needed
+    (absolute mode has no accumulation, each step is an independent forward transform).
+
+    Use this to record an equivalent ABSOLUTE action for a trajectory that was actually
+    driven via DELTA control (e.g. teleop, which is smoother/easier to operate) — invert
+    the ACTUAL resulting pose read back after each step, so the recorded action is always
+    exactly consistent with what really happened (no separate accumulator to drift).
+
+    pos/gripper: un-map the linear [pos_min,pos_max]/[gripper_min,gripper_max] scaling.
+    rot6d: the first two columns of R = Rotation.from_quat(quat).as_matrix() are already
+    exactly orthonormal, so Gram-Schmidt on them is a no-op -- the rot6d "inverse" is just
+    those two columns directly, no search needed.
+    """
+    pos = np.asarray(pos, dtype=np.float64).reshape(-1, 3)
+    quat = np.asarray(quat, dtype=np.float64).reshape(-1, 4)
+    gripper = np.asarray(gripper, dtype=np.float64).reshape(-1)
+    n = pos.shape[0]
+
+    lo, hi = action_config.clip
+    span = hi - lo
+    pos_min = np.asarray(action_config.pos_min, dtype=np.float64)
+    pos_max = np.asarray(action_config.pos_max, dtype=np.float64)
+
+    t_pos = (pos - pos_min) / (pos_max - pos_min)
+    a_pos = np.clip(lo + t_pos * span, lo, hi)
+
+    t_grip = (gripper - action_config.gripper_min) / (action_config.gripper_max - action_config.gripper_min)
+    a_grip = np.clip(lo + t_grip * span, lo, hi).reshape(n, 1)
+
+    a_rot6d = np.zeros((n, 6), dtype=np.float64)
+    for i in range(n):
+        xyzw = [quat[i, 1], quat[i, 2], quat[i, 3], quat[i, 0]]
+        mat = Rotation.from_quat(xyzw).as_matrix()
+        a_rot6d[i] = np.concatenate([mat[:, 0], mat[:, 1]])
+
+    return np.concatenate([a_pos, a_rot6d, a_grip], axis=1).astype(np.float32)
+
+
 class ActionPipeline:
     """
     Converts raw policy output into robot commands.

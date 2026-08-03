@@ -130,3 +130,195 @@ uv run --project envs/sim python examples/sim2real_diagnose/replay_demo_in_sim.p
 
 `replay_state.png` is the robot-state comparison (real vs sim → **matches**);
 `replay_pointcloud.png` is the point-cloud comparison (**the gap**).
+
+---
+
+## Deploy-replay & hybrid-dataset tools (2026-07-29/30)
+
+A second round of tooling, for the ABSOLUTE-action rigid-mushroom deployments
+(`dataset/real_deploy/<run>/shard_*.pkl` or `data.pkl`, and the equivalent real teleop
+demo collections under `dataset/demos/single_lift_mushroom_real/<run>/data.pkl` — same
+pkl schema either way).
+
+### `replay_deploy_in_sim.py` — real-vs-sim replay, now with more views + search-based spawn
+
+Same method as `replay_demo_in_sim.py` above (replay real actions open-loop through sim,
+compare), extended for `Experiment.load()`-driven configs (task/obs/action/dr composed
+from one experiment YAML — no hardcoded ranges) and absolute-mode (10-dim) actions.
+
+```bash
+uv run --project envs/sim python examples/sim2real_diagnose/replay_deploy_in_sim.py \
+    dataset/real_deploy/<run> \
+    --experiment single_lift_mushroom_rigid_state_abs_action_force \
+    --episodes 0,1,2 --video --video-episodes 3 \
+    --pc-views iso,front,side,top --overlay-video-views iso,front,side,top
+```
+
+Per episode: `traj_NN.png` (ee_pos/quat/gripper/cloud-zmean grid), `traj_NN_cloud_overlay.png`
++ `traj_NN_pointcloud.png` (now multi-angle: `--pc-views` — `iso`/`front`/`side`/`top`, the
+last three normal to the xz/yz/xy planes), `traj_NN_cloud_video.mp4` (side-by-side), and
+`traj_NN_cloud_overlay_video_<view>.mp4` (rolling real+sim overlay, one per `--overlay-video-views`
+angle). `--sim-pc-shift-x` (meters) applies a visualization-only x-shift to the SIM cloud only,
+for testing a calibration-offset hypothesis without touching `real_lab.yaml`.
+
+**Finding: the object topples during the post-spawn settle, independent of spawn height.**
+The naive `object_dxy=(cube_xy - default_xy)` reset seeds the object's XY at the real
+trajectory's grasp-time EE position, but the rigid mushroom's "upright" spawn pose is
+apparently an unstable equilibrium — it topples/rolls during the settle phase (see
+`single_lift_mushroom_rigid.yaml`'s `settle_steps` comment) and can walk **~40–70mm** away
+from the intended spot before the episode even starts (measured via the new `obj_xy_drift`
+diagnostic: `SimFeedback.object_center` right after `reset()`, vs. the commanded `cube_xy`).
+Confirmed this is NOT a drop-height artifact: `single_lift_mushroom_rigid_lowspawn.yaml` /
+`single_lift_mushroom_rigid_state_abs_action_force_lowspawn.yaml` (task+experiment forks that
+only change `object_spawn_z` to sit flush on the table instead of ~1.2mm above it) made
+**no reliable difference** (drift stayed 38–66mm, sometimes *worse* than baseline) — DR is
+not even active in this diagnostic (`SimBackend` gets no `dr` config here, so orientation is
+identity every reset), so the instability is inherent to the mesh/contact setup at this
+spawn pose, not a tunable height or a randomized tilt.
+
+**Fix: `--search-spawn` — search for a spawn offset whose SETTLED position matches, rather
+than fighting the instability.** Since we don't need the *settle process* to match reality,
+only the *final resting position* (against which the real cloud was seeded), `find_settled_spawn()`
+resets repeatedly: start from the naive offset, correct by the observed miss (usually converges
+in 2-5 tries since the topple direction/magnitude is fairly consistent near a candidate), and
+fall back to a small random search around the best candidate if correction alone doesn't
+converge within `--search-max-corrections` (tune up if convergence is inconsistent — 15
+corrections cleared every case tried on the `26-07-30-yab` demo set, vs 5 leaving a few
+episodes short). Result on that set (12 episodes): mean drift **54mm → ~2.9mm** (max 5.9mm),
+at a cost of ~2-14 extra `env.reset()` calls/episode. CLI: `--search-spawn --search-tol 0.006
+--search-max-corrections 15 --search-max-random-tries 8`.
+
+### `build_hybrid_arm_real_mushroom_sim.py` — paired real/sim dataset for policy action-diff probing
+
+Builds **paired observation streams**, same actions/frame range, so a policy can be probed
+on real vs. sim input and the action difference isolates the **arm/proprioception**
+sim2real gap specifically — the mushroom the policy sees is IDENTICAL (sim-rendered) in
+both conditions, so it can't be the source of any divergence:
+
+- **Condition R** (`ee_pos`/`ee_quat`/`gripper_width`/`point_cloud`): real arm+proprioception,
+  but the mushroom is stripped out of the real cloud and replaced with the paired sim
+  rollout's mushroom points.
+- **Condition S** (`ee_pos_sim`/`ee_quat_sim`/`gripper_width_sim`/`point_cloud_sim`): the
+  SAME sim rollout, fully unedited (arm AND mushroom both sim).
+
+Both come from replaying the SAME real actions open-loop through sim via `find_settled_spawn`
+(so the sim mushroom sits where the real one was). Rationale for scoping to the pre-grasp
+approach only: once lifted, tracking the real mushroom's cloud region through
+occlusion/motion to swap it out is a much harder problem than while it's still resting
+untouched on the table.
+
+Per episode: (1) **trim** to frames `[0, t_cutoff]` where `t_cutoff` is the first frame the
+EE descends to `--z-cutoff` (default 0.055m) — episodes that never reach that depth are
+skipped; (2) **replay** the trimmed real actions through sim via `find_settled_spawn`,
+seeded from the *full* (untrimmed) episode's deepest-EE-point XY estimate, collecting the
+full paired sim proprioception+cloud stream; (3) **edit** Condition R's cloud per kept
+frame: strip real points below `z_cutoff` (removes the real mushroom; the existing crop
+pipeline already excludes the bare tabletop, so what's left below cutoff is mostly object)
+and replace with the paired sim frame's points below `z_cutoff` (the sim mushroom, isolated
+the same way), then resample (with replacement if short) to exactly 1024 points so density
+stays constant frame-to-frame; (4) actions are preserved verbatim from the trimmed real
+episode (shared by both conditions, since it's the same open-loop replay).
+
+```bash
+uv run --project envs/sim python examples/sim2real_diagnose/build_hybrid_arm_real_mushroom_sim.py \
+    dataset/real_deploy/<run> \
+    --experiment single_lift_mushroom_rigid_state_abs_action_force
+# -> dataset/real_deploy/<run>/sim2real_data_analysis/hybrid_arm_real_mushroom_sim.pkl
+```
+
+Reusable on any real_deploy/demo run with this schema (`--episodes` to subset, `--z-cutoff`
+to change the trim/split depth, `--search-*` to tune the spawn search). Full run on
+`ahaxs800_printed_mushrooms` (21 episodes, 1 skipped — never reached `z_cutoff`): mean
+`obj_xy_drift` 3.2mm (max 5.8mm) across the 20 kept episodes. Queued follow-up: run on other
+real_deploy/demo datasets the same way.
+
+#### `add_original_real_cloud.py` — third condition: original real, unedited (no sim rerun)
+
+Adds a **Condition O** (`point_cloud_orig`) to an already-built hybrid pkl: the ORIGINAL
+real point cloud (arm + the REAL mushroom, not swapped) for the same frames. Proprioception
+is shared with Condition R (both are real underneath — only the cloud differs). Purpose:
+with all three conditions present, you can separate "does the arm-only gap change the
+policy's action" (R vs S, mushroom held constant=sim) from "does the FULL real signal
+(unedited) differ from sim" (O vs S) from "how much did editing itself change the cloud"
+(O vs R).
+
+No sim rerun — re-slices the matching frames straight out of the ORIGINAL source deploy
+dataset, using the exact `t_cutoff` / source-episode-index bookkeeping the build script
+already recorded in `meta["per_episode_stats"]`, so it stays frame-aligned automatically
+(including after `trim_leading_frames.py`, since it reads `meta["n_leading_frames_dropped"]`
+too).
+
+```bash
+python examples/sim2real_diagnose/add_original_real_cloud.py \
+    dataset/real_deploy/<run>/sim2real_data_analysis/hybrid_arm_real_mushroom_sim.pkl
+```
+
+#### `trim_leading_frames.py` — drop leading frame(s), no sim rerun
+
+Drops the first N frames (default 1) from every episode's observations AND actions, keeping
+everything (all three conditions, once added) frame-aligned. Pure pkl post-processing.
+
+```bash
+python examples/sim2real_diagnose/trim_leading_frames.py \
+    dataset/real_deploy/<run>/sim2real_data_analysis/hybrid_arm_real_mushroom_sim.pkl --n 1
+```
+
+#### `visualize_hybrid_dataset.py` — side-by-side cloud video + signal comparison plot
+
+Pure visualization of an already-built hybrid pkl — no sim rerun, no Genesis import (runs in
+`envs/deploy`). Per episode: `epNN_cloud_sidebyside.mp4` (Condition R left, Condition S
+right) and `epNN_signals.png` (ee_pos xyz / ee_quat wxyz / gripper_width / quat angular diff
+/ cloud zmean(t), real solid vs sim dashed, with ee_err/quat_ang/gw_err in the title).
+Currently only visualizes conditions R and S (not the newer Condition O) — extending it to a
+3-way cloud video or adding O to the signal plot hasn't been done yet.
+
+```bash
+uv run --project envs/deploy python examples/sim2real_diagnose/visualize_hybrid_dataset.py \
+    dataset/real_deploy/<run>/sim2real_data_analysis/hybrid_arm_real_mushroom_sim.pkl
+# -> dataset/real_deploy/<run>/sim2real_data_analysis/hybrid_data_viz/
+```
+
+## Policy action-diff probes (2026-08-03) — naming glossary
+
+All probes below run a trained policy open-loop / teacher-forced on the hybrid pkl's
+observation streams (feed the ground-truth history up to frame `t`, record only the
+immediate next predicted action — no closed-loop rollout, no error accumulation) and
+compare the PHYSICAL action (pos mm / rot deg / gripper mm) predicted from different
+synthetic mixes of real vs. sim observation channels. Every script constructs its own set
+of synthetic conditions by recombining the SAME four underlying arrays already in the pkl:
+
+| symbol | pkl field | what it actually is |
+|---|---|---|
+| real pos/quat/grip | `ee_pos`/`ee_quat`/`gripper_width` | Condition R's real proprioception (shared with Condition O — only the cloud differs between O and R) |
+| sim pos/quat/grip | `ee_pos_sim`/`ee_quat_sim`/`gripper_width_sim` | Condition S's sim proprioception |
+| **"R cloud"** | `point_cloud` | Condition R's **EDITED** cloud — real arm points, but the real mushroom is stripped out and replaced with the paired sim rollout's mushroom points. **This is NOT the original unedited real camera cloud.** |
+| "sim cloud" | `point_cloud_sim` | Condition S's pure-sim cloud (arm AND mushroom both sim-rendered) |
+| (original real cloud) | `point_cloud_orig` | Condition O's cloud — the actual unedited real camera capture (arm + REAL mushroom). Only used by `probe_policy_action_diff.py`; every later per-channel probe below uses "R cloud" (edited), never this one. |
+
+So whenever a probe script's output says "R cloud", read it as *edited* real-arm-plus-sim-mushroom, not "the real cloud" in the everyday sense — that distinction is the whole point of Condition R (see the hybrid-dataset section above: it isolates the arm/proprioception gap by holding the mushroom fixed at sim in both R and S).
+
+Every probe below builds SYNTHETIC conditions by taking one of these baselines and swapping
+exactly one proprioception channel between its real and sim value, everything else held
+fixed. Two verbs are used throughout, always relative to a stated baseline:
+- **"adding real X"** — baseline starts all-sim; X's value is swapped sim→real. (Used in the
+  P-family, baseline = all-sim proprio + R cloud.)
+- **"removing real X"** (a.k.a. "w/ sim X") — baseline starts all-real; X's value is swapped
+  real→sim. (Used in the Q-family and R-family below.) Nothing is deleted — this always means
+  "replace this one channel's array with its sim counterpart before feeding the policy."
+
+Every comparison is anchored back to **S** (baseline = fully sim: sim pos+quat+grip, sim
+cloud) so results across scripts are directly comparable. `KEY_S` in a script's output means
+"physical-action distance between condition KEY and condition S".
+
+| script | baselines | swaps one channel by... | isolates |
+|---|---|---|---|
+| `probe_policy_action_diff.py` | O, R, S (as recorded, no synthetic swaps) | n/a | full sim2real gap (O vs S) vs. edit-only sanity (O vs R) vs. arm-only gap (R vs S) |
+| `probe_policy_isolated_gap.py` | **P** = all-sim proprio + R cloud; **Q** = all-real proprio + sim cloud | n/a (P and Q are themselves the two "isolated" conditions) | point-cloud-only gap (P vs S) vs. proprioception-only gap (Q vs S) |
+| `probe_policy_gripper_isolated_gap.py` | P, Q (as above) | **adds** real gripper to P (`Pg`); **removes** real gripper from Q (`Qg`) | gripper_width's own contribution, isolated from ee_pos/ee_quat |
+| `probe_policy_channel_isolated_gap.py` | P, Q (as above) | **adds** real pos/quat/grip to P one at a time (`Pp`/`Pq`/`Pg`); **removes** real pos/quat/grip from Q one at a time (`Qp`/`Qq`/`Qg`) | ranks ee_pos vs ee_quat vs gripper_width by isolated effect on the predicted action, both by adding (P-family) and removing (Q-family) — cloud is sim throughout both families here |
+| `probe_policy_rcloud_channel_isolated_gap.py` | **Q** = all-real proprio + sim cloud; **R** = all-real proprio + **R cloud** (edited real) | **removes** real pos/quat/grip from Q one at a time (`Qp`/`Qq`/`Qg`, same as above); **removes** real pos/quat/grip from R one at a time (`Rp`/`Rq`/`Rg`) | whether the same pos>quat>gripper ranking holds when the point cloud is the edited-real R cloud instead of pure sim — answer: yes, ranking is unchanged |
+
+So e.g. `Rp_S` means: start from R (real pos, real quat, real grip, R/edited-real cloud),
+swap pos back to sim (quat/grip/cloud untouched), then report that condition's physical
+action distance from S. The `R_S - Rp_S` delta (printed as "R-family... pos_delta=...") is
+how much of R's total distance-from-S is attributable to pos specifically.

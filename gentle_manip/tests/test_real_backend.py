@@ -72,6 +72,30 @@ def test_cam_ext_extrinsic_is_world_t_cam_ext():
     assert np.allclose(raw.camera_extrinsics["cam_ext"], np.asarray(cfg.WORLD_T_CAM_EXT))
 
 
+def test_point_cloud_shift_offsets_extrinsic_translation():
+    """point_cloud_shift translates every camera's world_T_cam by the same vector — since
+    a backprojected point is world_T_cam @ point_cam, this shifts every resulting point
+    identically without touching the calibrated constants."""
+    config = {"robot": {}, "cameras": {"cam_ext": {"serial": "fake"}},
+              "point_cloud_shift": [0.01, 0.0, 0.0]}
+    robot = FakeRobot((0.4, 0.0, 0.3), (1.0, 0.0, 0.0, 0.0))
+    cameras = {"cam_ext": FakeCamera("cam_ext")}
+    backend = RealBackend(config, _robot=robot, _cameras=cameras)
+    raw = backend.reset()
+    expected = np.asarray(cfg.WORLD_T_CAM_EXT, dtype=np.float32).copy()
+    expected[:3, 3] += [0.01, 0.0, 0.0]
+    assert np.allclose(raw.camera_extrinsics["cam_ext"], expected)
+    # rotation part must be untouched -- only translation shifts
+    assert np.allclose(raw.camera_extrinsics["cam_ext"][:3, :3], np.asarray(cfg.WORLD_T_CAM_EXT)[:3, :3])
+
+
+def test_no_point_cloud_shift_is_noop():
+    """Default (no point_cloud_shift key) behaves exactly as before -- no-op."""
+    backend = make_backend()
+    raw = backend.reset()
+    assert np.allclose(raw.camera_extrinsics["cam_ext"], np.asarray(cfg.WORLD_T_CAM_EXT))
+
+
 def test_reset_connects_and_starts_cameras():
     backend = make_backend()
     backend.reset()

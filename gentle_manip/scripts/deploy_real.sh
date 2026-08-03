@@ -35,18 +35,68 @@
 # normalization from the sim rigid sma dataset.
 # obs-config = point_cloud_1cam_outlier.yaml (matches superset_rigid training crop/1024/outlier).
 #
-ckpt=logs/dppo/dppo-pretrain/single_lift_mushroom_rigid/sma/apioc/checkpoint/state_2000.pt
-normalization=dataset/dppo/single_lift_mushroom_rigid/sma/normalization.npz
+# ckpt=logs/dppo/dppo-pretrain/single_lift_mushroom_rigid/sma/apioc/checkpoint/state_2000.pt
+# normalization=dataset/dppo/single_lift_mushroom_rigid/sma/normalization.npz
+#
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} \
+#   --ft-denoising-steps 0 \
+#   --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_outlier.yaml \
+#   --action-config gentle_manip/configs/action/delta_pose_delta_gripper_fast_rot.yaml \
+#   --pose-scale 0.999 \
+#   --record dataset/real_deploy/rigid_sma_apioc2000 \
+#   --shard-size 10
+
+# ── BC pretrain on SIM RIGID demos, ABSOLUTE-POSE action (single_lift_mushroom_rigid, cho) ────
+# action config = abs_pose_abs_gripper.yaml (10-dim: pos3 + 6D-rotation6 + gripper1; MUST match
+# CMA-ES collection + eval_diffusion_pointnet.yaml under single_lift_mushroom_rigid_abs_pcd —
+# see that cfg's action_dim=10 / obs_dim=8). ft-denoising-steps 0 = pure BC checkpoint.
+# obs-config = point_cloud_1cam_outlier.yaml, same as the "sma" delta-mode entry above — the
+# real-only outlier denoise, no object_focus (matches superset_rigid's crop/1024, arm kept in).
+#
+# --pose-scale is a DELTA-mode-only knob and is a no-op here (absolute targets, not deltas).
+# --smooth-alpha is the absolute-mode equivalent for a jittery/shaky commanded pose (EMA
+# low-pass on pos+rotation, gripper dim untouched so grasp/release stays decisive) — start
+# around 0.3 and tune down further if motion still looks jerky, up if it feels sluggish/laggy
+# behind the policy's intent. NOTE: 0.0 freezes the commanded pose at whatever it was seeded
+# to (never tracks a new target) — that's likely not what you want; use a value in (0, 1].
+# --max-pos-step-m is a HARD per-tick safety cap (meters/axis) on top of/independent from
+# smooth_alpha — no single tick can move the target further than this, no matter what the
+# network outputs; both filters seed from the robot's ACTUAL current pose at reset/re-home,
+# so the very first commanded action is bounded too, not just steady-state jitter.
+# Sim eval of this checkpoint (band 0.175-0.275): success 0.76, ever_success 0.815 (see
+# logs/dppo/dppo-pretrain/single_lift_mushroom_rigid/cho/ahaxs/eval/).
+#
+ckpt=logs/dppo/dppo-pretrain/single_lift_mushroom_rigid/cho/ahaxs/checkpoint/state_800.pt
+normalization=dataset/dppo/single_lift_mushroom_rigid/cho/normalization.npz
 
 uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
   --ckpt ${ckpt} \
   --ft-denoising-steps 0 \
   --normalization ${normalization} \
   --obs-config gentle_manip/configs/obs/point_cloud_1cam_outlier.yaml \
-  --action-config gentle_manip/configs/action/delta_pose_delta_gripper_fast_rot.yaml \
-  --pose-scale 0.999 \
-  --record dataset/real_deploy/rigid_sma_apioc2000 \
-  --shard-size 10
+  --action-config gentle_manip/configs/action/abs_pose_abs_gripper.yaml \
+  --smooth-alpha 0.99 \
+  --max-pos-step-m 0.01 \
+  --record dataset/real_deploy/tmp \
+  --shard-size 10 \
+  --max-steps 5000
+
+# ckpt=logs/dppo/dppo-pretrain/single_lift_mushroom_rigid/rpk/fjyis/checkpoint/state_3500.pt
+# normalization=dataset/dppo/single_lift_mushroom_rigid/rpk/normalization.npz
+
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} \
+#   --ft-denoising-steps 0 \
+#   --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_outlier.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_abs_gripper.yaml \
+#   --smooth-alpha 0.1 \
+#   --max-pos-step-m 0.01 \
+#   --record dataset/real_deploy/tmp \
+#   --shard-size 10 \
+#   --max-steps 5000
 
 # ── DPPO finetune (sim-trained BC + PPO finetune, single_lift_mushroom_soft_pcd) ─────────────
 # action config = delta_pose_delta_gripper.yaml (standard; sim demos used standard scales).

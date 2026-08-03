@@ -48,10 +48,13 @@ def plot_episode(ep: dict, idx: int, out_path: Path) -> None:
     ax.set_title("ee_pos (m)"); ax.set_xlabel("step"); ax.legend(fontsize=7)
 
     # 3) gripper + action norm over time
+    # action layout depends on mode: delta = 7-dim (pos3+rot3+gripper1), absolute = 10-dim
+    # (pos3+rot6d6+gripper1) — gripper is always the LAST dim, "motion" is everything before it.
+    motion_action, gripper_action = actions[:, :-1], actions[:, -1]
     ax = fig.add_subplot(1, 3, 3)
     ax.plot(t, grip, "b-", label="gripper width (m)")
-    ax.plot(t, np.linalg.norm(actions[:, :6], axis=1), "m-", alpha=0.7, label="|motion action|")
-    ax.plot(t, actions[:, 6], "c-", alpha=0.7, label="gripper action")
+    ax.plot(t, np.linalg.norm(motion_action, axis=1), "m-", alpha=0.7, label="|motion action|")
+    ax.plot(t, gripper_action, "c-", alpha=0.7, label="gripper action")
     ax.set_title("gripper / action"); ax.set_xlabel("step"); ax.legend(fontsize=7)
 
     fig.tight_layout()

@@ -45,8 +45,8 @@ class DPPOPolicyAdapter:
     """
 
     def __init__(self, ckpt: str, normalization_path: str, *, obs_dim: int = 8,
-                 cond_steps: int = 2, act_steps: int = 4, horizon_steps: int = 4,
-                 denoising_steps: int = 20, ft_denoising_steps: int = 10,
+                 action_dim: int = 7, cond_steps: int = 2, act_steps: int = 4,
+                 horizon_steps: int = 4, denoising_steps: int = 20, ft_denoising_steps: int = 10,
                  device: str = "cuda:0") -> None:
         import torch  # noqa: F401
         from model.diffusion.diffusion_eval import DiffusionEval
@@ -56,7 +56,7 @@ class DPPOPolicyAdapter:
         self.n_action_steps = int(act_steps)
         self._cond_steps = int(cond_steps)
         net = PointNetDiffusionMLP(
-            action_dim=7, horizon_steps=horizon_steps, cond_dim=obs_dim * cond_steps,
+            action_dim=action_dim, horizon_steps=horizon_steps, cond_dim=obs_dim * cond_steps,
             pc_cond_steps=1, visual_feature_dim=256, time_dim=16, mlp_dims=[512, 512, 512],
             activation_type="ReLU", residual_style=True,
             pointnet={"in_channels": 3, "use_layernorm": True, "final_norm": "layernorm"})
@@ -65,7 +65,7 @@ class DPPOPolicyAdapter:
             network_path=str(ckpt), ft_denoising_steps=int(ft_denoising_steps), use_ddim=False,
             network=net, predict_epsilon=True, denoised_clip_value=1.0, randn_clip_value=3,
             ddim_steps=int(ft_denoising_steps), horizon_steps=horizon_steps, obs_dim=obs_dim,
-            action_dim=7, denoising_steps=denoising_steps, device=device).eval()
+            action_dim=action_dim, denoising_steps=denoising_steps, device=device).eval()
 
         stats = np.load(normalization_path)
         self.obs_min = stats["obs_min"].astype(np.float32)
@@ -130,7 +130,19 @@ def main() -> None:
     p.add_argument("--max-steps", type=int, default=20000)
     p.add_argument("--rate", type=float, default=30.0, help="control rate (Hz)")
     p.add_argument("--pose-scale", type=float, default=1.0,
-                   help="<1 shrinks the 6 delta-pose dims for slower/gentler motion")
+                   help="(delta mode only) <1 shrinks the 6 delta-pose dims for slower/"
+                        "gentler motion. No-op in absolute mode — see --smooth-alpha instead.")
+    p.add_argument("--smooth-alpha", type=float, default=None,
+                   help="(absolute mode only) EMA low-pass filter alpha on the commanded "
+                        "pos+rotation (gripper dim excluded), persisted across chunk re-plans "
+                        "and reset on re-home. Lower = smoother/slower to track a new target "
+                        "(e.g. start at 0.3). None (default) = off. This is the fix for "
+                        "shaky/jittery absolute-pose commands in place of pose_scale, which "
+                        "does not apply to absolute targets.")
+    p.add_argument("--max-pos-step-m", type=float, default=None,
+                   help="(absolute mode only) hard per-tick cap, meters PER AXIS, on how far "
+                        "the commanded position may move from the previous command — a slew-"
+                        "rate limiter, independent of/in addition to --smooth-alpha. None = off.")
     p.add_argument("--record", type=Path, default=None,
                    help="save the run in the demo pickle schema (for sim2real obs comparison). "
                         "With --shard-size>0 this is a DIRECTORY of shard_XXXX.pkl instead of one pkl")
@@ -146,11 +158,13 @@ def main() -> None:
     backend = RealBackend(setup)
     env = PolicyEnv(backend, obs_config, action_config, task=None, max_episode_steps=10 ** 9)
     policy = DPPOPolicyAdapter(
-        args.ckpt, args.normalization, cond_steps=args.cond_steps, act_steps=args.act_steps,
+        args.ckpt, args.normalization, action_dim=action_config.action_dim,
+        cond_steps=args.cond_steps, act_steps=args.act_steps,
         ft_denoising_steps=args.ft_denoising_steps, device=args.device)
     run_deploy_loop(env, policy, args.max_steps, args.rate,
                     pose_scale=args.pose_scale, record_path=args.record,
-                    shard_size=args.shard_size)
+                    shard_size=args.shard_size, action_config=action_config,
+                    smooth_alpha=args.smooth_alpha, max_pos_step_m=args.max_pos_step_m)
 
 
 if __name__ == "__main__":
