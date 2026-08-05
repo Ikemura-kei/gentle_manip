@@ -136,6 +136,64 @@ class FEM:
         u[free] = sparse.linalg.spsolve(Kff.tocsc(), np.asarray(b, float)[free])
         return u
 
+    def solve_dirichlet(self, fixed_dofs: np.ndarray, u_fixed: np.ndarray,
+                        b: Optional[np.ndarray] = None) -> Tuple[np.ndarray, np.ndarray]:
+        """Dirichlet solve with `fixed_dofs` PRESCRIBED to `u_fixed` (non-zero allowed) — the position/
+        width-controlled contact: push the pad-contact nodes in by the commanded indentation and solve.
+        Fixing both jaws anchors the object (no rigid null space), so this is a plain reduced solve.
+        Returns (u, reaction): reaction is non-zero only on fixed_dofs = the force the pad must exert to
+        impose the indentation (i.e. the grip force). Displacement u is E-INDEPENDENT (K∝E cancels), so
+        stress σ=element_stress(u) and reaction both scale linearly with E — evaluate at E=1 and scale."""
+        fixed = np.asarray(fixed_dofs, np.int64)
+        u_fix = np.asarray(u_fixed, float)
+        free = np.setdiff1d(np.arange(self.ndof), fixed)
+        rhs = np.zeros(self.ndof) if b is None else np.asarray(b, float).copy()
+        u = np.zeros(self.ndof); u[fixed] = u_fix
+        Kfc = self.K[free][:, fixed]
+        u[free] = sparse.linalg.spsolve(self.K[free][:, free].tocsc(), rhs[free] - Kfc @ u_fix)
+        reaction = np.zeros(self.ndof)
+        reaction[fixed] = np.asarray(self.K[fixed] @ u).ravel() - rhs[fixed]
+        return u, reaction
+
+    def solve_constrained(self, C: sparse.spmatrix, g: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """Minimum-elastic-energy displacement subject to the LINEAR constraints `C u = g`, with the
+        rigid-body null space bordered out. Use for NORMAL-ONLY pad contact: each row of C constrains
+        one contact node's displacement along the closing axis (`aᵀuᵢ = indentᵢ`), leaving the two
+        tangential components free so the soft object can bulge under the pad (real compression, no
+        clamped-flat edge singularity). Solves the KKT system
+            [ K    Cᵀ   R ] [u]     [0]
+            [ C    0    0 ] [λ]  =  [g]
+            [ Rᵀ   0    0 ] [β]     [0]
+        Returns (u, λ): λ is the per-constraint reaction (the normal contact force at each node = the
+        grip). R (the 6 rigid modes) pins the tangential/rotational null freedoms left by C."""
+        n, m = self.ndof, self.R.shape[1]
+        Csp = sparse.csc_matrix(C); nc = Csp.shape[0]
+        Rs = sparse.csc_matrix(self.R)
+        top = sparse.hstack([self.K, Csp.T, Rs])
+        mid = sparse.hstack([Csp, sparse.csc_matrix((nc, nc)), sparse.csc_matrix((nc, m))])
+        bot = sparse.hstack([Rs.T, sparse.csc_matrix((m, nc)), sparse.csc_matrix((m, m))])
+        A = sparse.vstack([top, mid, bot]).tocsc()
+        rhs = np.concatenate([np.zeros(n), np.asarray(g, float), np.zeros(m)])
+        sol = splu(A).solve(rhs)
+        return sol[:n], sol[n:n + nc]
+
+    def solve_constrained_fast(self, C: sparse.spmatrix, g: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """Same result as `solve_constrained` (min-energy displacement s.t. C u = g, rigid modes pinned)
+        but REUSING the cached inertia-relief factor of [K R; Rᵀ 0] (built once) instead of
+        refactorizing the full bordered KKT every call — the grasp-planner speedup.
+
+        With G = the inertia-relief solve operator (u-block of the cached factor, so M[G f; β]=[f;0]),
+        stationarity K u + Cᵀλ + Rβ = 0 gives u = −G Cᵀ λ; imposing C u = g:
+            W = G Cᵀ         (nc back-substitutions through the ONE cached factor)
+            S = C W          (nc×nc dense Schur matrix, SPD for independent non-rigid constraints)
+            λ = solve(S, −g),   u = −W λ.
+        Cost per grasp: one multi-RHS back-substitution + a small dense solve — no refactorization."""
+        Csp = sparse.csc_matrix(C)
+        W, _ = self.solve_free(np.asarray(Csp.T.todense()))      # (ndof, nc) = G Cᵀ, reuses cache
+        S = np.asarray((Csp @ W))                                # (nc, nc)
+        lam = np.linalg.solve(S, -np.asarray(g, float))
+        return -(W @ lam), lam
+
     # ── stress recovery ────────────────────────────────────────────────────────
     def element_stress(self, u: np.ndarray) -> np.ndarray:
         """Per-element Voigt stress σ (M,6) from a global displacement u (ndof,)."""

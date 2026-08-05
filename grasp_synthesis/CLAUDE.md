@@ -466,3 +466,143 @@ otherwise Q_SM under-counts twist-induced fragility. `μ_t` becomes a config kno
 principled alternatives: torque-downweighted `W` only helps near-force-closure grasps as shown
 above; or a task-wrench metric that scores resistance to gravity + bounded disturbance instead of
 the full 6-D unit ball.)
+
+---
+
+## 11. Task-based grasp synthesis for soft food (the pivot AWAY from force closure)
+
+**Decision (supersedes Q_SM as the primary objective):** Q_SM measures force-closure robustness —
+resistance to an *arbitrary* disturbance wrench — which degenerates to ≈0 for a two-pad grasp on
+organic/soft objects (§10.2). `experiments/degeneracy_diagnose.py` confirms *why*: for cube, bunny,
+bunny-head AND mushroom the unresisted axis is a **moment** (a twist), and overriding the contact
+normals with the finger normal (the "conforming" idea) does **not** rescue it — because that still
+only supplies forces at points, and the missing ingredient is torsional resistance (a new DOF). But
+**lifting only requires resisting ONE wrench — gravity** — which two pads CAN do without force
+closure. So for the actual goal (gently lift fragile food) we DROP force closure and score the grasp
+by the stress it induces while holding.
+
+### 11.1 The metric — `smgrasp/lift_stress.py` (Genesis-free, ~1 ms/grasp)
+Minimum-grip-to-hold-gravity, then read the induced stress:
+```
+min  Σ(nᵢ·fᵢ)                 s.t.  G f = -w_gravity     (FEASIBLE ⇔ can hold it → the lift check)
+                                     friction cones (SOC)
+then σ = B f  →  peak / top10 / mean von Mises            (gentleness; lower = gentler)
+```
+One small SOCP (ZeroCone + per-contact SOC, NO PSD cones/hull — far cheaper than Q_SM) + a matmul
+against the reused FEM stress map `B`. `grasp_stress(...)` returns `holdable`, `grip` (N), and
+`stress_{peak,top10,mean}`. **Units:** force-controlled stress is E-INDEPENDENT for a homogeneous
+linear-elastic body (equilibrium fixes it; only ν enters), so `σ = B f` with the FEM's E=1 IS the
+real stress in **Pa** for a real hold force `f` (N) — directly comparable to yield (mushroom ~40 kPa).
+Contact-adjacent elements are masked (§6.2) so the point-load singularity doesn't dominate; use
+`stress_top10` as the primary signal (robust), not `peak`. Validated on the mushroom (20 g): four
+hand-picked poses gave top10 = 742 (vertical stem↔cap, gentlest) … 1655 Pa (diagonal, harshest) —
+clean ~2.2× discrimination at ~1 ms.
+
+### 11.2 The synthesizer — `planner.plan_lift_grasp`  +  demo `demo_lift_stress_grasp.py`
+CMA-ES over the 5-DOF pose MINIMIZING `stress_top10` subject to `holdable` (penalty ladder:
+no-contact ≫ can't-hold ≫ feasible-stress). Genesis-free, ~100 ms/eval (`B` is recomputed per pose
+as contacts move). **MULTI-START** (`n_starts`, diverse canonical closing-axis seeds — x/y/z-vertical/
+diagonals — via `_axis_seeds`): a single horizontal start missed the gentle vertical basin (840 Pa),
+6 starts find it — mushroom **732 Pa in 198 evals** (below the 742 Pa hand-picked gentlest). The demo
+`demo_lift_stress_grasp.py` runs the synthesis and renders the winning grasp's **jaws + hold-stress
+field** (reusing the §10.1 pad viz) as a still + turntable, plus a search-trajectory video colored by
+each explored grasp's stress. **TODO:** expose the lift-acceleration margin in the demo (`accel` param
+exists in the metric); compose penetration/reach/table penalties (from `synth_utils`/`qsm_objective`)
+for real-arm reachability, not just geometric gentleness.
+
+### 11.3 Architecture — keep Genesis OUT of the loop
+Loading a Genesis scene costs **30–60 s**, and soft MPM is too costly per step, so neither belongs in
+the CMA-ES inner loop. Tiers:
+1. **Propose + score (pure FEM, NO Genesis):** `plan_lift_grasp` — the whole search runs on the mesh +
+   our FEM. This is the default.
+2. **Optional dynamic-lift confirmation (rigid Genesis, built ONCE):** `run_grasp_synth.py` already
+   teleports the gripper and does close→lift→success; run it on the winning grasp(s) only.
+3. **Optional high-fidelity stress (stripped soft MPM, built ONCE):** a minimal soft scene — object +
+   fingers, **no cameras/point-cloud** (the redundant cost) — to re-rank the final 1–3 grasps; the
+   von-Mises readout matches the RL-reward/sim2real stress. Rigid→soft is never switched online; the
+   tiers are separate scenes, each built once.
+
+### 11.4 Width/position-controlled model — `smgrasp/width_grasp.py` (the PREFERRED grasp model)
+The real gripper is **position-controlled** (commanded WIDTH, not force), so §11.1's force-controlled
+min-grip metric is superseded for synthesis by a width-controlled FEM contact model. Two flat pads (a
+CUBE proxy now, the real finger STL later) close to a commanded width and INDENT the soft object; the
+grip force is an OUTPUT (the reaction), the stress comes from the commanded indentation.
+- **Contact = normal-only, rounded pad.** `indent_contacts` prescribes, per contact node, ONLY the
+  displacement along the closing axis (`aᵀuᵢ = ±dᵢ`, tangential FREE) via `fem.solve_constrained`
+  (a bordered KKT: constraints + the 6 rigid modes for the freed tangential null space). The pad face
+  is a **parabola** (rounded, `dᵢ = δ·(1−(r/pad_half)²)`), not a sharp flat plane. These two fixes are
+  essential: bonded (all-DOF) + flat-plane contact clamps the surface → a mesh-dependent flat-punch
+  EDGE SINGULARITY and NO bulk compression (peak 249 kPa @ δ=2 mm, stress a thin ring). Normal-only +
+  rounded lets the soft object bulge and spreads the stress into a real compression zone (peak 58 kPa,
+  the cap visibly squeezed). Verified on the mushroom.
+- **Position control ⇒ stress DOES scale with E** (unlike §11.1's force control, which was
+  E-independent). But the prescribed displacement makes deformation `u` E-INDEPENDENT, so σ and the
+  grip reaction both scale LINEARLY with E: `width_grasp_stress` solves ONCE at E=1 (returns
+  `sigma1, u, F1`), and `evaluate_grasp` gets any `(E, mass, μ)` by scalar ops → cheap DR later.
+- `indent_from_width(center, axis, width)` converts a commanded WIDTH to per-jaw indentation
+  (`delta_left/right`) using ONLY the nominal mesh (no FEM) — the cheap pre-filter.
+
+### 11.5 Candidate scoring + the degeneracy pre-filter — `width_grasp.score_candidate`
+Per candidate `(center, axis, width)`, MAXIMIZE a gentleness score (planner convention):
+1. **Cheap filter first (NO FEM):** `indent_from_width` → status. `no_contact` (a jaw misses / width ≥
+   object cross-section) or `degenerate` (a jaw buried > `max_indent`=0.01 m ⟺ the pad still penetrates
+   the nominal mesh at `width + 0.02`) → return **BIG_NEG (−1e12)**, skip the FEM. Only `ok` candidates
+   pay the FEM cost.
+2. **FEM** (width→indentation→normal-only rounded-pad solve) → `stress_top10` (real Pa, masked contact
+   singularity) + grip. **score = −stress_top10** for a HOLDABLE grasp, else BIG_NEG.
+3. **Lift = quasi-static only:** `holdable ⟺ 2·μ·grip ≥ mass·g` (two pads, friction carries gravity;
+   `accel` adds a static margin). This is a static lift-FEASIBILITY check — NOT dynamic lift success
+   (slip / rotate-out during the motion). True dynamic lift = the Genesis close→lift tier (§11.3).
+Squeeze schedule (for the demo/animation): close from `width + 0.01` down to the target width; for
+LINEAR FEM only the final indentation matters, so scoring is one solve at the target width.
+
+### 11.6 The width-controlled synthesizer + demo — `plan_width_grasp`, `demo_width_grasp.py`
+`planner.plan_width_grasp`: multi-start CMA-ES over the **6-DOF** candidate `[cx,cy,cz,θ,φ,width]`,
+maximizing `score_candidate` (nominal E/mass/μ, no DR yet). `demo_width_grasp.py` runs it and renders
+BOTH the **optimization-process** video (`<name>_width_opt.mp4` — every `ok` candidate CMA-ES explored,
+colored by its induced stress) and the **best-grasp** video (`<name>_width_best.mp4` — cube jaws
+closing to the target width + a turntable), with the **grip force reported** in the title. Jaws are
+semi-transparent (`_draw` pad alpha 0.4) 3D cubes (`viz.gripper_cubes`) placed at the OUTERMOST
+contact so they rest on the surface without penetrating. Mushroom result (nominal, E=0.3 MPa, 20 g):
+gentlest holdable grasp = **width 34.5 mm, stress_top10 4.6 kPa, grip 0.275 N** — the planner drives
+the width out to the widest holdable value (squeeze as little as possible while still holding).
+- **Speedup — `fem.solve_constrained_fast` (DONE, wired into `width_grasp_stress`).** Reuses the ONE
+  cached inertia-relief factor (`solve_free`'s bordered [K R; Rᵀ0]) via a Schur complement over the
+  contact constraints — `W=G·Cᵀ` (nc back-subs), `S=C·W`, `λ=solve(S,−g)`, `u=−Wλ` — instead of
+  refactorizing the full bordered KKT every grasp. **Bit-identical** to `solve_constrained` (Δu~6e-16,
+  Δσ~3e-13), 1.7× on the same mesh (the nc-column back-substitution is the remaining cost). The real
+  lever is MESH RESOLUTION (fewer tets → smaller factor + fewer contact constraints):
+  | voxel_div | tets | ncts | ms/FEM | evals/s |
+  |---|---|---|---|---|
+  | 9  | 2199 | 28 | **31.7** | 31.6 |
+  | 11 | 3643 | 48 | 116.9 | 8.6 |
+  | 12 | 4448 | 81 | 345.8 | 2.9 |
+  | 14 | 7662 | 93 | 776.7 | 1.3 |
+  So plan on a COARSE mesh (voxel_div ≈ 9, ~30 ms/eval, plus the pre-filter → high throughput) and
+  re-score the winner on a fine mesh. NOTE: absolute grip/stress are mesh-sensitive (a coarse cap is
+  blockier → deeper effective indent), so coarse = fast RANKING, fine = trustworthy Pa/N.
+- **DR — `width_grasp.make_dr` + `score_candidate_dr`, `plan_width_grasp(dr=...)` (DONE).** ONE FEM
+  solve per pose; the E-independent primitives (`sigma1`, `F1`) scale by each `(E, mass, μ)` sample, so
+  per-sample stress `E·top10_1` and holdability `2μ·E·F1 ≥ mass·g` are scalar ops. `score = −mean
+  stress` if the grasp holds in ≥ `hold_frac` of a FIXED sample set (deterministic objective), else
+  BIG_NEG → the best OVERALL pose. Mushroom (E 0.15–0.6 MPa, mass 12–30 g, μ 0.4–0.9): DR-robust grasp
+  holds in ALL samples (hold_frac 1.0); for this LIGHT object holding is easy (large grip margin), so
+  DR-robust ≈ nominal width, just with a higher mean stress (averaged over the stiffer samples).
+- **DOF:** the search is **6 params** `[cx,cy,cz,θ,φ,width]` = 5-DOF pose (position + closing-axis
+  DIRECTION) + width. Roll about the closing axis is omitted — a symmetric square pad's squeeze is
+  invariant to it, so it's redundant *for the metric*. **TODO (7-DOF for EXECUTION):** roll DOES matter
+  for grasp execution — with the object on a table it sets the approach orientation and whether a
+  jaw/finger collides with the ground — so deployment needs the full 7-DOF (SE3 pose + width); add roll
+  when wiring execution / the real finger STL (whose asymmetric pad also makes roll matter).
+- **Frame (fixed):** `plan_width_grasp` searches in the RECENTERED (COM-at-origin) frame that
+  `indent_from_width` uses on `obj.verts`, seeding the center at the COM. Seeding from `mesh.bounds`
+  (original frame) silently missed the object whenever COM ≠ origin (e.g. a cropped/offset mesh like the
+  bunny head → every candidate misses → flat objective → CMA-ES quits with "no valid grasp").
+- **TODO:** swap the cube proxy for the real finger STL in `indent_from_width`/`gripper_cubes`; the
+  Genesis dynamic-lift confirmation tier on the winner (§11.3); re-score winner on a fine mesh.
+- **TODO (FEM acceleration, future):** the per-grasp FEM solve is the cost floor — move it to GPU /
+  C++ / **taichi** (esp. the constrained/Schur solve + stress recovery), exposing a Python API the
+  CMA-ES loop calls. And **batch** the FEM across candidates: a CMA-ES generation (or multiple
+  sub-envs) evaluates many grasps at once → batch the back-substitutions / stress evals on GPU instead
+  of one-at-a-time. The round-2 width scan is embarrassingly parallel (independent widths per pose) —
+  a natural first batched target.

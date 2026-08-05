@@ -130,6 +130,29 @@ def gripper_pads(center, axis, width, pad_half):
     return quads
 
 
+def gripper_cubes(center, axis, hw_left, hw_right, pad_half, thickness=None):
+    """Two 3D box jaws (a cube proxy for the finger), footprint 2·pad_half square ⟂ the closing axis,
+    each of the given `thickness` along the axis. The INNER face of each jaw sits at distance
+    hw_left / hw_right from `center` along ∓axis (place these at the OUTERMOST contact point so the jaw
+    rests on the surface without penetrating) and the box extends OUTWARD (away from the object).
+    Returns a list of 12 quad faces (6 per jaw) for Poly3DCollection."""
+    a = np.asarray(axis, float); a /= np.linalg.norm(a) + 1e-12
+    t = np.array([1.0, 0, 0]) if abs(a[0]) < 0.9 else np.array([0.0, 1, 0])
+    u1 = np.cross(a, t); u1 /= np.linalg.norm(u1); u2 = np.cross(a, u1)
+    center = np.asarray(center, float)
+    thickness = thickness if thickness is not None else pad_half
+    corners = [(-1, -1), (1, -1), (1, 1), (-1, 1)]
+    faces = []
+    for hw, out in ((hw_left, -1.0), (hw_right, +1.0)):          # left jaw outward = −a, right = +a
+        inner = center + out * hw * a
+        outer = inner + out * thickness * a
+        ic = [inner + s1 * pad_half * u1 + s2 * pad_half * u2 for s1, s2 in corners]
+        oc = [outer + s1 * pad_half * u1 + s2 * pad_half * u2 for s1, s2 in corners]
+        faces += [ic, oc]                                        # inner + outer faces
+        faces += [[ic[i], ic[(i + 1) % 4], oc[(i + 1) % 4], oc[i]] for i in range(4)]  # 4 sides
+    return faces
+
+
 def _draw(ax, tris, colors, obj, points, forces, *, edges=True, pads=None):
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
@@ -139,7 +162,8 @@ def _draw(ax, tris, colors, obj, points, forces, *, edges=True, pads=None):
         facecolors = np.hstack([facecolors, np.ones((len(facecolors), 1))])
     if pads is not None:                                         # merge the two gripper jaws into the
         polys = polys + [np.asarray(q, float) for q in pads]     # SAME collection so matplotlib's
-        gray = np.tile([0.15, 0.15, 0.15, 1.0], (len(pads), 1))  # per-face zsort occludes them
+        gray = np.tile([0.15, 0.15, 0.15, 0.4], (len(pads), 1))  # per-face zsort occludes them
+                                                                 # (alpha 0.4 = see the stress through the jaws)
         facecolors = np.vstack([facecolors, gray])               # correctly against the object (a
                                                                  # separate collection would z-order
                                                                  # as one unit and vanish behind it)
