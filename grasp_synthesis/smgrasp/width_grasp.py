@@ -176,7 +176,8 @@ def width_grasp_stress(obj, center, axis, *, pad_half: float, delta: float = Non
     k = max(1, int(0.1 * len(vmk)))
     return {"valid": True, "sigma1": sigma1, "u": u, "F1": F1,
             "top10_1": float(np.sort(vmk)[-k:].mean()), "peak_1": float(vmk.max()),
-            "mean_1": float(vmk.mean()), "n_contacts": nc, "nodes": nodes, "axis": a}
+            "mean_1": float(vmk.mean()), "hi_1": float(np.percentile(vm, 98)),   # UNMASKED p98 (contact-aware)
+            "n_contacts": nc, "nodes": nodes, "axis": a}
 
 
 def evaluate_grasp(obj, center, axis, *, pad_half: float, delta: float, E: float, density: float,
@@ -212,6 +213,12 @@ PEN_SLOPE = 1e9          # per-metre shaping toward the contact band
 # so it doesn't over-penalize genuinely curved contact on soft/organic objects.
 W_ALIGN = 3e4
 
+# Peak-aware stress weight (§11.7): score also subtracts W_PEAK · (unmasked p98 stress), so a grasp
+# with a big contact/edge stress SPIKE (e.g. a corner grasp) is penalized even when its masked-bulk
+# top10 looks low. Weight is relative to the masked top10 (both in Pa). 0.3 improved determinism (made
+# the mushroom identical across seeds) and penalises concentrated grasps without hurting the good ones.
+W_PEAK = 0.3
+
 
 def _shaped_penalty(status: str, dist: float) -> float:
     """Infeasible-candidate score: not-holdable (contacting) > no-contact/degenerate (farther = worse)."""
@@ -227,7 +234,7 @@ def is_real_grasp(score: float) -> bool:
 
 def score_candidate(obj, center, axis, width, *, pad_half: float, E: float, density: float, mu: float,
                     g: float = 9.81, accel: float = 0.0, gravity_dir=(0, 0, -1.0),
-                    max_indent: float = 0.01, w_align: float = W_ALIGN) -> dict:
+                    max_indent: float = 0.01, w_align: float = W_ALIGN, w_peak: float = W_PEAK) -> dict:
     """Score one width-controlled grasp candidate for the planner (higher = gentler; MAXIMIZED).
     Cheap degeneracy filter FIRST (no FEM): pads must indent BOTH jaws and not be buried > max_indent
     (⟺ the pad penetrating the nominal mesh at width + 2·max_indent). Only 'ok' candidates get an FEM
@@ -250,7 +257,7 @@ def score_candidate(obj, center, axis, width, *, pad_half: float, E: float, dens
         return {"score": _shaped_penalty("not_holdable", 0.0), "status": "ok", "holdable": False,
                 "stress_top10": r["stress_top10"], "grip": r["grip"], "prim": prim}
     align = grasp_alignment(obj, axis, prim["nodes"])            # 1 = flush/perpendicular, ->0 = edge
-    score = -r["stress_top10"] - w_align * (1.0 - align)
+    score = -r["stress_top10"] - w_align * (1.0 - align) - w_peak * E * prim["hi_1"]
     return {"score": score, "status": "ok", "holdable": True, "stress_top10": r["stress_top10"],
             "grip": r["grip"], "align": align, "delta_left": dl, "delta_right": dr, "prim": prim}
 
@@ -265,7 +272,7 @@ def make_dr(n, *, E_range, mass_range, mu_range, seed=0):
 
 def score_candidate_dr(obj, center, axis, width, *, pad_half: float, dr, g: float = 9.81,
                        accel: float = 0.0, max_indent: float = 0.01, hold_frac: float = 1.0,
-                       w_align: float = W_ALIGN) -> dict:
+                       w_align: float = W_ALIGN, w_peak: float = W_PEAK) -> dict:
     """DR version of `score_candidate`: score a candidate for robustness over the (E, mass, μ) samples
     `dr` (find the best OVERALL pose, §11). ONE FEM solve per pose — the E-independent primitives
     (`sigma1`, `F1`) scale by each sample's E, so per-sample stress `E·top10_1` and holdability
@@ -290,7 +297,7 @@ def score_candidate_dr(obj, center, axis, width, *, pad_half: float, dr, g: floa
     # holds enough -> −mean stress − alignment penalty; else nudge toward more grip (hold shortfall)
     if hf >= hold_frac:
         align = grasp_alignment(obj, axis, prim["nodes"])
-        score = -smean - w_align * (1.0 - align)
+        score = -smean - w_align * (1.0 - align) - w_peak * float(np.mean(Es)) * prim["hi_1"]
     else:
         align, score = 0.0, -PEN_BASE * (1.0 + (hold_frac - hf))
     return {"score": score, "status": "ok", "hold_frac": hf, "align": align,

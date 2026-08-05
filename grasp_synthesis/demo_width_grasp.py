@@ -59,6 +59,8 @@ def main():
     ap.add_argument("--opt-fps", type=float, default=8.0, help="FPS for the optimization-process video")
     ap.add_argument("--out-dir", default=None, help="subfolder under viz_out for the outputs")
     ap.add_argument("--gpu", action="store_true", help="opt-in GPU FEM solve (~5-7x faster; default CPU sparse)")
+    ap.add_argument("--n-refine", type=int, default=10, help="round-2: number of distinct poses to width-refine")
+    ap.add_argument("--refine-scan", type=int, default=25, help="round-2: width samples per pose (finer = more)")
     args = ap.parse_args()
 
     import trimesh, time
@@ -83,6 +85,7 @@ def main():
     t0 = time.perf_counter()
     res = plan_width_grasp(obj, mesh, E=args.E, density=args.density, mu=args.mu,
                            maxfevals=args.maxfevals, n_starts=args.n_starts, pad_half=pad, seed=args.seed,
+                           n_refine=args.n_refine, refine_scan=args.refine_scan,
                            verbose=True, record_history=True)
     plan_t = time.perf_counter() - t0
     if res["x"] is None:
@@ -92,6 +95,20 @@ def main():
           f"grip={res['grip']:.3f} N   ({res['evals']} evals, {res['n_starts']} starts)", flush=True)
     print(f"BENCH: {len(obj.tets)} tets | plan {plan_t:.1f}s | {res['evals']} evals | "
           f"{plan_t/max(res['evals'],1)*1e3:.0f} ms/eval (incl. filtered)", flush=True)
+    import json
+    al = res.get("align")
+    record = {"name": name, "seed": args.seed, "mesh": Path(args.mesh).name, "gpu": bool(args.gpu),
+              "tets": len(obj.tets), "ndof": int(obj.fem.ndof), "voxel_div": args.voxel_div,
+              "maxfevals": args.maxfevals, "n_starts": args.n_starts,
+              "profiling": {"plan_time_s": round(plan_t, 2), "evals": int(res["evals"]),
+                            "ms_per_eval": round(plan_t / max(res["evals"], 1) * 1e3, 1)},
+              "result": {"width_mm": round(W * 1e3, 3), "stress_top10_Pa": round(float(res["stress_top10"]), 1),
+                         "grip_N": round(float(res["grip"]), 4), "align": round(al, 4) if al is not None else None,
+                         "theta_deg": round(float(np.degrees(x[3])), 2), "phi_deg": round(float(np.degrees(x[4])), 2),
+                         "center_m": [round(float(c), 5) for c in x[:3]]}}
+    with open(outdir / f"{name}_result.json", "w") as f:
+        json.dump(record, f, indent=2)
+    print("  ->", outdir / f"{name}_result.json", flush=True)
 
     # cross-section under the footprint at the winning pose -> first-contact width for the closing ramp
     d = obj.verts[np.unique(boundary_faces(obj.tets)[0])] - center

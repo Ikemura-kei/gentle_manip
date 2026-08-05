@@ -613,3 +613,29 @@ the width out to the widest holdable value (squeeze as little as possible while 
 - **TODO (further FEM accel):** cut the GPU per-solve overhead (build Cᵀ + Schur on-device, avoid
   transfers); C++/**taichi** kernels; **batch** the FEM across a CMA-ES generation / the round-2 width
   scan (embarrassingly parallel — independent widths per pose) instead of one-at-a-time.
+
+### 11.7 Grasp quality: stability (alignment) + peak-aware stress + reliable round 2
+Gentleness-alone (min stress s.t. quasi-static hold) is under-constrained — on flat-faced objects it
+picks tilted/edge grasps that hold at a wider width with less indentation (lower bulk stress) but are
+unstable and concentrate stress at the contact. Three additions fix this (all tunable):
+- **Alignment term (`W_ALIGN`=3e4).** `score = −stress_top10 − W_ALIGN·(1−align)` where
+  `align = mean |closing-axis · surface-normal|` over the contacts (1 = pad flush/perpendicular, →0 =
+  grazing/edge). Favours flush face / through-centre grasps; natural on curved objects (perpendicular
+  pressing = through-centre). Rejects the mushroom's poorly-aligned thin-stem catch → a flush cap grasp.
+- **Peak-aware term (`W_PEAK`=0.3).** `score −= W_PEAK · (unmasked p98 stress)`. The masked top10 HIDES
+  a corner grasp's real spike (measured: corner raw peak 37 kPa vs face 4 kPa); the p98 term penalises
+  concentrated contact even when the masked bulk looks low. 0.3 made the mushroom identical across seeds
+  without hurting the good grasps.
+- **Round 2 = width-scan the canonical SEED poses too.** The flush centred face grasp is only gentle at
+  its RIGHT width, so round 1 never ranks it high enough to be picked — so round 2 width-scans the
+  distinct round-1 poses AND the canonical axis seeds (center=COM, x/y/z/diagonals), guaranteeing the
+  flush grasp is evaluated. This ELIMINATED the corner grasp (all cube grasps became near-face) and made
+  the mushroom deterministic. (A 6-DOF local pose-polish was worse — it optimises width imprecisely.)
+- **Diagnosis (corner grasp was SEARCH, not the metric):** a centred face grasp scores −906 vs the
+  planner-returned corner's −3571 — the metric ranks the face far better; the search just missed it.
+- **Cube caveat:** a symmetric cube is inherently multi-optimal (6 equivalent faces) so seeds pick
+  different faces/widths — a hard case, not representative of organic food targets (mushroom is solid).
+  Also: **test the cube on a SHARP subdivided box, not the voxel-remeshed (rounded, asymmetric) mesh.**
+- **Knobs:** `plan_width_grasp(w_align=, w_peak=, n_refine=, refine_scan=)`; `demo_width_grasp.py`
+  exposes `--n-refine --refine-scan --gpu --seed --opt-fps --out-dir` and writes a per-run result JSON
+  (profiling + optimization fields).
