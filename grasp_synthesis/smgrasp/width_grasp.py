@@ -23,6 +23,19 @@ from scipy import sparse
 
 from .viz import boundary_faces, von_mises
 
+# Opt-in GPU FEM solver (torch/CUDA dense factor, ~30× faster than the scipy sparse back-sub — the
+# profiled 97% hot path). Default False = the committed baseline (`solve_constrained_fast`, CPU sparse)
+# so results/behaviour are unchanged unless explicitly enabled; set True (or `use_gpu_solve(True)`) to
+# accelerate. Falls back to sparse for meshes too large for a dense factor (ndof > GPU_MAX_NDOF).
+USE_GPU_SOLVE = False
+GPU_MAX_NDOF = 16000
+
+
+def use_gpu_solve(on: bool = True):
+    """Enable/disable the GPU FEM solver globally (see USE_GPU_SOLVE)."""
+    global USE_GPU_SOLVE
+    USE_GPU_SOLVE = bool(on)
+
 
 def _perp_basis(axis: np.ndarray):
     a = np.asarray(axis, float); a = a / (np.linalg.norm(a) + 1e-12)
@@ -147,7 +160,10 @@ def width_grasp_stress(obj, center, axis, *, pad_half: float, delta: float = Non
     rows = np.repeat(np.arange(nc), 3)                           # C: one row per node, `a` in its 3 dofs
     cols = (3 * nodes[:, None] + np.arange(3)).reshape(-1)
     C = sparse.csr_matrix((np.tile(a, nc), (rows, cols)), shape=(nc, obj.fem.ndof))
-    u, lam = obj.fem.solve_constrained_fast(C, bc["g"])          # reuses the cached factor (§11.6)
+    if USE_GPU_SOLVE and obj.fem.ndof <= GPU_MAX_NDOF:           # opt-in GPU dense solve (~30×)
+        u, lam = obj.fem.solve_constrained_gpu(C, bc["g"])
+    else:
+        u, lam = obj.fem.solve_constrained_fast(C, bc["g"])      # reuses the cached factor (§11.6)
     sigma1 = obj.fem.element_stress(u)                           # (M,6) at E=1
     vm = von_mises(sigma1)
     F1 = float(abs(lam[bc["left_mask"]].sum()))                 # left-jaw normal grip at E=1 (= Σλ)

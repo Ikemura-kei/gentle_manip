@@ -600,9 +600,16 @@ the width out to the widest holdable value (squeeze as little as possible while 
   bunny head → every candidate misses → flat objective → CMA-ES quits with "no valid grasp").
 - **TODO:** swap the cube proxy for the real finger STL in `indent_from_width`/`gripper_cubes`; the
   Genesis dynamic-lift confirmation tier on the winner (§11.3); re-score winner on a fine mesh.
-- **TODO (FEM acceleration, future):** the per-grasp FEM solve is the cost floor — move it to GPU /
-  C++ / **taichi** (esp. the constrained/Schur solve + stress recovery), exposing a Python API the
-  CMA-ES loop calls. And **batch** the FEM across candidates: a CMA-ES generation (or multiple
-  sub-envs) evaluates many grasps at once → batch the back-substitutions / stress evals on GPU instead
-  of one-at-a-time. The round-2 width scan is embarrassingly parallel (independent widths per pose) —
-  a natural first batched target.
+- **FEM acceleration — GPU dense solve (DONE, opt-in).** Profiling showed **97%** of the per-grasp
+  cost is scipy's sparse multi-RHS back-substitution in `solve_free` (the W = M⁻¹Cᵀ step; ~300 ms for
+  ~50 RHS on a 4 k-DOF cube). Since the bordered matrix M is FIXED per object, `fem._ensure_gpu_factor`
+  builds a DENSE LU of M once on the GPU (torch/CUDA, ~130 ms) and `fem.solve_constrained_gpu` does the
+  per-grasp solve as a dense `lu_solve` — **~30× on the raw solve, 5–7× end-to-end** (a full ~580-eval
+  synthesis: ~45 s → ~7 s), machine-precision identical per solve (Δ~1e-11). Enable with
+  `width_grasp.use_gpu_solve(True)` or `demo_width_grasp.py --gpu`; **default OFF** so the committed
+  CPU-sparse baseline is unchanged (and is the fallback). Falls back to sparse for ndof > GPU_MAX_NDOF
+  (dense M is ndof²). NOTE: tiny FP differences can cascade through CMA-ES ranking / the round-2 argmax,
+  so GPU may land on a *neighbouring equally-good* grasp (per-solve is exact; the search is FP-sensitive).
+- **TODO (further FEM accel):** cut the GPU per-solve overhead (build Cᵀ + Schur on-device, avoid
+  transfers); C++/**taichi** kernels; **batch** the FEM across a CMA-ES generation / the round-2 width
+  scan (embarrassingly parallel — independent widths per pose) instead of one-at-a-time.

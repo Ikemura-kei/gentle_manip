@@ -194,6 +194,38 @@ class FEM:
         lam = np.linalg.solve(S, -np.asarray(g, float))
         return -(W @ lam), lam
 
+    def _ensure_gpu_factor(self):
+        """Dense LU of the bordered [K R; Rᵀ 0] on the GPU (torch/CUDA), built ONCE and cached. The
+        bordered matrix is fixed per object, so every grasp's W = M⁻¹ Cᵀ becomes a dense triangular
+        solve — ~30× faster than scipy's sparse multi-RHS back-substitution (which the profile showed
+        is 97% of the per-grasp cost). Feasible while ndof is modest (dense M is ndof² — a few hundred
+        MB up to ~ndof 15k; larger meshes should keep the sparse `solve_constrained_fast`)."""
+        if getattr(self, "_gpu_lu", None) is not None:
+            return
+        import torch
+        n, m = self.ndof, self.R.shape[1]
+        Rs = sparse.csc_matrix(self.R)
+        M = sparse.vstack([sparse.hstack([self.K, Rs]),
+                           sparse.hstack([Rs.T, sparse.csc_matrix((m, m))])]).tocsc()
+        self._gpu_dev = "cuda" if torch.cuda.is_available() else "cpu"
+        Mt = torch.tensor(np.asarray(M.todense()), dtype=torch.float64, device=self._gpu_dev)
+        self._gpu_lu = torch.linalg.lu_factor(Mt)                # (LU, pivots), cached on the object
+
+    def solve_constrained_gpu(self, C: sparse.spmatrix, g: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """GPU version of `solve_constrained_fast` — identical result (machine precision), but the
+        W = M⁻¹ Cᵀ step (the bottleneck) is a dense torch/CUDA `lu_solve` against the cached dense
+        factor instead of scipy's sparse back-substitution. Opt-in; falls back is `solve_constrained_fast`."""
+        import torch
+        self._ensure_gpu_factor()
+        n, m = self.ndof, self.R.shape[1]
+        Csp = sparse.csc_matrix(C); nc = Csp.shape[0]
+        Ct_pad = np.zeros((n + m, nc)); Ct_pad[:n] = np.asarray(Csp.T.todense())   # bordered RHS [Cᵀ; 0]
+        Ctt = torch.tensor(Ct_pad, dtype=torch.float64, device=self._gpu_dev)
+        W = torch.linalg.lu_solve(self._gpu_lu[0], self._gpu_lu[1], Ctt)[:n].cpu().numpy()
+        S = np.asarray(Csp @ W)
+        lam = np.linalg.solve(S, -np.asarray(g, float))
+        return -(W @ lam), lam
+
     # ── stress recovery ────────────────────────────────────────────────────────
     def element_stress(self, u: np.ndarray) -> np.ndarray:
         """Per-element Voigt stress σ (M,6) from a global displacement u (ndof,)."""

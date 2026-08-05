@@ -58,9 +58,12 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--opt-fps", type=float, default=8.0, help="FPS for the optimization-process video")
     ap.add_argument("--out-dir", default=None, help="subfolder under viz_out for the outputs")
+    ap.add_argument("--gpu", action="store_true", help="opt-in GPU FEM solve (~5-7x faster; default CPU sparse)")
     args = ap.parse_args()
 
     import trimesh, time
+    if args.gpu:
+        from smgrasp.width_grasp import use_gpu_solve; use_gpu_solve(True)
     raw = trimesh.load(args.mesh, process=False, force="mesh")
     if args.scale != 1.0:
         raw.apply_scale(args.scale)
