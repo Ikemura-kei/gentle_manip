@@ -859,15 +859,11 @@ def main() -> None:
         raw_init       = _state_to_raw_obs(init_state)
         init_obs_batch = perception.process(raw_init)
 
-        # Object pose for synthesis + priv obs. Rigid: settled orientation (get_quat / read_state).
-        # Soft MPM has no rigid quat / read_state["object_quat"] — the object keeps ~its placement (DR)
-        # orientation, so use object_euler; this feeds BOTH the FEM synthesis and the privileged obs.
-        obj_pos_all = init_state["object_center"].astype(np.float64)   # (N, 3)
-        if hasattr(obj, "get_quat"):
-            obj_quat_all = _np(obj.get_quat()).astype(np.float64)      # (N, 4) wxyz
-        else:
-            qx = Rot.from_euler("xyz", object_euler).as_quat()         # (N,4) xyzw
-            obj_quat_all = np.column_stack([qx[:, 3], qx[:, 0], qx[:, 1], qx[:, 2]]).astype(np.float64)  # wxyz
+        # Object pose (SETTLED) for synthesis + priv obs, straight from read_state: rigid = get_quat,
+        # soft = Kabsch best-fit rotation of the settled particle cloud (NOT the spawn euler, which the
+        # object leaves once it falls/settles under gravity). Same key for both.
+        obj_pos_all  = init_state["object_center"].astype(np.float64)  # (N, 3)
+        obj_quat_all = np.asarray(init_state["object_quat"], np.float64)  # (N, 4) wxyz
 
         # Episode scene-DR vector [scale, bend_deg] for priv_object_dr_params (mirrors SimBackend).
         dr_vec = np.array([float(scene_dr.get("scale", 1.0)),

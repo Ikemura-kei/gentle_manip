@@ -277,11 +277,36 @@ class GenesisWorker:
             state["object_center"] = particle_pos.mean(axis=1).astype(np.float32)   # (B, 3)
             state["von_mises_stress"] = _np(st.von_mises).astype(np.float32)        # (B, n_p)
             state["contact_force"] = None   # rigid-only surrogate; soft bodies use von_mises_stress
+            # Orientation of a DEFORMING body: the object was placed tilted (spawn euler) then FELL and
+            # settled under gravity, so the spawn euler is NOT its orientation. Recover the actual pose
+            # as the best-fit RIGID rotation from the nominal particles to the current ones (Kabsch —
+            # the particles keep their correspondence), i.e. the rigid part of the deformation. (B,4) wxyz.
+            base = np.asarray(self.handle.object_base_particles[0],
+                              np.float32).reshape(self.num_envs, -1, 3)
+            state["object_quat"] = _kabsch_quat_wxyz(base, particle_pos).astype(np.float32)
 
         state["depth_images"] = depth_images
         state["camera_intrinsics"] = intrinsics
         state["camera_extrinsics"] = extrinsics
         return state
+
+
+def _kabsch_quat_wxyz(P: np.ndarray, Q: np.ndarray) -> np.ndarray:
+    """Best-fit rigid rotation mapping nominal particles P → current particles Q, per env (the MPM
+    particles keep their index correspondence), as wxyz quaternions. This is the overall orientation of
+    a deforming soft body — used because MPM exposes no rigid quaternion and the spawn euler is invalidated
+    once the object falls/settles under gravity. P, Q: (B, n, 3) → (B, 4)."""
+    from scipy.spatial.transform import Rotation as _R
+    Pc = P - P.mean(axis=1, keepdims=True)
+    Qc = Q - Q.mean(axis=1, keepdims=True)
+    H = np.einsum("bni,bnj->bij", Pc, Qc)                       # (B,3,3) cross-covariance
+    U, _, Vt = np.linalg.svd(H)
+    V = np.transpose(Vt, (0, 2, 1)); Ut = np.transpose(U, (0, 2, 1))
+    d = np.sign(np.linalg.det(V @ Ut))                          # reflection guard
+    D = np.tile(np.eye(3), (len(P), 1, 1)); D[:, 2, 2] = d
+    R = V @ D @ Ut                                              # (B,3,3), det=+1
+    q = _R.from_matrix(R).as_quat()                             # (B,4) xyzw
+    return np.concatenate([q[:, 3:4], q[:, :3]], axis=1)        # -> wxyz
 
 
 def _gripper_object_contact_force(robot_entity, object_entity) -> np.ndarray:
