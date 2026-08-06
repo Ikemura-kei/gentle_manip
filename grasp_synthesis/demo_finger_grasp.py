@@ -83,7 +83,7 @@ def main():
     ap.add_argument("--E", type=float, default=3e5)
     ap.add_argument("--density", type=float, default=1000.0)
     ap.add_argument("--mu", type=float, default=0.7)
-    ap.add_argument("--maxfevals", type=int, default=300)
+    ap.add_argument("--maxfevals", type=int, default=1000, help="CMA budget (round 1); +~150 for round-2 refine")
     ap.add_argument("--n-starts", type=int, default=6)
     ap.add_argument("--obj-com", type=float, nargs=3, default=[0.45, 0.0, 0.02],
                     help="assumed object world COM (stands in for sim object_center)")
