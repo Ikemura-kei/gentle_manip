@@ -99,13 +99,14 @@ def main():
                          "grasp preference — that's a contact-area/alignment metric limitation)")
     ap.add_argument("--opt-fps", type=float, default=6.0, help="FPS for the optimization-progress video")
     ap.add_argument("--no-video", action="store_true", help="skip the optimization video (faster)")
+    ap.add_argument("--tag", default="", help="suffix for output filenames (e.g. an orientation label)")
     ap.add_argument("--gpu", action="store_true")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default=str(Path(__file__).resolve().parent / "viz_out/finger_grasp"))
     args = ap.parse_args()
 
     outdir = Path(args.out); outdir.mkdir(parents=True, exist_ok=True)
-    stem = Path(args.mesh).stem
+    stem = Path(args.mesh).stem + (f"_{args.tag}" if args.tag else "")
 
     # ── build FEM object + finger pad geometry ──
     raw = trimesh.load(args.mesh, force="mesh")
@@ -118,13 +119,14 @@ def main():
     pad_geo = fg.finger_pad_geometry(LEFT_FINGER, RIGHT_FINGER)
     print(f"[build] {stem}: {len(obj.tets)} tets, ndof={obj.fem.ndof}, gpu={wg.USE_GPU_SOLVE}")
 
-    obj_com = np.asarray(args.obj_com, float)
-    # rest the object ON the table (its lowest point at table_z) — a realistic pose for inspecting table
-    # clearance. obj.verts are COM-centred, so the resting COM height = table_z − min local z.
-    if not args.no_rest:
-        obj_com[2] = args.table_z - float(obj.verts[:, 2].min())
     obj_quat = Rot.from_euler("xyz", args.obj_euler).as_quat()   # xyzw
     obj_quat_wxyz = np.array([obj_quat[3], obj_quat[0], obj_quat[1], obj_quat[2]])
+    R_obj = Rot.from_quat(obj_quat)
+    obj_com = np.asarray(args.obj_com, float)
+    # rest the object ON the table in ITS orientation: drop it so its lowest ROTATED point is at table_z
+    # (must use the rotated verts — a tilted object rests on a different point than the upright one).
+    if not args.no_rest:
+        obj_com[2] = args.table_z - float(R_obj.apply(obj.verts)[:, 2].min())
     obj_size = float((obj.verts.max(0) - obj.verts.min(0)).max())
 
     # ── stage 1: convention check ──
