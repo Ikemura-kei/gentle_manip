@@ -52,6 +52,7 @@ from synth_utils import (  # noqa: E402
     FINGER_TO_TCP_Z,
 )
 from smgrasp import finger_grasp as fg  # noqa: E402  (v3: FEM gentleness synthesis replaces the SDF cost)
+from smgrasp import finger_viz          # noqa: E402  (grasp-pose viz paired with each execution video)
 from gentle_manip.actions.action_config import ActionConfig
 from gentle_manip.experiment import Experiment
 from gentle_manip.tasks.single_lift import SingleLiftTask
@@ -698,6 +699,10 @@ def main() -> None:
     p.add_argument("--grasp-E",           type=float, default=3e5,  help="object Young's modulus (Pa)")
     p.add_argument("--grasp-density",     type=float, default=1000.0, help="object density (kg/m^3)")
     p.add_argument("--grasp-mu",          type=float, default=0.7,  help="pad-object friction coefficient")
+    p.add_argument("--grasp-accel",       type=float, default=9.81,
+                   help="lift-acceleration safety margin (m/s^2): holdability needs 2*mu*grip >= m*(g+accel), "
+                        "so a positive value picks a FIRMER holdable width that survives the dynamic lift "
+                        "(0 = gentlest quasi-static grasp, which tends to slip during the lift)")
     p.add_argument("--table-z",           type=float, default=0.0,  help="table surface height (world z, m)")
     p.add_argument("--grasp-voxel-div",   type=int,   default=14,   help="FEM remesh resolution (keep ndof<~5k)")
     p.add_argument("--grasp-target-tets", type=int,   default=1500, help="FEM target tet count")
@@ -868,16 +873,30 @@ def main() -> None:
             fem_mesh = actual_mesh
             print(f"  FEM: {fem_meta['tets']} tets, ndof={fem_meta['ndof']}, gpu={fem_meta['gpu']}")
         all_best_x = []
+        all_grasp  = []                                          # per-env synthesis dict (for the grasp-pose viz)
         for i in range(n):
             cma_seed = int(cma_seed_rng.integers(1, 2**31 - 1))
             r = fg.synthesize_grasp(fem_obj, fem_pad_geo, obj_pos_all[i], obj_quat_all[i],
                                     E=args.grasp_E, density=args.grasp_density, mu=args.grasp_mu,
                                     table_z=args.table_z, maxfevals=args.maxfevals,
-                                    n_starts=args.grasp_n_starts, seed=cma_seed)
+                                    n_starts=args.grasp_n_starts, seed=cma_seed, accel=args.grasp_accel)
             best_x = r["x"]
-            all_best_x.append(best_x)
+            all_best_x.append(best_x); all_grasp.append(r)
             print(f"  Env {i}: stress={r['stress_top10']:.0f}Pa grip={r['grip']:.3f}N align={r['align']:.3f}"
                   f"  tcp={best_x[:3].round(4)}  w={best_x[6]*1e3:.1f} mm")
+
+        def _save_grasp_pose(vid_dir, stem, i):
+            """Render the METRIC's predicted grasp (pose + expected stress/grip/align) next to env i's
+            execution video — captures this batch's FEM + per-env grasp. Non-fatal on failure."""
+            try:
+                g = all_grasp[i]
+                finger_viz.render_grasp_pose(
+                    fem_obj, fem_pad_geo, all_best_x[i], obj_pos_all[i], obj_quat_all[i], args.table_z,
+                    str(Path(vid_dir) / f"{stem}_grasp.png"), E=args.grasp_E,
+                    stress=g.get("stress_top10"), grip=g.get("grip"), align=g.get("align"),
+                    width_face=g.get("width_face"), label=stem)
+            except Exception as e:  # viz must never break a collection run
+                print(f"    (grasp viz failed: {e})")
 
         # ── Execute scripted trajectory + collect data ──
         print(f"  Executing …")
@@ -897,6 +916,7 @@ def main() -> None:
                     vid_dir.mkdir(exist_ok=True)
                     vid_path = vid_dir / f"fail{total_failed:04d}_b{batch_idx}_env{i}.mp4"
                     imageio.mimwrite(str(vid_path), frame_bufs[i], fps=round(rate_hz), quality=8)
+                    _save_grasp_pose(vid_dir, vid_path.stem, i)
                     print(f"    fail video → {vid_path.name}")
                 if not args.keep_failures:
                     continue
@@ -920,6 +940,7 @@ def main() -> None:
                 vid_dir.mkdir(exist_ok=True)
                 vid_path = vid_dir / f"ep{total_saved:04d}_env{i}_success.mp4"
                 imageio.mimwrite(str(vid_path), frame_bufs[i], fps=round(rate_hz), quality=8)
+                _save_grasp_pose(vid_dir, vid_path.stem, i)
                 print(f"    video → {vid_path.name}")
 
             if len(shard_buf) >= args.shard_size:
