@@ -281,9 +281,12 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
             feasible.append((np.asarray(x, float).copy(), res["score"]))
             if res["score"] > best["score"]:
                 best.update(score=res["score"], x=np.asarray(x, float).copy(), res=res)
-        if record_history and res["status"] == "ok" and is_real_grasp(res["score"]):
-            history.append({"eval": n_eval[0], "score": res["score"], "x": np.asarray(x, float).copy(),
-                            "res": res, "round": cur_round[0], "best": res["score"] >= best["score"]})
+        if record_history:                                       # record EVERY candidate (the search process)
+            st = res.get("stress_top10")
+            history.append({"eval": n_eval[0], "x": np.asarray(x, float).copy(), "round": cur_round[0],
+                            "status": res["status"], "holdable": bool(res.get("holdable", False)),
+                            "score": res["score"], "best": res["score"] >= best["score"],
+                            "stress": float(st) if (st is not None and np.isfinite(st)) else None})
         return -res["score"]
 
     # tz range mirrors the collector's _synth_bounds: this grasp-frame "TCP" sits LOW (the finger pad is

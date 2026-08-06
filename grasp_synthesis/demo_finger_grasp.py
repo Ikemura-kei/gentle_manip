@@ -306,45 +306,55 @@ def render_grasp_rotation(obj, sigma_voigt, x_tcp, pad_geo, obj_com, obj_quat_wx
 
 
 def render_opt_video(obj, history, pad_geo, obj_com, obj_quat_wxyz, table_z, E, out, fps=6):
-    """Optimization video showing the ACTUAL search TRAJECTORY (the candidate poses tried), labelled by
-    STAGE — Round 1 (7-DoF CMA search: position/tilt/yaw/width all vary) then Round 2 (1-D width refine
-    at the best poses). Samples the feasible candidates chronologically (not just best-so-far), so the
-    full 7-DoF exploration is visible; ★ marks each new best."""
+    """Optimization-PROCESS video: EVERY candidate the search tried (subsampled), in order — not just
+    best-so-far. Feasible grasps are coloured by von Mises stress; infeasible attempts (jaw miss / table
+    hit / can't-hold) are drawn GREY with the reason, so you see the gripper actually exploring poses.
+    Labelled by STAGE (Round 1: 7-DoF CMA search / Round 2: width refine); ★ marks each new best."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import imageio.v2 as imageio
-    from smgrasp.viz import _face_colors
+    from smgrasp.viz import boundary_faces, von_mises
 
     obj_com = np.asarray(obj_com, float)
     q = np.asarray(obj_quat_wxyz, float)
     Rinv = Rot.from_quat([q[1], q[2], q[3], q[0]]).inv()
     tsegs = _table_grid_local(obj_com, table_z, Rinv)
+    tri, parent = boundary_faces(obj.tets)                       # object geometry is fixed → compute once
+    otris = obj.verts[tri]
+    lim = 1.15 * max(np.abs(otris).max(), 0.02)
+    cmap = plt.get_cmap("coolwarm")
+    GREY = np.tile([0.72, 0.76, 0.82, 1.0], (len(otris), 1))     # infeasible-attempt object colour
 
     r1 = [h for h in history if h.get("round", 1) == 1]           # Round 1: 7-DoF CMA search
     r2 = [h for h in history if h.get("round", 1) == 2]           # Round 2: width refine
     def _sample(hs, n):
         return hs if len(hs) <= n else [hs[i] for i in np.linspace(0, len(hs) - 1, n).astype(int)]
-    frames = _sample(r1, 40) + _sample(r2, 12)                   # trajectory: mostly R1, a taste of R2
+    frames = _sample(r1, 44) + _sample(r2, 10)                  # every candidate, subsampled, in order
 
-    lim, imgs, best_st = None, [], np.inf
+    imgs, best_st = [], np.inf
     for h in frames:
-        x, ev, rnd = h["x"], h["eval"], h.get("round", 1)
-        stress = h["res"].get("stress_top10")
-        if h.get("best"):
-            best_st = min(best_st, stress if stress is not None else best_st)
-        sig = _grasp_stress_voigt(obj, x, pad_geo, obj_com, obj_quat_wxyz, E)
-        if sig is None:
-            continue
-        otris, ocolors, _ = _face_colors(obj, sig, "coolwarm")
+        x, ev, rnd, status = h["x"], h["eval"], h.get("round", 1), h.get("status", "?")
+        feasible = h.get("holdable", False)
+        if feasible:
+            sig = _grasp_stress_voigt(obj, x, pad_geo, obj_com, obj_quat_wxyz, E)
+            if sig is not None:
+                fc = von_mises(sig)[parent]
+                ocolors = cmap((fc - fc.min()) / (np.percentile(fc, 99) - fc.min() + 1e-9))
+            else:
+                feasible = False
+        if not feasible:
+            ocolors = GREY
         ltris, rtris = _finger_local_tris(x, obj_com, Rinv)
-        if lim is None:
-            lim = 1.15 * max(np.abs(otris).max(), 0.02)
         stage = "Round 1: 7-DoF CMA search" if rnd == 1 else "Round 2: width refine"
-        mark = "  ★ new best" if h.get("best") else ""
         yaw = np.degrees(x[5]); tilt = np.degrees(abs(x[3] - np.pi)) + np.degrees(abs(x[4]))
-        title = (f"{stage}{mark}\neval {ev}   yaw {yaw:+.0f}°  tilt {tilt:.0f}°  w {x[6]*1e3:.0f}mm"
-                 f"\nstress {stress:.0f} Pa   best {best_st:.0f} Pa")
+        if h.get("holdable"):
+            if h.get("best"):
+                best_st = min(best_st, h["stress"] if h["stress"] is not None else best_st)
+            state = f"stress {h['stress']:.0f} Pa   best {best_st:.0f} Pa" + ("   ★ new best" if h.get("best") else "")
+        else:
+            state = f"infeasible: {status}"
+        title = f"{stage}\neval {ev}   yaw {yaw:+.0f}°  tilt {tilt:.0f}°  w {x[6]*1e3:.0f}mm\n{state}"
         fig = plt.figure(figsize=(5.4, 5.6)); ax = fig.add_subplot(111, projection="3d")
         _add_scene(ax, otris, ocolors, ltris, rtris, tsegs, lim, 22, -55, title)
         fig.tight_layout(); fig.canvas.draw()
