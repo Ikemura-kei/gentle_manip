@@ -245,7 +245,7 @@ def _down_quat_euler(yaw: float) -> np.ndarray:
 
 def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                       table_z: float = 0.0, ground_buf: float = 0.0035, obj_size: float = 0.03,
-                      z_lift=(0.02, 0.12), sigma: float = 0.15, maxfevals: int = 400,
+                      bbox_margin: float = 1.2, z_lift=(0.02, 0.12), sigma: float = 0.15, maxfevals: int = 400,
                       n_starts: int = 6, g: float = 9.81, accel: float = 0.0, max_indent: float = 0.01,
                       obj_sdf=None, pen_tol: float = 0.003, table_tol: float = 0.002,
                       w_align=None, w_peak=None, w_area: float = 0.0, refine: bool = True,
@@ -289,14 +289,20 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                             "stress": float(st) if (st is not None and np.isfinite(st)) else None})
         return -res["score"]
 
-    # tz range mirrors the collector's _synth_bounds: this grasp-frame "TCP" sits LOW (the finger pad is
-    # ~z_center down the long finger), so tz near/below the object is normal and executable — the real
-    # robot maps it through its own TCP offset. The per-candidate table filter enforces exact clearance.
+    # xy search range = bbox_margin × the object's (rotated) world bounding box, centred on the COM.
+    # Per-axis and object-sized (vs a fixed multiple of the MAX extent) → the TCP can reach anywhere over
+    # the object with a little margin, but far fewer samples fly off and miss (most of the ~95% infeasible
+    # were distant xy positions). tz range mirrors the collector's _synth_bounds: this grasp-frame "TCP"
+    # sits LOW (the finger pad is ~z_center down the long finger), so tz near/below the object is normal
+    # and executable. The per-candidate table filter enforces exact table clearance.
+    qw = np.asarray(obj_quat_wxyz, float)
+    vw_xy = Rot.from_quat([qw[1], qw[2], qw[3], qw[0]]).apply(obj.verts)[:, :2]   # world-frame verts (COM-rel)
+    half_xy = np.maximum(0.5 * bbox_margin * (vw_xy.max(0) - vw_xy.min(0)), 0.01)  # ≥1cm floor
     tz_lo = com[2] + FINGER_TO_TCP_Z - 0.04
     tz_hi = com[2] + z_lift[1]
-    lb = [com[0] - 1.5 * obj_size, com[1] - 1.5 * obj_size, tz_lo,
+    lb = [com[0] - half_xy[0], com[1] - half_xy[1], tz_lo,
           np.pi - np.pi / 2, -0.2 * np.pi, -np.pi, 0.008]
-    ub = [com[0] + 1.5 * obj_size, com[1] + 1.5 * obj_size, tz_hi,
+    ub = [com[0] + half_xy[0], com[1] + half_xy[1], tz_hi,
           np.pi + np.pi / 2,  0.2 * np.pi,  np.pi, 0.079]
 
     # object world→local rotation, for measuring the cross-section along each seed's closing axis
