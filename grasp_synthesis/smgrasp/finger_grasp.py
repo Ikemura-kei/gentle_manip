@@ -248,7 +248,7 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                       bbox_margin: float = 1.2, z_lift=(0.02, 0.12), sigma: float = 0.15, maxfevals: int = 400,
                       n_starts: int = 6, g: float = 9.81, accel: float = 0.0, max_indent: float = 0.01,
                       obj_sdf=None, pen_tol: float = 0.003, table_tol: float = 0.002,
-                      w_align=None, w_peak=None, w_area: float = 0.0, refine: bool = True,
+                      w_align=None, w_peak: float = 0.0, w_area: float = 0.0, refine: bool = True,
                       refine_scan: int = 25, seed: int = 0, verbose: bool = False,
                       record_history: bool = False) -> dict:
     """CMA-ES over the 7-DOF TCP grasp maximizing the FEM gentleness score, with real finger geometry +

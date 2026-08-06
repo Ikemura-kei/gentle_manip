@@ -94,9 +94,9 @@ def main():
     ap.add_argument("--no-prepare", action="store_true", help="skip voxel-remesh (for clean sharp meshes, e.g. cube)")
     ap.add_argument("--pen-tol", type=float, default=0.003, help="allowed finger-into-object penetration (m)")
     ap.add_argument("--table-tol", type=float, default=0.002, help="allowed table scratch below table_z (m)")
-    ap.add_argument("--w-peak", type=float, default=0.3,
-                    help="peak-stress penalty weight (tunable; note it does NOT resolve the sharp-edge "
-                         "grasp preference — that's a contact-area/alignment metric limitation)")
+    ap.add_argument("--w-peak", type=float, default=0.0,
+                    help="peak-stress penalty weight (default 0: it can prefer a HARDER low-peak grasp; "
+                         "gentleness is better served by -stress_top10 alone, which tracks grip/indent)")
     ap.add_argument("--opt-fps", type=float, default=6.0, help="FPS for the optimization-progress video")
     ap.add_argument("--no-video", action="store_true", help="skip the optimization video (faster)")
     ap.add_argument("--tag", default="", help="suffix for output filenames (e.g. an orientation label)")
