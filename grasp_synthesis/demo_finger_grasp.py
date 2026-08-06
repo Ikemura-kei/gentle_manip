@@ -91,8 +91,14 @@ def main():
                     help="assumed object world orientation (euler xyz, rad)")
     ap.add_argument("--table-z", type=float, default=0.0)
     ap.add_argument("--no-rest", action="store_true", help="use --obj-com z as-is instead of resting on table")
+    ap.add_argument("--no-prepare", action="store_true", help="skip voxel-remesh (for clean sharp meshes, e.g. cube)")
     ap.add_argument("--pen-tol", type=float, default=0.003, help="allowed finger-into-object penetration (m)")
     ap.add_argument("--table-tol", type=float, default=0.002, help="allowed table scratch below table_z (m)")
+    ap.add_argument("--w-peak", type=float, default=0.3,
+                    help="peak-stress penalty weight (tunable; note it does NOT resolve the sharp-edge "
+                         "grasp preference — that's a contact-area/alignment metric limitation)")
+    ap.add_argument("--opt-fps", type=float, default=6.0, help="FPS for the optimization-progress video")
+    ap.add_argument("--no-video", action="store_true", help="skip the optimization video (faster)")
     ap.add_argument("--gpu", action="store_true")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default=str(Path(__file__).resolve().parent / "viz_out/finger_grasp"))
@@ -103,7 +109,9 @@ def main():
 
     # ── build FEM object + finger pad geometry ──
     raw = trimesh.load(args.mesh, force="mesh")
-    mesh = prepare_mesh(raw, voxel_div=args.voxel_div, force_remesh=True)
+    # --no-prepare skips the watertight voxel-remesh (which ROUNDS sharp edges) — use it for a clean
+    # analytic mesh like a sharp cube; keep prepare for scanned meshes (mushroom, raspberry).
+    mesh = raw if args.no_prepare else prepare_mesh(raw, voxel_div=args.voxel_div, force_remesh=True)
     obj = build_elastic_object(mesh, switches=tet_switches(mesh, target_tets=args.target_tets))
     if args.gpu:
         wg.use_gpu_solve(obj.fem.ndof <= wg.GPU_MAX_NDOF)
@@ -125,91 +133,182 @@ def main():
     print(rep)
     print(f"  --> {'PASS' if ok else 'FAIL'} (center & width match to < 1 mm)")
 
+    # verify the object actually rests ON the table (min world-z == table_z), so any apparent
+    # ground penetration in the render is a viewing artifact, not a real placement bug.
+    obj_minz = float((Rot.from_quat(obj_quat).apply(obj.verts) + obj_com)[:, 2].min())
+    print(f"\n  object rests: min world-z = {obj_minz*1e3:.2f} mm  (table_z = {args.table_z*1e3:.0f} mm)")
+
     # ── stage 2: synthesis ──
     print("\n=== SYNTHESIS (7-DOF TCP grasp, real finger + table) ===")
-    import time
+    import time, json
     t0 = time.time()
     obj_sdf = fg.build_object_sdf(obj)
     res = fg.plan_finger_grasp(obj, obj_com=obj_com, obj_quat_wxyz=obj_quat_wxyz, pad_geo=pad_geo,
                                E=args.E, density=args.density, mu=args.mu, table_z=args.table_z,
                                obj_size=obj_size, maxfevals=args.maxfevals, n_starts=args.n_starts,
                                obj_sdf=obj_sdf, pen_tol=args.pen_tol, table_tol=args.table_tol,
-                               seed=args.seed)
+                               w_peak=args.w_peak, seed=args.seed, record_history=not args.no_video)
     dt = time.time() - t0
     x = res["x"]
     if x is None:
         print("  no feasible grasp found"); return
-    print(f"  plan_time = {dt:.1f}s  evals = {res['evals']}  ({1e3*dt/max(res['evals'],1):.0f} ms/eval)")
-    print(f"  TCP pos   = {np.round(x[:3], 4)} m")
-    print(f"  TCP euler = {np.round(np.degrees(x[3:6]), 1)} deg")
-    print(f"  width cmd = {x[6]*1e3:.1f} mm   width_face = {res['width_face']*1e3:.1f} mm")
-    print(f"  stress_top10 = {res['stress_top10']:.0f} Pa   grip = {res['grip']:.3f} N   align = {res['align']:.3f}")
-    print(f"  min finger world-z = {fg.finger_min_world_z(x, pad_geo)*1e3:.1f} mm  (table_z={args.table_z*1e3:.0f} mm)")
     Lw, Rw = fg.finger_world_pts(x, pad_geo)
     Rinv0 = Rot.from_quat([obj_quat_wxyz[1], obj_quat_wxyz[2], obj_quat_wxyz[3], obj_quat_wxyz[0]]).inv()
     sd = obj_sdf(Rinv0.apply(np.vstack([Lw, Rw]) - obj_com))
-    print(f"  max finger penetration into object = {max(0.0, float(-sd.min()))*1e3:.1f} mm "
-          f"(tol {args.pen_tol*1e3:.0f} mm);  table scratch = {max(0.0, args.table_z - fg.finger_min_world_z(x, pad_geo))*1e3:.1f} mm (tol {args.table_tol*1e3:.0f} mm)")
+    max_pen = max(0.0, float(-sd.min()))
+    ms_per = 1e3 * dt / max(res["evals"], 1)
+    print(f"  plan_time = {dt:.1f}s  evals = {res['evals']}  ({ms_per:.0f} ms/eval)  w_peak={args.w_peak}")
+    print(f"  TCP pos   = {np.round(x[:3], 4)} m   euler = {np.round(np.degrees(x[3:6]), 1)} deg")
+    print(f"  width cmd = {x[6]*1e3:.1f} mm   width_face = {res['width_face']*1e3:.1f} mm")
+    print(f"  stress_top10 = {res['stress_top10']:.0f} Pa   grip = {res['grip']:.3f} N   align = {res['align']:.3f}")
+    print(f"  max finger penetration = {max_pen*1e3:.1f} mm (tol {args.pen_tol*1e3:.0f});  "
+          f"table scratch = {max(0.0, args.table_z - fg.finger_min_world_z(x, pad_geo))*1e3:.1f} mm (tol {args.table_tol*1e3:.0f})")
 
-    # ── render: object stress field + the actual finger MESHES + table, from several angles ──
-    center, axis, u1, u2, wface = fg.tcp_to_local_grasp(x, obj_com, obj_quat_wxyz, pad_geo)
-    half_uv = (pad_geo["half_u1"], pad_geo["half_u2"])
-    dl, dr, status, _ = fg.indent_from_width(obj, center, axis, pad_half=max(half_uv), width=wface,
-                                             u1=u1, u2=u2, half_uv=half_uv)
-    prim = wg.width_grasp_stress(obj, center, axis, pad_half=max(half_uv), delta_left=dl, delta_right=dr,
-                                 u1=u1, u2=u2, half_uv=half_uv)
+    # ── profiling + result JSON ──
+    rj = {"name": stem, "tets": len(obj.tets), "ndof": int(obj.fem.ndof), "gpu": bool(wg.USE_GPU_SOLVE),
+          "w_peak": args.w_peak, "maxfevals": args.maxfevals, "n_starts": args.n_starts,
+          "profiling": {"plan_time_s": round(dt, 2), "evals": res["evals"], "ms_per_eval": round(ms_per, 1)},
+          "result": {"width_mm": round(x[6]*1e3, 2), "width_face_mm": round(res["width_face"]*1e3, 2),
+                     "stress_top10_Pa": round(float(res["stress_top10"]), 1), "grip_N": round(float(res["grip"]), 4),
+                     "align": round(float(res["align"]), 4), "max_pen_mm": round(max_pen*1e3, 2),
+                     "tcp_pos_m": [round(float(v), 4) for v in x[:3]],
+                     "tcp_euler_deg": [round(float(v), 1) for v in np.degrees(x[3:6])]}}
+    json.dump(rj, open(outdir / f"{stem}_result.json", "w"), indent=1)
+
+    # ── render: final grasp (4 views) + optimization-progress video ──
     png = str(outdir / f"{stem}_finger_grasp.png")
-    render_grasp_scene(obj, args.E * prim["sigma1"], x, pad_geo, obj_com, obj_quat_wxyz, args.table_z, png)
-    print(f"\n  rendered -> {png}")
+    render_grasp_scene(obj, _grasp_stress_voigt(obj, x, pad_geo, obj_com, obj_quat_wxyz, args.E),
+                       x, pad_geo, obj_com, obj_quat_wxyz, args.table_z, png)
+    print(f"  rendered -> {png}  +  {stem}_result.json")
+    if not args.no_video and res.get("history"):
+        vid = str(outdir / f"{stem}_finger_opt.mp4")
+        render_opt_video(obj, res["history"], pad_geo, obj_com, obj_quat_wxyz, args.table_z, args.E,
+                         vid, fps=args.opt_fps)
+        print(f"  opt video -> {vid}")
+
+
+_FINGER_CACHE = {}
+
+
+def _finger_meshes():
+    if not _FINGER_CACHE:
+        _FINGER_CACHE["L"] = trimesh.load(LEFT_FINGER, force="mesh")
+        _FINGER_CACHE["R"] = trimesh.load(RIGHT_FINGER, force="mesh")
+    return _FINGER_CACHE["L"], _FINGER_CACHE["R"]
+
+
+def _finger_local_tris(x_tcp, obj_com, Rinv):
+    """The two finger meshes at TCP grasp x_tcp, as triangle arrays in the object-local frame."""
+    L, Rm = _finger_meshes()
+    R = Rot.from_euler("xyz", np.asarray(x_tcp[3:6], float)); w = float(x_tcp[6]); z = fg._z_off(w)
+    tcp = np.asarray(x_tcp[:3], float)
+    tL = np.array([0.0,  (w / 2 + fg.FINGER_GRIP_OFF), z]); tR = np.array([0.0, -(w / 2 + fg.FINGER_GRIP_OFF), z])
+    Ll = Rinv.apply(R.apply(np.asarray(L.vertices, float) + tL) + tcp - obj_com)
+    Rl = Rinv.apply(R.apply(np.asarray(Rm.vertices, float) + tR) + tcp - obj_com)
+    return Ll[L.faces], Rl[Rm.faces]
+
+
+def _table_grid_local(obj_com, table_z, Rinv, d=0.045, n=9):
+    """Table as a GRID of line segments on the world z=table_z plane, mapped to object-local. A grid
+    reads clearly as a floor and (unlike a filled quad viewed edge-on) never projects as a band across
+    the object — which is what made the resting object look like it penetrated the ground."""
+    xs = np.linspace(obj_com[0] - d, obj_com[0] + d, n); ys = np.linspace(obj_com[1] - d, obj_com[1] + d, n)
+    segs = []
+    for xv in xs:
+        segs.append(Rinv.apply(np.array([[xv, ys[0], table_z], [xv, ys[-1], table_z]]) - obj_com))
+    for yv in ys:
+        segs.append(Rinv.apply(np.array([[xs[0], yv, table_z], [xs[-1], yv, table_z]]) - obj_com))
+    return segs
+
+
+def _grasp_stress_voigt(obj, x_tcp, pad_geo, obj_com, obj_quat_wxyz, E):
+    """von Mises-ready per-tet stress (Voigt, scaled by E) of the grasp at x_tcp — the field to colour."""
+    c, ax, u1, u2, wf = fg.tcp_to_local_grasp(x_tcp, obj_com, obj_quat_wxyz, pad_geo)
+    huv = (pad_geo["half_u1"], pad_geo["half_u2"]); ph = max(huv)
+    dl, dr, st, _ = fg.indent_from_width(obj, c, ax, pad_half=ph, width=wf, u1=u1, u2=u2, half_uv=huv)
+    if st != "ok":
+        return None
+    prim = wg.width_grasp_stress(obj, c, ax, pad_half=ph, delta_left=dl, delta_right=dr, u1=u1, u2=u2, half_uv=huv)
+    return E * prim["sigma1"] if prim["valid"] else None
+
+
+def _add_scene(ax, otris, ocolors, ltris, rtris, tsegs, lim, elev, azim, title):
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection, Line3DCollection
+    ax.add_collection3d(Poly3DCollection(otris, facecolors=ocolors, edgecolors=(0, 0, 0, 0.12), linewidths=0.2))
+    ax.add_collection3d(Poly3DCollection(ltris, facecolors=(0.4, 0.4, 0.45), alpha=0.20, edgecolors="none"))
+    ax.add_collection3d(Poly3DCollection(rtris, facecolors=(0.4, 0.4, 0.45), alpha=0.20, edgecolors="none"))
+    ax.add_collection3d(Line3DCollection(tsegs, colors=[(0.55, 0.4, 0.25, 0.55)], linewidths=0.6))
+    ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim); ax.set_zlim(-lim, lim)
+    ax.set_box_aspect((1, 1, 1)); ax.view_init(elev=elev, azim=azim)
+    ax.set_title(title, fontsize=10)
 
 
 def render_grasp_scene(obj, sigma_voigt, x_tcp, pad_geo, obj_com, obj_quat_wxyz, table_z, out):
     """Multi-angle render: object boundary coloured by von Mises stress + the two REAL finger meshes
-    (translucent) + the table plane, all in the object COM-local frame. For visual inspection of the
-    grasp geometry (straddle, table clearance, contact placement)."""
+    (translucent) + the table grid, in the object COM-local frame. For visual inspection of the grasp
+    geometry (straddle, table clearance, contact placement)."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
     from smgrasp.viz import _face_colors
 
     obj_com = np.asarray(obj_com, float)
     q = np.asarray(obj_quat_wxyz, float)
-    Rinv = Rot.from_quat([q[1], q[2], q[3], q[0]]).inv()          # world → object-local
-
+    Rinv = Rot.from_quat([q[1], q[2], q[3], q[0]]).inv()
     otris, ocolors, _ = _face_colors(obj, sigma_voigt, "coolwarm")
-
-    # finger meshes → world → object-local (full vertices, so we draw the solid finger, not samples)
-    L = trimesh.load(LEFT_FINGER, force="mesh"); Rm = trimesh.load(RIGHT_FINGER, force="mesh")
-    R = Rot.from_euler("xyz", np.asarray(x_tcp[3:6], float)); w = float(x_tcp[6]); z = fg._z_off(w)
-    tcp = np.asarray(x_tcp[:3], float)
-    tL = np.array([0.0,  (w / 2 + fg.FINGER_GRIP_OFF), z]); tR = np.array([0.0, -(w / 2 + fg.FINGER_GRIP_OFF), z])
-    Lw = R.apply(np.asarray(L.vertices, float) + tL) + tcp
-    Rw = R.apply(np.asarray(Rm.vertices, float) + tR) + tcp
-    Ll = Rinv.apply(Lw - obj_com); Rl = Rinv.apply(Rw - obj_com)
-    ltris, rtris = Ll[L.faces], Rl[Rm.faces]
-
-    # table quad (world z=table_z) → local, spanning a neighbourhood of the object
-    d = 0.05
-    tw = np.array([[obj_com[0] - d, obj_com[1] - d, table_z], [obj_com[0] + d, obj_com[1] - d, table_z],
-                   [obj_com[0] + d, obj_com[1] + d, table_z], [obj_com[0] - d, obj_com[1] + d, table_z]])
-    tl = Rinv.apply(tw - obj_com)
+    ltris, rtris = _finger_local_tris(x_tcp, obj_com, Rinv)
+    tsegs = _table_grid_local(obj_com, table_z, Rinv)
 
     lim = 1.15 * max(np.abs(otris).max(), 0.02)
-    views = [("front (−y)", 8, -90), ("side (+x)", 8, 0), ("top", 88, -90), ("iso", 24, -55)]
+    views = [("front (−y)", 14, -90), ("side (+x)", 14, 0), ("top", 88, -90), ("iso", 24, -55)]
     fig = plt.figure(figsize=(13, 11))
     for k, (name, elev, azim) in enumerate(views):
         ax = fig.add_subplot(2, 2, k + 1, projection="3d")
-        ax.add_collection3d(Poly3DCollection(otris, facecolors=ocolors, edgecolors=(0, 0, 0, 0.12), linewidths=0.2))
-        ax.add_collection3d(Poly3DCollection(ltris, facecolors=(0.4, 0.4, 0.45), alpha=0.22, edgecolors="none"))
-        ax.add_collection3d(Poly3DCollection(rtris, facecolors=(0.4, 0.4, 0.45), alpha=0.22, edgecolors="none"))
-        ax.add_collection3d(Poly3DCollection([tl], facecolors=(0.75, 0.6, 0.4), alpha=0.28, edgecolors="none"))
-        ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim); ax.set_zlim(-lim, lim)
-        ax.set_box_aspect((1, 1, 1)); ax.view_init(elev=elev, azim=azim)
-        ax.set_title(name, fontsize=10); ax.set_xlabel("x"); ax.set_ylabel("y")
+        _add_scene(ax, otris, ocolors, ltris, rtris, tsegs, lim, elev, azim, name)
+        ax.set_xlabel("x"); ax.set_ylabel("y")
     fig.suptitle(f"{Path(out).stem}: von Mises stress + finger meshes + table", fontsize=12)
     fig.tight_layout()
     fig.savefig(out, dpi=110); plt.close(fig)
+
+
+def render_opt_video(obj, history, pad_geo, obj_com, obj_quat_wxyz, table_z, E, out, fps=6):
+    """Optimization-progress video: the BEST-SO-FAR grasp as the search improves it (one frame each time
+    the score improves), iso view, object stress + fingers + table. Shows how the planner converges."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import imageio.v2 as imageio
+    from smgrasp.viz import _face_colors
+
+    obj_com = np.asarray(obj_com, float)
+    q = np.asarray(obj_quat_wxyz, float)
+    Rinv = Rot.from_quat([q[1], q[2], q[3], q[0]]).inv()
+
+    best = -np.inf; frames = []                                   # best-so-far progression
+    for h in history:
+        if h["score"] > best + 1e-9:
+            best = h["score"]; frames.append((h["eval"], h["res"].get("stress_top10"), h["x"]))
+    if len(frames) > 40:
+        frames = [frames[i] for i in np.linspace(0, len(frames) - 1, 40).astype(int)]
+
+    tsegs = _table_grid_local(obj_com, table_z, Rinv)
+    lim, imgs = None, []
+    for ev, stress, x in frames:
+        sig = _grasp_stress_voigt(obj, x, pad_geo, obj_com, obj_quat_wxyz, E)
+        if sig is None:
+            continue
+        otris, ocolors, _ = _face_colors(obj, sig, "coolwarm")
+        ltris, rtris = _finger_local_tris(x, obj_com, Rinv)
+        if lim is None:
+            lim = 1.15 * max(np.abs(otris).max(), 0.02)
+        fig = plt.figure(figsize=(5.2, 5.2)); ax = fig.add_subplot(111, projection="3d")
+        _add_scene(ax, otris, ocolors, ltris, rtris, tsegs, lim, 22, -55,
+                   f"eval {ev}   stress_top10 = {stress:.0f} Pa")
+        fig.tight_layout(); fig.canvas.draw()
+        imgs.append(np.asarray(fig.canvas.buffer_rgba())[..., :3].copy()); plt.close(fig)
+    if imgs:
+        imgs += [imgs[-1]] * int(max(fps, 1) * 1.5)              # hold the final grasp ~1.5 s
+        imageio.mimsave(out, imgs, fps=fps)
 
 
 if __name__ == "__main__":
