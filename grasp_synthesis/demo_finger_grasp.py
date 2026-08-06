@@ -177,16 +177,20 @@ def main():
                      "tcp_euler_deg": [round(float(v), 1) for v in np.degrees(x[3:6])]}}
     json.dump(rj, open(outdir / f"{stem}_result.json", "w"), indent=1)
 
-    # ── render: final grasp (4 views) + optimization-progress video ──
+    # ── render: final grasp (4 views PNG + turntable video) + optimization-progress video ──
+    sig = _grasp_stress_voigt(obj, x, pad_geo, obj_com, obj_quat_wxyz, args.E)
     png = str(outdir / f"{stem}_finger_grasp.png")
-    render_grasp_scene(obj, _grasp_stress_voigt(obj, x, pad_geo, obj_com, obj_quat_wxyz, args.E),
-                       x, pad_geo, obj_com, obj_quat_wxyz, args.table_z, png)
+    render_grasp_scene(obj, sig, x, pad_geo, obj_com, obj_quat_wxyz, args.table_z, png)
     print(f"  rendered -> {png}  +  {stem}_result.json")
-    if not args.no_video and res.get("history"):
-        vid = str(outdir / f"{stem}_finger_opt.mp4")
-        render_opt_video(obj, res["history"], pad_geo, obj_com, obj_quat_wxyz, args.table_z, args.E,
-                         vid, fps=args.opt_fps)
-        print(f"  opt video -> {vid}")
+    if not args.no_video:
+        rot = str(outdir / f"{stem}_finger_final.mp4")
+        render_grasp_rotation(obj, sig, x, pad_geo, obj_com, obj_quat_wxyz, args.table_z, rot)
+        print(f"  final-grasp turntable -> {rot}")
+        if res.get("history"):
+            vid = str(outdir / f"{stem}_finger_opt.mp4")
+            render_opt_video(obj, res["history"], pad_geo, obj_com, obj_quat_wxyz, args.table_z, args.E,
+                             vid, fps=args.opt_fps)
+            print(f"  opt video -> {vid}")
 
 
 _FINGER_CACHE = {}
@@ -271,6 +275,34 @@ def render_grasp_scene(obj, sigma_voigt, x_tcp, pad_geo, obj_com, obj_quat_wxyz,
     fig.suptitle(f"{Path(out).stem}: von Mises stress + finger meshes + table", fontsize=12)
     fig.tight_layout()
     fig.savefig(out, dpi=110); plt.close(fig)
+
+
+def render_grasp_rotation(obj, sigma_voigt, x_tcp, pad_geo, obj_com, obj_quat_wxyz, table_z, out,
+                          n_frames=48, fps=15):
+    """Turntable video of the FINAL grasp: the object (von Mises stress) + finger meshes + table,
+    rotating 360° in azimuth. One FEM solve (the field is fixed) — only the camera moves — so it's
+    cheap and lets you inspect the grasp from every side."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import imageio.v2 as imageio
+    from smgrasp.viz import _face_colors
+
+    obj_com = np.asarray(obj_com, float)
+    q = np.asarray(obj_quat_wxyz, float)
+    Rinv = Rot.from_quat([q[1], q[2], q[3], q[0]]).inv()
+    otris, ocolors, _ = _face_colors(obj, sigma_voigt, "coolwarm")
+    ltris, rtris = _finger_local_tris(x_tcp, obj_com, Rinv)
+    tsegs = _table_grid_local(obj_com, table_z, Rinv)
+    lim = 1.15 * max(np.abs(otris).max(), 0.02)
+
+    imgs = []
+    for az in np.linspace(-90, 270, n_frames, endpoint=False):
+        fig = plt.figure(figsize=(5.2, 5.2)); ax = fig.add_subplot(111, projection="3d")
+        _add_scene(ax, otris, ocolors, ltris, rtris, tsegs, lim, 18, az, "final grasp")
+        fig.tight_layout(); fig.canvas.draw()
+        imgs.append(np.asarray(fig.canvas.buffer_rgba())[..., :3].copy()); plt.close(fig)
+    imageio.mimsave(out, imgs, fps=fps)
 
 
 def render_opt_video(obj, history, pad_geo, obj_com, obj_quat_wxyz, table_z, E, out, fps=6):
