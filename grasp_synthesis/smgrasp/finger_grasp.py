@@ -20,12 +20,16 @@ the oriented rectangular pad is opt-in (`u1,u2,half_uv`).
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import trimesh
 from scipy.spatial.transform import Rotation as Rot
 
 from .width_grasp import (width_grasp_stress, evaluate_grasp, grasp_alignment, indent_from_width,
                           _shaped_penalty, is_real_grasp, W_ALIGN, W_PEAK, PEN_BASE, PEN_SLOPE)
+
+_ROOT = Path(__file__).resolve().parents[2]                     # repo root (for the finger STL assets)
 
 # ── Gripper geometry (verbatim from synth_utils; meters) ──────────────────────
 FINGER_TO_TCP_Z = -0.069863       # finger-local origin z below TCP origin, along tool z
@@ -359,3 +363,39 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
     if record_history:
         out["history"] = history
     return out
+
+
+# ── Collector integration API (grasp_synthesis/CLAUDE.md §11.8) ───────────────────────────────────────
+# Two entry points the v3 sim collector uses. Because all envs in a batch SHARE the object mesh (scene-DR
+# varies per relaunch, not per sub-env), build the FEM ONCE per batch (`build_grasp_fem`) and plan per-env
+# pose (`synthesize_grasp`) — the FEM factorization (the expensive part) is reused across all envs.
+
+def build_grasp_fem(mesh_path, *, voxel_div: int = 14, target_tets: int = 1500, prepare: bool = True,
+                    use_gpu: bool = False, gpu_max_ndof: int = None):
+    """Build the FEM ElasticObject + finger pad geometry for one object mesh (once per batch). Returns
+    (obj, pad_geo, meta). `use_gpu` toggles the GPU dense solver (default OFF so the metric doesn't
+    starve the simulator's GPU); it self-disables above `gpu_max_ndof` (falls back to CPU sparse)."""
+    from .geometry import build_elastic_object
+    from .preprocess import prepare_mesh, tet_switches
+    from . import width_grasp as wg
+    _LF = str(_ROOT / "gentle_manip/assets/xarm/xarm_gripper/meshes/left_finger.STL")
+    _RF = str(_ROOT / "gentle_manip/assets/xarm/xarm_gripper/meshes/right_finger.STL")
+    raw = trimesh.load(str(mesh_path), force="mesh")
+    mesh = prepare_mesh(raw, voxel_div=voxel_div, force_remesh=True) if prepare else raw
+    obj = build_elastic_object(mesh, switches=tet_switches(mesh, target_tets=target_tets))
+    cap = gpu_max_ndof if gpu_max_ndof is not None else wg.GPU_MAX_NDOF
+    wg.use_gpu_solve(bool(use_gpu) and obj.fem.ndof <= cap)
+    pad_geo = finger_pad_geometry(_LF, _RF)
+    return obj, pad_geo, {"tets": len(obj.tets), "ndof": int(obj.fem.ndof), "gpu": bool(wg.USE_GPU_SOLVE)}
+
+
+def synthesize_grasp(obj, pad_geo, obj_com, obj_quat_wxyz, *, E: float = 3e5, density: float = 1000.0,
+                     mu: float = 0.7, table_z: float = 0.0, maxfevals: int = 1000, n_starts: int = 6,
+                     seed: int = 0, **plan_kw) -> dict:
+    """Plan one grasp for a given object world pose (obj_com = sim object_center, obj_quat_wxyz = its
+    orientation). Thin wrapper over `plan_finger_grasp`; returns its dict — `out["x"]` is the executable
+    7-DOF TCP grasp `[tx,ty,tz,roll,pitch,yaw,width]` the collector FSM drives directly (like v2's best_x)."""
+    obj_size = float((obj.verts.max(0) - obj.verts.min(0)).max())
+    return plan_finger_grasp(obj, obj_com=np.asarray(obj_com, float), obj_quat_wxyz=obj_quat_wxyz,
+                             pad_geo=pad_geo, E=E, density=density, mu=mu, table_z=table_z,
+                             obj_size=obj_size, maxfevals=maxfevals, n_starts=n_starts, seed=seed, **plan_kw)
