@@ -531,8 +531,11 @@ def execute_and_collect(
         raw_next = _state_to_raw_obs(state)
         next_obs_batch = perception.process(raw_next)
         if priv_cfg is not None:
-            next_obs_batch.update(_privileged_obs_batch(
-                state["object_center"], state["object_quat"], dr_vec, priv_cfg,
+            oq = state.get("object_quat")                          # soft MPM: no rigid quat in the step
+            if oq is None:                                         # state → identity placeholder (the
+                oq = np.tile(np.array([1., 0, 0, 0], np.float32), (num_envs, 1))  # deployable student
+            next_obs_batch.update(_privileged_obs_batch(           # uses point_cloud, not this)
+                state["object_center"], oq, dr_vec, priv_cfg,
                 contact_force=state.get("contact_force")))
         next_obs_list = [{k: next_obs_batch[k][i] for k in next_obs_batch}
                          for i in range(num_envs)]
@@ -597,8 +600,10 @@ def execute_and_collect(
         phase_idx[rolled_over]  += advance[rolled_over]
         phase_step[rolled_over]  = 0
 
-    # Success check from final object position
-    obj_z   = _np(worker.handle.objects[0].get_pos())[:, 2]
+    # Success check from final object height. Rigid: get_pos; soft MPM: the particle-mean centre from
+    # the last step's state (MPMEntity has no get_pos).
+    _o = worker.handle.objects[0]
+    obj_z   = _np(_o.get_pos())[:, 2] if hasattr(_o, "get_pos") else np.asarray(state["object_center"])[:, 2]
     success = obj_z > (grasp_pos[:, 2] + LIFT_HEIGHT * 0.5)
 
     # Post-process: trim long held-command runs (absolute mode only — see
@@ -837,30 +842,40 @@ def main() -> None:
         home_offset  = dr_cfg.sample_home_offset(rng, n)   # per-env arm-home jitter (sim-only DR)
         worker.reset(object_dxy=object_dxy, object_euler=object_euler, home_offset=home_offset)
 
-        # Extra settling until object velocity is small
+        # Extra settling. Rigid objects roll → settle until velocity is small; soft MPM objects have no
+        # rigid get_vel/get_ang (and are placed resting, not dropped) → a brief fixed settle suffices.
         obj = worker.handle.objects[0]
-        for _ in range(600):
-            worker.handle.scene.step()
-            lin = np.abs(_np(obj.get_vel())).max()
-            ang = np.abs(_np(obj.get_ang())).max()
-            if lin < 0.003 and ang < 0.01:
-                break
+        if hasattr(obj, "get_vel"):
+            for _ in range(600):
+                worker.handle.scene.step()
+                if np.abs(_np(obj.get_vel())).max() < 0.003 and np.abs(_np(obj.get_ang())).max() < 0.01:
+                    break
+        else:                                          # soft MPM
+            for _ in range(30):
+                worker.handle.scene.step()
 
         # Read initial state (depth rendered; this is obs_0 for every env)
         init_state     = worker.read_state()
         raw_init       = _state_to_raw_obs(init_state)
         init_obs_batch = perception.process(raw_init)
-        # Episode scene-DR vector [scale, bend_deg] for priv_object_dr_params (mirrors
-        # SimBackend._episode_dr_vec). scene_dr may re-randomize this per batch (below).
+
+        # Object pose for synthesis + priv obs. Rigid: settled orientation (get_quat / read_state).
+        # Soft MPM has no rigid quat / read_state["object_quat"] — the object keeps ~its placement (DR)
+        # orientation, so use object_euler; this feeds BOTH the FEM synthesis and the privileged obs.
+        obj_pos_all = init_state["object_center"].astype(np.float64)   # (N, 3)
+        if hasattr(obj, "get_quat"):
+            obj_quat_all = _np(obj.get_quat()).astype(np.float64)      # (N, 4) wxyz
+        else:
+            qx = Rot.from_euler("xyz", object_euler).as_quat()         # (N,4) xyzw
+            obj_quat_all = np.column_stack([qx[:, 3], qx[:, 0], qx[:, 1], qx[:, 2]]).astype(np.float64)  # wxyz
+
+        # Episode scene-DR vector [scale, bend_deg] for priv_object_dr_params (mirrors SimBackend).
         dr_vec = np.array([float(scene_dr.get("scale", 1.0)),
                            float(scene_dr.get("bend_deg", 0.0))], dtype=np.float32)
         if priv_cfg is not None:
             init_obs_batch.update(_privileged_obs_batch(
-                init_state["object_center"], init_state["object_quat"], dr_vec, priv_cfg,
+                obj_pos_all, obj_quat_all, dr_vec, priv_cfg,
                 contact_force=init_state.get("contact_force")))
-
-        obj_pos_all  = init_state["object_center"].astype(np.float64)  # (N, 3)
-        obj_quat_all = _np(obj.get_quat()).astype(np.float64)           # (N, 4) wxyz
 
         # ── Per-env FEM gentleness grasp synthesis (v3) ──
         # Build the FEM ElasticObject ONCE for this batch's ACTUAL (DR shape+size) mesh — all envs share

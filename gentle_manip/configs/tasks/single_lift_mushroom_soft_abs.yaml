@@ -1,0 +1,33 @@
+# [task] Soft-MPM mushroom single-lift for FEM-gentleness grasp collection (v3, abs action).
+# Used by: experiments (single_lift_mushroom_soft_abs_action) -> collect_demos_synth_v3
+# Status: active
+#
+# Same as single_lift_mushroom_soft.yaml (soft MPM mushroom, Config C material) EXCEPT
+# sim_substeps=230 (a touch above the tuned 220 for extra CFL headroom during the firm grasp,
+# per user). Used to test whether a SOFT object — which deforms and conforms to the pads
+# (more contact area) — lifts more reliably than the rigid point-contact grasp.
+success_z_min: 0.175
+success_z_max: 0.275
+hold_steps: 30
+object_name: "mushroom"
+object_type: "soft"      # MPM -> von_mises_stress available
+
+# Config C (E=0.3 MPa, grid_density 250); 230 substeps for CFL stability during the firm grasp.
+sim_substeps: 230
+mpm_grid_density: 250
+
+success_scale: 0.2
+
+rewards:
+  stress:
+    scale: 0.2
+    cap: 1.5
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 0.1
+    decay: 8.0
+  lift:
+    scale: 0.1
+    grasp_gate_dist: 0.079
+    lift_target: 0.16
