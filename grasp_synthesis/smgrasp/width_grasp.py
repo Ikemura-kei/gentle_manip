@@ -45,6 +45,19 @@ def _perp_basis(axis: np.ndarray):
     return a, u1, u2
 
 
+def _pad_basis(axis, u1=None, u2=None):
+    """Orthonormal (a, u1, u2), a = normalized closing axis. If u1 (and u2) are given — the REAL finger's
+    in-plane axes (TCP x, z) — orthonormalize u1 against a and take u2 = a×u1, so the rectangular pad and
+    its stress ring are oriented to the actual finger; else fall back to the arbitrary `_perp_basis`.
+    (Opt-in: the square-pad callers pass nothing and get the original behaviour.)"""
+    a = np.asarray(axis, float); a = a / (np.linalg.norm(a) + 1e-12)
+    if u1 is None:
+        return _perp_basis(a)
+    u1 = np.asarray(u1, float); u1 = u1 - (u1 @ a) * a; u1 = u1 / (np.linalg.norm(u1) + 1e-12)
+    u2 = np.cross(a, u1)
+    return a, u1, u2
+
+
 def boundary_normals(obj):
     """Outward unit surface normal at every tet-mesh node (0 for interior nodes), cached on `obj`.
     Used by the alignment term — a good grasp presses PERPENDICULAR to the surface (closing axis ∥ the
@@ -74,7 +87,8 @@ def grasp_alignment(obj, axis, nodes):
 
 
 def indent_from_width(obj, center, axis, *, pad_half: float, width: float,
-                      max_indent: float = 0.01, min_nodes: int = 3):
+                      max_indent: float = 0.01, min_nodes: int = 3,
+                      u1=None, u2=None, half_uv=None):
     """Position control: pads close to gripper WIDTH `width` (inner faces at center ± width/2 along the
     axis). Returns (delta_left, delta_right, status) — the per-jaw CENTRE indentation and one of:
       'ok'         — both jaws indent the object (a real squeeze),
@@ -82,10 +96,11 @@ def indent_from_width(obj, center, axis, *, pad_half: float, width: float,
       'degenerate' — a jaw is buried > max_indent (⟺ the pad still penetrates the nominal mesh at
                      width + 2·max_indent) → skip, it's beyond the valid (small-strain) regime.
     Cheap (nominal mesh only, no FEM) — the pre-filter before an FEM evaluation."""
-    a, u1, u2 = _perp_basis(axis)
+    a, u1, u2 = _pad_basis(axis, u1, u2)
+    h1, h2 = half_uv if half_uv is not None else (pad_half, pad_half)
     d = obj.verts[np.unique(boundary_faces(obj.tets)[0])] - np.asarray(center, float)
     proj = d @ a
-    foot = (np.abs(d @ u1) < pad_half) & (np.abs(d @ u2) < pad_half)   # SQUARE pad footprint
+    foot = (np.abs(d @ u1) < h1) & (np.abs(d @ u2) < h2)              # rectangular pad footprint
     left, right = foot & (proj < 0), foot & (proj > 0)
     # `dist` (metres) = signed distance OUTSIDE the valid contact band, for a SHAPED search penalty
     # (0 when ok) — a flat penalty breaks CMA-ES on flat-faced objects (see score_candidate).
@@ -102,7 +117,8 @@ def indent_from_width(obj, center, axis, *, pad_half: float, width: float,
 
 
 def indent_contacts(obj, center, axis, *, pad_half: float, delta: float = None,
-                    delta_left: float = None, delta_right: float = None, min_nodes: int = 3):
+                    delta_left: float = None, delta_right: float = None, min_nodes: int = 3,
+                    u1=None, u2=None, half_uv=None):
     """Two FLAT pads with slightly ROUNDED EDGES (a real finger pad), footprint radius `pad_half` ⟂
     the closing axis, indent the object by `delta_left`/`delta_right` (or a shared `delta`). The
     prescribed indentation is UNIFORM (= δ, a FLAT indent — correct for a flat face) over the interior
@@ -113,14 +129,15 @@ def indent_contacts(obj, center, axis, *, pad_half: float, delta: float = None,
     or None if a jaw grips < min_nodes boundary nodes."""
     dL = delta_left if delta_left is not None else delta
     dR = delta_right if delta_right is not None else delta
-    fillet = 0.12 * pad_half                                       # THIN rounded-edge width (real pad fillet)
-    a, u1, u2 = _perp_basis(axis)
+    a, u1, u2 = _pad_basis(axis, u1, u2)
+    h1, h2 = half_uv if half_uv is not None else (pad_half, pad_half)
+    fillet = 0.12 * min(h1, h2)                                    # THIN rounded-edge width (real pad fillet)
     v = obj.verts
     bidx = np.unique(boundary_faces(obj.tets)[0])                  # boundary node indices
     d = v[bidx] - np.asarray(center, float)
     proj = d @ a
-    p1, p2 = d @ u1, d @ u2                                       # SQUARE pad footprint (rectangular pad)
-    edge = pad_half - np.maximum(np.abs(p1), np.abs(p2))          # distance to the square pad boundary
+    p1, p2 = d @ u1, d @ u2                                       # rectangular pad footprint (finger-oriented)
+    edge = np.minimum(h1 - np.abs(p1), h2 - np.abs(p2))           # distance to the RECTANGULAR pad boundary
     foot = edge > 0
 
     nodes_all, g_all, left_mask = [], [], []
@@ -147,12 +164,13 @@ def indent_contacts(obj, center, axis, *, pad_half: float, delta: float = None,
 
 def width_grasp_stress(obj, center, axis, *, pad_half: float, delta: float = None,
                        delta_left: float = None, delta_right: float = None,
-                       mask_contact: bool = True) -> dict:
+                       mask_contact: bool = True, u1=None, u2=None, half_uv=None) -> dict:
     """Solve the width-controlled indentation grasp at E=1 (normal-only rounded-pad contact). Returns
     the E-independent primitives (deformation `u`, per-jaw normal grip `F1`, stress field `sigma1`,
     `top10_1`) — scale by E for a real stiffness (see module docstring). dict(valid, ...)."""
     bc = indent_contacts(obj, center, axis, pad_half=pad_half, delta=delta,
-                         delta_left=delta_left, delta_right=delta_right)
+                         delta_left=delta_left, delta_right=delta_right,
+                         u1=u1, u2=u2, half_uv=half_uv)
     if bc is None:
         return {"valid": False}
     nodes, a = bc["nodes"], bc["axis"]
