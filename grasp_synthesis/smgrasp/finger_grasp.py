@@ -207,7 +207,11 @@ def score_finger_grasp(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, densit
     r = evaluate_grasp(obj, center, axis, pad_half=ph, delta=None, E=E, density=density, mu=mu,
                        g=g, accel=accel, prim=prim)
     if not r["holdable"]:
-        return {"score": _shaped_penalty("not_holdable", 0.0), "status": "ok", "holdable": False,
+        # contacting but grip too low → shape by how CLOSE it is to holding (frac = 2μ·grip / m·g ∈ [0,1)),
+        # so the penalty eases as grip rises: a gradient telling CMA to narrow the width. Stays in
+        # [−2·PEN_BASE, −PEN_BASE) — always worse than any real grasp, better the closer it is to holding.
+        frac = min(2.0 * mu * r["grip"] / (r["mass"] * (g + accel) + 1e-12), 0.999)
+        return {"score": -PEN_BASE * (2.0 - frac), "status": "ok", "holdable": False,
                 "stress_top10": r["stress_top10"], "grip": r["grip"]}
     align = grasp_alignment(obj, axis, prim["nodes"])
     carea = _contact_area(obj, prim["nodes"]) if w_area else 0.0   # reward distributed (low-pressure) contact
