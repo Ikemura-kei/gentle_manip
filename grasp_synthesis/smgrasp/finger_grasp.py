@@ -136,11 +136,29 @@ def build_object_sdf(obj, *, simplify_faces: int = 500):
     return _sdf
 
 
+def _contact_area(obj, nodes) -> float:
+    """Total boundary-surface area (m²) actually gripped = area of boundary faces whose 3 vertices are
+    ALL contact nodes. Mesh-resolution-robust (a real area, not a node count). A flush FACE grasp grips a
+    large flat patch; an edge/CORNER grasp grips a sliver — so this is the signal that a corner grasp
+    (tiny area → huge contact pressure → crush) is NOT gentle, which stress/alignment alone miss."""
+    cache = getattr(obj, "_bface_area", None)
+    if cache is None:
+        from .viz import boundary_faces
+        tri, _ = boundary_faces(obj.tets)
+        v = obj.verts
+        area = 0.5 * np.linalg.norm(np.cross(v[tri[:, 1]] - v[tri[:, 0]], v[tri[:, 2]] - v[tri[:, 0]]), axis=1)
+        obj._bface_tri, obj._bface_area = tri, area
+        cache = area
+    sel = np.zeros(len(obj.verts), bool); sel[nodes] = True
+    full = sel[obj._bface_tri].all(axis=1)
+    return float(obj._bface_area[full].sum())
+
+
 def score_finger_grasp(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                        table_z: float = 0.0, ground_buf: float = 0.0035, g: float = 9.81,
                        accel: float = 0.0, max_indent: float = 0.01, obj_sdf=None,
                        pen_tol: float = 0.003, table_tol: float = 0.002,
-                       w_align: float = W_ALIGN, w_peak: float = W_PEAK) -> dict:
+                       w_align: float = W_ALIGN, w_peak: float = W_PEAK, w_area: float = 0.0) -> dict:
     """Score one 7-DOF TCP grasp candidate (higher = gentler; MAXIMIZED). Ladder mirrors
     `width_grasp.score_candidate` but in TCP space with the real finger pad, plus two TOLERANCE-based
     geometric pre-filters (cheap, no FEM): gross table scratch >> gross finger-body penetration >>
@@ -192,10 +210,12 @@ def score_finger_grasp(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, densit
         return {"score": _shaped_penalty("not_holdable", 0.0), "status": "ok", "holdable": False,
                 "stress_top10": r["stress_top10"], "grip": r["grip"]}
     align = grasp_alignment(obj, axis, prim["nodes"])
-    score = -r["stress_top10"] - w_align * (1.0 - align) - w_peak * E * prim["hi_1"]
+    carea = _contact_area(obj, prim["nodes"]) if w_area else 0.0   # reward distributed (low-pressure) contact
+    score = -r["stress_top10"] - w_align * (1.0 - align) - w_peak * E * prim["hi_1"] + w_area * carea
     return {"score": float(score), "status": "ok", "holdable": True,
             "stress_top10": float(r["stress_top10"]), "grip": float(r["grip"]), "align": float(align),
-            "width_face": wface, "center": center, "axis": axis, "delta_left": dl, "delta_right": dr}
+            "contact_area": float(carea), "width_face": wface, "center": center, "axis": axis,
+            "delta_left": dl, "delta_right": dr}
 
 
 def _closing_axis_world(x_tcp) -> np.ndarray:
@@ -228,8 +248,9 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                       z_lift=(0.02, 0.12), sigma: float = 0.15, maxfevals: int = 400,
                       n_starts: int = 6, g: float = 9.81, accel: float = 0.0, max_indent: float = 0.01,
                       obj_sdf=None, pen_tol: float = 0.003, table_tol: float = 0.002,
-                      w_align=None, w_peak=None, refine: bool = True, refine_scan: int = 25,
-                      seed: int = 0, verbose: bool = False, record_history: bool = False) -> dict:
+                      w_align=None, w_peak=None, w_area: float = 0.0, refine: bool = True,
+                      refine_scan: int = 25, seed: int = 0, verbose: bool = False,
+                      record_history: bool = False) -> dict:
     """CMA-ES over the 7-DOF TCP grasp maximizing the FEM gentleness score, with real finger geometry +
     table constraint. Multi-start over top-down approaches at diverse yaw (a good starting basin for a
     tabletop grasp); the search may tilt/translate from there. `obj_com` is the object world COM,
@@ -237,7 +258,7 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
     align, evals[, history])."""
     import cma
 
-    aln = {}
+    aln = {"w_area": w_area}
     if w_align is not None: aln["w_align"] = w_align
     if w_peak is not None:  aln["w_peak"] = w_peak
     com = np.asarray(obj_com, float)
@@ -245,7 +266,7 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
         obj_sdf = build_object_sdf(obj)
 
     best = {"score": -np.inf, "x": None, "res": None}
-    history, feasible, n_eval = [], [], [0]
+    history, feasible, n_eval, cur_round = [], [], [0], [1]      # cur_round: 1=CMA search, 2=width refine
 
     def _score(x):
         return score_finger_grasp(obj, x, obj_com=com, obj_quat_wxyz=obj_quat_wxyz, pad_geo=pad_geo,
@@ -262,7 +283,7 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                 best.update(score=res["score"], x=np.asarray(x, float).copy(), res=res)
         if record_history and res["status"] == "ok" and is_real_grasp(res["score"]):
             history.append({"eval": n_eval[0], "score": res["score"], "x": np.asarray(x, float).copy(),
-                            "res": res})
+                            "res": res, "round": cur_round[0], "best": res["score"] >= best["score"]})
         return -res["score"]
 
     # tz range mirrors the collector's _synth_bounds: this grasp-frame "TCP" sits LOW (the finger pad is
@@ -312,6 +333,7 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
     # SEVERAL distinct poses, not just the CMA best — on elongated objects the gentlest basin (flush
     # across the short axis) is often not where CMA's raw best landed.
     if refine and feasible:
+        cur_round[0] = 2
         for xb in _distinct_tcp_poses(feasible, n=6, pos_thr=1.5 * obj_size, ang_thr=np.radians(30)):
             for w in np.linspace(0.7 * xb[6], min(1.6 * xb[6], 0.079), refine_scan):
                 x2 = xb.copy(); x2[6] = w
