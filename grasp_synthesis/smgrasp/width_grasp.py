@@ -195,7 +195,7 @@ def width_grasp_stress(obj, center, axis, *, pad_half: float, delta: float = Non
     return {"valid": True, "sigma1": sigma1, "u": u, "F1": F1,
             "top10_1": float(np.sort(vmk)[-k:].mean()), "peak_1": float(vmk.max()),
             "mean_1": float(vmk.mean()), "hi_1": float(np.percentile(vm, 98)),   # UNMASKED p98 (contact-aware)
-            "n_contacts": nc, "nodes": nodes, "axis": a}
+            "n_contacts": nc, "nodes": nodes, "left_mask": bc["left_mask"], "axis": a}   # left_mask: per-pad split
 
 
 def evaluate_grasp(obj, center, axis, *, pad_half: float, delta: float, E: float, density: float,
