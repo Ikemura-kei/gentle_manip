@@ -19,6 +19,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import csv
 import datetime
 import os
 import pickle
@@ -814,6 +815,14 @@ def main() -> None:
     print(f"  Config → {cfg_path.resolve()}")
     print(f"  Data   → {run_dir.resolve()}/data.pkl  (shards flushed every {args.shard_size} ep)")
 
+    # Per-env-per-batch DR + grasp log (CSV, alongside the data). One row per env each batch.
+    dr_csv = open(run_dir / "dr_params.csv", "w", newline="")
+    dr_writer = csv.writer(dr_csv)
+    dr_writer.writerow(["batch", "env", "success", "obj_dx", "obj_dy",
+                        "roll_deg", "pitch_deg", "yaw_deg", "flipped",
+                        "home_dx", "home_dy", "home_dz", "scene_scale", "scene_bend_deg",
+                        "stress_Pa", "grip_N", "align", "pressure_Pa", "min_pad_mm2", "width_mm"])
+
     total_saved  = 0
     total_failed = 0
     batch_idx   = 0
@@ -917,6 +926,26 @@ def main() -> None:
         )
         print(f"  Success: {success.tolist()}")
 
+        # ── Log per-env DR + grasp params for this batch (CSV row per env) ──
+        eul_deg = np.degrees(object_euler) if object_euler is not None else np.zeros((n, 3))
+        for i in range(n):
+            g = all_grasp[i]
+            roll, pitch, yaw = eul_deg[i]
+            flipped = int(abs(roll) > 140 or abs(pitch) > 140)                # a big-flip sample
+            ho = home_offset[i] if home_offset is not None else (0.0, 0.0, 0.0)
+            odxy = object_dxy[i] if object_dxy is not None else (0.0, 0.0)
+            dr_writer.writerow([batch_idx, i, int(bool(success[i])),
+                                round(float(odxy[0]), 5), round(float(odxy[1]), 5),
+                                round(float(roll), 1), round(float(pitch), 1), round(float(yaw), 1), flipped,
+                                round(float(ho[0]), 5), round(float(ho[1]), 5), round(float(ho[2]), 5),
+                                round(float(scene_dr.get("scale", 1.0)), 4),
+                                round(float(scene_dr.get("bend_deg", 0.0)), 2),
+                                round(float(g.get("stress_top10") or 0), 1), round(float(g.get("grip") or 0), 4),
+                                round(float(g.get("align") or 0), 4), round(float(g.get("pressure") or 0), 1),
+                                round(float((g.get("min_pad_area") or 0) * 1e6), 2),
+                                round(float(g["x"][6] * 1e3), 2)])
+        dr_csv.flush()
+
         # ── Package and shard successful (or all) episodes ──
         for i in range(n):
             # Always save failure video (if recording) before skipping demo data.
@@ -967,6 +996,7 @@ def main() -> None:
     if shard_buf:
         _write_shard(run_dir, shard_buf, task_name, shard_idx, rate_hz)
 
+    dr_csv.close()
     data_path = _merge_shards(run_dir)
     elapsed   = time.time() - t0
 

@@ -29,6 +29,11 @@ class DRConfig:
                                         # Combine with robot_init_pos_xyz>0 to jitter AROUND the shifted home.
     object_yaw_deg: float = 0.0         # half-range (deg); per-env uniform object YAW (about world z). 180 = full
     object_pitch_roll_deg: float = 0.0  # half-range (deg); per-env uniform object PITCH & ROLL tilt (small, e.g. 15)
+    object_flip_prob: float = 0.0       # per-env probability of a big FLIP: instead of the small ±pitch_roll
+                                        # tilt, set ONE of pitch/roll to ±U(object_flip_deg) (~180° → the
+                                        # object spawns upside-down/flipped, so it settles in a distinct
+                                        # stable pose). e.g. 0.25 for occasional flipped/upright mushrooms.
+    object_flip_deg: _Range = (160.0, 180.0)  # (lo, hi) flip magnitude range (deg) when a flip fires
 
     # ── per-scene (rebuild via GenesisProcess.restart) ────────────────────────
     object_E: Optional[_Range] = None       # Young's modulus (Pa)
@@ -55,7 +60,8 @@ class DRConfig:
     def has_reset_dr(self) -> bool:
         return (self.object_pos_xy > 0 or self.robot_init_pos_xyz > 0
                 or self.robot_init_offset_xyz is not None
-                or self.object_yaw_deg > 0 or self.object_pitch_roll_deg > 0)
+                or self.object_yaw_deg > 0 or self.object_pitch_roll_deg > 0
+                or self.object_flip_prob > 0)
 
     def has_scene_dr(self) -> bool:
         return any(getattr(self, f) is not None for f in self._SCENE_FIELDS)
@@ -91,14 +97,25 @@ class DRConfig:
         in RADIANS, or None if disabled. Yaw ~ U(+/- object_yaw_deg) about world z (full at
         180); pitch & roll ~ U(+/- object_pitch_roll_deg) small tilts. Applied at the object's
         resting center, so the object stays put but spawns rotated/tilted."""
-        if self.object_yaw_deg <= 0 and self.object_pitch_roll_deg <= 0:
+        if self.object_yaw_deg <= 0 and self.object_pitch_roll_deg <= 0 and self.object_flip_prob <= 0:
             return None
         pr = np.deg2rad(self.object_pitch_roll_deg)
         yaw = np.deg2rad(self.object_yaw_deg)
         e = np.zeros((num_envs, 3), dtype=np.float32)
-        e[:, 0] = rng.uniform(-pr, pr, num_envs)    # roll  (about x)
-        e[:, 1] = rng.uniform(-pr, pr, num_envs)    # pitch (about y)
-        e[:, 2] = rng.uniform(-yaw, yaw, num_envs)  # yaw   (about z)
+        if pr > 0:
+            e[:, 0] = rng.uniform(-pr, pr, num_envs)    # roll  (about x)
+            e[:, 1] = rng.uniform(-pr, pr, num_envs)    # pitch (about y)
+        if yaw > 0:
+            e[:, 2] = rng.uniform(-yaw, yaw, num_envs)  # yaw   (about z)
+        # FLIP: with object_flip_prob, replace ONE of roll/pitch with a ±(flip_deg) turn (~180°) so the
+        # object spawns flipped and settles in a distinct stable pose (some flipped/upright samples).
+        if self.object_flip_prob > 0:
+            flip = rng.random(num_envs) < self.object_flip_prob
+            lo, hi = np.deg2rad(self.object_flip_deg[0]), np.deg2rad(self.object_flip_deg[1])
+            mag = (rng.uniform(lo, hi, num_envs) * np.where(rng.random(num_envs) < 0.5, -1.0, 1.0)).astype(np.float32)
+            on_roll = rng.random(num_envs) < 0.5        # which axis (roll vs pitch) gets the flip
+            e[flip & on_roll, 0] = mag[flip & on_roll]
+            e[flip & ~on_roll, 1] = mag[flip & ~on_roll]
         return e
 
     def sample_home_offset(self, rng: np.random.Generator, num_envs: int) -> Optional[np.ndarray]:
