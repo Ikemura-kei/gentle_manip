@@ -212,6 +212,40 @@ OBJECT_MAP: dict[str, ObjectDef] = {
         material_dr_mult={"E": (0.4, 2.0), "nu": (0.95, 1.05), "rho": (0.9, 1.1),
                           "yield": (0.4, 1.6)},
     ),
+
+    # ── Kitchen/protein items: fish and beef registered TWICE (raw + cooked),
+    # sharing one mesh_path -- cooking changes material, not gross geometry.
+    # fish: elongated fillet-piece shape (~7 x 2.4 x 2.1cm).
+    "fish_raw": ObjectDef(
+        "fish_raw", MATERIALS["fish_raw"], object_type="soft",
+        size=(0.07, 0.024, 0.0212), default_pos=(0.47, 0.0, 0.0106),
+        mesh_path=str(_OBJ_DIR / "fish.obj"),
+        shape_dr_ranges={"bend_deg": (-10.0, 10.0), "twist_deg": (-8.0, 8.0),
+                         "taper": (-0.1, 0.1), "rbf": (0.0, 0.02),
+                         "axis_scale": (0.9, 1.1), "scale": (0.8, 1.2)},
+        material_dr_mult={"E": (0.5, 1.6), "nu": (0.97, 1.03), "rho": (0.9, 1.1),
+                          "yield": (0.4, 1.6)},
+    ),
+    "fish_cooked": ObjectDef(
+        "fish_cooked", MATERIALS["fish_cooked"], object_type="soft",
+        size=(0.07, 0.024, 0.0212), default_pos=(0.47, 0.0, 0.0106),
+        mesh_path=str(_OBJ_DIR / "fish.obj"),
+        shape_dr_ranges={"bend_deg": (-8.0, 8.0), "twist_deg": (-6.0, 6.0),
+                         "taper": (-0.1, 0.1), "rbf": (0.0, 0.02),
+                         "axis_scale": (0.9, 1.1), "scale": (0.8, 1.2)},
+        material_dr_mult={"E": (0.5, 1.6), "nu": (0.97, 1.03), "rho": (0.9, 1.1),
+                          "yield": (0.4, 1.6)},
+    ),
+
+    # beef: diced stew-style chunk. Reasonably block-shaped (unlike fish's elongated
+    # fillet), so -- after repeated Objaverse sourcing attempts (beef_(food),
+    # steak_(food), patty_(food) all failed tet-meshability QA) -- registered as a
+    # primitive box (mesh_path=None, mirrors tofu) rather than blocking demo
+    # collection on further mesh hunting. No shape_dr_ranges (mesh_deform doesn't
+    # apply to a box, same as tofu); scale-only shape DR via the DR yaml's
+    # object_scale field.
+    "beef_raw":    ObjectDef("beef_raw",    MATERIALS["beef_raw"],    size=(0.035, 0.03, 0.025)),
+    "beef_cooked": ObjectDef("beef_cooked", MATERIALS["beef_cooked"], size=(0.035, 0.03, 0.025)),
 }
 
 

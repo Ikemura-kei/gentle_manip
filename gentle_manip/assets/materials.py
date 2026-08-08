@@ -26,7 +26,13 @@ class Material:
 # Named presets. "tofu" is the soft, easily-bruised baseline validated in the dev
 # prototype (deforms visibly under the gripper, lifts intact).
 MATERIALS: dict[str, Material] = {
-    "tofu":    Material(youngs_modulus=4e3, poisson_ratio=0.3, density=1050.0, von_mises_yield_stress=2e4),
+    # Updated with a literature citation (was an uncalibrated 4e3 Pa placeholder):
+    # compression-ball testing reports tofu stiffness 56.7+-14.1 kPa. nu/density
+    # kept at their prior (already-reasonable) values -- no citation found more
+    # specific than the E measurement. yield = E * 0.15 (same heuristic as the
+    # cross-category food presets below, consistent with mushroom's own ~13.3%
+    # implicit yield strain).
+    "tofu":    Material(youngs_modulus=5.67e4, poisson_ratio=0.3, density=1050.0, von_mises_yield_stress=8.5e3),
     "gelatin": Material(youngs_modulus=8e3, poisson_ratio=0.35, density=1100.0, von_mises_yield_stress=3e4),
     "sponge":  Material(youngs_modulus=2e3, poisson_ratio=0.2, density=300.0, von_mises_yield_stress=1e4),
     # Firm, near-rigid block to stand in for a real red cube (stiff + high yield so
@@ -127,4 +133,33 @@ MATERIALS: dict[str, Material] = {
     # DELIBERATELY LOW yield stress (cracks under light grip force, matching
     # real fragility) -- a documented simplification, not a citation.
     "egg": Material(youngs_modulus=2.0e6, poisson_ratio=0.30, density=1035.0, von_mises_yield_stress=8.0e3),
+
+    # ── Kitchen/protein items (raw vs. cooked -- same mesh, different material;
+    # cooking denatures proteins and dramatically changes stiffness, not gross
+    # geometry, so this mirrors real cooking rather than needing separate scans).
+    #
+    # fish (raw, cod): E=22 kPa DIRECTLY CITED (Instron compression). nu bumped to
+    # 0.40 (high water content, low connective tissue per the same literature).
+    # yield strain 10% (not the usual 15%) -- raw fish is notoriously prone to
+    # flaking/tearing apart, a lower yield-onset is the more honest choice here.
+    "fish_raw": Material(youngs_modulus=2.2e4, poisson_ratio=0.40, density=1060.0, von_mises_yield_stress=2.2e3),
+    # fish (cooked): no direct per-species cooked-E citation found. ESTIMATED via
+    # a ~4x stiffening factor from the actin-denaturation literature (raw->cooked
+    # meat stiffening is well documented as an order-of-magnitude-scale effect,
+    # e.g. 6->60 kPa i.e. 10x in one cited generic-muscle study) -- used a MORE
+    # CONSERVATIVE 4x than that generic figure since fish has much less
+    # connective tissue than red meat (the dominant collagen-contraction
+    # mechanism is weaker), so its cooked stiffening should be smaller than
+    # beef's. Flagged as an estimate, not a direct citation, unlike fish_raw.
+    "fish_cooked": Material(youngs_modulus=9.0e4, poisson_ratio=0.38, density=1090.0, von_mises_yield_stress=1.35e4),
+    # beef (raw): E=2 kPa DIRECTLY CITED (raw skeletal muscle, "soft, compliant"
+    # per the same source). nu=0.45 (very high water content, near-incompressible
+    # uncooked muscle). yield strain 10% (very low yield -- raw muscle tears
+    # easily, matching real handling fragility).
+    "beef_raw": Material(youngs_modulus=2.0e3, poisson_ratio=0.45, density=1060.0, von_mises_yield_stress=2.0e2),
+    # beef (cooked): E=150 kPa, within the DIRECTLY CITED 70-300 kPa range for
+    # cooked/non-marinaded steak (apparent elastic modulus, compression). Picked
+    # the range's midpoint. Higher collagen cross-linking + moisture loss vs.
+    # fish_cooked -> denser, and nu drops (less free water, more structured).
+    "beef_cooked": Material(youngs_modulus=1.5e5, poisson_ratio=0.35, density=1090.0, von_mises_yield_stress=2.25e4),
 }

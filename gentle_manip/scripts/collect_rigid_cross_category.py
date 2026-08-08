@@ -14,12 +14,56 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
+MIN_AVAILABLE_MEM_GB = 4.0   # refuse to launch a new category below this (defense in depth
+                            # on top of the process-group-kill fix -- see _run_with_group_kill)
+
+
+def _available_mem_gb() -> float:
+    with open("/proc/meminfo") as f:
+        for line in f:
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) / (1024 * 1024)
+    return float("inf")   # unknown platform -- don't block
+
+
+def _run_with_group_kill(cmd, cwd, log_path, timeout_s, env) -> bool:
+    """Run cmd, and on timeout kill its ENTIRE process group, not just the
+    immediate child. `subprocess.run(timeout=)` only kills the process it
+    directly spawned (here, `uv`) -- `uv` itself spawns the real Genesis/Python
+    worker as its OWN child, which survives uv's death as an orphan and keeps
+    running indefinitely. Confirmed root cause of a real OOM incident: timed-out
+    attempts left full Genesis processes running for hours, accumulating across
+    every retried category until the system ran out of memory. start_new_session
+    puts the whole `uv -> python -> workers` tree in one process group so a
+    single killpg reaches all of them.
+    """
+    with open(log_path, "a") as logf:
+        logf.write(f"\n\n=== attempt at {time.ctime()} ===\n")
+        logf.flush()
+        proc = subprocess.Popen(cmd, cwd=str(cwd), stdout=logf, stderr=subprocess.STDOUT,
+                                env=env, start_new_session=True)
+        try:
+            proc.wait(timeout=timeout_s)
+            return proc.returncode == 0
+        except subprocess.TimeoutExpired:
+            logf.write(f"\n[orchestrator] TIMED OUT after {timeout_s}s -- killing process group {proc.pid}\n")
+            logf.flush()
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                logf.write("[orchestrator] WARNING: process group did not die within 15s of SIGKILL\n")
+            return False
 
 
 def collect_one(category: str, n_episodes: int, n_envs: int, maxfevals: int,
@@ -42,23 +86,27 @@ def collect_one(category: str, n_episodes: int, n_envs: int, maxfevals: int,
     if record_video:
         cmd.append("--record-video")
 
+    sub_env = os.environ.copy()
+    sub_env["MUJOCO_GL"] = "egl"
+    # Strip any inherited PYTHONPATH -- the dev machine's shell profile exports
+    # PYTHONPATH entries for OLD, unrelated sibling checkouts (e.g. a standalone
+    # Genesis_fork clone from the pre-submodule codesign-dfom/codesign_genesis
+    # projects, see top-level CLAUDE.md "Old Code Reference"). Since a plain
+    # directory on PYTHONPATH is resolved by Python's stdlib PathFinder BEFORE
+    # the editable install's meta-path finder is consulted, it silently shadows
+    # this repo's `third_party/genesis` submodule with a stale, differently
+    # environed checkout (missing gstaichi) -- `import genesis` then crashes
+    # immediately, before any of our code runs. uv's project venv resolution
+    # already puts everything this subprocess needs on sys.path; a leaked
+    # PYTHONPATH from the user's global shell config only causes harm here.
+    sub_env.pop("PYTHONPATH", None)
+
     result = {"category": category, "attempts": 0, "ok": False, "elapsed_s": 0.0,
              "saved": 0, "attempted": 0, "success_rate": None, "data_path": None}
     for attempt in range(2):   # one retry on crash
         result["attempts"] = attempt + 1
         t0 = time.time()
-        with open(log_path, "a") as logf:
-            logf.write(f"\n\n=== attempt {attempt + 1} at {time.ctime()} ===\n")
-            logf.flush()
-            try:
-                sub_env = os.environ.copy()
-                sub_env["MUJOCO_GL"] = "egl"
-                proc = subprocess.run(cmd, cwd=str(REPO), stdout=logf, stderr=subprocess.STDOUT,
-                                      timeout=timeout_s, env=sub_env)
-                ok = proc.returncode == 0
-            except subprocess.TimeoutExpired:
-                logf.write(f"\n[orchestrator] TIMED OUT after {timeout_s}s\n")
-                ok = False
+        ok = _run_with_group_kill(cmd, REPO, log_path, timeout_s, sub_env)
         result["elapsed_s"] = time.time() - t0
 
         # Regardless of ok/crash, check whether a usable data.pkl got written
@@ -103,8 +151,20 @@ def main() -> None:
     results = []
     t_start = time.time()
     for cat in args.categories:
+        avail = _available_mem_gb()
+        if avail < MIN_AVAILABLE_MEM_GB:
+            print(f"\n[orchestrator] ABORTING before {cat}: only {avail:.1f}GB memory available "
+                 f"(need >={MIN_AVAILABLE_MEM_GB}GB) -- refusing to launch another Genesis process "
+                 f"into a starved system. Investigate stray processes before resuming.", flush=True)
+            results.append({"category": cat, "attempts": 0, "ok": False, "elapsed_s": 0.0,
+                            "saved": 0, "attempted": 0, "success_rate": None, "data_path": None,
+                            "aborted_low_memory": True})
+            summary_path.write_text(json.dumps({"elapsed_total_s": time.time() - t_start,
+                                                "results": results}, indent=2))
+            continue
         print(f"\n{'='*70}\n[orchestrator] Starting category: {cat}  "
-             f"({args.n_episodes} episodes, n_envs={args.n_envs}, maxfevals={args.maxfevals})\n{'='*70}",
+             f"({args.n_episodes} episodes, n_envs={args.n_envs}, maxfevals={args.maxfevals}, "
+             f"mem_available={avail:.1f}GB)\n{'='*70}",
              flush=True)
         r = collect_one(cat, args.n_episodes, args.n_envs, args.maxfevals,
                         args.out_dir, args.timeout_s, args.record_video, args.log_dir)

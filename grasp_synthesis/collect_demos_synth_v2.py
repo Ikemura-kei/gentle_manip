@@ -243,6 +243,16 @@ def _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir):
         return nominal_spec, {"scale": nominal_scale, "bend_deg": 0.0}
 
     nominal_mesh = o.mesh_path or get_object_def(o.name).mesh_path
+    if nominal_mesh is None:
+        # Primitive box (e.g. tofu) -- no mesh to deform/export, but `scale` still
+        # applies directly to the box's own size (scene_builder.py: size = s *
+        # entry.scale), so apply just that and skip the mesh pipeline entirely.
+        new_scale = nominal_scale * float(shp.get("scale", 1.0))
+        new_obj = dataclasses.replace(o, scale=new_scale)
+        new_spec = dataclasses.replace(nominal_spec, objects=[new_obj, *nominal_spec.objects[1:]])
+        scene_dr = {"scale": float(shp.get("scale", 1.0)), "bend_deg": 0.0}
+        return new_spec, scene_dr
+
     mesh = trimesh.load(str(nominal_mesh), process=False, force="mesh")
     shape = {k: shp[k] for k in ("bend", "twist", "taper", "rbf", "axis_scale", "axis_scale_ax")
              if k in shp}
@@ -257,6 +267,30 @@ def _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir):
     scene_dr = {"scale": float(shp.get("scale", 1.0)),
                 "bend_deg": float(np.rad2deg(shp.get("bend", 0.0)))}
     return new_spec, scene_dr
+
+
+def _resolve_actual_mesh(spec_dr, deform_dir: Optional[str]) -> str:
+    """Real, on-disk mesh path for the CMA-ES SDF (build_object_sdf needs a file).
+
+    A mesh-based object already has one (`o.mesh_path`, possibly the DR-deformed
+    export from `_apply_scene_dr`). A primitive-box object (e.g. tofu) has
+    `mesh_path=None` by design -- there is no mesh to fall back on, so write a box
+    .obj matching the ACTUAL simulated size (registry nominal size * the object's
+    current scale, which already carries any scene-DR scale factor). Previously
+    this fell back to a hardcoded mushroom mesh, silently making CMA-ES search for
+    a grasp on the wrong geometry entirely for every box-primitive category.
+    """
+    o = spec_dr.objects[0]
+    if o.mesh_path is not None:
+        return o.mesh_path
+    import trimesh
+    from gentle_manip.assets.registry import get_object_def
+    size = tuple(s * float(o.scale or 1.0) for s in get_object_def(o.name).size)
+    box = trimesh.creation.box(extents=size)
+    out_dir = deform_dir or tempfile.gettempdir()
+    dst = Path(out_dir) / f"{o.name}_box_{size[0]:.4f}x{size[1]:.4f}x{size[2]:.4f}.obj"
+    box.export(str(dst))
+    return str(dst)
 
 
 # ── Privileged obs (sim-only state-teacher fields) ────────────────────────────
@@ -781,7 +815,7 @@ def main() -> None:
         w = GenesisWorker(spec_dr, num_envs=args.n_envs, show_viewer=False,
                           settle_steps=settle_steps, settle_max_steps=settle_max_steps,
                           settle_vel_thresh=settle_vel_thresh, render_obs_cameras=True)
-        return w, sdr, (w.handle.spec.objects[0].mesh_path or MUSHROOM_MESH)
+        return w, sdr, _resolve_actual_mesh(spec_dr, deform_dir)
 
     worker, scene_dr, actual_mesh = _make_worker()
     if do_scene_dr:

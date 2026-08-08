@@ -1,0 +1,19 @@
+# [experiment] Rigid tofu lift -- primitive box, literature-cited material.
+# Used by: grasp_synthesis collect_demos_synth_v2/v3.py; DPPO train/eval
+# Status: active
+task: single_lift_tofu_rigid
+action: delta_pose_delta_gripper_fast_rot
+dr: rigid_orientation_tofu
+augmentation: l515_noise
+
+obs: superset_rigid
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400

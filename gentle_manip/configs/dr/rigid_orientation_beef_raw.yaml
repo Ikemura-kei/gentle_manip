@@ -1,0 +1,10 @@
+# [dr] Per-reset DR for rigid beef_raw lift -- pose + full orientation. No shape
+# DR (primitive box, like tofu; mesh_deform doesn't apply to a box), scale only.
+# Used by: experiments (dr:) single_lift_beef_raw_rigid
+# Status: active
+object_pos_xy: 0.04
+robot_init_pos_xyz: 0.02
+object_yaw_deg: 180
+object_pitch_roll_deg: 45
+
+object_scale: [0.85, 1.2]

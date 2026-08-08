@@ -1,0 +1,18 @@
+# [dr] Per-reset DR for rigid tofu lift -- pose + full orientation. No shape DR
+# (primitive box; mesh_deform doesn't apply to a box), scale only.
+# Used by: experiments (dr:) single_lift_tofu_rigid
+# Status: active
+#
+# Tightened after a 6-episode pilot showed only 12.5% success (6/48) at the
+# original 45deg/[0.85,1.2] -- lower than every other accepted rigid category
+# (kiwi/apple/pear were the previous floor at 27-30%). Same fix pattern already
+# validated on apple/avocado/pear: a symmetric cube is a documented hard case for
+# the SDF-based grasp planner (grasp_synthesis/CLAUDE.md S11.7 "cube caveat" --
+# 6 equivalent faces split the search), so reduce tilt + upper scale to make more
+# of the sampled poses land on a face CMA-ES can reliably grasp.
+object_pos_xy: 0.04
+robot_init_pos_xyz: 0.02
+object_yaw_deg: 180
+object_pitch_roll_deg: 30
+
+object_scale: [0.85, 1.1]
