@@ -1,23 +1,26 @@
-# [dppo-eval] Evaluate the cross-category BC policy on ONE category at a time.
+# [dppo-eval] Evaluate the Stage 5(A) category-conditioned BC policy on ONE category
+# at a time -- mirrors single_lift_cross_category_food_rigid_pcd/eval_diffusion_pointnet.yaml
+# (same canonical spec, same fixed n_steps/max_episode_steps=55/220 matching the ~209-217
+# step training horizon), PLUS the Stage 5 category embedding fed live via
+# env.specific.category (gentle_manip.dppo.category_embedding.embed(category), a FIXED
+# per-episode vector -- see genesis_venv.py::GenesisMultiStepVecEnv).
 # Used by: third_party/dppo/script/run.py (EvalHarnessAgent) via gentle_manip.dppo.train
 # Status: experimental
-#
-# `experiment` is overridden per call (loop over ALL 10 categories -- both trained-on
-# and the 2 held-out ones -- to get the held-in / zero-shot breakdown). Everything else
-# (checkpoint, normalization) stays fixed across the loop -- it's the SAME policy.
 #
 # Start the sim server for whichever category you're evaluating BEFORE running eval:
 #   uv run --project envs/sim python -m gentle_manip.scripts.serl_sim_server \
 #       --experiment single_lift_<category>_rigid --view student \
-#       --num-envs 5 --render-rgb
+#       --num-envs 5 --render-rgb --subprocess
 #
-# Then run eval (loop this over each category, overriding experiment= and logdir=):
+# Then run eval (loop this over each category, overriding experiment=/category=/logdir=
+# -- category is the BARE registered name, e.g. "cherry"; experiment is the full
+# "single_lift_cherry_rigid" task config name -- the two must refer to the same object):
 #   uv run --project envs/dppo python -m gentle_manip.dppo.train \
 #       --config-name eval_diffusion_pointnet \
-#       --config-path gentle_manip/dppo/cfg/single_lift_cross_category_food_rigid_pcd \
+#       --config-path gentle_manip/dppo/cfg/single_lift_cross_category_food_rigid_pcd_catembed \
 #       base_policy_path=<checkpoint.pt> \
 #       experiment=single_lift_<category>_rigid \
-#       logdir=<run_dir>/eval/<category>
+#       category=<category>
 defaults:
   - _self_
 hydra:
@@ -28,14 +31,16 @@ _target_: gentle_manip.dppo.eval_agent.EvalHarnessAgent
 name: ${env_name}_eval_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
 logdir: ${eval_base:${base_policy_path}}/eval/${now:%Y-%m-%d}_${now:%H-%M-%S}
 base_policy_path: ???
-normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_cross_category_food_rigid_pcd/normalization.npz
+normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_cross_category_food_rigid_pcd_catembed/normalization.npz
 experiment: ???   # REQUIRED override per call -- single_lift_<category>_rigid
+category: ???     # REQUIRED override per call -- bare category name, e.g. "cherry"
 
 seed: 42
 device: cuda:0
-env_name: single_lift_cross_category_food_rigid_pcd
+env_name: single_lift_cross_category_food_rigid_pcd_catembed
 obs_dim: 8
 action_dim: 7
+category_embed_dim: 21        # gentle_manip.dppo.category_embedding.EMBEDDING_DIM
 denoising_steps: 20
 ft_denoising_steps: 0
 cond_steps: 2
@@ -47,19 +52,13 @@ act_steps: 4
 use_ddim: False
 ddim_steps: ${ft_denoising_steps}
 
-# Canonical eval spec -- fixed, do not change between policies/categories.
+# Canonical eval spec -- fixed, do not change between policies/categories. n_steps/
+# max_episode_steps sized to the ACTUAL demo trajectory length (see the baseline eval
+# config's comment for the full derivation: ~209-217 steps from collect_demos_synth_v2.py's
+# fixed PHASES budget).
 n_episodes: 100
 scene_group_size: 4
 record_batches: null         # record all episodes (one clip per episode) -- hard requirement
-# n_steps/max_episode_steps sized to the ACTUAL demo trajectory length (train.npz
-# traj_lengths ~209-217, from collect_demos_synth_v2.py's fixed PHASES budget:
-# N_HOME_TO_PRE 87 + N_SETTLE 1 + N_GRASP 39 + N_LIFT 70 + N_HOLD 12 = 209, +up to
-# ~8 for the optional "firm" phase). Previously 100/400 (act_steps=4) let episodes
-# run to 400 raw steps -- roughly double the training distribution -- forcing the
-# policy to act for ~180 steps past anything it was ever trained on. Not the root
-# cause of a since-diagnosed 0%-success eval (that traced to the policy failing to
-# complete the grasp within the FIRST ~210 steps, i.e. still inside-distribution),
-# but a real, separate inefficiency worth fixing regardless.
 n_steps: 55
 render_num: 5
 
@@ -67,7 +66,7 @@ env:
   n_envs: 5
   name: ${env_name}
   env_type: genesis
-  max_episode_steps: 220        # see n_steps comment above -- matches the ~209-217 training horizon
+  max_episode_steps: 220
   reset_at_iteration: False
   save_video: True
   use_image_obs: True
@@ -79,6 +78,7 @@ env:
     port: 5570
     obs_keys: [ee_pos, ee_quat, gripper_width]
     pointcloud_key: point_cloud
+    category: ${category}
 
 shape_meta:
   obs:
@@ -86,6 +86,8 @@ shape_meta:
       shape: [8]
     point_cloud:
       shape: [1024, 3]
+    category_embed:
+      shape: [21]
   action:
     shape: [7]
 
@@ -105,6 +107,7 @@ model:
     action_dim: ${action_dim}
     horizon_steps: ${horizon_steps}
     cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+    category_embed_dim: ${category_embed_dim}
     pc_cond_steps: ${pc_cond_steps}
     visual_feature_dim: ${visual_feature_dim}
     time_dim: 16

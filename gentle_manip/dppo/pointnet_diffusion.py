@@ -109,7 +109,10 @@ class PointNetDiffusionMLP(nn.Module):
         feat = _encode_clouds(self.backbone, cond["point_cloud"], self.pc_cond_steps)
         parts = [feat, state]
         if self.category_embed_dim > 0:
-            parts.append(cond["category_embed"].view(B, -1))
+            ce = cond["category_embed"]
+            if ce.dim() == 3:            # (B, To, D) from a live env's obs-history windowing
+                ce = ce[:, -1]           # constant per episode -- any step is equivalent
+            parts.append(ce.view(B, -1))
         cond_encoded = torch.cat(parts, dim=-1)
         time_emb = self.time_embedding(time.view(B, 1)).view(B, self.time_dim)
         x = torch.cat([x, time_emb, cond_encoded], dim=-1)

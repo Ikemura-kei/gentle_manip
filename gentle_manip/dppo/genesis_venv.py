@@ -23,10 +23,16 @@ import numpy as np
 class GenesisMultiStepVecEnv:
     def __init__(self, client, obs_keys, n_envs: int, n_obs_steps: int, n_action_steps: int,
                  max_episode_steps: int, obs_min, obs_max, action_min, action_max,
-                 pointcloud_key: Optional[str] = None):
+                 pointcloud_key: Optional[str] = None, category_embed: Optional[np.ndarray] = None):
         self.client = client                       # SimEnvClient (batched N-env rpc)
         self.obs_keys = list(obs_keys)             # proprio/state keys -> normalized "state"
         self.pointcloud_key = pointcloud_key       # e.g. "point_cloud" -> raw xyz modality
+        # Stage 5(A): a FIXED per-episode category embedding (gentle_manip.dppo.
+        # category_embedding) -- the eval harness pins one category for the whole run
+        # (env.specific.category=<name>), so unlike point_cloud this needs no live sim
+        # signal at all; broadcast the same (D,) vector to every env/step.
+        self._category_embed = (np.asarray(category_embed, np.float32)
+                                if category_embed is not None else None)
         self.n_envs = int(n_envs)
         self.n_obs_steps = int(n_obs_steps)
         self.n_action_steps = int(n_action_steps)
@@ -59,6 +65,8 @@ class GenesisMultiStepVecEnv:
         m = {"state": self._norm_obs(self._raw_state(obs))}
         if self.pointcloud_key is not None:         # raw xyz (meters); crop bounds already limit it
             m["point_cloud"] = np.asarray(obs[self.pointcloud_key], np.float32).reshape(self.n_envs, -1, 3)
+        if self._category_embed is not None:
+            m["category_embed"] = np.tile(self._category_embed[None], (self.n_envs, 1))
         return m
 
     def _stacked(self) -> dict:                     # per modality -> (n_envs, n_obs_steps, ...)
@@ -176,7 +184,7 @@ class GenesisMultiStepVecEnv:
 
 def build_genesis_venv(num_envs, obs_steps, act_steps, max_episode_steps, normalization_path,
                        obs_keys=None, pointcloud_key=None, host="127.0.0.1", port=5570,
-                       connect_timeout=240.0):
+                       connect_timeout=240.0, category=None):
     """Factory used by DPPO's make_async (env_type="genesis"): connect a SimEnvClient to a
     running sim server, load demo normalization, and wrap it as a DPPO VectorEnv.
 
@@ -184,6 +192,12 @@ def build_genesis_venv(num_envs, obs_steps, act_steps, max_episode_steps, normal
     + view whose obs order matches obs_keys / the demo converter. normalization_path is the
     demo converter's normalization.npz (obs_min/obs_max/action_min/action_max). Set
     pointcloud_key="point_cloud" for the DP3/PointNet student view (adds a raw-xyz modality).
+
+    category: Stage 5(A) conditioning -- a bare registered category name (e.g. "mushroom",
+    matching the sim server's --experiment single_lift_<category>_rigid). When set, resolves
+    gentle_manip.dppo.category_embedding.embed(category) ONCE and feeds that fixed vector to
+    every env/step of this eval run as cond["category_embed"]. None (default) = no category
+    conditioning, for the unconditioned baseline's eval.
     """
     from gentle_manip.envs.rpc import SimEnvClient
     from gentle_manip.dppo.convert_demos import STATE_VIEW, PROPRIO_VIEW
@@ -191,9 +205,13 @@ def build_genesis_venv(num_envs, obs_steps, act_steps, max_episode_steps, normal
     default_keys = PROPRIO_VIEW if pointcloud_key else STATE_VIEW
     stats = np.load(normalization_path)
     client = SimEnvClient(host=host, port=int(port), connect_timeout=connect_timeout)
+    category_embed = None
+    if category is not None:
+        from gentle_manip.dppo.category_embedding import embed as _cat_embed
+        category_embed = _cat_embed(category)
     return GenesisMultiStepVecEnv(
         client, obs_keys=list(obs_keys) if obs_keys else default_keys, n_envs=num_envs,
         n_obs_steps=obs_steps, n_action_steps=act_steps, max_episode_steps=max_episode_steps,
         obs_min=stats["obs_min"], obs_max=stats["obs_max"],
         action_min=stats["action_min"], action_max=stats["action_max"],
-        pointcloud_key=pointcloud_key)
+        pointcloud_key=pointcloud_key, category_embed=category_embed)
