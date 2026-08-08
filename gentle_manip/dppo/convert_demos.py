@@ -55,9 +55,35 @@ def _episode_state(ep: dict, obs_keys: Sequence[str]) -> np.ndarray:
     return np.concatenate(cols, axis=1)
 
 
+def _load_episodes_by_path(paths: Sequence[Path]) -> List[tuple]:
+    """Like _load_episodes, but keeps each episode paired with its SOURCE path (needed to
+    derive a per-episode category for the Stage 5 category-embedding conditioning -- see
+    `category_per_path` below)."""
+    out = []
+    for p in paths:
+        d = pickle.load(open(p, "rb"))
+        out.extend((p, ep) for ep in d["episodes"])
+    if not out:
+        raise ValueError(f"no episodes found in {list(map(str, paths))}")
+    return out
+
+
 def convert(demo_paths: Sequence[Path], out_dir: Path, obs_keys: Sequence[str] = STATE_VIEW,
-            pointcloud_key: str = None, val_split: float = 0.1, seed: int = 0) -> dict:
-    episodes = _load_episodes(demo_paths)
+            pointcloud_key: str = None, val_split: float = 0.1, seed: int = 0,
+            category_embed: bool = False) -> dict:
+    if category_embed:
+        # One category per SOURCE FILE (merge_cross_category_demos.py names each symlink
+        # "<category>.pkl") -- broadcast that file's fixed registry embedding to every
+        # episode/timestep loaded from it. Fails loudly (KeyError from category_embedding.embed)
+        # rather than silently skipping a path whose stem isn't a known food category, since a
+        # silent skip would desync which episodes got an embedding from which didn't.
+        from gentle_manip.dppo.category_embedding import embed as _cat_embed
+        path_episodes = _load_episodes_by_path(demo_paths)
+        episodes = [ep for _, ep in path_episodes]
+        cat_embeds = [_cat_embed(p.stem) for p, _ in path_episodes]   # one (EMBED_DIM,) per episode
+    else:
+        episodes = _load_episodes(demo_paths)
+        cat_embeds = None
     states = [_episode_state(ep, obs_keys) for ep in episodes]
     actions = [np.asarray(ep["actions"], np.float32) for ep in episodes]
     rewards = [np.asarray(ep["rewards"], np.float32).reshape(-1) for ep in episodes]
@@ -100,6 +126,9 @@ def convert(demo_paths: Sequence[Path], out_dir: Path, obs_keys: Sequence[str] =
                       terminals=np.zeros(len(s), bool), traj_lengths=tl)
         if clouds is not None:                       # (T_total, N, 3) raw xyz
             arrays["point_cloud"] = np.concatenate([clouds[i] for i in idxs], axis=0)
+        if cat_embeds is not None:                    # (T_total, EMBED_DIM) -- constant per episode
+            arrays["category_embed"] = np.concatenate(
+                [np.tile(cat_embeds[i], (len(actions[i]), 1)) for i in idxs], axis=0)
         np.savez_compressed(out_dir / f"{split_name}.npz", **arrays)
         return len(idxs)
 
@@ -111,7 +140,8 @@ def convert(demo_paths: Sequence[Path], out_dir: Path, obs_keys: Sequence[str] =
     meta = dict(obs_keys=list(obs_keys), obs_dim=int(obs_dim), action_dim=int(act_dim),
                 n_episodes=n, n_train_traj=n_tr, n_val_traj=n_va,
                 total_steps=int(all_s.shape[0]), out_dir=str(out_dir),
-                point_cloud=(None if clouds is None else list(clouds[0].shape[1:])))
+                point_cloud=(None if clouds is None else list(clouds[0].shape[1:])),
+                category_embed_dim=(None if cat_embeds is None else int(cat_embeds[0].shape[0])))
     return meta
 
 
@@ -138,6 +168,11 @@ def main() -> None:
                          "Takes precedence over --obs-keys.")
     ap.add_argument("--view", default="teacher",
                     help="which experiment view to use with --experiment (default: teacher)")
+    ap.add_argument("--category-embed", action="store_true",
+                    help="also store a per-timestep Stage-5 category conditioning vector "
+                         "(gentle_manip.dppo.category_embedding), derived from each input "
+                         "file's stem -- requires demo files named '<category>.pkl' "
+                         "(merge_cross_category_demos.py's convention)")
     args = ap.parse_args()
 
     if args.experiment:
@@ -157,7 +192,7 @@ def main() -> None:
     paths = _find_demo_pkls(args.demos)
     print(f"converting {len(paths)} demo file(s): {[str(p) for p in paths]}")
     meta = convert(paths, args.out, obs_keys=obs_keys, pointcloud_key=args.pc_key,
-                   val_split=args.val_split)
+                   val_split=args.val_split, category_embed=args.category_embed)
     for k, v in meta.items():
         print(f"  {k}: {v}")
 

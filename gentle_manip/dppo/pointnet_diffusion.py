@@ -75,17 +75,24 @@ class PointNetDiffusionMLP(nn.Module):
     def __init__(self, action_dim, horizon_steps, cond_dim,
                  pointnet=None, pc_cond_steps=1, visual_feature_dim=256,
                  time_dim=16, mlp_dims=(512, 512, 512), activation_type="ReLU",
-                 out_activation_type="Identity", use_layernorm=False, residual_style=True):
+                 out_activation_type="Identity", use_layernorm=False, residual_style=True,
+                 category_embed_dim=0):
+        """category_embed_dim: Stage 5(A) conditioning (gentle_manip.dppo.category_embedding) --
+        0 (default) reproduces the unconditioned baseline exactly (input_dim unchanged, no
+        cond["category_embed"] lookup), so every existing single-/cross-category config that
+        doesn't set this is completely unaffected. > 0 expects cond["category_embed"]: (B, D)."""
         super().__init__()
         pn = dict(pointnet or {})
         pn.setdefault("out_channels", visual_feature_dim)
         self.backbone = PointNetEncoderXYZ(**pn)
         self.pc_cond_steps = pc_cond_steps
+        self.category_embed_dim = category_embed_dim
         self.time_dim = time_dim
         self.time_embedding = nn.Sequential(
             SinusoidalPosEmb(time_dim), nn.Linear(time_dim, time_dim * 2), nn.Mish(),
             nn.Linear(time_dim * 2, time_dim))
-        input_dim = time_dim + action_dim * horizon_steps + visual_feature_dim + cond_dim
+        input_dim = (time_dim + action_dim * horizon_steps + visual_feature_dim + cond_dim
+                     + category_embed_dim)
         output_dim = action_dim * horizon_steps
         model = ResidualMLP if residual_style else MLP
         self.mlp_mean = model([input_dim] + list(mlp_dims) + [output_dim],
@@ -94,12 +101,16 @@ class PointNetDiffusionMLP(nn.Module):
                               use_layernorm=use_layernorm)
 
     def forward(self, x, time, cond: Dict[str, torch.Tensor], **kwargs):
-        """x: (B, Ta, Da); time: (B,); cond: {state:(B,To,Do), point_cloud:(B,Tpc,N,3)}."""
+        """x: (B, Ta, Da); time: (B,); cond: {state:(B,To,Do), point_cloud:(B,Tpc,N,3),
+        category_embed:(B,D) if category_embed_dim>0}."""
         B, Ta, Da = x.shape
         x = x.view(B, -1)
         state = cond["state"].view(B, -1)
         feat = _encode_clouds(self.backbone, cond["point_cloud"], self.pc_cond_steps)
-        cond_encoded = torch.cat([feat, state], dim=-1)
+        parts = [feat, state]
+        if self.category_embed_dim > 0:
+            parts.append(cond["category_embed"].view(B, -1))
+        cond_encoded = torch.cat(parts, dim=-1)
         time_emb = self.time_embedding(time.view(B, 1)).view(B, self.time_dim)
         x = torch.cat([x, time_emb, cond_encoded], dim=-1)
         return self.mlp_mean(x).view(B, Ta, Da)
