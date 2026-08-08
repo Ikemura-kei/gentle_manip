@@ -27,10 +27,14 @@ REPO = Path(__file__).resolve().parents[2]
 
 def find_latest_data_pkl(demos_root: Path, category: str) -> Path:
     cat_dir = demos_root / f"single_lift_{category}_rigid"
-    pkls = sorted(cat_dir.glob("*/data.pkl"))
+    pkls = sorted(cat_dir.glob("*/data.pkl"), key=lambda p: p.stat().st_mtime)
     if not pkls:
         raise FileNotFoundError(f"no data.pkl found under {cat_dir}")
-    return pkls[-1]   # newest run dir (lexicographic == chronological for these run-id names)
+    # Sort by mtime, not path string: run dirs are "<date>-<3 random letters>"
+    # (collect_demos_synth_v2.py's _make_run_dir), so a lexicographic sort is
+    # NOT chronological across multiple runs on the same day -- confirmed this
+    # picked a stale 6-episode tofu pilot over the real 50-episode run.
+    return pkls[-1]
 
 
 def main() -> None:

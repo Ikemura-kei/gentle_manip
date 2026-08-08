@@ -111,7 +111,15 @@ def collect_one(category: str, n_episodes: int, n_envs: int, maxfevals: int,
 
         # Regardless of ok/crash, check whether a usable data.pkl got written
         # (shards are merged incrementally in some code paths -- best effort).
-        run_dirs = sorted(cat_out.glob("*/data.pkl")) if cat_out.exists() else []
+        # Sort by mtime, NOT path string: run dirs are named "<date>-<3 random
+        # lowercase letters>" (_make_run_dir), so a lexicographic sort is only
+        # chronological within a single run -- across multiple runs on the same
+        # day (e.g. a pilot + this full run) it can pick a STALE, smaller dataset
+        # purely because its random suffix sorts later ("sdf" > "hki"). Confirmed
+        # this happened for tofu: a 6-episode pilot's dir outsorted the real
+        # 50-episode run's dir.
+        run_dirs = (sorted(cat_out.glob("*/data.pkl"), key=lambda p: p.stat().st_mtime)
+                    if cat_out.exists() else [])
         if run_dirs:
             data_path = run_dirs[-1]
             result["data_path"] = str(data_path)
