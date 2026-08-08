@@ -1,0 +1,44 @@
+# [task] Cross-category single-lift smoke test: same reward/success shape as
+# single_lift_mushroom_soft.yaml, but the object actually spawned each scene
+# rebuild is decided by dr: cross_category_food (object_category_pool), not by
+# object_name below (which is only the NOMINAL/fallback category before DR
+# overrides it — see SimBackend._apply_scene_dr).
+# Used by: experiments (task:) single_lift_cross_category_food
+# Status: experimental
+#
+# Stage 2 (cross-category DR plumbing) smoke test ONLY — success band / reward
+# scales are copied unchanged from the mushroom-tuned task and are NOT re-tuned per
+# category (raspberry's mass/reach differ). Verifies category-switching scene
+# rebuild + registry-driven material/mesh resolution work end-to-end in Genesis.
+# TODO (Stage 4): tune success_z/reward scales per category once real cross-category
+# demo collection starts; for now this only needs to not crash / settle correctly.
+success_z_min: 0.175
+success_z_max: 0.275
+hold_steps: 30
+object_name: "mushroom"    # nominal/fallback only; dr.object_category_pool overrides per scene
+object_type: "soft"
+
+# mushroom's tuned substeps (Config C, E=3e5) — reused as-is for the smoke test.
+# Reusing the STIFFEST pool member's substep count is the conservative choice: MPM
+# stable substeps ~ sqrt(E), so a category with LOWER E (raspberry, 1e5) than the
+# tuned baseline needs fewer substeps, not more, for CFL stability. If a future
+# pool member is stiffer than mushroom, this needs revisiting per Stage 2's flagged
+# risk (per-category substep stability is not yet automatic).
+sim_substeps: 220
+mpm_grid_density: 250
+
+success_scale: 0.2
+
+rewards:
+  stress:
+    scale: 0.2
+    cap: 1.5
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 0.1
+    decay: 8.0
+  lift:
+    scale: 0.1
+    grasp_gate_dist: 0.079
+    lift_target: 0.16

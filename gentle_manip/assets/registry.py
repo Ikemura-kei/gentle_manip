@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 from gentle_manip.assets.materials import MATERIALS, Material
 
@@ -27,6 +27,27 @@ class ObjectDef:
     size: Tuple[float, float, float] = (0.04, 0.04, 0.04)   # primitive box extents (m)
     default_pos: Tuple[float, float, float] = (0.50, 0.0, 0.03)  # resting pose (m)
     mesh_path: Optional[str] = None                 # reserved; None => primitive box
+    # ── Cross-category DR (see domain_randomization/dr_config.py) ────────────────
+    # Per-category defaults used when a DRConfig activates `object_category_pool`
+    # but leaves its own absolute field unset — lets ONE DRConfig work across many
+    # categories while every category still gets ranges suited to its own geometry
+    # and material, instead of hardcoding 10-20 absolute range sets in presets.py.
+    # Never used unless a category pool is active; single-category experiments are
+    # unaffected. Keys mirror DRConfig's shape/material field names, minus the
+    # `object_` prefix (e.g. "bend_deg", "taper", "E", "yield").
+    shape_dr_ranges: Optional[Dict[str, Tuple[float, float]]] = None      # bend_deg/twist_deg/taper/rbf/axis_scale/scale
+    material_dr_mult: Optional[Dict[str, Tuple[float, float]]] = None    # E/nu/rho/yield, as MULTIPLIERS on this object's own nominal (not absolute Pa)
+    # ── Per-category MPM stability overrides ──────────────────────────────────────
+    # SceneSpec.sim_substeps/mpm_grid_density are scene-wide constants tuned for
+    # ONE object (mushroom's "Config C") — a genuinely different category can need
+    # a different value for a numerically stable sim, independent of DR (this is
+    # NOT randomized, just a fixed per-category correction). Discovered empirically:
+    # a real photogrammetry-scan mesh (pear, ~54k faces) needs more substeps than
+    # the shared default (220) to avoid NaN contact forces; a very small object
+    # (blueberry, ~1cm) needs a finer MPM grid than the shared default (250) or
+    # particle sampling errors out. None = use SceneSpec's existing default.
+    sim_substeps_override: Optional[int] = None
+    mpm_grid_density_override: Optional[float] = None
 
 
 # The validated baseline matches examples/gs_sim_backend_dev.py: a 4 cm tofu cube
@@ -49,9 +70,148 @@ OBJECT_MAP: dict[str, ObjectDef] = {
     # x 3.5 cm). Soft MPM body; rests on the table (mesh bottom at z=-0.0148, so
     # default_pos z=0.016 puts it just above the surface). size is informational only
     # (ignored for meshes). Material is the soft-end "Config C" (see materials.py).
-    "mushroom": ObjectDef("mushroom", MATERIALS["mushroom"], object_type="soft",
-                          size=(0.033, 0.032, 0.035), default_pos=(0.47, 0.0, 0.016),
-                          mesh_path=str(_OBJ_DIR / "mushroom.obj")),
+    "mushroom": ObjectDef(
+        "mushroom", MATERIALS["mushroom"], object_type="soft",
+        size=(0.033, 0.032, 0.035), default_pos=(0.47, 0.0, 0.016),
+        mesh_path=str(_OBJ_DIR / "mushroom.obj"),
+        # Matches configs/dr/food_shape.yaml's tuned ranges (kept on the soft side of
+        # nominal E for MPM stability at the tuned substeps — see materials.py).
+        shape_dr_ranges={"bend_deg": (-25.0, 25.0), "twist_deg": (-20.0, 20.0),
+                         "taper": (-0.15, 0.15), "axis_scale": (0.9, 1.1),
+                         "scale": (0.8, 1.12)},
+        material_dr_mult={"E": (0.667, 1.0), "nu": (0.914, 1.086), "rho": (0.9, 1.1)},
+    ),
+    # Second mesh-based, cross-category food object (Stage 1 triage: validated via
+    # gentle_manip.scripts.repair_and_validate_mesh — tet-meshable, gripper-feasible,
+    # ~1.5cm isotropic). Roughly spherical drupelet cluster, unlike the mushroom's
+    # cap+stem asymmetry, so its shape DR favors organic surface bumps (rbf) over
+    # bend/twist (which assume an elongated long axis).
+    "raspberry": ObjectDef(
+        "raspberry", MATERIALS["raspberry"], object_type="soft",
+        size=(0.0154, 0.0154, 0.0146), default_pos=(0.47, 0.0, 0.008),
+        mesh_path=str(_OBJ_DIR / "raspberry.stl"),
+        shape_dr_ranges={"bend_deg": (-8.0, 8.0), "twist_deg": (-10.0, 10.0),
+                         "taper": (-0.1, 0.1), "rbf": (0.0, 0.08),
+                         "axis_scale": (0.9, 1.1), "scale": (0.85, 1.15)},
+        material_dr_mult={"E": (0.6, 1.5), "nu": (0.95, 1.05), "rho": (0.85, 1.15),
+                          "yield": (0.6, 1.4)},
+    ),
+
+    # ── Cross-category food set continued (sourced from Objaverse-LVIS, CC-BY/CC0
+    # licensed, permissive-license-filtered; each validated via
+    # gentle_manip.scripts.repair_and_validate_mesh — tet-meshable + gripper-
+    # feasible + sane volume). default_pos.z is set to roughly half the mesh's
+    # max extent (a safe "spawn above the table" height) since these meshes'
+    # native pivot isn't guaranteed centered like mushroom.obj's; the settle
+    # step lets each one fall into its natural resting pose regardless.
+    #
+    # apple: near-round, minor natural asymmetry -> small bend/twist, mild
+    # surface bumps, moderate scale range (real apples span ~6-9cm).
+    "apple": ObjectDef(
+        "apple", MATERIALS["apple"], object_type="soft",
+        size=(0.065, 0.060, 0.065), default_pos=(0.47, 0.0, 0.033),
+        mesh_path=str(_OBJ_DIR / "apple.obj"),
+        shape_dr_ranges={"bend_deg": (-6.0, 6.0), "twist_deg": (-8.0, 8.0),
+                         "taper": (-0.08, 0.08), "rbf": (0.0, 0.04),
+                         "axis_scale": (0.9, 1.1), "scale": (0.85, 1.2)},
+        material_dr_mult={"E": (0.6, 1.5), "nu": (0.95, 1.05), "rho": (0.85, 1.15),
+                          "yield": (0.6, 1.4)},
+    ),
+    # pear: round nashi-type scan (not the elongated western teardrop shape);
+    # moderate bend for natural lopsidedness, more taper range than apple. Real
+    # photogrammetry scan (~54k faces, much denser than the other harvested
+    # meshes) -- empirically NaN'd during settling at the shared 220-substep
+    # default; 400 is confirmed stable (see harvest verification notes).
+    "pear": ObjectDef(
+        "pear", MATERIALS["pear"], object_type="soft",
+        size=(0.062, 0.052, 0.065), default_pos=(0.47, 0.0, 0.0325),
+        mesh_path=str(_OBJ_DIR / "pear.obj"),
+        shape_dr_ranges={"bend_deg": (-10.0, 10.0), "twist_deg": (-8.0, 8.0),
+                         "taper": (-0.12, 0.12), "rbf": (0.0, 0.03),
+                         "axis_scale": (0.9, 1.1), "scale": (0.85, 1.15)},
+        material_dr_mult={"E": (0.6, 1.5), "nu": (0.95, 1.05), "rho": (0.85, 1.15),
+                          "yield": (0.6, 1.4)},
+        sim_substeps_override=400,
+    ),
+    # grape: tiny, near-spherical -- minimal shape DR needed, but real grapes
+    # vary a lot in size (small seedless to large table grapes), so a wide
+    # scale range.
+    "grape": ObjectDef(
+        "grape", MATERIALS["grape"], object_type="soft",
+        size=(0.019, 0.020, 0.020), default_pos=(0.47, 0.0, 0.010),
+        mesh_path=str(_OBJ_DIR / "grape.obj"),
+        shape_dr_ranges={"bend_deg": (-5.0, 5.0), "twist_deg": (-5.0, 5.0),
+                         "taper": (-0.05, 0.05), "rbf": (0.0, 0.02),
+                         "axis_scale": (0.92, 1.08), "scale": (0.8, 1.25)},
+        material_dr_mult={"E": (0.6, 1.5), "nu": (0.95, 1.05), "rho": (0.85, 1.15),
+                          "yield": (0.6, 1.4)},
+    ),
+    # kiwi: elongated oval (unlike the round berries above) -- more bend/twist/
+    # taper range, matching its natural long-axis asymmetry.
+    "kiwi": ObjectDef(
+        "kiwi", MATERIALS["kiwi"], object_type="soft",
+        size=(0.043, 0.046, 0.060), default_pos=(0.47, 0.0, 0.030),
+        mesh_path=str(_OBJ_DIR / "kiwi.obj"),
+        shape_dr_ranges={"bend_deg": (-8.0, 8.0), "twist_deg": (-10.0, 10.0),
+                         "taper": (-0.10, 0.10), "rbf": (0.0, 0.03),
+                         "axis_scale": (0.9, 1.1), "scale": (0.85, 1.15)},
+        material_dr_mult={"E": (0.6, 1.5), "nu": (0.95, 1.05), "rho": (0.85, 1.15),
+                          "yield": (0.6, 1.4)},
+    ),
+    # cherry: tiny and near-spherical, same shape-DR profile as grape.
+    "cherry": ObjectDef(
+        "cherry", MATERIALS["cherry"], object_type="soft",
+        size=(0.020, 0.017, 0.020), default_pos=(0.47, 0.0, 0.0098),
+        mesh_path=str(_OBJ_DIR / "cherry.obj"),
+        shape_dr_ranges={"bend_deg": (-5.0, 5.0), "twist_deg": (-5.0, 5.0),
+                         "taper": (-0.05, 0.05), "rbf": (0.0, 0.02),
+                         "axis_scale": (0.92, 1.08), "scale": (0.85, 1.2)},
+        material_dr_mult={"E": (0.6, 1.5), "nu": (0.95, 1.05), "rho": (0.85, 1.15),
+                          "yield": (0.6, 1.4)},
+    ),
+    # blueberry: tiny near-spherical berry, same profile as raspberry/grape but
+    # scaled down further; real blueberries vary a fair amount in size cluster
+    # to cluster, so a wide scale range. Its small volume (~0.13 cm^3) undersamples
+    # MPM particles at the shared 250 grid_density default (crashes with an
+    # internal "kth out of bounds" particle-sampling error); 500 is confirmed
+    # stable (see harvest verification notes).
+    "blueberry": ObjectDef(
+        "blueberry", MATERIALS["blueberry"], object_type="soft",
+        size=(0.0088, 0.013, 0.009), default_pos=(0.47, 0.0, 0.0045),
+        mesh_path=str(_OBJ_DIR / "blueberry.obj"),
+        shape_dr_ranges={"bend_deg": (-5.0, 5.0), "twist_deg": (-5.0, 5.0),
+                         "taper": (-0.05, 0.05), "rbf": (0.0, 0.03),
+                         "axis_scale": (0.9, 1.1), "scale": (0.8, 1.25)},
+        mpm_grid_density_override=500,
+        material_dr_mult={"E": (0.6, 1.5), "nu": (0.95, 1.05), "rho": (0.85, 1.15),
+                          "yield": (0.6, 1.4)},
+    ),
+    # egg: distinctive, fairly CONSISTENT ellipsoid shape (unlike organic fruit,
+    # real eggs don't bend/twist/bump) -- shape DR is deliberately narrow, mostly
+    # just a taper range (rounder vs. more pointed eggs) and modest scale.
+    "egg": ObjectDef(
+        "egg", MATERIALS["egg"], object_type="soft",
+        size=(0.0446, 0.058, 0.0451), default_pos=(0.47, 0.0, 0.0225),
+        mesh_path=str(_OBJ_DIR / "egg.obj"),
+        shape_dr_ranges={"bend_deg": (-2.0, 2.0), "twist_deg": (-2.0, 2.0),
+                         "taper": (-0.08, 0.08), "axis_scale": (0.95, 1.05),
+                         "scale": (0.92, 1.08)},
+        material_dr_mult={"E": (0.7, 1.3), "nu": (0.95, 1.05), "rho": (0.95, 1.05),
+                          "yield": (0.5, 1.5)},
+    ),
+    # avocado: larger, elongated pear-like shape -- more bend/taper range than
+    # the round berries, matching its natural asymmetry (narrower neck, wider
+    # base).
+    "avocado": ObjectDef(
+        "avocado", MATERIALS["avocado"], object_type="soft",
+        size=(0.062, 0.095, 0.0614), default_pos=(0.47, 0.0, 0.0307),
+        mesh_path=str(_OBJ_DIR / "avocado.obj"),
+        shape_dr_ranges={"bend_deg": (-8.0, 8.0), "twist_deg": (-6.0, 6.0),
+                         "taper": (-0.12, 0.12), "rbf": (0.0, 0.02),
+                         "axis_scale": (0.9, 1.1), "scale": (0.85, 1.15)},
+        material_dr_mult={"E": (0.4, 2.0), "nu": (0.95, 1.05), "rho": (0.9, 1.1),
+                          "yield": (0.4, 1.6)},
+    ),
 }
 
 

@@ -1,0 +1,20 @@
+# [dr] Per-reset DR for rigid avocado lift -- pose + full orientation + this
+# category's own shape/scale ranges (from registry.py ObjectDef.shape_dr_ranges).
+# Used by: experiments (dr:) single_lift_avocado_rigid
+# Status: active
+#
+# Pitch/roll and scale REDUCED from the mushroom template (was 45deg / up to
+# 1.15x): avocado's nominal min-extent (~61mm) is close to the XArm7 gripper's
+# 80mm stroke (~70mm practical limit incl. margin) -- same issue diagnosed for
+# apple (see rigid_orientation_apple.yaml). 20deg tilt + <=1.10x scale keeps
+# min-extent under ~68mm.
+object_pos_xy: 0.04           # half-range (m)
+robot_init_pos_xyz: 0.02      # per-env arm-home jitter
+object_yaw_deg: 180           # full 360 deg yaw
+object_pitch_roll_deg: 20     # was 45 -- too aggressive for this object's size
+
+object_scale:      [0.85, 1.10]
+object_bend_deg:   [-8.0, 8.0]
+object_twist_deg:  [-6.0, 6.0]
+object_taper:      [-0.12, 0.12]
+object_axis_scale: [0.9, 1.1]

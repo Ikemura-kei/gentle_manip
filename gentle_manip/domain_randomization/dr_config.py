@@ -16,7 +16,11 @@ from typing import Dict, Optional, Tuple
 
 import numpy as np
 
+from gentle_manip.assets.registry import ObjectDef
+
 _Range = Tuple[float, float]
+_MATERIAL_NOMINAL_ATTR = {"E": "youngs_modulus", "nu": "poisson_ratio",
+                          "rho": "density", "yield": "von_mises_yield_stress"}
 
 
 @dataclass
@@ -44,7 +48,19 @@ class DRConfig:
     object_rbf: Optional[_Range] = None       # shape: organic bump magnitude (fraction of size, e.g. (0, 0.05))
     object_axis_scale: Optional[_Range] = None  # shape: anisotropic scale along ONE random x/y/z axis, e.g. (0.9, 1.1)
 
+    # ── per-scene object CATEGORY (rebuild; cross-category training) ──────────
+    # When set, sample_category() draws which registered object to spawn each scene
+    # build. Every field above still applies as an ABSOLUTE override on top of
+    # whichever category is drawn; a field left None instead falls back to that
+    # category's own ObjectDef.shape_dr_ranges/material_dr_mult (see registry.py),
+    # so ONE DRConfig can drive many categories without hardcoding per-category
+    # absolute ranges here. None = single fixed category, today's unchanged behavior.
+    object_category_pool: Optional[Tuple[str, ...]] = None
+    object_category_weights: Optional[Tuple[float, ...]] = None  # sampling weights, same length as the pool; None = uniform
+
     seed: int = 0
+
+    _STR_LIST_FIELDS = ("object_category_pool",)
 
     _SCENE_FIELDS = ("object_E", "object_nu", "object_rho", "object_yield", "coup_friction",
                      "object_scale", "object_bend_deg", "object_twist_deg", "object_taper",
@@ -58,7 +74,8 @@ class DRConfig:
                 or self.object_yaw_deg > 0 or self.object_pitch_roll_deg > 0)
 
     def has_scene_dr(self) -> bool:
-        return any(getattr(self, f) is not None for f in self._SCENE_FIELDS)
+        return (any(getattr(self, f) is not None for f in self._SCENE_FIELDS)
+                or bool(self.object_category_pool))
 
     def has_shape_dr(self) -> bool:
         return any(getattr(self, f) is not None for f in self._SHAPE_FIELDS)
@@ -76,10 +93,24 @@ class DRConfig:
             k = "object_pos_xy" if k == "pose_dr_xy" else k     # back-compat alias
             if k not in names:
                 continue
-            kw[k] = tuple(float(x) for x in v) if isinstance(v, (list, tuple)) else v
+            if k in cls._STR_LIST_FIELDS:
+                kw[k] = tuple(str(x) for x in v) if isinstance(v, (list, tuple)) else v
+            else:
+                kw[k] = tuple(float(x) for x in v) if isinstance(v, (list, tuple)) else v
         return cls(**kw)
 
     # ── sampling ──────────────────────────────────────────────────────────────
+    def sample_category(self, rng: np.random.Generator) -> Optional[str]:
+        """Which registered object name to spawn this scene build, or None if
+        `object_category_pool` isn't set (single fixed category, unchanged)."""
+        if not self.object_category_pool:
+            return None
+        if self.object_category_weights is not None:
+            w = np.asarray(self.object_category_weights, dtype=np.float64)
+            idx = int(rng.choice(len(self.object_category_pool), p=w / w.sum()))
+        else:
+            idx = int(rng.integers(len(self.object_category_pool)))
+        return self.object_category_pool[idx]
     def sample_object_dxy(self, rng: np.random.Generator, num_envs: int) -> Optional[np.ndarray]:
         """Per-env object (dx, dy) offset from the default pose, or None if disabled."""
         if self.object_pos_xy <= 0:
@@ -117,34 +148,68 @@ class DRConfig:
             return np.tile(center, (num_envs, 1)).astype(np.float32)
         return None
 
-    def sample_scene(self, rng: np.random.Generator) -> Dict[str, float]:
+    def sample_scene(self, rng: np.random.Generator,
+                     category: Optional[ObjectDef] = None) -> Dict[str, float]:
         """Sample the per-scene params that are randomized (single value each — material
-        is global). Keys: 'E','nu','rho','yield','coup_friction' for whatever is set."""
+        is global). Keys: 'E','nu','rho','yield','coup_friction' for whatever is set.
+
+        `category`: the ObjectDef sample_category() drew this scene (or None for the
+        single-fixed-category case). A field left None here (e.g. object_E) falls back
+        to `category.material_dr_mult`, sampled as a MULTIPLIER on that category's own
+        nominal Material value — so cross-category training doesn't need one absolute
+        range per category. `coup_friction` has no per-category fallback (it's a scene
+        coupling param, not part of Material) and is only ever set via the field above.
+        """
         out: Dict[str, float] = {}
         keymap = {"object_E": "E", "object_nu": "nu", "object_rho": "rho",
                   "object_yield": "yield", "coup_friction": "coup_friction"}
+        cat_mult = category.material_dr_mult if category is not None else None
         for field_name, key in keymap.items():
             rng_pair = getattr(self, field_name)
             if rng_pair is not None:
                 out[key] = float(rng.uniform(rng_pair[0], rng_pair[1]))
+            elif cat_mult is not None and key in _MATERIAL_NOMINAL_ATTR and key in cat_mult:
+                nominal = getattr(category.material, _MATERIAL_NOMINAL_ATTR[key])
+                out[key] = float(nominal * rng.uniform(*cat_mult[key]))
         return out
 
-    def sample_shape_scale(self, rng: np.random.Generator) -> Dict[str, float]:
+    def sample_shape_scale(self, rng: np.random.Generator,
+                           category: Optional[ObjectDef] = None) -> Dict[str, float]:
         """Per-scene object SIZE + SHAPE, or {} if none set. 'scale' (float); shape params for
         mesh_deform.deform_mesh — 'bend'/'twist' in RADIANS (config is deg), 'taper'/'rbf'
-        fractions. Sampled once per scene build (all sub-envs share the geometry)."""
+        fractions. Sampled once per scene build (all sub-envs share the geometry).
+
+        `category`: as in sample_scene() — a field left None here falls back to that
+        category's own ObjectDef.shape_dr_ranges (magnitudes suited to ITS geometry,
+        e.g. a round object gets little bend/twist but real rbf bumps; an elongated
+        one gets the reverse) instead of one global shape range for every category.
+        """
+        cat_ranges = category.shape_dr_ranges if category is not None else None
+
+        def _range(field_name: str, cat_key: str) -> Optional[_Range]:
+            rng_pair = getattr(self, field_name)
+            if rng_pair is None and cat_ranges is not None:
+                rng_pair = cat_ranges.get(cat_key)
+            return rng_pair
+
         out: Dict[str, float] = {}
-        if self.object_scale is not None:
-            out["scale"] = float(rng.uniform(*self.object_scale))
-        if self.object_bend_deg is not None:
-            out["bend"] = float(np.deg2rad(rng.uniform(*self.object_bend_deg)))
-        if self.object_twist_deg is not None:
-            out["twist"] = float(np.deg2rad(rng.uniform(*self.object_twist_deg)))
-        if self.object_taper is not None:
-            out["taper"] = float(rng.uniform(*self.object_taper))
-        if self.object_rbf is not None:
-            out["rbf"] = float(rng.uniform(*self.object_rbf))
-        if self.object_axis_scale is not None:              # anisotropic scale on a random axis
-            out["axis_scale"] = float(rng.uniform(*self.object_axis_scale))
+        scale_range = _range("object_scale", "scale")
+        if scale_range is not None:
+            out["scale"] = float(rng.uniform(*scale_range))
+        bend_range = _range("object_bend_deg", "bend_deg")
+        if bend_range is not None:
+            out["bend"] = float(np.deg2rad(rng.uniform(*bend_range)))
+        twist_range = _range("object_twist_deg", "twist_deg")
+        if twist_range is not None:
+            out["twist"] = float(np.deg2rad(rng.uniform(*twist_range)))
+        taper_range = _range("object_taper", "taper")
+        if taper_range is not None:
+            out["taper"] = float(rng.uniform(*taper_range))
+        rbf_range = _range("object_rbf", "rbf")
+        if rbf_range is not None:
+            out["rbf"] = float(rng.uniform(*rbf_range))
+        axis_scale_range = _range("object_axis_scale", "axis_scale")
+        if axis_scale_range is not None:                    # anisotropic scale on a random axis
+            out["axis_scale"] = float(rng.uniform(*axis_scale_range))
             out["axis_scale_ax"] = int(rng.integers(3))     # 0=x, 1=y, 2=z
         return out

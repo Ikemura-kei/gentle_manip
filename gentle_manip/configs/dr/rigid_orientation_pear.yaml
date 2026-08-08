@@ -1,0 +1,20 @@
+# [dr] Per-reset DR for rigid pear lift -- pose + full orientation + this
+# category's own shape/scale ranges (from registry.py ObjectDef.shape_dr_ranges).
+# Used by: experiments (dr:) single_lift_pear_rigid
+# Status: active
+#
+# Pitch/roll moderated from the mushroom template (was 45deg): pear's nominal
+# min-extent (~52mm) has less headroom than the small berries against the
+# XArm7 gripper's ~70mm practical limit -- same class of issue diagnosed for
+# apple/avocado (see rigid_orientation_apple.yaml), less severe here so a
+# moderate reduction (not the full cut to 20deg) plus the existing scale range.
+object_pos_xy: 0.04           # half-range (m)
+robot_init_pos_xyz: 0.02      # per-env arm-home jitter
+object_yaw_deg: 180           # full 360 deg yaw
+object_pitch_roll_deg: 30     # was 45 -- moderate reduction, less headroom than small berries
+
+object_scale:      [0.85, 1.15]
+object_bend_deg:   [-10.0, 10.0]
+object_twist_deg:  [-8.0, 8.0]
+object_taper:      [-0.12, 0.12]
+object_axis_scale: [0.9, 1.1]

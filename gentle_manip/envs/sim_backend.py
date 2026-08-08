@@ -173,30 +173,60 @@ class SimBackend:
         return dict(self._applied_scene)
 
     def _apply_scene_dr(self, spec: SceneSpec):
-        """Sample FULL scene-level DR — material (E/ν/ρ + coupling friction) + object size/shape
-        — and bake it into `spec`; return (new_spec, coup_friction_or_None). Works from the
-        REGISTRY nominal mesh + NOMINAL scale + ABSOLUTE material values, so it's idempotent —
-        always call it on self._nominal_spec so rebuilds don't chain. Records the applied
-        size/shape/coup in self._applied_scene (material is auditable via material_params)."""
+        """Sample FULL scene-level DR — object CATEGORY (cross-category, if configured) +
+        material (E/ν/ρ + coupling friction) + object size/shape — and bake it into `spec`;
+        return (new_spec, coup_friction_or_None). Works from the REGISTRY nominal mesh +
+        NOMINAL scale + ABSOLUTE material values, so it's idempotent — always call it on
+        self._nominal_spec so rebuilds don't chain. Records the applied category/size/shape/
+        coup in self._applied_scene (material is auditable via material_params).
+
+        Category sampling (DRConfig.object_category_pool) happens FIRST, before material/
+        shape are sampled, because those two calls take the resolved category's ObjectDef as
+        a fallback for any field DRConfig itself leaves unset (its own per-category
+        material_dr_mult/shape_dr_ranges — see dr_config.py). Swapping `o.name` (+
+        `object_type`, from the new category's registry entry) is enough for scene_builder to
+        re-resolve mesh/material from the NEW category via its existing None-fallback
+        (ObjectEntry.mesh_path/youngs_modulus/etc. are None on the nominal entry, so they
+        already fall back to the registry lookup by name) — mesh_path is explicitly reset to
+        None on a category switch so a stale override never survives onto a different object.
+        """
         import dataclasses
         import numpy as _np
-        mat = self._dr.sample_scene(self._rng)                   # E/nu/rho/yield/coup (absolute)
-        shp = self._dr.sample_shape_scale(self._rng)             # scale + bend/twist/taper/rbf
-        self._applied_scene = {}
-        if (not mat and not shp) or not spec.objects:
-            return spec, None
         from gentle_manip.assets.registry import get_object_def
+
+        self._applied_scene = {}
+        if not spec.objects:
+            return spec, None
+
         o = spec.objects[0]
+        category_name = self._dr.sample_category(self._rng)
+        if category_name is not None:
+            cat_def = get_object_def(category_name)
+            o = dataclasses.replace(o, name=category_name, object_type=cat_def.object_type,
+                                    mesh_path=None)
+        else:
+            cat_def = get_object_def(o.name)
+
+        mat = self._dr.sample_scene(self._rng, category=cat_def)         # E/nu/rho/yield/coup
+        shp = self._dr.sample_shape_scale(self._rng, category=cat_def)   # scale + bend/twist/taper/rbf
+        has_sim_override = (cat_def.sim_substeps_override is not None
+                            or cat_def.mpm_grid_density_override is not None)
+
+        if not mat and not shp and category_name is None and not has_sim_override:
+            return spec, None   # nothing sampled/overridden at all (no category pool, no absolute DR)
+
         updates, applied = {}, {}
-        for key, field in (("E", "youngs_modulus"), ("nu", "poisson_ratio"), ("rho", "density")):
+        if category_name is not None:
+            applied["category"] = category_name
+        for key, field_name in (("E", "youngs_modulus"), ("nu", "poisson_ratio"), ("rho", "density")):
             if key in mat:
-                updates[field] = float(mat[key])
+                updates[field_name] = float(mat[key])
         if "scale" in shp:
             updates["scale"] = float(self._nominal_scale * shp["scale"])
             applied["scale"] = updates["scale"]
         shape = {k: shp[k] for k in ("bend", "twist", "taper", "rbf", "axis_scale", "axis_scale_ax")
                  if k in shp}
-        nominal_mesh = get_object_def(o.name).mesh_path          # from nominal (no chaining)
+        nominal_mesh = cat_def.mesh_path                          # from the resolved category, no chaining
         if shape and nominal_mesh is not None:                   # mesh object only; boxes -> size only
             import tempfile
             from gentle_manip.assets import mesh_deform
@@ -215,10 +245,16 @@ class SimBackend:
         if coup is not None:
             applied["coup_friction"] = float(coup)
         self._applied_scene = applied
-        if updates:
-            objects = list(spec.objects)
-            objects[0] = dataclasses.replace(o, **updates)
-            spec = dataclasses.replace(spec, objects=objects)
+        objects = list(spec.objects)
+        objects[0] = dataclasses.replace(o, **updates) if updates else o
+        scene_updates = {}
+        if cat_def.sim_substeps_override is not None:
+            scene_updates["sim_substeps"] = cat_def.sim_substeps_override
+            applied["sim_substeps"] = cat_def.sim_substeps_override
+        if cat_def.mpm_grid_density_override is not None:
+            scene_updates["mpm_grid_density"] = cat_def.mpm_grid_density_override
+            applied["mpm_grid_density"] = cat_def.mpm_grid_density_override
+        spec = dataclasses.replace(spec, objects=objects, **scene_updates)
         return spec, coup
 
     def randomize_scene(self, tries: int = 6) -> RawObs:

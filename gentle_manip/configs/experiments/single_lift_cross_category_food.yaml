@@ -1,0 +1,21 @@
+# [experiment] Cross-category single-lift smoke test (Stage 2 of the cross-category
+# IL plan): same composition shape as single_lift_mushroom_soft.yaml, but dr:
+# cross_category_food makes each scene rebuild draw a different registered object
+# (mushroom/raspberry) instead of training on one fixed category.
+# Used by: manual smoke test (SimBackend scene-DR rebuild across categories);
+#          future grasp_synthesis / demo collection once Stage 3/4 land
+# Status: experimental
+#
+# NOT yet a real training config — see configs/tasks/single_lift_cross_category_food.yaml
+# for what's still mushroom-tuned (success band, reward scales). This experiment
+# exists to exercise the Stage 2 plumbing (SimBackend._apply_scene_dr category
+# switching, registry-driven mesh/material resolution) end-to-end in Genesis.
+task: single_lift_cross_category_food
+action: delta_pose_delta_gripper
+dr: cross_category_food
+augmentation: l515_noise
+
+obs: superset_soft
+views:
+  teacher: [privileged]
+  student: [point_cloud]

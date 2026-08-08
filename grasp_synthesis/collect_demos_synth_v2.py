@@ -333,6 +333,11 @@ _GRASP_IDX = [name for name, _ in PHASES].index("grasp")   # boundary the firm-c
 # Bounded to fire once per env (a one-way linear FSM check, not a retry loop).
 FIRM_FORCE_THRESH_N  = 1.0     # below this measured contact force -> needs firming
 FIRM_EXTRA_CLOSE_M   = 0.0025  # additional close distance (meters) if triggered
+FIRM_MAX_CLOSE_FRACTION = 0.15 # ...but never more than this fraction of the grasp's
+                               # own commanded width -- 2.5mm is negligible on a large
+                               # object but can exceed a tiny object's own size (see
+                               # collection diagnostic notes: blueberry ~9mm min-extent,
+                               # 2.5mm unconditional extra close was ~28% of that).
 
 # ── Post-processing: trim long held-command runs ──────────────────────────────
 HELD_RUN_MAX  = 8   # runs longer than this get trimmed
@@ -461,9 +466,19 @@ def execute_and_collect(
             # loop) found this env's grip too weak — envs that were already fine skip
             # "firm" entirely (phase_idx jumps straight to "lift", no artificial no-op
             # steps to generate-then-trim). So here it's always a real extra close.
+            #
+            # Cap the extra close to a FRACTION of this env's own grasp width, not a
+            # fixed 2.5mm for every object: 2.5mm is negligible on a mushroom/apple
+            # but is 20-30% of a blueberry's ~9mm size -- fixed-magnitude closing
+            # after an already-computed grasp risks crushing/ejecting small objects.
+            # This matters MORE than usual right now because contact_force always
+            # reads 0 (a pinned Genesis bug, see genesis_worker.py), so the grasp->
+            # firm check below can never observe "already fine" and skip firm -- every
+            # rigid grasp goes through this phase, every time.
             pos, quat = pos_b[i], quat_b[i]
             alpha = (phase_step + 1) / dur
-            grip_target[i] = max(0.0, width_cls[i] - alpha * FIRM_EXTRA_CLOSE_M)
+            close_amount = min(FIRM_EXTRA_CLOSE_M, FIRM_MAX_CLOSE_FRACTION * width_cls[i])
+            grip_target[i] = max(0.0, width_cls[i] - alpha * close_amount)
             grip = grip_target[i]
         elif name == "lift":
             alpha = (phase_step + 1) / dur

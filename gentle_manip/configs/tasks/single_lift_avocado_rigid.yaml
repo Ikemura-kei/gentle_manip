@@ -1,0 +1,29 @@
+# [task] Rigid avocado single-lift (rigid material, no stress reward).
+# Used by: experiments (task:) -> demo collection, DPPO training
+# Status: active
+#
+# Auto-generated to mirror single_lift_mushroom_rigid.yaml exactly (same success
+# band / reward shape / settle params) with avocado's own mesh + registry material.
+success_z_min: 0.175
+success_z_max: 0.275
+hold_steps: 30
+object_name: "avocado"
+object_type: "rigid"
+
+sim_substeps: 5
+mpm_grid_density: 250    # unused (no MPM entity), kept for SceneSpec
+
+settle_steps: 30
+settle_max_steps: 200
+settle_vel_thresh: 0.0005
+
+success_scale: 2.0
+
+rewards:
+  dist_to_obj:
+    scale: 1.0
+    decay: 8.0
+  lift:
+    scale: 1.0
+    grasp_gate_dist: 0.079
+    lift_target: 0.16

@@ -207,6 +207,8 @@ class GenesisWorker:
         if getattr(self.handle, "batch_render_cameras", False):
             frames = _batched_render(cam_list[0], self.handle.scene, rgb=True, depth=False)
             frames = _np(frames[0]).astype(np.uint8)   # (B, H, W, 3)
+            if frames.ndim == 3:
+                frames = frames[None]   # rasterizer squeezed B=1 -> restore (1, H, W, 3), matching read_state()'s depth fix
             return frames if all_envs else frames[0]
         # Per-env path (soft scenes) — unchanged
         if all_envs:
@@ -270,7 +272,23 @@ class GenesisWorker:
             state["object_center"] = _np(obj.get_pos()).astype(np.float32)      # (B, 3)
             state["object_quat"]   = _np(obj.get_quat()).astype(np.float32)    # (B, 4) wxyz
             state["von_mises_stress"] = None
-            state["contact_force"] = _gripper_object_contact_force(self.robot.robot, obj)  # (B,)
+            try:
+                state["contact_force"] = _gripper_object_contact_force(self.robot.robot, obj)  # (B,)
+            except RuntimeError as e:
+                # Upstream Genesis bug (pinned fork, unmodified collider.py): the
+                # non-zerocopy get_contacts() path gathers with an int32
+                # contact_sort_idx, which torch.gather rejects ("Expected dtype
+                # int64 for index"). Hit on every rigid-object step, not just this
+                # object -- a genesis-side fix is out of scope for this session, so
+                # degrade gracefully (contact_force is an OPTIONAL signal: the
+                # collector's "firm regrasp" heuristic and an opt-in privileged obs
+                # field, neither load-bearing for basic rigid pick-and-lift).
+                if not getattr(self, "_contact_force_warned", False):
+                    print(f"[genesis_worker] contact_force unavailable (upstream Genesis "
+                         f"bug, degrading to zeros): {e}", flush=True)
+                    self._contact_force_warned = True
+                n_envs = _np(obj.get_pos()).shape[0]
+                state["contact_force"] = np.zeros(n_envs, dtype=np.float32)
         else:
             st = obj.get_state()
             particle_pos = _np(st.pos)                                   # (B, n_p, 3)

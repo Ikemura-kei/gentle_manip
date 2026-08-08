@@ -1,0 +1,19 @@
+# [dr] Cross-category food DR: draws WHICH registered object to spawn each scene
+# rebuild, falling back to each category's OWN ObjectDef material_dr_mult/
+# shape_dr_ranges (registry.py) for material/shape variation.
+# Used by: experiments (dr:) single_lift_cross_category_food (Stage 2 smoke test)
+# Status: experimental
+#
+# Mirrors domain_randomization/presets.py::cross_category_food() — kept in sync
+# manually since YAML can't call a Python function. Deliberately leaves object_E/
+# object_bend_deg/etc. UNSET so each drawn category uses its own registry-defined
+# ranges instead of one global range forced onto every category (see dr_config.py's
+# sample_scene/sample_shape_scale docstrings).
+object_pos_xy: 0.05            # half-range (m): per-env object x/y jitter
+object_yaw_deg: 180            # per-env object yaw ~ U(-180,180) about world z (full range)
+object_pitch_roll_deg: 15      # per-env object pitch & roll tilt ~ U(-15,15) deg
+
+# Stage 1's full confirmed set (10 categories, see registry.py).
+object_category_pool: ["mushroom", "raspberry", "apple", "pear", "grape", "kiwi",
+                       "cherry", "blueberry", "egg", "avocado"]
+# object_category_weights: [...]   # optional; default is uniform over the pool

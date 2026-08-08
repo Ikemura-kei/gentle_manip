@@ -1,0 +1,17 @@
+# [dr] Per-reset DR for rigid egg lift -- pose + full orientation + this
+# category's own shape/scale ranges (from registry.py ObjectDef.shape_dr_ranges).
+# Used by: experiments (dr:) single_lift_egg_rigid
+# Status: active
+#
+# Auto-generated to mirror configs/dr/rigid_orientation.yaml's mushroom pattern —
+# same pose/orientation ranges, category-specific shape/scale.
+object_pos_xy: 0.04           # half-range (m)
+robot_init_pos_xyz: 0.02      # per-env arm-home jitter
+object_yaw_deg: 180           # full 360 deg yaw
+object_pitch_roll_deg: 45     # +/-45 deg pitch & roll
+
+object_scale:      [0.92, 1.08]
+object_bend_deg:   [-2.0, 2.0]
+object_twist_deg:  [-2.0, 2.0]
+object_taper:      [-0.08, 0.08]
+object_axis_scale: [0.95, 1.05]
