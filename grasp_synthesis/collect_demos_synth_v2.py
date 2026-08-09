@@ -357,8 +357,26 @@ PHASES = [
     ("hold",     N_HOLD),          # hold at lift height (success eval window)
 ]
 N_PHASES  = len(PHASES)
+_SETTLE_IDX = [name for name, _ in PHASES].index("settle")  # regrasp rewinds here (idea #2)
 _GRASP_IDX = [name for name, _ in PHASES].index("grasp")   # boundary the firm-check fires at
 _LIFT_IDX  = [name for name, _ in PHASES].index("lift")    # disturbance-injection phase (idea #3)
+
+# ── Robustness idea #2: lift-phase failure detection + regrasp ────────────────
+# Checked ONCE per env, exactly at the moment it finishes "lift" (about to enter
+# "hold") — read this env's just-measured object height. If the object didn't
+# actually rise with the gripper (a genuine physical slip — either an
+# under-firm grasp or idea #3's disturbance kick knocking it loose), REWIND
+# phase_idx back to "settle" (reopens at the original grasp pose, gripper still
+# open) instead of advancing to "hold", so the env re-runs settle->grasp->firm->
+# lift for real: a genuine grasp-drop-retry example, not a fabricated one. Uses
+# the SAME height fraction as the final success check for consistency. Bounded
+# to MAX_REGRASP_RETRIES per env (default 1) so one persistently-failing env
+# can't stall the batch or produce a runaway-length episode; a "regrasp in
+# place" at the original CMA-ES pose is the cheap approximation (the object has
+# usually only dropped a little, still under/near the fingers) — a full replan
+# is deliberately NOT attempted here (see CLAUDE.md's retry brainstorm §2/§3).
+REGRASP_HEIGHT_FRAC   = 0.5   # matches the final success check's fraction of LIFT_HEIGHT
+MAX_REGRASP_RETRIES   = 1
 
 # ── Robustness idea #1: force-based grasp firming ─────────────────────────────
 # At the moment an env finishes "grasp" (checked ONCE, per env, at the grasp->firm
@@ -433,6 +451,8 @@ def execute_and_collect(
     disturbance_prob: float = 0.0, # idea #3: DART-style disturbance injection (off by default)
     disturbance_max_m: float = 0.02,
     disturbance_rng=None,          # np.random.Generator; required if disturbance_prob > 0
+    enable_regrasp: bool = False,  # idea #2: lift-phase failure detection + regrasp (off by default)
+    max_regrasp_retries: int = MAX_REGRASP_RETRIES,
 ) -> Tuple[List[List[dict]], List[List[np.ndarray]], List[List[float]], np.ndarray, List[List]]:
     """Execute the scripted grasp trajectory with DECOUPLED per-env phase control;
     record (obs, action, reward) per env.
@@ -466,6 +486,15 @@ def execute_and_collect(
     intended trajectory — unlike post-hoc noise augmentation (which doesn't reflect
     real closed-loop-induced error and is known not to fix compounding error on its
     own), this bakes an actual recovery example into the demo itself.
+
+    Idea #2 — lift-phase failure detection + regrasp: checked once per env, exactly
+    when it finishes "lift". If the object's measured height didn't reach
+    `REGRASP_HEIGHT_FRAC` of LIFT_HEIGHT above the grasp point (a genuine physical
+    slip, not injected), rewind that env's phase back to "settle" (reopens at the
+    original grasp pose) and let it re-run settle→grasp→firm→lift for real, up to
+    `max_regrasp_retries` times. Complements idea #3: a disturbance-induced slip is
+    exactly the kind of failure this can catch and recover from, but it also fires
+    on ordinary weak-grasp drops with no disturbance involved.
 
     Returns:
         obs_bufs:    list[N] of obs-dict lists (T_i steps per env, unbatched)
@@ -578,6 +607,7 @@ def execute_and_collect(
     # Per-env FSM state
     phase_idx  = np.zeros(num_envs, dtype=np.int64)
     phase_step = np.zeros(num_envs, dtype=np.int64)
+    regrasp_count = np.zeros(num_envs, dtype=np.int64)   # idea #2: retries used so far
 
     def _step(cur_pos, cur_quat, cur_grip, record_mask):
         nonlocal prev_pos, prev_quat, prev_grip
@@ -649,11 +679,10 @@ def execute_and_collect(
 
         cur_obs_list, state = _step(cur_pos_arr, cur_quat_arr, cur_grip_arr, record_mask=active)
 
-        # Advance phase state for envs that were active this step.
-        # TODO(retry): this is where a robustness pass would check per-env
-        # success/failure (e.g. at the "lift"/"hold" -> DONE boundary) and, on
-        # failure, rewind phase_idx[i] to an earlier phase instead of advancing to
-        # DONE — independent of every other env's state.
+        # Advance phase state for envs that were active this step. Idea #2 (below)
+        # is exactly the robustness pass this used to be a TODO for: on a detected
+        # lift-phase failure, rewind phase_idx[i] to an earlier phase instead of
+        # advancing to "hold" — independent of every other env's state.
         phase_step[active] += 1
         # phase_idx may already be N_PHASES (done envs) — clip before indexing PHASES;
         # those entries are masked out by `active` anyway so the clipped value is unused.
@@ -676,6 +705,36 @@ def execute_and_collect(
                               f"{FIRM_FORCE_THRESH_N}N -> closing {FIRM_EXTRA_CLOSE_M*1000:.1f}mm more")
                     else:
                         advance[i] = 2   # grip already fine -> skip "firm", straight to "lift"
+
+        # Idea #2: lift-phase failure detection + regrasp. Check ONCE, exactly at
+        # the moment an env finishes "lift" (about to enter "hold") — read this
+        # env's just-measured object height. If it didn't rise far enough (a
+        # genuine slip — under-firm grasp, or idea #3's disturbance knocking it
+        # loose), REWIND to "settle" (reopens at the original grasp pose) instead
+        # of advancing to "hold", bounded to max_regrasp_retries per env.
+        leaving_lift = rolled_over & (phase_idx == _LIFT_IDX)
+        if enable_regrasp and np.any(leaving_lift):
+            obj_z_now = state["object_center"][:, 2]
+            for i in np.where(leaving_lift)[0]:
+                expected_z = grasp_pos[i, 2] + LIFT_HEIGHT * REGRASP_HEIGHT_FRAC
+                if obj_z_now[i] < expected_z and regrasp_count[i] < max_regrasp_retries:
+                    regrasp_count[i] += 1
+                    print(f"    [regrasp] env {i}: object z={obj_z_now[i]:.4f} < "
+                          f"expected {expected_z:.4f} after lift -> retry "
+                          f"{regrasp_count[i]}/{max_regrasp_retries}, rewinding to settle")
+                    advance[i] = _SETTLE_IDX - _LIFT_IDX   # negative -> rewind phase_idx
+                    grip_target[i] = width_cls[i]          # reset for a clean re-firm check
+                    # KNOWN ISSUE (deprioritized — specialist SR is the current focus):
+                    # "settle" commands pos_b[i] directly with no interpolation from
+                    # where the env actually is (still near lift height at this point),
+                    # so the PD controller sees a large one-step target jump and drives
+                    # hard toward it — visually a fast, uncontrolled-looking motion that
+                    # can clip the table. A real fix needs a short interpolated
+                    # re-approach from the CURRENT ee position (e.g. reuse the
+                    # "approach" phase's slerp/lerp machinery with a per-env dynamic
+                    # start pose instead of a fixed home_pos) rather than a hard target
+                    # snap. Left as-is for now; revisit only if regrasp data quality
+                    # becomes the priority again.
 
         phase_idx[rolled_over]  += advance[rolled_over]
         phase_step[rolled_over]  = 0
@@ -802,6 +861,13 @@ def main() -> None:
                         "See execute_and_collect's docstring.")
     p.add_argument("--disturbance-max-m", type=float, default=0.02,
                    help="max magnitude (m) of the idea #3 positional kick")
+    p.add_argument("--enable-regrasp-retry", action="store_true",
+                   help="lift-phase failure detection + regrasp (idea #2, off by default): "
+                        "if an env's object didn't rise far enough by the end of 'lift', "
+                        "rewind to 'settle' and re-run settle->grasp->firm->lift for a "
+                        "genuine grasp-drop-retry example. See execute_and_collect's docstring.")
+    p.add_argument("--max-regrasp-retries", type=int, default=MAX_REGRASP_RETRIES,
+                   help="cap on regrasp attempts per env (bounds episode length)")
     args = p.parse_args()
 
     # ── Load everything from the experiment config (same as training / eval) ──
@@ -963,6 +1029,7 @@ def main() -> None:
             record_video=args.record_video, priv_cfg=priv_cfg, dr_vec=dr_vec,
             disturbance_prob=args.disturbance_prob, disturbance_max_m=args.disturbance_max_m,
             disturbance_rng=disturbance_rng,
+            enable_regrasp=args.enable_regrasp_retry, max_regrasp_retries=args.max_regrasp_retries,
         )
         print(f"  Success: {success.tolist()}")
 
@@ -997,7 +1064,14 @@ def main() -> None:
             if args.record_video and frame_bufs[i]:
                 vid_dir = run_dir / "videos"
                 vid_dir.mkdir(exist_ok=True)
-                vid_path = vid_dir / f"ep{total_saved:04d}_env{i}_success.mp4"
+                # success[i] is True on the normal path; this branch is also reached
+                # for a KEPT FAILURE (--keep-failures, success[i]=False fell through
+                # instead of `continue`-ing above) — label the suffix accordingly so
+                # the filename doesn't lie about the outcome (a real bug: every
+                # --keep-failures episode was previously named "..._success.mp4"
+                # regardless of its actual success[i] flag).
+                outcome = "success" if success[i] else "keptfail"
+                vid_path = vid_dir / f"ep{total_saved:04d}_env{i}_{outcome}.mp4"
                 imageio.mimwrite(str(vid_path), frame_bufs[i], fps=round(rate_hz), quality=8)
                 print(f"    video → {vid_path.name}")
 
