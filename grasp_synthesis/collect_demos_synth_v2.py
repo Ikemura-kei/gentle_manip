@@ -451,6 +451,7 @@ def execute_and_collect(
     disturbance_prob: float = 0.0, # idea #3: DART-style disturbance injection (off by default)
     disturbance_max_m: float = 0.02,
     disturbance_rng=None,          # np.random.Generator; required if disturbance_prob > 0
+    disturbance_phases: tuple = ("lift",),  # which phase(s) get an independent kick draw each
     enable_regrasp: bool = False,  # idea #2: lift-phase failure detection + regrasp (off by default)
     max_regrasp_retries: int = MAX_REGRASP_RETRIES,
 ) -> Tuple[List[List[dict]], List[List[np.ndarray]], List[List[float]], np.ndarray, List[List]]:
@@ -476,16 +477,31 @@ def execute_and_collect(
     Idea #3 — DART-style disturbance injection (Laskey et al. 2017): our demos are
     100% clean scripted trajectories with zero recovery examples, a known BC
     brittleness source (small closed-loop errors compound because the policy has
-    never seen how to correct them). With probability `disturbance_prob`, one env
-    gets a ONE-STEP random positional kick (magnitude up to `disturbance_max_m`,
-    uniform direction) injected into the COMMANDED position at a random step during
-    "lift" — chosen because eval videos showed the failure mode is precisely
-    grasp/lift alignment, not gross navigation. Every subsequent step still targets
-    the ORIGINAL unperturbed plan (`_env_target` is untouched), so the recorded
-    action at the following step is a genuine corrective delta back toward the
-    intended trajectory — unlike post-hoc noise augmentation (which doesn't reflect
-    real closed-loop-induced error and is known not to fix compounding error on its
-    own), this bakes an actual recovery example into the demo itself.
+    never seen how to correct them). For each phase named in `disturbance_phases`,
+    with probability `disturbance_prob` one env gets an INDEPENDENT ONE-STEP random
+    positional kick (magnitude up to `disturbance_max_m`, uniform direction)
+    injected into the COMMANDED position at a random step during that phase. Every
+    subsequent step still targets the ORIGINAL unperturbed plan (`_env_target` is
+    untouched), so the recorded action at the following step is a genuine
+    corrective delta back toward the intended trajectory — unlike post-hoc noise
+    augmentation (which doesn't reflect real closed-loop-induced error and is known
+    not to fix compounding error on its own), this bakes an actual recovery example
+    into the demo itself.
+
+    Which phase(s) to disturb matters: the original default (`("lift",)`) targets
+    the failure mode "grasp succeeded, then dropped during/after lift." A teacher-
+    forced diagnostic (comparing the TRAINED model's predicted actions against real
+    held-out demo actions at matching states) found the model predicts gripper-
+    closing direction/magnitude correctly ~90% of the time when SHOWN a real
+    training-distribution state — i.e. the model itself is competent; the actual
+    closed-loop failure (policy hovers near the object without closing, then closes
+    empty while already retreating) is compounding POSITION error during
+    approach/grasp carrying the robot to a state outside the training distribution
+    right at the critical closing moment. `disturbance_phases=("grasp",)` (or
+    `("approach","grasp","lift")` for full coverage) targets THIS failure mode
+    directly — the demonstrator still targets the true grasp pose, so the recorded
+    recovery example is "arrived slightly off target, corrected into alignment,
+    then closed," which is exactly the missing skill.
 
     Idea #2 — lift-phase failure detection + regrasp: checked once per env, exactly
     when it finishes "lift". If the object's measured height didn't reach
@@ -519,19 +535,26 @@ def execute_and_collect(
     # a frozen (DONE) env all read the FINAL width, which is width_cls unless firmed.
     grip_target = width_cls.copy()
 
-    # Idea #3 setup: per-env disturbance draw (which envs, which "lift"-phase step,
-    # what offset) — precomputed once so the main loop only needs a cheap lookup.
+    # Idea #3 setup: per-env, per-disturbed-phase draw (which envs, which step within
+    # that phase, what offset) — precomputed once so the main loop only needs a cheap
+    # dict lookup keyed by the CURRENT phase_idx. Each named phase gets an INDEPENDENT
+    # bernoulli(disturbance_prob) draw, so an env can be disturbed in more than one
+    # phase (or none) in the same episode.
+    _phase_idx_by_name = {name: idx for idx, (name, _) in enumerate(PHASES)}
+    _phase_dur_by_name = {name: dur for name, dur in PHASES}
+    disturb_draws = {}   # phase_idx -> (mask, step, offset), each (N,) / (N,) / (N,3)
     if disturbance_prob > 0:
         assert disturbance_rng is not None, "disturbance_rng required when disturbance_prob > 0"
-        disturb_mask = disturbance_rng.random(num_envs) < disturbance_prob
-        disturb_step = disturbance_rng.integers(0, N_LIFT, size=num_envs)
-        _dirs = disturbance_rng.normal(size=(num_envs, 3))
-        _dirs /= np.linalg.norm(_dirs, axis=1, keepdims=True) + 1e-9
-        disturb_offset = (_dirs * disturbance_rng.uniform(0.0, disturbance_max_m, size=num_envs)[:, None]
-                          ).astype(np.float32)
-    else:
-        disturb_mask = np.zeros(num_envs, dtype=bool)
-        disturb_step, disturb_offset = None, None
+        for _phase_name in disturbance_phases:
+            p_idx = _phase_idx_by_name[_phase_name]
+            p_dur = _phase_dur_by_name[_phase_name]
+            mask = disturbance_rng.random(num_envs) < disturbance_prob
+            step = disturbance_rng.integers(0, p_dur, size=num_envs)
+            _dirs = disturbance_rng.normal(size=(num_envs, 3))
+            _dirs /= np.linalg.norm(_dirs, axis=1, keepdims=True) + 1e-9
+            offset = (_dirs * disturbance_rng.uniform(0.0, disturbance_max_m, size=num_envs)[:, None]
+                     ).astype(np.float32)
+            disturb_draws[p_idx] = (mask, step, offset)
 
     home_pos  = np.tile(worker.robot.home_pos[None].astype(np.float32),  (num_envs, 1))
     home_quat = np.tile(worker.robot.home_quat[None].astype(np.float32), (num_envs, 1))
@@ -665,14 +688,17 @@ def execute_and_collect(
         for i in range(num_envs):
             if active[i]:
                 pos, quat, grip = _env_target(i, int(phase_idx[i]), int(phase_step[i]))
-                # Idea #3: one-step positional kick at a random point during "lift".
-                # _env_target is untouched (still returns the ORIGINAL plan), so every
-                # step AFTER this one keeps targeting the unperturbed trajectory — the
-                # next recorded action is therefore a genuine corrective delta back
-                # toward the intended path, not just noise with no recovery signal.
-                if (disturb_mask[i] and phase_idx[i] == _LIFT_IDX
-                        and phase_step[i] == disturb_step[i]):
-                    pos = pos + disturb_offset[i]
+                # Idea #3: one-step positional kick at a random point during whichever
+                # phase(s) this env drew for. _env_target is untouched (still returns the
+                # ORIGINAL plan), so every step AFTER this one keeps targeting the
+                # unperturbed trajectory — the next recorded action is therefore a genuine
+                # corrective delta back toward the intended path, not just noise with no
+                # recovery signal.
+                _draw = disturb_draws.get(int(phase_idx[i]))
+                if _draw is not None:
+                    mask, step, offset = _draw
+                    if mask[i] and phase_step[i] == step[i]:
+                        pos = pos + offset[i]
             else:
                 pos, quat, grip = _frozen_target(i)
             cur_pos_arr[i], cur_quat_arr[i], cur_grip_arr[i] = pos, quat, grip
@@ -861,6 +887,11 @@ def main() -> None:
                         "See execute_and_collect's docstring.")
     p.add_argument("--disturbance-max-m", type=float, default=0.02,
                    help="max magnitude (m) of the idea #3 positional kick")
+    p.add_argument("--disturbance-phase", nargs="+", default=["lift"],
+                   choices=["approach", "settle", "grasp", "firm", "lift", "hold"],
+                   help="which phase(s) get an independent idea #3 disturbance draw "
+                        "(default: lift only, the original behavior). Each phase is "
+                        "an independent bernoulli(disturbance_prob) draw per env.")
     p.add_argument("--enable-regrasp-retry", action="store_true",
                    help="lift-phase failure detection + regrasp (idea #2, off by default): "
                         "if an env's object didn't rise far enough by the end of 'lift', "
@@ -1028,7 +1059,7 @@ def main() -> None:
             worker, all_best_x, init_obs_batch, perception, action_config,
             record_video=args.record_video, priv_cfg=priv_cfg, dr_vec=dr_vec,
             disturbance_prob=args.disturbance_prob, disturbance_max_m=args.disturbance_max_m,
-            disturbance_rng=disturbance_rng,
+            disturbance_rng=disturbance_rng, disturbance_phases=tuple(args.disturbance_phase),
             enable_regrasp=args.enable_regrasp_retry, max_regrasp_retries=args.max_regrasp_retries,
         )
         print(f"  Success: {success.tolist()}")

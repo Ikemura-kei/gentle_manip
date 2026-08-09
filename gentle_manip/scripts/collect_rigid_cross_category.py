@@ -69,7 +69,8 @@ def _run_with_group_kill(cmd, cwd, log_path, timeout_s, env) -> bool:
 def collect_one(category: str, n_episodes: int, n_envs: int, maxfevals: int,
                 out_dir: Path, timeout_s: int, record_video: bool, log_dir: Path,
                 shard_size: int = 5, disturbance_prob: float = 0.0,
-                disturbance_max_m: float = 0.02, enable_regrasp_retry: bool = False,
+                disturbance_max_m: float = 0.02, disturbance_phase: list = None,
+                enable_regrasp_retry: bool = False,
                 max_regrasp_retries: int = 1) -> dict:
     exp = f"single_lift_{category}_rigid"
     # collect_demos_synth_v2.py's own _make_run_dir() appends task_name (== exp,
@@ -90,6 +91,8 @@ def collect_one(category: str, n_episodes: int, n_envs: int, maxfevals: int,
     if disturbance_prob > 0:
         cmd += ["--disturbance-prob", str(disturbance_prob),
                "--disturbance-max-m", str(disturbance_max_m)]
+        if disturbance_phase:
+            cmd += ["--disturbance-phase", *disturbance_phase]
     if enable_regrasp_retry:
         cmd += ["--enable-regrasp-retry", "--max-regrasp-retries", str(max_regrasp_retries)]
     if record_video:
@@ -182,6 +185,9 @@ def main() -> None:
                     help="DART-style recovery-demo injection passthrough to "
                          "collect_demos_synth_v2.py (0 = off, matches its own default).")
     ap.add_argument("--disturbance-max-m", type=float, default=0.02)
+    ap.add_argument("--disturbance-phase", nargs="+", default=None,
+                    help="which phase(s) get an independent disturbance draw, passthrough "
+                         "to collect_demos_synth_v2.py (default: its own default, 'lift' only).")
     ap.add_argument("--enable-regrasp-retry", action="store_true",
                     help="lift-phase failure detection + regrasp passthrough to "
                          "collect_demos_synth_v2.py (off by default).")
@@ -214,6 +220,7 @@ def main() -> None:
                         args.out_dir, args.timeout_s, args.record_video, args.log_dir,
                         shard_size=args.shard_size, disturbance_prob=args.disturbance_prob,
                         disturbance_max_m=args.disturbance_max_m,
+                        disturbance_phase=args.disturbance_phase,
                         enable_regrasp_retry=args.enable_regrasp_retry,
                         max_regrasp_retries=args.max_regrasp_retries)
         results.append(r)
