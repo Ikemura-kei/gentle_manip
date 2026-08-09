@@ -358,6 +358,7 @@ PHASES = [
 ]
 N_PHASES  = len(PHASES)
 _GRASP_IDX = [name for name, _ in PHASES].index("grasp")   # boundary the firm-check fires at
+_LIFT_IDX  = [name for name, _ in PHASES].index("lift")    # disturbance-injection phase (idea #3)
 
 # ── Robustness idea #1: force-based grasp firming ─────────────────────────────
 # At the moment an env finishes "grasp" (checked ONCE, per env, at the grasp->firm
@@ -429,6 +430,9 @@ def execute_and_collect(
     record_video: bool = False,
     priv_cfg=None,                 # PrivilegedConfig or None — sim-only state-teacher fields
     dr_vec=None,                   # (2,) [scale, bend_deg] for priv_object_dr_params
+    disturbance_prob: float = 0.0, # idea #3: DART-style disturbance injection (off by default)
+    disturbance_max_m: float = 0.02,
+    disturbance_rng=None,          # np.random.Generator; required if disturbance_prob > 0
 ) -> Tuple[List[List[dict]], List[List[np.ndarray]], List[List[float]], np.ndarray, List[List]]:
     """Execute the scripted grasp trajectory with DECOUPLED per-env phase control;
     record (obs, action, reward) per env.
@@ -448,6 +452,20 @@ def execute_and_collect(
     The scripted trajectory itself (positions/quats/gripper widths, all physical
     units) is IDENTICAL regardless of action_config.mode — only how each step's
     *recorded action* is derived (delta-inverted vs absolute-inverted) differs.
+
+    Idea #3 — DART-style disturbance injection (Laskey et al. 2017): our demos are
+    100% clean scripted trajectories with zero recovery examples, a known BC
+    brittleness source (small closed-loop errors compound because the policy has
+    never seen how to correct them). With probability `disturbance_prob`, one env
+    gets a ONE-STEP random positional kick (magnitude up to `disturbance_max_m`,
+    uniform direction) injected into the COMMANDED position at a random step during
+    "lift" — chosen because eval videos showed the failure mode is precisely
+    grasp/lift alignment, not gross navigation. Every subsequent step still targets
+    the ORIGINAL unperturbed plan (`_env_target` is untouched), so the recorded
+    action at the following step is a genuine corrective delta back toward the
+    intended trajectory — unlike post-hoc noise augmentation (which doesn't reflect
+    real closed-loop-induced error and is known not to fix compounding error on its
+    own), this bakes an actual recovery example into the demo itself.
 
     Returns:
         obs_bufs:    list[N] of obs-dict lists (T_i steps per env, unbatched)
@@ -471,6 +489,20 @@ def execute_and_collect(
     # Mutable — "firm" phase tightens this once per env (idea #1); "lift"/"hold"/
     # a frozen (DONE) env all read the FINAL width, which is width_cls unless firmed.
     grip_target = width_cls.copy()
+
+    # Idea #3 setup: per-env disturbance draw (which envs, which "lift"-phase step,
+    # what offset) — precomputed once so the main loop only needs a cheap lookup.
+    if disturbance_prob > 0:
+        assert disturbance_rng is not None, "disturbance_rng required when disturbance_prob > 0"
+        disturb_mask = disturbance_rng.random(num_envs) < disturbance_prob
+        disturb_step = disturbance_rng.integers(0, N_LIFT, size=num_envs)
+        _dirs = disturbance_rng.normal(size=(num_envs, 3))
+        _dirs /= np.linalg.norm(_dirs, axis=1, keepdims=True) + 1e-9
+        disturb_offset = (_dirs * disturbance_rng.uniform(0.0, disturbance_max_m, size=num_envs)[:, None]
+                          ).astype(np.float32)
+    else:
+        disturb_mask = np.zeros(num_envs, dtype=bool)
+        disturb_step, disturb_offset = None, None
 
     home_pos  = np.tile(worker.robot.home_pos[None].astype(np.float32),  (num_envs, 1))
     home_quat = np.tile(worker.robot.home_quat[None].astype(np.float32), (num_envs, 1))
@@ -603,6 +635,14 @@ def execute_and_collect(
         for i in range(num_envs):
             if active[i]:
                 pos, quat, grip = _env_target(i, int(phase_idx[i]), int(phase_step[i]))
+                # Idea #3: one-step positional kick at a random point during "lift".
+                # _env_target is untouched (still returns the ORIGINAL plan), so every
+                # step AFTER this one keeps targeting the unperturbed trajectory — the
+                # next recorded action is therefore a genuine corrective delta back
+                # toward the intended path, not just noise with no recovery signal.
+                if (disturb_mask[i] and phase_idx[i] == _LIFT_IDX
+                        and phase_step[i] == disturb_step[i]):
+                    pos = pos + disturb_offset[i]
             else:
                 pos, quat, grip = _frozen_target(i)
             cur_pos_arr[i], cur_quat_arr[i], cur_grip_arr[i] = pos, quat, grip
@@ -754,6 +794,14 @@ def main() -> None:
                    help="also save episodes where the grasp failed (default: success only)")
     p.add_argument("--record-video", action="store_true",
                    help="write per-episode mp4 videos to <out-dir>/videos/ (slower)")
+    p.add_argument("--disturbance-prob", type=float, default=0.0,
+                   help="DART-style recovery-demo injection (idea #3, off by default): "
+                        "probability a given env gets a one-step positional kick during "
+                        "'lift', so the demo contains a genuine corrective action back "
+                        "toward the plan instead of only ever-clean trajectories. "
+                        "See execute_and_collect's docstring.")
+    p.add_argument("--disturbance-max-m", type=float, default=0.02,
+                   help="max magnitude (m) of the idea #3 positional kick")
     args = p.parse_args()
 
     # ── Load everything from the experiment config (same as training / eval) ──
@@ -795,6 +843,8 @@ def main() -> None:
     # (previously every _synth_worker call used run_cmaes's hardcoded default seed=2567, so
     # ALL envs/batches shared the identical internal search sequence regardless of --seed).
     cma_seed_rng = np.random.default_rng(args.seed + 1_000_000)
+    # Separate stream again for idea #3's disturbance draws (which env/step/offset).
+    disturbance_rng = np.random.default_rng(args.seed + 3_000_000)
 
     # ── Build scene + worker (with per-scene SIZE+SHAPE DR) ──
     # Scene DR re-randomizes object geometry by REBUILDING the worker every N batches (GenesisWorker
@@ -911,6 +961,8 @@ def main() -> None:
         obs_bufs, act_bufs, rew_bufs, success, frame_bufs = execute_and_collect(
             worker, all_best_x, init_obs_batch, perception, action_config,
             record_video=args.record_video, priv_cfg=priv_cfg, dr_vec=dr_vec,
+            disturbance_prob=args.disturbance_prob, disturbance_max_m=args.disturbance_max_m,
+            disturbance_rng=disturbance_rng,
         )
         print(f"  Success: {success.tolist()}")
 
