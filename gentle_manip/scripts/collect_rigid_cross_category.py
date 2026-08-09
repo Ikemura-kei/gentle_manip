@@ -67,7 +67,8 @@ def _run_with_group_kill(cmd, cwd, log_path, timeout_s, env) -> bool:
 
 
 def collect_one(category: str, n_episodes: int, n_envs: int, maxfevals: int,
-                out_dir: Path, timeout_s: int, record_video: bool, log_dir: Path) -> dict:
+                out_dir: Path, timeout_s: int, record_video: bool, log_dir: Path,
+                shard_size: int = 5) -> dict:
     exp = f"single_lift_{category}_rigid"
     # collect_demos_synth_v2.py's own _make_run_dir() appends task_name (== exp,
     # for these single-object experiments) as a subdirectory of --out-dir itself --
@@ -82,6 +83,7 @@ def collect_one(category: str, n_episodes: int, n_envs: int, maxfevals: int,
         "--n-envs", str(n_envs),
         "--maxfevals", str(maxfevals),
         "--out-dir", str(out_dir),
+        "--shard-size", str(shard_size),
     ]
     if record_video:
         cmd.append("--record-video")
@@ -150,6 +152,10 @@ def main() -> None:
     ap.add_argument("--record-video", action="store_true", default=True)
     ap.add_argument("--no-record-video", dest="record_video", action="store_false")
     ap.add_argument("--log-dir", type=Path, default=REPO / "logs" / "collect_rigid_cross_category")
+    ap.add_argument("--shard-size", type=int, default=5,
+                    help="episodes per on-disk shard flush. Lower (e.g. 1) for a slow/flaky "
+                         "category so a timeout-triggered kill loses at most 1 episode instead "
+                         "of up to shard_size-1 -- see blueberry's shard-loss incident.")
     args = ap.parse_args()
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -175,7 +181,8 @@ def main() -> None:
              f"mem_available={avail:.1f}GB)\n{'='*70}",
              flush=True)
         r = collect_one(cat, args.n_episodes, args.n_envs, args.maxfevals,
-                        args.out_dir, args.timeout_s, args.record_video, args.log_dir)
+                        args.out_dir, args.timeout_s, args.record_video, args.log_dir,
+                        shard_size=args.shard_size)
         results.append(r)
         print(f"[orchestrator] {cat}: ok={r['ok']} saved={r['saved']}/{r['attempted']} "
              f"success_rate={r['success_rate']} elapsed={r['elapsed_s']:.0f}s attempts={r['attempts']}",
