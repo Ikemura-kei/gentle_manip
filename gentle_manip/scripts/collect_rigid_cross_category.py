@@ -109,6 +109,10 @@ def collect_one(category: str, n_episodes: int, n_envs: int, maxfevals: int,
 
     result = {"category": category, "attempts": 0, "ok": False, "elapsed_s": 0.0,
              "saved": 0, "attempted": 0, "success_rate": None, "data_path": None}
+    # Captured ONCE, before any attempt -- see the call_start filter below. Using
+    # time.time() (not monotonic) deliberately: compared directly against
+    # st_mtime, which is also wall-clock.
+    call_start = time.time()
     for attempt in range(2):   # one retry on crash
         result["attempts"] = attempt + 1
         t0 = time.time()
@@ -124,7 +128,18 @@ def collect_one(category: str, n_episodes: int, n_envs: int, maxfevals: int,
         # purely because its random suffix sorts later ("sdf" > "hki"). Confirmed
         # this happened for tofu: a 6-episode pilot's dir outsorted the real
         # 50-episode run's dir.
-        run_dirs = (sorted(cat_out.glob("*/data.pkl"), key=lambda p: p.stat().st_mtime)
+        #
+        # ALSO filter to data.pkl written AFTER call_start: without this, a
+        # category with an EARLIER, unrelated, already-complete run (e.g. a plain
+        # collection run before a disturbance-injected one for the same category)
+        # has its stale data.pkl picked up and reported as THIS invocation's
+        # result even when this invocation's own run timed out and never merged
+        # its shards -- confirmed happening for cherry's disturbance-injected run
+        # (killed at the exact timeout boundary, shards never merged, but the
+        # plain run's data.pkl from ~2 hours earlier was silently reported as
+        # "saved=250" for the disturbed attempt instead).
+        run_dirs = (sorted((p for p in cat_out.glob("*/data.pkl") if p.stat().st_mtime >= call_start),
+                          key=lambda p: p.stat().st_mtime)
                     if cat_out.exists() else [])
         if run_dirs:
             data_path = run_dirs[-1]
