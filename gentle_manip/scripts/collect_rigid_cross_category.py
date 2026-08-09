@@ -68,7 +68,8 @@ def _run_with_group_kill(cmd, cwd, log_path, timeout_s, env) -> bool:
 
 def collect_one(category: str, n_episodes: int, n_envs: int, maxfevals: int,
                 out_dir: Path, timeout_s: int, record_video: bool, log_dir: Path,
-                shard_size: int = 5) -> dict:
+                shard_size: int = 5, disturbance_prob: float = 0.0,
+                disturbance_max_m: float = 0.02) -> dict:
     exp = f"single_lift_{category}_rigid"
     # collect_demos_synth_v2.py's own _make_run_dir() appends task_name (== exp,
     # for these single-object experiments) as a subdirectory of --out-dir itself --
@@ -85,6 +86,9 @@ def collect_one(category: str, n_episodes: int, n_envs: int, maxfevals: int,
         "--out-dir", str(out_dir),
         "--shard-size", str(shard_size),
     ]
+    if disturbance_prob > 0:
+        cmd += ["--disturbance-prob", str(disturbance_prob),
+               "--disturbance-max-m", str(disturbance_max_m)]
     if record_video:
         cmd.append("--record-video")
 
@@ -156,6 +160,10 @@ def main() -> None:
                     help="episodes per on-disk shard flush. Lower (e.g. 1) for a slow/flaky "
                          "category so a timeout-triggered kill loses at most 1 episode instead "
                          "of up to shard_size-1 -- see blueberry's shard-loss incident.")
+    ap.add_argument("--disturbance-prob", type=float, default=0.0,
+                    help="DART-style recovery-demo injection passthrough to "
+                         "collect_demos_synth_v2.py (0 = off, matches its own default).")
+    ap.add_argument("--disturbance-max-m", type=float, default=0.02)
     args = ap.parse_args()
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -182,7 +190,8 @@ def main() -> None:
              flush=True)
         r = collect_one(cat, args.n_episodes, args.n_envs, args.maxfevals,
                         args.out_dir, args.timeout_s, args.record_video, args.log_dir,
-                        shard_size=args.shard_size)
+                        shard_size=args.shard_size, disturbance_prob=args.disturbance_prob,
+                        disturbance_max_m=args.disturbance_max_m)
         results.append(r)
         print(f"[orchestrator] {cat}: ok={r['ok']} saved={r['saved']}/{r['attempted']} "
              f"success_rate={r['success_rate']} elapsed={r['elapsed_s']:.0f}s attempts={r['attempts']}",
