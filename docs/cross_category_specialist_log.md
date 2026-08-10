@@ -849,4 +849,18 @@ identical narrow-DR recipe on **avocado** (~95mm long axis, elongated/asymmetric
 `rigid_orientation_avocado_easy.yaml` (narrowed the same way as apple:
 pos_xy 0.04→0.02, pitch/roll 20°→8°, tight scale/shape bounds) and
 `single_lift_avocado_rigid_easy.yaml`. Collection launched with the same
-80-episode/maxfevals=800/seed=0 recipe as apple-easy. Committed. Result pending.
+80-episode/maxfevals=800/seed=0 recipe as apple-easy.
+
+**Collection result: 80/80 saved, but only 18.1% collection success rate**
+(362 failed / 442 total attempts, 93.5 min) — notably lower than apple's 43.5%.
+Consistent with the pre-existing note in `rigid_orientation_avocado.yaml`
+that avocado's min-extent (~61mm) sits close to the XArm7 gripper's practical
+stroke limit (~70mm), making CMA-ES grasp search harder. **Not necessarily
+predictive of trained-policy quality** — apple's own collection success (43.5%)
+was already much lower than cherry's (~80%), yet apple's trained policy still
+hit 65%. Proceeding to convert/train regardless, same as with apple.
+
+Converted: 72 train / 8 val (matches apple exactly), episode lengths 209-217
+steps (same FSM timing as every other run). Training launched: run `wqlxl`,
+configs at `gentle_manip/dppo/cfg/single_lift_avocado_rigid_easy_pcd/`.
+Result pending.
