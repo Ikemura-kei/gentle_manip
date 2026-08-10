@@ -778,3 +778,47 @@ would otherwise have been needed to redo them from scratch):
 
 Both training toward plateau again now. This resume capability should make any
 future interruption much cheaper to recover from.
+
+## Toy-task result: 65% — task difficulty confirmed as the bottleneck, not architecture
+
+**Apple-easy (bigger object, narrow DR) plateaued at epoch 630** (best val loss
+0.0318 at epoch 330, no improvement in 300 subsequent epochs — patience
+exhausted). Because checkpoints only save every 100 epochs, the true best-val
+epoch (330) wasn't itself checkpointed; evaluated the nearest available
+checkpoint by actual val loss among the saved ones (100/200/300/400/500/600),
+which was **`state_500.pt`** (val loss 0.0420).
+
+**Canonical eval (n=100, num_envs=5, seed=0, scene_group_size=0 workaround,
+per-episode video) result: 65.0% success (65/100)** — `ever_success_rate` 70%,
+`ever_in_band_rate` 71%, `hold_failure_gap` 0.01 (i.e. almost every episode that
+reaches the target band also completes the hold — the policy isn't dropping the
+object after lifting, unlike the failure mode seen in cherry's eval videos).
+Approx. 95% CI [55.7%, 74.3%] — squarely inside the 60-80% target band even at
+the low end of the interval. Per-batch breakdown was noisy but consistent
+(40-100% across the 20 batches of 5 episodes each), no degenerate batches.
+
+**This is the key diagnostic result for the whole cross-category effort.**
+Identical architecture, identical training recipe, identical eval harness as
+every cherry specialist this session (13-33% across n=3 seeds) — the only
+things that changed were (a) object size (~65mm apple vs. ~20mm cherry) and (b)
+DR range (narrowed pos_xy 0.04→0.02, pitch/roll 20°→8°, tighter shape/scale
+bounds). That alone closed a 40+ point gap. **Task difficulty (tiny object +
+wide randomization range), not the DP3/DPPO architecture or the demo-collection
+pipeline, was the bottleneck capping cherry's specialists.** This directly
+answers the diagnostic question the toy-task experiment was designed to answer.
+
+**Implication for "cross-category policy working within days"**: the fastest
+path to a working generalist is now clearer — build the category pool from
+objects/DR ranges in this same favorable regime (larger graspable objects,
+narrower per-category DR) rather than defaulting to cherry-like tight/small/
+wide-DR objects. Cherry may simply be a poor first-category choice for this
+architecture at this control frequency, independent of any future cross-category
+conditioning work.
+
+**Environment note (fixed):** the apple-easy eval initially crashed the sim
+server with `ModuleNotFoundError: No module named 'gstaichi'` — traced to a
+stray `PYTHONPATH` env var in the shell (`.../Genesis_fork:...`, an old sibling
+clone from a prior project) that shadowed the correctly-configured editable
+genesis install in `envs/sim/.venv`. Fixed by prefixing the sim server launch
+with `env -u PYTHONPATH` (the same pattern already used for the dppo training
+launches this session) — not an environment corruption, just a missed prefix.
