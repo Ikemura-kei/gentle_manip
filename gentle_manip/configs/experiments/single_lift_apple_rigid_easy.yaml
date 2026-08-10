@@ -1,0 +1,26 @@
+# [experiment] TOY/EASY rigid apple lift -- deliberately narrow DR (see
+# rigid_orientation_apple_easy.yaml for full rationale). Isolation experiment:
+# same pipeline as every cherry specialist tonight, but on a bigger (~65mm vs
+# ~20mm) object with much narrower pose/shape randomization. If this reaches
+# 60-80% where cherry couldn't, task difficulty (small object + wide DR) is the
+# bottleneck, not the architecture -- points toward using an easier object (or
+# narrower DR) for the eventual cross-category policy instead of more cherry
+# demo-recipe tweaks.
+# Used by: grasp_synthesis collect_demos_synth_v2/v3.py; DPPO train/eval
+# Status: experimental
+task: single_lift_apple_rigid
+action: delta_pose_delta_gripper_fast_rot
+dr: rigid_orientation_apple_easy
+augmentation: l515_noise
+
+obs: superset_rigid
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400

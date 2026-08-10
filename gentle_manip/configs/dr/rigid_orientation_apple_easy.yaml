@@ -1,0 +1,26 @@
+# [dr] TOY/EASY variant of rigid_orientation_apple -- deliberately narrow ranges to
+# isolate task difficulty from demo-recipe effects. Rationale (2026-08-10): four
+# cherry specialists (13-33% canonical SR, likely true mean ~15-25% once seed
+# variance is accounted for) all used the WIDE rigid_orientation_* DR (full 360deg
+# yaw, up to 45deg pitch/roll, shape+scale DR) on a TINY (~20mm) object. Before
+# spending more effort on demo recipes for cherry, this checks whether the SAME
+# pipeline can reach 60-80% AT ALL under favorable conditions (big object + narrow
+# DR). If yes -> cherry's difficulty (small size + wide DR) is the bottleneck, not
+# the architecture. If no -> something more fundamental needs fixing first.
+# Used by: experiments (dr:) single_lift_apple_rigid_easy
+# Status: experimental
+#
+# Narrowed from rigid_orientation_apple.yaml: pos half-range 0.04->0.02, pitch/roll
+# 20->8deg, yaw kept full (apple is roughly round, yaw isn't the hard axis), scale
+# range tightened to near-nominal, shape DR (bend/twist/taper/axis_scale) reduced
+# to near-zero so demo geometry stays close to the nominal mesh.
+object_pos_xy: 0.02
+robot_init_pos_xyz: 0.01
+object_yaw_deg: 180
+object_pitch_roll_deg: 8
+
+object_scale:      [0.95, 1.05]
+object_bend_deg:   [-2.0, 2.0]
+object_twist_deg:  [-2.0, 2.0]
+object_taper:      [-0.02, 0.02]
+object_axis_scale: [0.97, 1.03]
