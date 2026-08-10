@@ -1,0 +1,25 @@
+# [dr] TOY/EASY variant of rigid_orientation_kiwi -- third confirmation of the
+# toy-task finding (2026-08-10/11): apple-easy (big, comfortably graspable) hit
+# 65.0% canonical SR; avocado-easy (big but grasp-marginal, min-extent close to
+# gripper stroke) only reached 52.0% -- refining the finding to "large object +
+# COMFORTABLE grasp margin + narrow DR", not just "large object". Kiwi's own
+# rigid_orientation_kiwi.yaml carries NO gripper-margin warning (unlike apple/
+# avocado/pear), i.e. its ~43mm min-extent has real headroom against the ~70mm
+# practical gripper stroke -- a cleaner test of the comfortable-grasp hypothesis
+# on a medium-large, structurally distinct (egg-shaped) object.
+# Used by: experiments (dr:) single_lift_kiwi_rigid_easy
+# Status: experimental
+#
+# Narrowed from rigid_orientation_kiwi.yaml the same way apple/avocado were:
+# pos half-range 0.04->0.02, pitch/roll 45->8deg, yaw kept full, scale tightened
+# to near-nominal, shape DR (bend/twist/taper/axis_scale) reduced near zero.
+object_pos_xy: 0.02
+robot_init_pos_xyz: 0.01
+object_yaw_deg: 180
+object_pitch_roll_deg: 8
+
+object_scale:      [0.95, 1.05]
+object_bend_deg:   [-2.0, 2.0]
+object_twist_deg:  [-2.0, 2.0]
+object_taper:      [-0.02, 0.02]
+object_axis_scale: [0.97, 1.03]
