@@ -863,4 +863,26 @@ hit 65%. Proceeding to convert/train regardless, same as with apple.
 Converted: 72 train / 8 val (matches apple exactly), episode lengths 209-217
 steps (same FSM timing as every other run). Training launched: run `wqlxl`,
 configs at `gentle_manip/dppo/cfg/single_lift_avocado_rigid_easy_pcd/`.
-Result pending.
+
+**Result: plateaued fast (epoch 660, best val 0.0315@360 — nearly identical val
+loss to apple-easy's 0.0318@330). Canonical eval on the best available
+checkpoint (`state_400.pt`, val 0.0350): 52.0% success (52/100)**,
+`ever_success_rate` 54%, `hold_failure_gap` 0.0 (every reach-band episode also
+completes the hold — same clean pattern as apple, no drop-after-lift failure
+mode). Approx 95% CI [42.2%, 61.8%] — the top of the interval just touches 60%,
+but the point estimate falls short of the 60-80% target.
+
+**Nuanced finding: partial replication.** Avocado-easy (52%) sits well above
+cherry's 25.7% mean but below apple-easy's 65% and short of the target band.
+The most likely explanation is avocado's own grasp-geometry difficulty
+(min-extent ~61mm vs. the gripper's ~70mm practical stroke — already flagged in
+`rigid_orientation_avocado.yaml`'s own history) rather than a failure of the
+"bigger object + narrow DR" recipe itself: avocado's collection success (18.1%)
+was already much lower than apple's (43.5%), and `ever_success_rate`≈`success_rate`
+here (54% vs 52%) shows the policy isn't dropping objects after a good grasp —
+it's failing to commit to a good grasp as often as apple's policy does. **Revised
+takeaway**: task difficulty (object size relative to gripper stroke + DR range)
+is a SPECTRUM, not binary — cherry (tiny, wide DR) is hardest, avocado (large but
+grasp-marginal) is intermediate, apple (large, comfortably graspable) is easiest.
+For the cross-category pool, prefer objects that are both large AND comfortably
+within the gripper's stroke margin, not just "large."
