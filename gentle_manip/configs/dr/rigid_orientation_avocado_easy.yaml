@@ -1,0 +1,23 @@
+# [dr] TOY/EASY variant of rigid_orientation_avocado -- second confirmation of
+# the toy-task finding (2026-08-10): single_lift_apple_rigid_easy (big object +
+# narrow DR) scored 65.0% canonical SR (n=100), vs. cherry's 13-33% on the wide
+# DR / tiny object. This narrows avocado's DR the same way to check the effect
+# replicates on a second, structurally different large object (avocado is
+# elongated/asymmetric, not round like apple/cherry) before committing to
+# "bigger object + narrow DR" as the recipe for the cross-category pool.
+# Used by: experiments (dr:) single_lift_avocado_rigid_easy
+# Status: experimental
+#
+# Narrowed from rigid_orientation_avocado.yaml the same way apple was narrowed:
+# pos half-range 0.04->0.02, pitch/roll 20->8deg, yaw kept full, scale tightened
+# to near-nominal, shape DR (bend/twist/taper/axis_scale) reduced near zero.
+object_pos_xy: 0.02
+robot_init_pos_xyz: 0.01
+object_yaw_deg: 180
+object_pitch_roll_deg: 8
+
+object_scale:      [0.95, 1.05]
+object_bend_deg:   [-2.0, 2.0]
+object_twist_deg:  [-2.0, 2.0]
+object_taper:      [-0.02, 0.02]
+object_axis_scale: [0.97, 1.03]
