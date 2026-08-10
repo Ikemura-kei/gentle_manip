@@ -886,3 +886,43 @@ is a SPECTRUM, not binary — cherry (tiny, wide DR) is hardest, avocado (large 
 grasp-marginal) is intermediate, apple (large, comfortably graspable) is easiest.
 For the cross-category pool, prefer objects that are both large AND comfortably
 within the gripper's stroke margin, not just "large."
+
+## Third confirmation + first real cross-category training run launched
+
+Launched **kiwi-easy** (43x46x60mm, egg-shaped, no gripper-margin warning in its
+DR config -- a cleaner "comfortable grasp" test than avocado) as a third
+confirmation, collecting now. Early signal is promising: 9/80 saved after only
+4 batches (vs. avocado's much slower early pace) -- consistent with the
+comfortable-grasp-margin hypothesis.
+
+**In parallel, built the first genuine cross-category (Phase 2) training run.**
+`gentle_manip/scripts/merge_cross_category_demos.py` (pre-existing from an
+earlier session, unused until now) merges per-category `data.pkl` files by
+symlinking into a temp dir and calling `convert_demos.py` once -- confirmed it
+picks the LATEST run per category by mtime (verified: apple's aborted
+150-episode attempt `26-08-10-ali` has no `data.pkl` so is correctly skipped;
+apple's `26-08-10-cne` and avocado's `26-08-10-kul` -- the actual easy-recipe
+runs -- are picked). **Bug found and worked around**: passing `--demos-root`
+as a RELATIVE path breaks the script's symlinks (they're written relative to
+the temp dir, not the repo root) -- use the script's absolute default instead
+(don't pass `--demos-root` unless using an absolute path).
+
+Merged apple-easy + avocado-easy -> 160 episodes (144 train / 16 val, 33800
+steps) at `$DPPO_DATA_DIR/single_lift_cross_category_easy_pcd`. This is the
+**unconditioned baseline** merge (no category embedding) per the original
+research plan's Stage 6 recommendation ("do the free merge first"). New configs
+at `gentle_manip/dppo/cfg/single_lift_cross_category_easy_pcd/`:
+`pre_diffusion_pointnet.yaml` (training) + three eval configs pointing the SAME
+merged-normalization checkpoint at different single-category sim tasks --
+`eval_diffusion_pointnet_apple.yaml` / `_avocado.yaml` (**held-in**, both
+categories were in the training mix) and `eval_diffusion_pointnet_kiwi.yaml`
+(**zero-shot** -- kiwi was never in the merge, the actual generalization test
+this whole session has been building toward). Training launched: run `ioqec`.
+
+**Plan**: once `ioqec` plateaus, run all three evals. Compare apple/avocado
+held-in numbers against their solo specialist numbers (65.0% / 52.0%) to check
+for catastrophic interference from merging two categories into one policy: if
+held-in numbers land close to solo, the merge didn't hurt; if they collapse,
+multi-category BC needs more than a naive merge (motivating Stage 5's category
+conditioning). The kiwi zero-shot number is the actual deliverable -- first real
+cross-category generalization result for this project.
