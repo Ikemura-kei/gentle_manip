@@ -822,3 +822,31 @@ clone from a prior project) that shadowed the correctly-configured editable
 genesis install in `envs/sim/.venv`. Fixed by prefixing the sim server launch
 with `env -u PYTHONPATH` (the same pattern already used for the dppo training
 launches this session) — not an environment corruption, just a missed prefix.
+
+## Cherry seed=7 replicate: n=3 seed-variance estimate finalized
+
+Cherry seed=7 plateaued at epoch 890 (best val loss 0.0100 at epoch 590, no
+improvement in 300 subsequent epochs). Evaluated the nearest saved checkpoint
+by val loss (`state_600.pt`, val 0.0112, tied with `state_800.pt` but earlier —
+picked the earlier one to reduce overfitting risk). **Canonical eval result:
+29.0% success (29/100)**, `ever_success_rate` 36%, `hold_failure_gap` 0.01.
+
+**n=3 seed-variance estimate for the disturbed-180/lift-phase recipe on the
+IDENTICAL dataset is now closed out: 33.0% (original seed), 15.0% (seed 123),
+29.0% (seed 7) → mean 25.7%, range 15-33 points.** This confirms the earlier
+warning that the 33.0% single-seed number looked better than the recipe's true
+mean. Combined with the apple-easy result above, the picture is now clear:
+cherry's specialists cap out around 25-30% on average regardless of seed or
+demo-recipe tweaks (disturbance injection, grasp-phase vs. lift-phase, dataset
+size 180-250) — the object/DR combination itself is the ceiling, not any of the
+things that were being tuned.
+
+## Second confirmation launched: avocado-easy
+
+To rule out that apple's 65% was a fluke of that specific object, launched the
+identical narrow-DR recipe on **avocado** (~95mm long axis, elongated/asymmetric
+— structurally different from apple/cherry's round shape). New configs:
+`rigid_orientation_avocado_easy.yaml` (narrowed the same way as apple:
+pos_xy 0.04→0.02, pitch/roll 20°→8°, tight scale/shape bounds) and
+`single_lift_avocado_rigid_easy.yaml`. Collection launched with the same
+80-episode/maxfevals=800/seed=0 recipe as apple-easy. Committed. Result pending.
