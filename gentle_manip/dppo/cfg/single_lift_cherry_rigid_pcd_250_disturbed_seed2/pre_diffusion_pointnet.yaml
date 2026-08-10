@@ -1,0 +1,114 @@
+# [dppo-pretrain] Seed-variance replication of single_lift_cherry_rigid_pcd_250_disturbed
+# (the disturbed-180 lift-phase-disturbance dataset, 33.0% canonical eval -- best result
+# this session). SAME dataset, ONLY the training seed differs (42 -> 123). Motivation: a
+# later grasp-phase-disturbance variant (250 clean episodes, LOWEST BC val loss of any
+# checkpoint so far) scored WORSE in closed-loop eval (13.0%) than this 33.0% result --
+# a genuinely surprising reversal given BC loss doesn't reliably predict rollout SR (see
+# docs/cross_category_specialist_log.md). Before drawing further conclusions about WHICH
+# demo recipe is best, this checks how much of the 33.0% vs 13.0%/17.0%/24.0% spread is
+# real recipe signal vs. ordinary training-run variance (diffusion BC is stochastic; we
+# have exactly one seed per recipe so far, and 13-33% is a wide spread across 4 single
+# runs). If seed=123 on the IDENTICAL disturbed-180 data lands far from 33.0%, that's
+# strong evidence single-seed comparisons this session are noisy and recipe conclusions
+# need more than one training run each to trust.
+# Used by: third_party/dppo/script/run.py (TrainDiffusionAgent) via gentle_manip.dppo.train
+# Status: active
+#
+# No new demo collection or conversion needed -- reuses the disturbed-180 dataset as-is:
+#   $DPPO_DATA_DIR/single_lift_cherry_rigid_pcd_250_disturbed/{train,val}.npz
+#
+# Train:
+#   uv run --project envs/dppo python -m gentle_manip.dppo.train \
+#       --config-name pre_diffusion_pointnet \
+#       --config-path gentle_manip/dppo/cfg/single_lift_cherry_rigid_pcd_250_disturbed_seed2
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${logdir}
+  callbacks:
+    experiment_snapshot:
+      _target_: gentle_manip.dppo.hydra_snapshot.ExperimentSnapshot
+_target_: agent.pretrain.train_diffusion_agent.TrainDiffusionAgent
+
+name: ${env}_pre_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
+logdir: ${oc.env:DPPO_LOG_DIR}/dppo-pretrain/${env}_seed2/${exp_id:}
+train_dataset_path: ${oc.env:DPPO_DATA_DIR}/single_lift_cherry_rigid_pcd_250_disturbed/train.npz
+val_dataset_path: ${oc.env:DPPO_DATA_DIR}/single_lift_cherry_rigid_pcd_250_disturbed/val.npz
+experiment: single_lift_cherry_rigid   # env snapshot (task+obs+dr); rigid, no stress
+
+seed: 123
+device: cuda:0
+env: single_lift_cherry_rigid_pcd_250_disturbed
+obs_dim: 8                    # ee_pos3 + ee_quat4 + gripper1
+action_dim: 7
+denoising_steps: 20
+horizon_steps: 4
+cond_steps: 2
+pc_cond_steps: 1
+n_points: 1024
+visual_feature_dim: 256
+
+wandb:
+  entity: ${oc.env:DPPO_WANDB_ENTITY,null}
+  project: gentle-manip-${env}-seed2
+  run: ${exp_id:}
+  group: dppo-pretrain
+
+train:
+  n_epochs: 2000
+  batch_size: 128
+  learning_rate: 1e-4
+  weight_decay: 1e-6
+  lr_scheduler:
+    first_cycle_steps: ${train.n_epochs}
+    warmup_steps: 100
+    min_lr: 1e-5
+  epoch_start_ema: 10
+  update_ema_freq: 5
+  save_model_freq: 100
+  val_freq: 10
+
+model:
+  _target_: model.diffusion.diffusion.DiffusionModel
+  predict_epsilon: True
+  denoised_clip_value: 1.0
+  network:
+    _target_: gentle_manip.dppo.pointnet_diffusion.PointNetDiffusionMLP
+    action_dim: ${action_dim}
+    horizon_steps: ${horizon_steps}
+    cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+    pc_cond_steps: ${pc_cond_steps}
+    visual_feature_dim: ${visual_feature_dim}
+    time_dim: 16
+    mlp_dims: [512, 512, 512]
+    activation_type: ReLU
+    residual_style: True
+    pointnet:
+      in_channels: 3
+      use_layernorm: True
+      final_norm: layernorm
+  horizon_steps: ${horizon_steps}
+  obs_dim: ${obs_dim}
+  action_dim: ${action_dim}
+  denoising_steps: ${denoising_steps}
+  device: ${device}
+
+ema:
+  decay: 0.995
+
+train_dataset:
+  _target_: gentle_manip.dppo.pointcloud_dataset.StitchedSequencePointCloudDataset
+  dataset_path: ${train_dataset_path}
+  horizon_steps: ${horizon_steps}
+  cond_steps: ${cond_steps}
+  pc_cond_steps: ${pc_cond_steps}
+  device: ${device}
+
+val_dataset:
+  _target_: gentle_manip.dppo.pointcloud_dataset.StitchedSequencePointCloudDataset
+  dataset_path: ${val_dataset_path}
+  horizon_steps: ${horizon_steps}
+  cond_steps: ${cond_steps}
+  pc_cond_steps: ${pc_cond_steps}
+  device: ${device}
