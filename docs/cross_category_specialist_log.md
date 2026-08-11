@@ -845,3 +845,22 @@ launched: run `atwfy`. Committed `6ff453f`.
 apple, held-in avocado, zero-shot kiwi) once they plateau — 6 evals total, for a
 direct 3-way comparison against the 39%/31%/4.0% baseline. See the **Summary**
 section at the top of this document for the up-to-date status once results land.
+
+## Bug found + fixed: eval configs missing category_embed in shape_meta
+
+First Track A eval attempt (apple held-in) crashed immediately with
+`KeyError: 'category_embed'` inside `PointNetDiffusionMLP.forward()`. Root cause:
+`EvalHarnessAgent.__init__` builds `self.obs_keys = list(cfg.shape_meta.obs.keys())`
+and the policy adapter only pulls THOSE keys from the live venv obs into `cond` --
+the conditioned eval configs' `shape_meta.obs` block (copied from the unconditioned
+template) only listed `state`/`point_cloud`, so `category_embed` was silently never
+fetched even though `genesis_venv.py` was correctly producing it. Fixed by adding a
+`category_embed: {shape: [21]}` (Track A) / `[24]` (Track B) entry to `shape_meta.obs`
+in all 6 conditioned eval configs. Committed.
+
+## Track A eval results
+
+**Held-in APPLE: 42.0% success (42/100)**, `ever_success_rate` 45%,
+`hold_failure_gap` 0.0. Small improvement over the unconditioned baseline's 39.0%
+(+3 points), but still far below apple-solo's 65.0% -- the registry one-hot+features
+embedding recovers only a fraction of the interference loss.
