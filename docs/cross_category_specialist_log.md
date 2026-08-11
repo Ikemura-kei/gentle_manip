@@ -864,3 +864,30 @@ in all 6 conditioned eval configs. Committed.
 `hold_failure_gap` 0.0. Small improvement over the unconditioned baseline's 39.0%
 (+3 points), but still far below apple-solo's 65.0% -- the registry one-hot+features
 embedding recovers only a fraction of the interference loss.
+
+**Held-in AVOCADO: 32.0% success (32/100)**, `ever_success_rate` 34%. Essentially
+flat vs. the unconditioned baseline's 31.0% (+1 point, within noise), still far
+below avocado-solo's 52.0%.
+
+**Zero-shot KIWI: 2.0% success (2/100)**, `ever_success_rate` 2%. Essentially
+identical to the unconditioned baseline's 4.0% collapse -- the registry
+one-hot+features embedding gives NO real zero-shot benefit. Kiwi's reserved-but-
+never-trained one-hot slot plus its continuous material/size/shape features are
+not enough to rescue generalization.
+
+### Track A verdict
+
+| | Unconditioned | Track A (registry) | Delta |
+|---|---|---|---|
+| Held-in apple | 39.0% | 42.0% | +3 |
+| Held-in avocado | 31.0% | 32.0% | +1 |
+| Zero-shot kiwi | 4.0% | 2.0% | -2 (noise) |
+
+**The cheap calibration check confirms what the user's standing directive already
+predicted: a one-hot-containing embedding does not meaningfully help, even with
+now-good specialist data (ruling out the original data-quality confound
+hypothesis).** Held-in numbers move by only a few points (within eval noise at
+n=100), and zero-shot stays at collapse level. This is a genuine negative result,
+not a data-quality artifact -- strengthens the case that Track B (the true VLM
+embedding) is doing something structurally different, not just "the same idea with
+better data." Track B evals next.
