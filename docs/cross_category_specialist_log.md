@@ -1053,3 +1053,43 @@ clear, validated next step, no longer a hedge against an unproven risk.
 
 All GPU processes and sim servers cleanly shut down at end of session; no
 orphaned Genesis subprocesses (`nvidia-smi --query-compute-apps` empty).
+
+## Fourth data point: pear-easy -- complicates the grasp-margin story further
+
+Pear-easy (44.7% collection SR) plateaued at epoch 780 (best val loss 0.0314
+@480). Canonical eval on the nearest checkpoint (`state_500.pt`, val 0.0364):
+**44.0% success (44/100)**, `ever_success_rate` 46%, `hold_failure_gap` 0.0.
+Approx 95% CI [34.3%, 53.7%].
+
+**Full four-object task-difficulty spectrum, canonical eval n=100 each:**
+
+| Object | Size (mm) | Grasp-margin flag (own DR config) | Collection SR | Solo eval SR |
+|---|---|---|---|---|
+| apple | 65x60x65 | severe (was reduced 45->20deg) | 43.5% | **65.0%** |
+| avocado | 62x95x61 | severe (was reduced 45->20deg) | 18.1% | 52.0% |
+| kiwi | 43x46x60 | none (kept full 45deg) | 52.6% | 52.0% |
+| pear | 62x52x65 | moderate (was reduced 45->30deg) | 44.7% | **44.0%** |
+| cherry | 20x17x20 | n/a (wide DR, not an "_easy" variant) | ~80% | 25.7% (n=3 mean) |
+
+**Pear breaks the clean "grasp-margin severity" story**: pear's flag
+(moderate) is explicitly LESS severe than avocado's (severe), yet pear scored
+LOWER (44.0% vs 52.0%). Collection success rates don't explain it either
+(pear 44.7% is close to apple's 43.5%, nothing like avocado's 18.1% outlier).
+**Revised, more honest conclusion**: object size/DR/grasp-margin all
+correlate with difficulty in the expected direction relative to cherry (every
+"easy" object beats cherry's 25.7% by a wide margin), but the FINE ordering
+among the four "easy" objects (65% > 52% ≈ 52% > 44%) doesn't reduce to any
+single simple rule identified so far — likely reflects some combination of
+exact geometry (not just bounding-box size), how well CMA-ES's SDF-based grasp
+search performs on that particular mesh shape, and possibly demonstration
+quality/diversity in ways not yet isolated. Apple remains the standout best
+performer and the safest choice if only one "easy" category is needed; for a
+larger category pool, all four are usable (44-65% is still a huge
+improvement over cherry) but expect meaningful per-category variance that
+DR/size heuristics alone won't fully predict — empirical per-category eval
+remains necessary, not just a size/margin lookup.
+
+This does not change the session's two headline verdicts (Phase 1 validated;
+naive Phase 2 merge proven insufficient) — it only refines the "why some
+objects are easier than others" sub-question, which was always secondary to
+the two main findings. GPU/processes clean at end of this run.
