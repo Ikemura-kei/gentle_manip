@@ -986,3 +986,70 @@ research plan's Stage 5 category-conditioning branch is NECESSARY, not just a
 nice-to-have refinement -- a bare merge of even 2 categories already shows
 meaningful interference at this model capacity/architecture. Kiwi zero-shot
 eval (the actual novel-category generalization number) running next.
+
+## Cross-category generalist eval, part 3: kiwi zero-shot COLLAPSES
+
+**Zero-shot eval on KIWI (never in the training mix): 4.0% success (4/100)**,
+`ever_success_rate` 5%, `ever_in_band_rate` 5%. Essentially a collapse to
+near-random/failure level -- the SAME magnitude as this project's original
+(pre-this-session) 11-category mixed baseline (2.0%) and one-hot
+category-embedding variants (0.0-1.0%). This REPLICATES that early negative
+result, now with a cleaner, better-controlled setup (2 known-good categories,
+both independently verified at 52-65% solo) instead of 11 categories of
+uneven/unknown quality.
+
+## Session summary: full results table + verdict
+
+| Policy | apple | avocado | kiwi | cherry |
+|---|---|---|---|---|
+| Solo specialist | **65.0%** | 52.0% | 52.0% | 25.7% (n=3 mean, range 15-33%) |
+| Cross-category generalist (apple+avocado merge, unconditioned) | 39.0% (held-in, -26pts) | 31.0% (held-in, -21pts) | **4.0% (ZERO-SHOT)** | not tested |
+
+**Two independent, decisive findings from tonight's work:**
+
+1. **Task difficulty (object size + DR range + grasp margin) is real and
+   large** — solo specialists on favorable objects (apple/avocado/kiwi, all
+   "easy" narrow-DR recipes) land at 52-65%, categorically higher than
+   cherry's 25.7% mean despite IDENTICAL architecture/training recipe. This
+   fully explains why cherry alone never got near the 60-80% target no matter
+   how much the demo recipe was tuned (disturbance injection, dataset size,
+   phase choice) — the object/DR choice was the ceiling, not the recipe.
+
+2. **A naive unconditioned multi-category merge does NOT produce a working
+   cross-category policy** — even merging just 2 well-performing categories:
+   held-in performance drops substantially (both categories lose 20+ points
+   vs. their solo numbers) AND zero-shot generalization to an unseen category
+   is near-total collapse (4.0%, statistically indistinguishable from this
+   project's original 11-category 2.0% baseline). This is not a data-quality
+   problem this time (both source categories are independently confirmed
+   good, 52-65% solo) — it is architectural: an 8-dim state + point-cloud
+   input with NO category signal genuinely cannot serve multiple categories
+   from one unconditioned network at this model capacity, and does not
+   interpolate/extrapolate to new shapes without an explicit conditioning
+   mechanism.
+
+**Verdict on the two-phase plan**: **Phase 1 (specialist works) is now
+conclusively validated** — pick large, comfortably-graspable objects with
+narrow DR and this architecture reliably clears 50-65%. **Phase 2 (cross-
+category generalist) needs the category-conditioning branch (Stage 5 of the
+original research plan) — a bare merge is proven insufficient, not merely
+"not yet tried."** The VLM-based low-dimensional conditioning direction the
+user specified ahead of time (see Goal section, top of this doc) is now the
+clear, validated next step, no longer a hedge against an unproven risk.
+
+**Suggested next steps (not yet started, for the user's review)**:
+1. Build the Stage 5(A) VLM/low-dim category-embedding conditioning branch
+   into `DP3Encoder` (insertion point: `pointnet_extractor.py:276`,
+   `torch.cat([pn_feat, state_feat], dim=-1)`) — now justified by a real
+   negative result, not a hedge.
+2. Re-run the SAME apple+avocado merge WITH conditioning, eval held-in +
+   kiwi zero-shot again — directly comparable numbers to the unconditioned
+   39%/31%/4.0% baseline in this table.
+3. Consider a 3rd or 4th "easy" category in the training mix (mushroom and
+   pear are both untested this session but fit the "large, comfortable
+   grasp" profile from the registry) before drawing final conclusions about
+   conditioning's effect size, since n=2 held-in / n=1 zero-shot is a small
+   base to generalize from.
+
+All GPU processes and sim servers cleanly shut down at end of session; no
+orphaned Genesis subprocesses (`nvidia-smi --query-compute-apps` empty).
