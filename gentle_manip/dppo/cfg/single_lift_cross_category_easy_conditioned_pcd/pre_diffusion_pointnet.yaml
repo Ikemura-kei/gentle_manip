@@ -1,0 +1,124 @@
+# [dppo-pretrain] BC-pretrain a PointNet diffusion policy on the SAME apple+avocado
+# merged dataset as single_lift_cross_category_easy_pcd, but WITH Stage 5(A) category
+# conditioning enabled (category_embed_dim=21: 15-dim registry one-hot + [log E, log
+# yield] + [size_x,y,z] + aspect_ratio, gentle_manip/dppo/category_embedding.py).
+#
+# Track A ("calibration first, then VLM") of the 2026-08-11 conditioning plan: this
+# one-hot+features embedding was tried once before this session (pre-existing code,
+# never wired to the merge configs), scored 0-4.5%, and was written off as possibly
+# confounded by weak (2-4.5%-success) specialist data at the time. That confound is
+# now resolved -- apple/avocado are independently confirmed 52-65% solo -- so
+# re-running this ALREADY-BUILT conditioning on now-good data is a cheap, informative
+# test before investing in the true VLM-based embedding (which the user's standing
+# directive actually specifies -- this one-hot-containing version is NOT that, it's a
+# fast sanity check). Compare directly against the unconditioned baseline in
+# single_lift_cross_category_easy_pcd: held-in apple 39.0%, held-in avocado 31.0%,
+# zero-shot kiwi 4.0%.
+#
+# Used by: third_party/dppo/script/run.py (TrainDiffusionAgent) via gentle_manip.dppo.train
+# Status: experimental
+#
+# Dataset built via:
+#   uv run --project envs/dppo python -m gentle_manip.scripts.merge_cross_category_demos \
+#       --categories apple avocado --category-embed \
+#       --out $DPPO_DATA_DIR/single_lift_cross_category_easy_conditioned_pcd \
+#       --reference-experiment single_lift_apple_rigid_easy --view student --val-split 0.1
+#
+# Then train:
+#   uv run --project envs/dppo python -m gentle_manip.dppo.train \
+#       --config-name pre_diffusion_pointnet \
+#       --config-path gentle_manip/dppo/cfg/single_lift_cross_category_easy_conditioned_pcd
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${logdir}
+  callbacks:
+    experiment_snapshot:
+      _target_: gentle_manip.dppo.hydra_snapshot.ExperimentSnapshot
+_target_: agent.pretrain.train_diffusion_agent.TrainDiffusionAgent
+
+name: ${env}_pre_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
+logdir: ${oc.env:DPPO_LOG_DIR}/dppo-pretrain/${env}/${exp_id:}
+train_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/train.npz
+val_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/val.npz
+experiment: single_lift_apple_rigid_easy   # env snapshot metadata only -- merged dataset spans
+                                             # apple+avocado; pretraining itself is sim-free
+
+seed: 42
+device: cuda:0
+env: single_lift_cross_category_easy_conditioned_pcd
+obs_dim: 8                    # ee_pos3 + ee_quat4 + gripper1
+action_dim: 7
+category_embed_dim: 21        # gentle_manip.dppo.category_embedding.EMBEDDING_DIM
+denoising_steps: 20
+horizon_steps: 4
+cond_steps: 2
+pc_cond_steps: 1
+n_points: 1024
+visual_feature_dim: 256
+
+wandb:
+  entity: ${oc.env:DPPO_WANDB_ENTITY,null}
+  project: gentle-manip-${env}
+  run: ${exp_id:}
+  group: dppo-pretrain
+
+train:
+  n_epochs: 2000
+  batch_size: 128
+  learning_rate: 1e-4
+  weight_decay: 1e-6
+  lr_scheduler:
+    first_cycle_steps: ${train.n_epochs}
+    warmup_steps: 100
+    min_lr: 1e-5
+  epoch_start_ema: 10
+  update_ema_freq: 5
+  save_model_freq: 100
+  val_freq: 10
+
+model:
+  _target_: model.diffusion.diffusion.DiffusionModel
+  predict_epsilon: True
+  denoised_clip_value: 1.0
+  network:
+    _target_: gentle_manip.dppo.pointnet_diffusion.PointNetDiffusionMLP
+    action_dim: ${action_dim}
+    horizon_steps: ${horizon_steps}
+    cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+    category_embed_dim: ${category_embed_dim}
+    pc_cond_steps: ${pc_cond_steps}
+    visual_feature_dim: ${visual_feature_dim}
+    time_dim: 16
+    mlp_dims: [512, 512, 512]
+    activation_type: ReLU
+    residual_style: True
+    pointnet:
+      in_channels: 3
+      use_layernorm: True
+      final_norm: layernorm
+  horizon_steps: ${horizon_steps}
+  obs_dim: ${obs_dim}
+  action_dim: ${action_dim}
+  denoising_steps: ${denoising_steps}
+  device: ${device}
+
+ema:
+  decay: 0.995
+
+train_dataset:
+  _target_: gentle_manip.dppo.pointcloud_dataset.StitchedSequencePointCloudCategoryDataset
+  dataset_path: ${train_dataset_path}
+  horizon_steps: ${horizon_steps}
+  cond_steps: ${cond_steps}
+  pc_cond_steps: ${pc_cond_steps}
+  device: ${device}
+
+val_dataset:
+  _target_: gentle_manip.dppo.pointcloud_dataset.StitchedSequencePointCloudCategoryDataset
+  dataset_path: ${val_dataset_path}
+  horizon_steps: ${horizon_steps}
+  cond_steps: ${cond_steps}
+  pc_cond_steps: ${pc_cond_steps}
+  device: ${device}
