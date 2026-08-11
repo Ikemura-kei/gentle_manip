@@ -978,3 +978,47 @@ concluding conditioning itself is a dead end.
 
 All GPU processes and sim servers cleanly shut down; no orphaned Genesis
 subprocesses (`nvidia-smi --query-compute-apps` empty).
+
+## RLDG-style specialist-rollout collection: infrastructure built and validated
+
+Per the FINAL VERDICT's recommended next step #1 and explicit user direction to
+continue with RLDG-style distillation AND expand the category pool (3-category
+merge: apple+avocado+pear train, kiwi held out zero-shot -- user's choice between
+the two sequencing options offered).
+
+**Built new infrastructure** (all committed):
+- `gentle_manip/dppo/genesis_venv.py`: `GenesisMultiStepVecEnv` gained an opt-in
+  `record_raw` flag (default False, zero effect on every existing eval/finetune
+  caller) that captures the TRUE per-physical-sim-step raw obs/action pairs
+  during a policy chunk's execution -- the only place with access to this data,
+  since `step()` normally sums/discards sub-step detail after executing an
+  action chunk. Threaded through `build_genesis_venv` and the `third_party/dppo`
+  submodule's `make_async` (`env.specific.record_raw: true`).
+- `gentle_manip/dppo/rollout_collector.py`: new `RolloutCollectorAgent` (sibling
+  to `EvalHarnessAgent`, same `EvalAgent` base/venv+model construction) that
+  drives batches of rollouts, keeps only episodes that ever hit `success=True`,
+  truncates each kept episode right after its first success (drops the idle
+  post-success tail, keeping episode length comparable to the original CMA-ES
+  demos instead of running to `max_episode_steps`), and writes the result in the
+  EXACT demo pickle schema `convert_demos.py` expects
+  (`dataset/demos/single_lift_<category>_rigid/<date>-rollout-<id>/data.pkl`).
+- New `collect_rollouts.yaml` configs per category (apple/avocado/pear), mirroring
+  the eval config structure with `env.specific.record_raw: true`.
+
+**Smoke-tested before scaling**: 6 successful episodes from apple's checkpoint at
+a small target, ~60% success rate (matches apple-solo's known 65% canonical SR --
+a good consistency check). **Schema fully validated**: episode lengths 208-222
+steps, remarkably close to the ORIGINAL apple-easy demos' 209-217 range (confirms
+the truncate-at-first-success logic produces naturally comparable episode
+lengths); raw ee_pos/action values in sane physical-unit ranges (not leftover
+normalized garbage).
+
+**Full collection launched in parallel** (GPU headroom trivial for this,
+~2.2GB total across all three): apple (port 5570), avocado (port 5571), pear
+(port 5572), each targeting 150 successful episodes from its own solo
+checkpoint. Once all three finish: merge into one rollout-distilled training
+set (apple+avocado+pear), train an unconditioned generalist the same way as
+tonight's raw-demo merge, eval held-in on all three + zero-shot on kiwi
+(never touched by rollout collection either) -- directly comparable to
+tonight's baseline (39%/31%/4.0%, though now with 3 held-in categories instead
+of 2) and to Track A/B's conditioned results.
