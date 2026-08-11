@@ -971,3 +971,18 @@ rather than theoretically. Avocado held-in and kiwi zero-shot evals next --
 the avocado-held-in number will show whether the interference is symmetric
 (both categories pulled toward some average) or whether apple specifically
 lost the most.
+
+## Cross-category generalist eval, part 2: avocado held-in also regresses
+
+**Held-in eval on AVOCADO: 31.0% success (31/100)**, `ever_success_rate` 31%,
+`hold_failure_gap` 0.01. Down from avocado-SOLO's 52.0% (-21 points).
+
+**Both held-in categories regressed from their solo numbers**: apple 65.0%->
+39.0% (-26pts), avocado 52.0%->31.0% (-21pts). This rules out an asymmetric
+"one category dominates" story -- the naive unconditioned 2-category merge
+genuinely hurts BOTH categories relative to training a dedicated specialist on
+each. This is real evidence (not just a theoretical concern) that the original
+research plan's Stage 5 category-conditioning branch is NECESSARY, not just a
+nice-to-have refinement -- a bare merge of even 2 categories already shows
+meaningful interference at this model capacity/architecture. Kiwi zero-shot
+eval (the actual novel-category generalization number) running next.
