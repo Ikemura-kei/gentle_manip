@@ -926,3 +926,48 @@ held-in numbers land close to solo, the merge didn't hurt; if they collapse,
 multi-category BC needs more than a naive merge (motivating Stage 5's category
 conditioning). The kiwi zero-shot number is the actual deliverable -- first real
 cross-category generalization result for this project.
+
+## Kiwi-easy result: surprising tie with avocado
+
+Kiwi-easy plateaued at epoch 620 (best val loss 0.0291@320 -- the LOWEST val
+loss of any object trained this session). Canonical eval on the nearest
+checkpoint (`state_300.pt`, val 0.0312): **52.0% success (52/100)**,
+`ever_success_rate` 54%, `hold_failure_gap` 0.0. Approx 95% CI [42.2%, 61.8%].
+
+**This is a striking, unexpected result: kiwi's numbers are numerically
+IDENTICAL to avocado's** (success_rate 0.52/0.52, ever_success_rate 0.54/0.54,
+ever_in_band_rate 0.54/0.54, hold_failure_gap 0.0/0.0) -- despite kiwi having
+(a) the best collection success rate of any object this session (52.6% vs.
+apple's 43.5% and avocado's 18.1%), (b) the lowest BC val loss, and (c) no
+gripper-margin warning in its DR config (unlike avocado). The "comfortable
+grasp margin" refinement to the task-difficulty hypothesis predicted kiwi
+should beat avocado, not tie it.
+
+**Complicates the picture -- most likely explanation: object SIZE itself
+(not just grasp comfort) matters independently.** Kiwi (43x46x60mm) is
+meaningfully smaller than both apple (65x60x65mm, 65% success) and avocado
+(62x95x61mm, 52% success). Revised reading of the full spectrum:
+cherry (~20mm, wide DR) 25.7% < {avocado (~61mm, marginal grasp) 52%, kiwi
+(~43-60mm, comfortable grasp) 52%} < apple (~60-65mm, comfortable AND largest)
+65%. Apple may simply be uniquely favorable (large across all three axes,
+comfortably within gripper stroke) rather than "large + comfortable" being a
+clean two-factor rule -- absolute size band matters on top of grasp-margin
+comfort. Not fully resolved with n=3 objects; would need more categories to
+properly disentangle size vs. grasp-margin as independent effects.
+
+## Cross-category generalist eval, part 1: apple held-in shows real interference
+
+Cross-category generalist (`ioqec`, apple+avocado merged, unconditioned)
+plateaued at epoch 760 (best val loss 0.0198, tied at epoch 460 and 700 --
+used `state_700.pt`, the more-trained of the tied-best checkpoints).
+
+**Held-in eval on APPLE: 39.0% success (39/100)**, `ever_success_rate` 40%,
+`hold_failure_gap` 0.0. This is a substantial drop from apple-SOLO's 65.0% --
+roughly a 26-point regression from merging just ONE other category
+(avocado) into the training set with no conditioning signal. This is the
+"catastrophic interference from a naive merge" risk the original research
+plan's Stage 5/6 flagged as a real possibility, now confirmed empirically
+rather than theoretically. Avocado held-in and kiwi zero-shot evals next --
+the avocado-held-in number will show whether the interference is symmetric
+(both categories pulled toward some average) or whether apple specifically
+lost the most.
