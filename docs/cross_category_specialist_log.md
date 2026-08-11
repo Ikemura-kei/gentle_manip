@@ -902,3 +902,79 @@ next.
 **Held-in AVOCADO: 31.0% success (31/100)**, `ever_success_rate` 31%. Identical to
 the unconditioned baseline's 31.0% -- zero improvement. Zero-shot kiwi eval next
 (the key result for both tracks).
+
+**Zero-shot KIWI: 0.0% success (0/100)**, `ever_success_rate` 0%. Complete
+collapse -- even worse than the unconditioned baseline's 4.0% and Track A's 2.0%.
+
+### Track B verdict
+
+| | Unconditioned | Track A (registry) | Track B (VLM) |
+|---|---|---|---|
+| Held-in apple | 39.0% | 42.0% | 38.0% |
+| Held-in avocado | 31.0% | 32.0% | 31.0% |
+| Zero-shot kiwi | 4.0% | 2.0% | **0.0%** |
+
+**Neither conditioning approach fixes zero-shot generalization. Both are within
+noise of the unconditioned baseline on held-in performance, and both collapse on
+the zero-shot test -- Track B (the true VLM embedding) collapses even harder than
+doing nothing at all.**
+
+## FINAL VERDICT: naive conditioning (of either kind) does not solve cross-category generalization at this scale
+
+All three policies (unconditioned, Track A registry-embed, Track B VLM-embed) were
+trained on the IDENTICAL 160-episode apple+avocado merge, evaluated with the
+IDENTICAL canonical harness. The full 3x3 comparison:
+
+| Policy | Held-in apple | Held-in avocado | Zero-shot kiwi |
+|---|---|---|---|
+| Solo specialist (reference) | 65.0% | 52.0% | 52.0% (as its own solo) |
+| Unconditioned merge | 39.0% | 31.0% | 4.0% |
+| Track A: registry one-hot+features (21-dim) | 42.0% | 32.0% | 2.0% |
+| Track B: frozen CLIP + fixed projection (24-dim) | 38.0% | 31.0% | **0.0%** |
+
+**Why Track B likely collapsed even harder than Track A**: Track A's embedding has
+an explicit, if untrained, one-hot slot reserved for every known category
+(including kiwi) -- the network can in principle route on "this is some OTHER
+known category" even without having trained on kiwi specifically. Track B's CLIP
+embedding has no discrete category structure at all; generalization depends
+entirely on continuity in embedding space (kiwi's projected CLIP vector needs to
+land "near" apple/avocado's for the network to interpolate sensibly). With only 2
+training categories to define that geometry, and a FIXED random (not learned,
+not task-aware) projection, there's no reason to expect the projection preserves
+the right notion of similarity for THIS specific manipulation task -- CLIP's
+visual/semantic similarity space wasn't built for "does this generalize a grasp
+policy," and a random projection doesn't fix that mismatch. This is a plausible,
+architecture-level explanation, not tested further this session.
+
+**What this genuinely establishes**: with only 2 source categories and a small
+(~144-episode) BC dataset, naive category conditioning -- whether a cheap one-hot
+style embedding or a from-scratch VLM embedding -- does not produce a working
+cross-category policy. The held-in numbers barely move (all three policies land
+within a few points of each other, well below solo specialist performance), and
+zero-shot stays at or below the pre-conditioning collapse level regardless of
+embedding source. **The bottleneck is not "which embedding" -- it's more
+fundamental**: either (a) the training set is too small/narrow (n=2 categories) to
+give ANY conditioning signal something meaningful to learn from, or (b) BC-from-a-
+flat-merge is the wrong training paradigm regardless of conditioning, and the
+RLDG-style specialist-rollout-distillation approach (flagged since early in this
+session, never yet tried) is a structurally different lever worth trying before
+concluding conditioning itself is a dead end.
+
+**Recommended next steps, in priority order**:
+1. **Try RLDG-style distillation** (train the merge from ROLLOUTS of the working
+   solo specialists, not raw CMA-ES demo pickles) -- this changes the TRAINING
+   DATA quality/consistency, a variable neither track above touched. Named,
+   validated precedent in the literature for exactly this two-phase setup.
+2. **Expand the category pool before re-testing conditioning** -- n=2 is a very
+   thin basis for any conditioning signal to learn a meaningful geometry from,
+   whether one-hot or VLM-embedding-based. pear-easy and kiwi-easy specialists
+   already exist this session; a 4-category merge (holding out one for zero-shot)
+   is a natural next experiment.
+3. **If both of the above still fail**: this would be strong evidence that BC
+   point-cloud diffusion policies at this scale genuinely cannot share weights
+   across categories without much more substantial architecture changes
+   (PA3FF/PADP-style part-aware features, or a fundamentally different backbone),
+   not just a better conditioning vector on the same encoder.
+
+All GPU processes and sim servers cleanly shut down; no orphaned Genesis
+subprocesses (`nvidia-smi --query-compute-apps` empty).
