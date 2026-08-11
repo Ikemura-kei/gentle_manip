@@ -898,3 +898,7 @@ better data." Track B evals next.
 `hold_failure_gap` 0.0. Essentially flat vs. the unconditioned baseline's 39.0%
 (within noise), slightly below Track A's 42.0%. Avocado and kiwi zero-shot evals
 next.
+
+**Held-in AVOCADO: 31.0% success (31/100)**, `ever_success_rate` 31%. Identical to
+the unconditioned baseline's 31.0% -- zero improvement. Zero-shot kiwi eval next
+(the key result for both tracks).
