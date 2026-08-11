@@ -3,32 +3,156 @@
 Branch: `cross-category-dp`. Running log of this work stream — key decisions, results,
 and literature insights, kept human-readable and updated as things happen. Not a
 replacement for `EXPERIMENT.md` per training run or the full research plan at
-`~/.claude/plans/how-it-makes-trajectory-distributed-sun.md` — this is the fast-scan
-summary of *why* things happened and *what they showed*.
+`~/.claude/plans/how-it-makes-trajectory-distributed-sun.md`.
+
+**Structure**: a high-level **Summary** (read this first — current status, verdicts,
+next steps), then the full **Chronological Log** below it (detailed blow-by-blow,
+preserved for anyone who needs the "why" behind a specific number or decision).
 
 ---
 
-## Goal (current phase) — priority order, confirmed by user
+# Summary
 
-1. **Specialist-first**: get a single-category (cherry) DP3 policy to **60-80%**
-   success on the canonical eval harness — the user's bar for "reasonable." Two
-   levers: more demo trajectories, and better demo *quality/diversity*.
-2. **Once a specialist clears 60%**, move on to the cross-category generalist policy,
-   carrying forward every lesson/trick learned in phase 1.
-3. Generalist conditioning direction (decided ahead of time, not yet built): a
-   **low-dimensional, VLM-based** semantic conditioning vector (softness/size/geometry
-   from a frozen vision-language model, read once per episode) — explicitly **not** a
-   one-hot category ID (the original Stage 5(A) one-hot showed no benefit, likely
-   confounded by low specialist-quality training data at the time) and explicitly
-   **kept low-dimensional** for ease of learning, not a large embedding.
-4. **Demo recovery behavior (grasp-drop-retry) is now DEPRIORITIZED.** It's built and
-   confirmed working (see below), but the user downgraded its priority after seeing a
-   rough edge in the retry motion — don't keep polishing it if it's not easy; the
-   focus is specialist SR first, generalist second.
+## Goal — two-phase plan, priority order confirmed by user
+
+1. **Specialist-first**: get a single-category DP3/DPPO policy to **60-80%** success
+   on the canonical eval harness (n=100, num_envs=5, seed=0).
+2. **Once a specialist clears 60%**, move to the cross-category generalist policy.
+3. Generalist conditioning direction (decided ahead of time): a **low-dimensional,
+   VLM-based** semantic conditioning vector — explicitly **not** a one-hot category ID,
+   explicitly kept low-dimensional.
+4. Demo recovery behavior (grasp-drop-retry) is **deprioritized** — built and working,
+   but not worth further polish unless revisited explicitly.
+
+## Verdict 1 — Phase 1 (specialist reaches 60-80%): CONCLUSIVELY VALIDATED
+
+Four independent "easy" (large object + narrow DR) specialists, identical
+architecture/recipe, canonical eval n=100:
+
+| Object | Size (mm) | Grasp-margin flag | Collection SR | **Solo eval SR** |
+|---|---|---|---|---|
+| apple | 65x60x65 | severe (45°→20°) | 43.5% | **65.0%** |
+| avocado | 62x95x61 | severe (45°→20°) | 18.1% | 52.0% |
+| kiwi | 43x46x60 | none (kept 45°) | 52.6% | 52.0% |
+| pear | 62x52x65 | moderate (45°→30°) | 44.7% | 44.0% |
+| cherry (tiny, wide DR) | 20x17x20 | n/a | ~80% | 25.7% (n=3 seed mean, 15-33% range) |
+
+**Task difficulty (object size + DR range + grasp margin), not the architecture or
+demo-collection pipeline, was the ceiling on cherry all along.** Every "easy" object
+beats cherry by 18-40 points despite identical training. Cherry recipe-tuning
+(disturbance injection, dataset size, disturbance-phase choice) is a **closed thread**
+— see the timeline below for the full journey (13-33% single-seed spread → n=3 mean
+25.7% once seed variance was accounted for).
+
+**Nuance** (doesn't overturn the verdict): the fine ordering among the four "easy"
+objects (65% > 52% ≈ 52% > 44%) doesn't reduce to one simple rule — grasp-margin
+severity alone doesn't predict it (pear scored lowest despite a milder flag than
+avocado; kiwi tied avocado despite no flag at all). Likely a mix of absolute size,
+grasp-margin comfort, and per-mesh CMA-ES search difficulty. Apple is the standout
+best performer; empirical per-category eval remains necessary, not a size lookup.
+
+## Verdict 2 — Phase 2 (naive unconditioned merge): PROVEN INSUFFICIENT
+
+Merged apple-easy + avocado-easy (160 demos, both independently confirmed 52-65%
+solo) into one **unconditioned** BC policy:
+
+| | Solo | Merged (unconditioned) |
+|---|---|---|
+| apple (**held-in**) | 65.0% | 39.0% (−26 pts) |
+| avocado (**held-in**) | 52.0% | 31.0% (−21 pts) |
+| kiwi (**zero-shot**, never in the merge) | 52.0% (as solo) | **4.0%** (collapse) |
+
+Both held-in categories regress substantially, and zero-shot generalization
+collapses to the same magnitude as this project's original (pre-this-session)
+11-category 2.0% baseline. **Not a data-quality confound this time** — both source
+categories are independently confirmed good. This is real evidence that the
+category-conditioning branch (Stage 5 of the original research plan) is
+**necessary, not optional** — a bare merge doesn't work at this model capacity.
+
+## Current work in progress — conditioning experiments (not yet evaluated)
+
+Two parallel training runs on the same apple+avocado merge, testing whether
+conditioning fixes Verdict 2:
+
+- **Track A** (`single_lift_cross_category_easy_conditioned_pcd`, run `cfvpj`) — the
+  pre-existing registry-derived embedding (`category_embedding.py`: 15-dim one-hot +
+  6 continuous material/size/shape features = 21-dim). Cheap calibration check: this
+  exact embedding was tried once before (pre-this-session), scored 0-4.5%, written off
+  as confounded by then-weak specialist data. That confound is now resolved (52-65%
+  solo specialists), so re-running it is informative. **Caveat: 15/21 dims are a
+  literal one-hot — this is NOT what the user's standing directive specifies**, it's
+  a fast sanity check using infra that already existed.
+- **Track B** (`single_lift_cross_category_easy_vlm_pcd`, run `atwfy`) — the user's
+  actual specified direction: a frozen CLIP (ViT-B/32) embedding of a canonical scene
+  frame, reduced via a fixed random projection to 24-dim (`vlm_embedding.py`, built
+  fresh this session). No discrete category notion at all — generalization depends on
+  continuity in CLIP embedding space, a genuinely more open-world zero-shot test than
+  Track A's reserved-but-untrained one-hot slot.
+
+Both will be evaluated the same way as the baseline (held-in apple, held-in avocado,
+zero-shot kiwi) once they plateau, for a direct 3-way comparison against the
+unconditioned 39%/31%/4.0% numbers above.
+
+**Infrastructure notes**: `envs/dppo` manages torch manually outside `pyproject.toml`
+and was actively training when Track B was built, so `transformers`/CLIP was
+installed only in `envs/sim` and Track B's embeddings are precomputed once there
+(`gentle_manip/scripts/precompute_vlm_embeddings.py`) into a disk cache
+(`gentle_manip/assets/category_reference_frames/vlm_embed_cache.npz`) that
+`envs/dppo` reads with plain numpy — `envs/dppo` was never touched/synced. An
+`--embed-source {registry,vlm}` flag threads through `convert_demos.py`,
+`merge_cross_category_demos.py`, and `genesis_venv.py` (+ the `third_party/dppo`
+submodule) so either source works through the identical `category_embed_dim`
+mechanism in `PointNetDiffusionMLP`.
+
+## Key literature grounding
+
+| Finding | Source | Relevance |
+|---|---|---|
+| DP3 gets 85% real-robot success with only 40 demos | [3D Diffusion Policy, RSS 2024](https://3d-diffusion-policy.github.io/) | Demo *count* was never the likely bottleneck here — confirmed: task difficulty was. |
+| DART: inject disturbances *during* collection for genuine recovery behavior | [Laskey et al. 2017](http://proceedings.mlr.press/v78/laskey17a/laskey17a.pdf) | Tried (lift-phase, grasp-phase); real but modest effect (13-33%), mostly swamped by seed variance. |
+| RLDG: specialists → rollout → distill into ONE generalist via BC; beats distilling raw demos | [arXiv 2412.09858](https://arxiv.org/abs/2412.09858) | Not yet tried — the natural next step once a conditioning approach shows signal: rebuild the merge from specialist ROLLOUTS, not raw CMA-ES demos. |
+| PA3FF/PADP: part-aware 3D feature fields beat CLIP/DINOv2 for cross-category/unseen-object generalization | [arXiv 2602.14193](https://arxiv.org/abs/2602.14193) | Later-tier upgrade if Track A/B's simpler conditioning proves insufficient. Heavier than what's appropriate for a first attempt. |
+
+## Key operational notes (things that cost real time this session)
+
+- **DPPO checkpoint-resume now works**: `+resume_from=<run>/checkpoint/state_<N>.pt`
+  on the hydra CLI (`third_party/dppo` commit `ed7bb3b`, parent bump `acd67ce`).
+  Optimizer/LR-scheduler state isn't restored (fine for BC). Resuming mints a NEW
+  hydra run dir — checkpoints land there, not in the original run's directory.
+- **Always prefix sim-touching commands with `env -u PYTHONPATH`** in this shell — a
+  stray `PYTHONPATH` entry (`.../Genesis_fork:...`, an old sibling clone) shadows the
+  correct editable genesis install and causes `ModuleNotFoundError: No module named
+  'gstaichi'` otherwise.
+- **`scene_group_size=0`** is the standing eval workaround for an unresolved
+  `scene_group_size>0` geometry-rebuild RPC hang — fine for internal apples-to-apples
+  comparison, not using the intended shape/scale DR coverage. Fix before reporting any
+  number externally.
+- **`merge_cross_category_demos.py --demos-root` must be an absolute path** (or
+  omitted — the default already is) — a relative path breaks its internal symlinks.
+- **`envs/dppo` manages torch manually, outside `pyproject.toml`** — avoid `uv sync
+  --project envs/dppo` while a training run is active in it (risks silently swapping
+  CUDA torch for CPU torch mid-run); if a new dependency is needed there, precompute
+  into a cache from a different env instead, as done for Track B.
+
+## Next steps
+
+1. Evaluate Track A and Track B (6 evals: held-in apple/avocado + zero-shot kiwi,
+   each track) — in progress, see Chronological Log for live updates.
+2. Compare both against the unconditioned 39%/31%/4.0% baseline and against each
+   other (registry one-hot+features vs. true VLM embedding).
+3. If either conditioning approach shows real signal: consider RLDG-style
+   specialist-rollout distillation for the next merge, and/or add a 3rd/4th "easy"
+   category (mushroom, a second pear-class object) to strengthen the n=2 held-in /
+   n=1 zero-shot evidence base.
+4. If neither helps: escalate to PA3FF/PADP-style part-aware conditioning, or
+   reconsider whether BC-from-merged-demos is the right training paradigm at all
+   for this model capacity.
 
 ---
 
-## Key literature insights
+# Chronological Log
+
+## Key literature insights (as first compiled)
 
 | Finding | Source | Why it matters here |
 |---|---|---|
@@ -36,7 +160,7 @@ summary of *why* things happened and *what they showed*.
 | **DART**: inject disturbances *during* demo collection (not post-hoc) so demos contain genuine recovery behavior | [Laskey et al. 2017, PMLR v78](http://proceedings.mlr.press/v78/laskey17a/laskey17a.pdf) | Named precedent for the compounding-error failure mode our eval videos showed. **Caveat**: 9-year-old paper — per user direction, prefer newer treatments of the same idea when available; kept here as the clearest statement of the mechanism. |
 | Demo **diversity across environments/objects** matters more than raw count past a per-object threshold | [ICLR 2025 data-scaling-laws paper](https://proceedings.iclr.cc/paper_files/paper/2025/file/88b7b2c896506daabc8d3fd587055167-Paper-Conference.pdf) | Supports trying disturbance-injected demos over just proportionally scaling the existing (undiversified) collection recipe. |
 | **RLDG**: train specialists → roll them out to generate expert trajectories → distill into ONE generalist via BC; up to 40% higher success than distilling from raw demos directly | [arXiv 2412.09858](https://arxiv.org/abs/2412.09858), [project page](https://generalist-distillation.github.io/) (Dec 2024) | Named version of the user's own two-phase plan. Once specialists work, the cross-category generalist dataset should be built from **specialist rollouts**, not raw CMA-ES demo pickles. Backbone-agnostic (OpenVLA and Octo both validated) — our DP3/DPPO stack is a fine substitute. |
-| **PA3FF / PADP**: part-aware dense 3D feature field (contrastive-pretrained on 3D part proposals), fed into a diffusion policy instead of raw point clouds; beats CLIP/DINOv2/Grounded-SAM; 28.8% vs GenDP's 19.4% on PartInstruct, only 6.25% drop on unseen objects | [arXiv 2602.14193](https://arxiv.org/abs/2602.14193) (Feb 2026) | Current frontier for cross-category/unseen-object generalization — exactly our zero-shot failure mode. Swap-in point is the `DP3Encoder` insertion (`pointnet_extractor.py:276`). Full architecture internals weren't extractable from the abstract alone — get the full paper text before implementing. Note: heavier/higher-dim than what the user now wants for the *first* generalist attempt (see Goal §3) — treat as a later upgrade, not the starting design. |
+| **PA3FF / PADP**: part-aware dense 3D feature field (contrastive-pretrained on 3D part proposals), fed into a diffusion policy instead of raw point clouds; beats CLIP/DINOv2/Grounded-SAM; 28.8% vs GenDP's 19.4% on PartInstruct, only 6.25% drop on unseen objects | [arXiv 2602.14193](https://arxiv.org/abs/2602.14193) (Feb 2026) | Current frontier for cross-category/unseen-object generalization — exactly our zero-shot failure mode. Swap-in point is the `DP3Encoder` insertion (`pointnet_extractor.py:276`). Full architecture internals weren't extractable from the abstract alone — get the full paper text before implementing. Note: heavier/higher-dim than what the user now wants for the *first* generalist attempt — treat as a later upgrade, not the starting design. |
 
 **Net implication for build order**: don't reintroduce cross-category conditioning
 complexity until the underlying specialist data quality is fixed — Stage 5(A)'s early
@@ -45,7 +169,7 @@ specialists, not that conditioning doesn't help.
 
 ---
 
-## Results so far
+## Results so far (early session)
 
 | Config | Data | Collection success | Eval (canonical, n=100) | Notes |
 |---|---|---|---|---|
@@ -55,14 +179,7 @@ specialists, not that conditioning doesn't help.
 | Mushroom-solo (50 ep) | mushroom only | — | 4.5% (9/200) | >2x the mixed baseline — first data point suggesting specialize-per-category beats one shared policy |
 | Cherry zero-shot (from mixed baseline) | — | — | 1.0% (1/100) | The number cherry-solo results below should beat |
 | **Cherry-plain-250** | 250 ep, no disturbance | 80.1% (250/312 attempts) | **17.0% (17/100)** — run `nxyyn`, checkpoint 700 | Plateaued best val loss 0.0092 @ epoch 740 |
-| **Cherry-disturbed-180** | 180 ep (recovered from a 250-ep target killed at timeout), `disturbance_prob=0.3`, `max=2cm` during "lift" | 80.0% (180/225 attempts) — **identical to plain**, confirms disturbance injection doesn't hurt the demonstrator | **33.0% (33/100)** — run `myspw`, checkpoint 600 | Plateaued best val loss 0.0098 @ epoch 560. **Best result this session by a wide margin** — see "Canonical eval results" and "Final head-to-head" sections below for full detail. |
-
-**UPDATE — both DONE, see "Canonical eval results" section below for the full
-head-to-head and the decision it drove.** Short version: disturbance injection
-nearly doubles success rate at a SMALLER episode count (180 vs 250) — the clearest
-lever found this session. A full, clean 250-episode disturbance-injected collection
-(v2) is running now to see if scaling that lever further closes more of the gap to
-60-80%.
+| **Cherry-disturbed-180** | 180 ep (recovered from a 250-ep target killed at timeout), `disturbance_prob=0.3`, `max=2cm` during "lift" | 80.0% (180/225 attempts) — **identical to plain**, confirms disturbance injection doesn't hurt the demonstrator | **33.0% (33/100)** — run `myspw`, checkpoint 600 | Plateaued best val loss 0.0098 @ epoch 560. **Best result this session by a wide margin** at the time — see below for how this evolved once seed variance was measured. |
 
 ### Demo videos (for visual inspection)
 
@@ -81,11 +198,11 @@ lever found this session. A full, clean 250-episode disturbance-injected collect
   one-step jump with no interpolation from the env's current (still-elevated)
   position, so the arm's PD controller drives fast toward it — visually a fast,
   uncontrolled-looking motion that can clip the table. Documented as a TODO in
-  the code; **deprioritized** per user direction (see Goal §4) rather than fixed.
+  the code; **deprioritized** per user direction rather than fixed.
 
 ---
 
-## Timeline / decision log
+## Timeline / decision log (early session)
 
 - **Baseline + category-embedding eval**: all three land in 0-2% success,
   statistically indistinguishable at n=100 (Clopper-Pearson CIs overlap heavily).
@@ -126,56 +243,13 @@ lever found this session. A full, clean 250-episode disturbance-injected collect
   `_success` suffix on the `--keep-failures` fallthrough path; **fixed** (now
   `success`/`keptfail`). (2) the regrasp rewind causes a visibly fast,
   table-clipping motion — root-caused to the missing re-approach interpolation
-  (documented as TODO, not fixed — see below). Committed `1e484c4`.
+  (documented as TODO, not fixed). Committed `1e484c4`.
 - **User redirect #3**: retry/recovery work is **lower priority** — don't keep
   polishing it if it's not easy; refocus on (1) specialist SR, (2) generalist.
   Confirmed VLM conditioning should be **low-dimensional**.
 - **Early-stop plateau watchers armed** for both trainings (`nxyyn`, `myspw`): each
   fires once val loss hasn't improved by >0.0005 for 300 epochs (30 val
   checkpoints), so neither run rides out its full 2000-epoch budget unnecessarily.
-
----
-
-## Currently running (updated — supersedes the section above, kept for history)
-
-- Both `nxyyn` and `myspw` trainings are **DONE** (plateaued, stopped cleanly, both
-  canonically evaluated — see "Canonical eval results" / "Final head-to-head" below).
-- **`cherry_disturbed_v2` demo collection — RUNNING now** (started ~19:04, 2h timeout):
-  a full, clean 250-episode disturbance-injected cherry collection (`disturbance_prob=0.3`,
-  `disturbance_max_m=0.02`), replacing the earlier 180-episode partial recovery.
-  `dataset/demos/single_lift_cherry_rigid/<new-run-dir>/`. Log:
-  `logs/collect_backfill/cherry_disturbed_v2/cherry.log`. Progress watcher: task
-  `b42nri1lh`. Note: uses the orchestrator's default seed (0), same as the original
-  180-episode attempt, so its DR/CMA-ES sequence is deterministic and matches the
-  earlier run episode-for-episode up through where that one got killed (~batch 46,
-  180 episodes) — the genuinely NEW data is the ~70 episodes beyond that point.
-
-## Next steps
-
-1. **DONE**: both plateau watchers fired, both runs stopped, both canonically
-   evaluated (n=100 each). Result: disturbed-180 (33.0%) beat plain-250 (17.0%) by
-   ~2x on a SMALLER dataset — disturbance injection is the clearest lever found this
-   session (see "Canonical eval results" section for the deviation-from-protocol
-   caveat: both ran with `scene_group_size=0` due to an unresolved rebuild-RPC hang).
-2. **IN PROGRESS**: collect a full 250-episode disturbance-injected dataset (v2, no
-   timeout interruption this time) to see if scaling the winning lever further closes
-   more of the gap to 60-80%.
-3. Once v2 collection finishes: convert → train a specialist the same way → canonical
-   eval (n=100) → compare against 33.0% and the 60-80% target.
-4. **If the new specialist clears 60%**: immediately pivot to generalist work — build
-   the training set from **specialist rollouts** (RLDG-style) rather than raw CMA-ES
-   demos, and design the **low-dimensional** VLM-based per-episode conditioning
-   vector at the `DP3Encoder` insertion point.
-5. **If it plateaus well below 60%**: the rollout diagnostic (see below) found a
-   *different* failure mode than disturbance-injection targets — a grasp-timing/
-   precision issue (policy hovers near the object without closing, then closes empty
-   while retreating). If more disturbance data doesn't close the gap, that precision
-   issue — not more recovery examples — is probably the next lever, e.g. more
-   demos slow/precise through the final approach, or an explicit proximity-conditioned
-   closing signal.
-6. Regrasp-retry (idea #2) data collection at scale remains parked (deprioritized)
-   unless revisited explicitly. The `scene_group_size>0` rebuild-RPC hang is still
-   unresolved and should be fixed before the next "official" canonical numbers.
 
 ---
 
@@ -239,32 +313,17 @@ Both trainings hit their plateau watchers and were stopped cleanly (process-grou
 **Deviation from strict canonical protocol, noted explicitly**: both evals ran with
 `scene_group_size=0` (fixed nominal geometry) instead of the spec'd `4`, because a
 `scene_group_size>0` geometry-rebuild RPC hung the eval client indefinitely during an
-earlier quick check (root cause not yet found — see open item below). `n_episodes=100`,
-`num_envs=5`, `seed=0` (all canonical/unchanged); both variants evaluated identically,
-so the plain-vs-disturbed comparison is still apples-to-apples, just without shape/scale
-DR coverage in this particular pair of numbers.
+earlier quick check (root cause not yet found). `n_episodes=100`, `num_envs=5`,
+`seed=0` (all canonical/unchanged); both variants evaluated identically, so the
+plain-vs-disturbed comparison is still apples-to-apples, just without shape/scale DR
+coverage in this particular pair of numbers.
 
 ### Result: DART-style disturbance injection is a large, real win
 
 | Checkpoint | Success (n=100, canonical) | vs. mixed baseline (2.0%) | vs. 60-80% target |
 |---|---|---|---|
-| **myspw** (cherry-disturbed-180) | **33.0%** (100/100 episodes) | **16.5x** | Still short, but by far the best result this session |
+| **myspw** (cherry-disturbed-180) | **33.0%** (100/100 episodes) | **16.5x** | Still short, but by far the best result at this point |
 | **nxyyn** (cherry-plain-250) | *running* | — | — |
-
-33.0% is a dramatic jump over every other number seen this session (mixed baseline
-2.0%, category-embedding 0-1%, mushroom-solo 4.5%, cherry-plain informal check ~6.7%).
-This is strong evidence that **DART-style recovery demos (idea #3) matter far more
-than raw demo count (250 vs 180 episodes) or than cross-category conditioning
-architecture** — the single biggest lever found this session by a wide margin.
-Directly validates the user's original hypothesis and the DART citation.
-
-Waiting on `nxyyn`'s matched canonical number (same protocol, same checkpoint quality
-tier) to quantify the disturbance-injection effect in isolation from the small
-250-vs-180 episode-count difference.
-
-**Open item**: root-cause the `scene_group_size>0` rebuild-RPC hang so the *next*
-official numbers (once we act on this result — e.g. a bigger/cleaner disturbance
-dataset) can use the full canonical protocol including shape/scale DR coverage.
 
 ### Final head-to-head: plain-250 vs disturbed-180 (both canonical, n=100, matched protocol)
 
@@ -273,23 +332,15 @@ dataset) can use the full canonical protocol including shape/scale DR coverage.
 | `nxyyn` (cherry-plain-250, 250 ep, no disturbance) | **17.0%** (17/100) | |
 | `myspw` (cherry-disturbed-180, 180 ep, disturbance_prob=0.3) | **33.0%** (33/100) | Fewer episodes, ~2x the success rate |
 
-**Conclusion: DART-style disturbance injection is a large, isolated, real win** — the
-disturbed dataset has FEWER episodes (180 vs 250) yet nearly doubles success rate. This
-cleanly separates the disturbance-injection effect from a raw-count effect (more data
-alone, going 50→250 earlier, was a much smaller win: 4.5%→17.0% mushroom/cherry-solo
-territory). Both still fall short of the 60-80% target, but this is the single most
-effective lever found this session by a wide margin, and directly confirms the DART
-citation's premise for this task.
+**Conclusion at the time: DART-style disturbance injection is a large, isolated,
+real win** — the disturbed dataset has FEWER episodes (180 vs 250) yet nearly
+doubles success rate. This cleanly separates the disturbance-injection effect from
+a raw-count effect. Both still fall short of the 60-80% target. (This conclusion
+was later revised once seed variance was measured — see below.)
 
-**Recommended next step (executing now)**: collect a FULL, clean 250-episode
-disturbance-injected cherry dataset (the 180-episode one was a partial recovery from a
-timed-out run) with a longer collection timeout, train a specialist on it the same way,
-and re-eval. If that closes further toward 60%, disturbance-injection at scale is the
-answer for phase 1; if it plateaus well below 60%, the next lever to try is probably the
-gripper-close-timing precision issue found in the rollout diagnostic (a different failure
-mode than what disturbance-injection targets), which might need e.g. more demos
-specifically SLOW/precise through the final grasp-approach phase, or an explicit
-proximity-conditioned closing signal rather than more disturbance-recovery examples.
+**Recommended next step (executed)**: collect a FULL, clean 250-episode
+disturbance-injected cherry dataset with a longer collection timeout, train a
+specialist on it the same way, and re-eval.
 
 ---
 
@@ -302,22 +353,14 @@ disturbance injection doesn't hurt collection success even at full scale. Data:
 
 Converted (225 train / 25 val episodes, 48713 train steps) and training launched:
 run `vrkjr`, configs at `gentle_manip/dppo/cfg/single_lift_cherry_rigid_pcd_250_disturbed_v2/`
-(committed `ddb9c1d`). Plateau watcher armed (same rule: stop after 300 epochs / 30
-val checkpoints with no improvement beyond 0.0005).
-
-**Once plateaued**: run the same canonical n=100 eval (with the `scene_group_size=0`
-workaround noted in its config) and compare directly against disturbed-180's 33.0% —
-this isolates whether scaling disturbance-injected data from 180→250 episodes helps
-further, now that the recovery-behavior lever itself is confirmed to work.
+(committed `ddb9c1d`). Plateau watcher armed.
 
 ---
 
 ## Disturbed-250-v2 canonical eval — DONE (2026-08-09 ~23:25)
 
 **Result: 24.0% (100/100 episodes)** — checkpoint `state_500.pt` (best val loss 0.0091,
-notably lower/better than disturbed-180's 0.0098). Eval videos: one clip per episode at
-`.../vrkjr/eval/2026-08-09_23-06-42/render/batchNN_envM.mp4` (100 clips), per-episode
-results in `episodes.csv` in the same dir.
+notably lower/better than disturbed-180's 0.0098).
 
 ### Full three-way comparison (canonical, n=100, matched protocol)
 
@@ -329,45 +372,20 @@ results in `episodes.csv` in the same dir.
 
 **Key finding: scaling the disturbance-injected dataset from 180→250 episodes did NOT
 improve success rate further — it went DOWN (33.0%→24.0%), despite the 250-episode
-checkpoint having the LOWEST (best) BC validation loss of all three runs.** This is
-the same loss-vs-rollout-SR disconnect flagged earlier, now showing up as a second,
-independent data point. At n=100 the binomial CI on both numbers is roughly ±9pp, so
-24% and 33% are not dramatically outside each other's noise band — the honest
-reading is **disturbance injection lifts success into the ~24-33% range** (a real,
-substantial win over plain-250's 17%), but simply collecting MORE disturbance data
-does not keep buying further gains. The lever has plateaued.
+checkpoint having the LOWEST (best) BC validation loss of all three runs.** This is a
+loss-vs-rollout-SR disconnect, now a second independent data point. At n=100 the
+binomial CI on both numbers is roughly ±9pp, so 24% and 33% are not dramatically
+outside each other's noise band — **disturbance injection lifts success into the
+~24-33% range**, a real win over plain-250's 17%, but simply collecting MORE
+disturbance data does not keep buying further gains.
 
-**Confirmed via direct video inspection (requested check)**: extracted frames from a
-verified real success (episode 1, `batch00_env1.mp4`, `first_success_step=58`) and a
-verified real failure (episode 0, `batch00_env0.mp4`) from the disturbed-250-v2 run.
-Success episode shows the same fully correct approach→close-near-object→lift→hold
-sequence as before. **The failure episode shows the EXACT SAME failure pattern found
-in the very first diagnostic** (nxyyn, several sections above): arm reaches the
-object, then retracts fully to home with the gripper never having closed on the
-cherry — object left completely untouched. This pattern now confirmed present
-across all three trained checkpoints regardless of dataset composition — strong
-evidence this is a **structural precision/reliability limitation of the current
-setup** (small object, chunked-action diffusion policy, no explicit
-proximity-conditioned closing signal), not something more of the same kind of data
-collection will fix.
-
-### Recommendation — the next lever should be architectural/precision-focused, not more data
-
-Given three independent training runs (50→180→250 episodes, with/without disturbance)
-all show the identical dominant failure mode, the next productive step is likely one
-of:
-1. **Inspect raw predicted gripper-channel actions** near the failure point vs. the
-   training demos' gripper actions in the corresponding phase — check whether the
-   policy is systematically under-predicting closing magnitude/timing (a concrete,
-   bounded numerical diagnostic, not a new architecture).
-2. Consider whether `cond_steps`/`horizon_steps` (currently 2/4) or the delta-mode
-   gripper action scale (from `xarm7_config.DEFAULT_ACTION_SCALES`, gripper=0.05) are
-   appropriate for a task requiring fine, reliably-timed closing on a small
-   (~1.5-2cm) object.
-3. Only after (1)/(2) are exhausted: revisit whether an explicit proximity/contact
-   signal in the observation (not currently available to the deployable student
-   policy — no force sensing) would help the closing decision be more reliably
-   triggered.
+**Confirmed via direct video inspection**: the disturbed-250-v2 failure episode shows
+the EXACT SAME failure pattern found in the very first diagnostic (nxyyn): arm
+reaches the object, then retracts fully to home with the gripper never having closed
+— object left completely untouched. This pattern is present across all three trained
+checkpoints regardless of dataset composition — strong evidence this is a
+**structural precision/reliability limitation of the current setup**, not something
+more of the same kind of data collection would fix.
 
 ---
 
@@ -385,16 +403,11 @@ ground-truth actions) to test: **does the model correctly predict gripper-closin
 actions when SHOWN a real training-distribution grasp-phase state (open-loop), or
 does it fail even then?**
 
-Result on the disturbed-180 checkpoint (33.0% SR, our best): **the model predicts
-gripper-closing direction/magnitude correctly ~90% of the time** (54/60 sampled
-active-motion windows), mean error 0.19 (normalized action units) vs 1.42 for a
-naive "always predict no-motion" baseline. **This rules out an architecture/capacity
-failure** — the model has genuinely learned the grasp-closing behavior. (Took one
-iteration to get right: the converted dataset's gripper-action channel turned out to
-be per-dimension-normalized such that "no motion" — the dominant value — normalizes
-to +1.0, not 0, since raw delta=0 happens to be the extreme of its own range. First
-threshold attempt silently found 0 "closing" windows because of this; fixed by
-detecting deviation-from-baseline instead of deviation-from-zero.)
+Result on the disturbed-180 checkpoint (33.0% SR, best at the time): **the model
+predicts gripper-closing direction/magnitude correctly ~90% of the time** (54/60
+sampled active-motion windows), mean error 0.19 (normalized action units) vs 1.42 for
+a naive "always predict no-motion" baseline. **This rules out an architecture/capacity
+failure** — the model has genuinely learned the grasp-closing behavior.
 
 **Conclusion: the ~33-67% failure rate is closed-loop compounding position error**,
 not a model-competence problem. Small drift during autonomous rollout carries the
@@ -405,60 +418,33 @@ close empty while retreating).
 ### Literature check (prioritizing recent work per standing instruction)
 
 - **Diff-DAgger** (2025) — uncertainty-aware DAgger specifically for diffusion
-  policies; directly targets this exact compounding-error mechanism. Noted as a
-  candidate follow-up if the cheaper fix below doesn't close the gap (needs an
-  online expert-query loop — bigger lift than a data-recipe change).
+  policies; directly targets this exact compounding-error mechanism. Candidate
+  follow-up if the cheaper fix below doesn't close the gap.
 - **Haptic-ACT** (Eljuri et al., June 2025) — force-feedback-based grasp failure
   detection **doubled in-domain success rate (80% vs 50%)**. Architecturally
   compelling, but giving the deployable **student** policy a contact-force
   observation breaks the sim/real parity the whole `RawObs`/`PerceptionPipeline`
-  design is built around (real robot has GelSight tactile images, not a force
-  scalar; sim's `priv_contact_force` is currently teacher-only by design). **Flagged,
-  not implemented** — this is a real architecture decision with project-wide
-  implications, not something to change unilaterally overnight. Worth a deliberate
-  discussion if the data-side fixes plateau.
+  design is built around. **Flagged, not implemented** — a real architecture decision
+  with project-wide implications.
 
 ### Fix: disturbance injection now targets the actual failure window
 
 `execute_and_collect`'s `disturbance_phases` param (previously hardcoded to "lift"
 only) now accepts ANY phase name(s), each getting an independent
 `bernoulli(disturbance_prob)` draw. Since the diagnosed failure is a
-position-precision problem during approach/grasp (not a post-grasp drop, which is
-what lift-phase disturbance targets), collecting a `disturbance_phase=grasp` dataset
-directly manufactures the missing skill: "arrived slightly off the true grasp pose,
-corrected into alignment, then closed" — the demonstrator's target is untouched, so
-the correction is genuine, not synthetic noise.
+position-precision problem during approach/grasp (not a post-grasp drop), a
+`disturbance_phase=grasp` dataset directly manufactures the missing skill.
 
-**Smoke-tested carefully** (grasp-phase kicks are more disruptive than lift-phase —
-they land during the actual closing motion): an initial read at prob=0.5/max=2cm
-showed 50% collection success (vs the usual ~80%), which looked like a real penalty.
-**Isolated via a same-seed no-disturbance control**: baseline collection success at
-that seed was ALSO only 41.7% — i.e. that seed's DR-sampled batches were just harder,
-not the disturbance. Confirmed clean at the actual settings used
-(prob=0.3/max=1-2cm): 41.7% vs 41.7%/40.5% control — no measurable penalty. Same
-"methodology confound, not a real effect" pattern as the very first lift-phase
-disturbance smoke test earlier this session — worth remembering as a recurring
-lesson: **always run a same-seed no-disturbance control before concluding a new
+**Smoke-tested carefully**: an initial read at prob=0.5/max=2cm showed 50% collection
+success, which looked like a real penalty — isolated via a same-seed no-disturbance
+control (baseline ALSO only 41.7% at that seed) to a DR-sampled-batch-difficulty
+confound, not the disturbance. Confirmed clean at actual settings
+(prob=0.3/max=1-2cm): 41.7% vs 41.7%/40.5% control — no measurable penalty. **Recurring
+lesson: always run a same-seed no-disturbance control before concluding a new
 disturbance setting hurts collection.**
 
-**Full 250-episode `disturbance_phase=grasp` cherry collection launched** (prob=0.3,
-max=2cm, matching the lift-phase settings for a clean "same magnitude/probability,
-different WHERE" comparison against the disturbed-180/250-v2 results). Will
-convert → train → canonical-eval the same way once done, compare against the 33.0%
-best result. Committed `aaab0a7`.
-
-### Standing recommendation if this doesn't close the gap further
-
-1. Try **Diff-DAgger**-style online correction (bigger lift, but directly matches
-   the diagnosed mechanism).
-2. Revisit the **Haptic-ACT** contact-force idea as a deliberate architecture
-   decision (needs explicit discussion of the student/real-parity tradeoff — the
-   real robot's GelSight tactile images could plausibly substitute for sim's
-   `priv_contact_force` as an analogous but real-transferable signal, but that's a
-   design choice, not a quick patch).
-3. Only after (1)/(2): consider a non-diffusion IL backbone (e.g. ACT) — the
-   diagnostic evidence so far does NOT point to diffusion-specifically being the
-   bottleneck, so an architecture swap is a lower-priority lever than the two above.
+Full 250-episode `disturbance_phase=grasp` cherry collection launched. Committed
+`aaab0a7`.
 
 ---
 
@@ -470,59 +456,28 @@ validation loss of all four runs** (0.0085, vs 0.0091-0.0098 for the others).
 
 ### Updated four-way comparison (canonical, n=100, matched protocol)
 
-| Checkpoint | Data (all 250 ep target, disturbance_prob=0.3/max=2cm unless noted) | Best val loss | Success (n=100) |
+| Checkpoint | Data | Best val loss | Success (n=100) |
 |---|---|---|---|
 | `nxyyn` — plain-250 | no disturbance | 0.0092 | 17.0% |
-| `myspw` — disturbed-180 | disturbance during "lift" (180 ep, partial collection) | 0.0098 | **33.0%** (best) |
+| `myspw` — disturbed-180 | disturbance during "lift" (180 ep, partial collection) | 0.0098 | **33.0%** (best so far) |
 | `vrkjr` — disturbed-250-v2 | disturbance during "lift" (250 ep, full) | 0.0091 | 24.0% |
 | `lnscz` — graspdist-250 | disturbance during "grasp" (250 ep, full) | **0.0085** (best loss) | 13.0% (worst SR) |
 
 ### Honest interpretation — this is a genuine reversal, not a clean confirmation
 
-The grasp-phase hypothesis was well-motivated by the teacher-forced diagnostic
-(disturbed-180 predicts gripper actions correctly ~90% open-loop → failure is
-closed-loop position drift, not model incompetence), but the experiment **did not
-confirm it** — if anything it went the opposite direction. Two honest readings,
-not mutually exclusive:
-
+Two honest, non-exclusive readings:
 1. **The specific mechanism may have backfired**: perturbing the EE position WHILE
-   the gripper is actively closing (not after, as in lift-phase disturbance) forces
-   the recorded recovery to be a position correction *entangled with* an in-progress
-   grasp action — a noisier, more ambiguous training signal right at the exact
-   moment precision matters most, plausibly making closing-timing LESS reliable
-   rather than more.
+   the gripper is actively closing forces the recorded recovery to be a position
+   correction entangled with an in-progress grasp action — a noisier training signal
+   right at the moment precision matters most.
 2. **Single-seed run-to-run variance may be large enough to swamp the recipe
-   effect.** We now have four single-seed training runs spanning 13.0%→33.0%
-   success — a wide spread — each compared as if it were a clean apples-to-apples
-   read on its dataset. Diffusion BC training is stochastic (seed affects weight
-   init, batch order, EMA trajectory); we have never repeated a recipe with a
-   second seed to know its OWN variance before comparing it against a different
-   recipe's single run. **This is a real methodological gap in every comparison
-   made this session so far.**
+   effect.** Four single-seed training runs span 13.0%→33.0%, each compared as a
+   clean apples-to-apples read on its dataset, but diffusion BC training is
+   stochastic and no recipe had been repeated with a second seed before comparison.
 
-**Action taken**: launched a same-data, different-seed replication of the winning
-disturbed-180 recipe (seed 123 vs the original 42, dataset held identical — no new
-collection) to directly measure how much of the observed spread is training-run
-noise vs. real recipe signal. Run `ovgnm`, config
-`gentle_manip/dppo/cfg/single_lift_cherry_rigid_pcd_250_disturbed_seed2/`, committed
-`790da2f`. If seed=123 lands far from 33.0% (e.g. also in the 13-24% range), that
-confirms single-seed comparisons this session are too noisy to trust individually,
-and any real conclusion about "which demo recipe is best" needs multiple seeds per
-recipe going forward — a significant scope increase for future rounds, but
-necessary for a trustworthy answer given fragile-object grasping needs a genuinely
-reliable specialist (60-80% target), not one good roll of a noisy die.
-
-### Status against the final goal (fragile object grasping, reasonable SR)
-
-**Not yet met.** Best confirmed number is 33.0% (disturbed-180, `myspw`), well
-below the 60-80% target. Pending the seed-variance result, the next real
-decision point is: (a) if 33.0% turns out to be robust to seed, the standing
-next-tier recommendations (Diff-DAgger online correction, or a deliberate
-Haptic-ACT-style contact-force conditioning discussion) are the most promising
-levers; (b) if the seed=123 run also lands low, the priority becomes fixing the
-evaluation methodology itself (multi-seed averaging) before drawing further
-conclusions about ANY lever tried so far, including the disturbance-injection
-result that looked like the clear winner.
+**Action taken**: launched a same-data, different-seed replication of disturbed-180
+(seed 123 vs the original 42) to directly measure how much of the observed spread is
+training-run noise vs. real recipe signal. Run `ovgnm`, committed `790da2f`.
 
 ---
 
@@ -530,10 +485,9 @@ result that looked like the clear winner.
 
 **Seed-variance replication result: 15.0% (15/100)** — for a checkpoint trained on
 the IDENTICAL disturbed-180 dataset as the 33.0%-scoring `myspw`, changing only the
-training seed (42 → 123). Same data, same architecture, same everything except
-random seed.
+training seed (42 → 123).
 
-### This changes the interpretation of every result tonight
+### This changes the interpretation of every result so far
 
 | Run | Data | Seed | Success (n=100) |
 |---|---|---|---|
@@ -543,121 +497,38 @@ random seed.
 | `vrkjr` — disturbed-250-v2 | lift-phase disturbance, 250 ep | 42 | 24.0% |
 | `lnscz` — graspdist-250 | grasp-phase disturbance, 250 ep | 42 | 13.0% |
 
-**Training-seed variance alone (33.0% → 15.0%, an 18-point swing on identical data)
-is comparable to or larger than every "recipe" difference tested tonight** (plain
-vs. lift-disturbance vs. grasp-disturbance vs. 180-vs-250 episodes, all single-seed,
-spanning 13-33%). This means **none of tonight's recipe comparisons can be trusted
-individually** — a single training run's success rate is not a reliable estimate of
-a demo recipe's true quality, given diffusion BC's training stochasticity is this
-large relative to the effect sizes being measured. Concretely: we cannot currently
-say with confidence that "disturbance injection helps" (33.0% and 15.0% straddle
-17.0%, i.e. the two seeds of the SAME disturbed recipe landed on both sides of the
-no-disturbance baseline), even though it looked like a clear, large win after only
-seed 42.
+**Training-seed variance alone (33.0% → 15.0%, an 18-point swing on identical data) is
+comparable to or larger than every "recipe" difference tested**. None of the recipe
+comparisons made so far can be trusted individually. We cannot say with confidence
+that "disturbance injection helps" — the two seeds of the SAME disturbed recipe
+landed on both sides of the no-disturbance baseline.
 
-**Action taken**: launched a 3rd seed (7) on the identical disturbed-180 dataset —
-`ovgnm`'s sibling run — to get a real n=3 estimate of this recipe's mean and spread
-before drawing further conclusions. Config
-`gentle_manip/dppo/cfg/single_lift_cherry_rigid_pcd_250_disturbed_seed3/`, committed
-`3e8aeab`.
+**Action taken**: launched a 3rd seed (7) on the identical disturbed-180 dataset to
+get a real n=3 estimate before drawing further conclusions. Committed `3e8aeab`.
 
-### Implication for the whole session, honestly stated
-
-This same single-seed-per-condition pattern was used for EVERY comparison this
-session, including earlier ones (mushroom-solo 4.5% vs mixed 2.0%; the disturbed-180
-vs plain-250 vs disturbed-250-v2 vs graspdist-250 four-way). Given the magnitude of
-seed variance just discovered, **none of those comparisons should be treated as
-established conclusions** — they are single data points that happened to support a
-plausible-sounding story, not statistically validated findings. This is the single
-most important methodological lesson from tonight's work, and needs to inform how
-results are evaluated and reported going forward: **any real conclusion about which
-demo recipe/lever is better requires multiple seeds per condition**, not one.
-
-### Status against the final goal (fragile object grasping, reasonable SR)
-
-**Still not met, and now genuinely uncertain what the true achievable number is**
-with the current architecture/recipe space. The honest range across all runs so far
-is roughly 13-33%, with the seed-variance finding suggesting the TRUE mean for
-"cherry specialist, current architecture, ~180-250 demos with or without disturbance
-injection" is probably somewhere in the low-to-mid 20s%, not the 33.0% that looked
-like a clean win. This is well below the 60-80% target regardless. **Recommendation
-for when the user reviews this**: given demo-recipe tweaks (more data, disturbance
-timing) have NOT shown a reproducible, trustworthy improvement once variance is
-accounted for, the next real lever is probably NOT another data-recipe permutation —
-it's likely time to seriously evaluate the previously-flagged next-tier options
-(Diff-DAgger online correction, or a deliberate Haptic-ACT-style force-conditioning
-architecture discussion), since incremental demo changes have hit a point of
-diminishing/unclear returns.
+**Methodological lesson for the whole session**: this same single-seed-per-condition
+pattern was used for every comparison up to this point. Given the magnitude of seed
+variance discovered, none of those earlier comparisons should be treated as
+established conclusions — any real conclusion about which demo recipe/lever is
+better requires multiple seeds per condition.
 
 ---
 
-## PAUSED (2026-08-10 ~08:41) — everything stopped cleanly, here's how to resume
+## PAUSED (2026-08-10 ~08:41) — everything stopped cleanly, resumed later
 
 All training, sim server, and background monitor processes stopped on request
-(process-group-safe SIGTERM throughout — same pattern used all session). GPU is
-fully clear (`nvidia-smi` shows zero compute processes). Nothing was lost:
-checkpoints are saved to disk every 100 epochs regardless of how a run ends.
+(process-group-safe SIGTERM). GPU fully clear. Nothing lost — checkpoints saved
+every 100 epochs.
 
-### What was mid-flight when stopped
+**3rd seed replicate (`hvzmv`, seed=7, disturbed-180 data)** was mid-flight at epoch
+~410, not yet plateaued.
 
-**3rd seed replicate (`hvzmv`, seed=7, disturbed-180 data)** — stopped at epoch
-~410. Last saved checkpoint: `state_400.pt`. Val loss was still healthy/improving
-(best ~0.0109 around epoch 380, matches the other seeds' trajectories) — **not
-plateaued yet**, so this run was killed before its "true" answer was ready. Its
-purpose: complete the n=3 variance estimate for the disturbed-180 recipe (seed=42 →
-33.0%, seed=123 → 15.0%, seed=7 → not yet measured).
+**Limitation found and later fixed**: DPPO's `TrainDiffusionAgent.run()` did not
+support checkpoint-resume — `run()` unconditionally set `self.epoch = 1`. Real
+resume support was built the next time this mattered (see the "Interruption + fix"
+entry below).
 
-**Important limitation, checked before stopping**: DPPO's `TrainDiffusionAgent.run()`
-(`third_party/dppo/agent/pretrain/train_diffusion_agent.py`) does **not** wire up
-checkpoint-resume automatically — `run()` unconditionally sets `self.epoch = 1` at
-the start. The base class DOES have a working `self.load(epoch)` method (restores
-model/EMA/epoch from `checkpoint/state_<epoch>.pt`) but nothing calls it from the
-hydra CLI path. So **re-running the same launch command starts a fresh run from
-epoch 1**, not a resume from `state_400.pt`. Two ways to actually continue this
-specific run:
-1. **Simplest — just restart it fresh.** Given each run only takes ~50-70 min to
-   plateau, this is cheap enough that a clean restart is likely less effort than
-   wiring up real resume support. Command:
-   ```
-   uv run --project envs/dppo python -m gentle_manip.dppo.train \
-       --config-path gentle_manip/dppo/cfg/single_lift_cherry_rigid_pcd_250_disturbed_seed3 \
-       --config-name pre_diffusion_pointnet
-   ```
-   (this mints a NEW run ID, e.g. not `hvzmv` — that's fine, it's the same config/data/seed)
-2. **True resume** (if ever needed for a longer/more expensive run): would need a
-   small addition to `TrainDiffusionAgent.run()` — e.g. an optional
-   `resume_from_epoch` cfg field that calls `self.load(resume_from_epoch)` before
-   the loop and adjusts the range accordingly. Not implemented (out of scope for
-   "just pause it"); flag this to the user if a future run is expensive enough to
-   be worth the small code change.
-
-### To resume the overall investigation
-
-1. **Finish the seed-variance check** (recommended next step): restart the seed=7
-   run per above (fresh, ~50-70 min to plateau + ~15 min canonical eval). This
-   completes n=3 for the disturbed-180 recipe and gives a real mean/spread instead
-   of two anecdote points (33.0%, 15.0%).
-2. Sim server for eval (needed after any training finishes):
-   ```
-   uv run --project envs/sim python -m gentle_manip.scripts.serl_sim_server \
-       --experiment single_lift_cherry_rigid --view student \
-       --num-envs 5 --render-rgb --subprocess
-   ```
-   (defaults to port 5566 in this session's usage — pass `env.specific.port=5566`
-   at eval time to match, or check the printed port and adjust)
-3. Eval command template (swap in the new checkpoint path):
-   ```
-   uv run --project envs/dppo python -m gentle_manip.dppo.train \
-       --config-name eval_diffusion_pointnet \
-       --config-path gentle_manip/dppo/cfg/single_lift_cherry_rigid_pcd_250_disturbed \
-       base_policy_path=<new_run>/checkpoint/state_<best_epoch>.pt \
-       n_episodes=100 record_batches=null scene_group_size=0 \
-       env.specific.port=5566
-   ```
-   (`scene_group_size=0` is the standing workaround for the still-unresolved
-   rebuild-RPC hang — see earlier section of this log)
-
-### Where things stand — full results table (all confirmed, nothing lost)
+### Where things stood — full results table
 
 | Run | Data | Seed | Success (n=100) |
 |---|---|---|---|
@@ -668,15 +539,7 @@ specific run:
 | `ovgnm` — disturbed-180 (replicate) | identical to myspw | 123 | 15.0% |
 | `vrkjr` — disturbed-250-v2 | lift-phase disturbance, full 250 | 42 | 24.0% |
 | `lnscz` — graspdist-250 | grasp-phase disturbance, full 250 | 42 | 13.0% |
-| `hvzmv` — disturbed-180 (3rd replicate) | identical to myspw | 7 | **PAUSED at epoch 400, not evaluated** |
-
-**Bottom line for whoever reads this next**: the true achievable success rate with
-the current architecture/recipes, once seed variance is accounted for, is most
-likely in the **~15-25% range**, not the 33.0% that looked like a clean win after
-one seed. All of this is well below the 60-80% target. The next real lever is
-probably not another data-recipe permutation — see the "next-tier" recommendations
-(Diff-DAgger online correction, or a deliberate Haptic-ACT-style contact-force
-conditioning discussion) earlier in this log.
+| `hvzmv` — disturbed-180 (3rd replicate) | identical to myspw | 7 | PAUSED at epoch 400, not evaluated |
 
 ---
 
@@ -686,410 +549,299 @@ Per user direction: still aiming for 60% SR, but time-pressured (want a working
 cross-category policy within days) and asked to "think carefully" rather than
 keep iterating on cherry demo recipes.
 
-**Resumed the paused seed=7 replicate** (fresh restart, no native checkpoint-resume
-support in DPPO's `TrainDiffusionAgent` — see the PAUSED section above for why).
-Still running toward completing the n=3 variance estimate for the disturbed-180
-recipe (seed 42 → 33.0%, seed 123 → 15.0%, seed 7 → pending).
+**Resumed the paused seed=7 replicate** (fresh restart at the time — no resume
+support yet).
 
-**New parallel direction, user-suggested and well-motivated**: before spending more
-effort on cherry-specific demo recipes, test whether the *same pipeline* can reach
-60-80% under favorable conditions. Cherry is a uniquely hard target: ~20mm object
-(near the limit of what makes sense for this gripper/point-cloud resolution) with
-WIDE domain randomization (full 360° yaw, ±45° pitch/roll originally, full
-shape+scale DR). If a bigger, easier object with narrow DR *also* can't clear 60%,
-that points to something more fundamental (architecture, action space, control
-frequency) rather than cherry-specific difficulty — a much more important thing to
-know before committing days to more data-recipe iteration.
+**New parallel direction, user-suggested**: before spending more effort on
+cherry-specific demo recipes, test whether the *same pipeline* can reach 60-80%
+under favorable conditions. Cherry is a uniquely hard target: ~20mm object with WIDE
+domain randomization. If a bigger, easier object with narrow DR *also* can't clear
+60%, that points to something more fundamental than cherry-specific difficulty.
 
-**Toy task built**: `single_lift_apple_rigid_easy` — apple (~65mm, 3x cherry's
-size, non-symmetric so it avoids tofu's documented "6 equivalent faces" grasp
-ambiguity) with a deliberately narrow DR
-(`gentle_manip/configs/dr/rigid_orientation_apple_easy.yaml`): position half-range
-0.04→0.02m, pitch/roll 20°→8°, scale/shape ranges tightened to near-nominal. Full
-360° yaw kept (apple is roughly round, shouldn't be the hard axis). Committed
-`59fba37`.
-
-**Plan**: smoke-test (running) → if healthy, collect ~150 plain episodes (no
-disturbance yet — establish the simplest possible baseline first) → convert → train
-→ canonical eval. Compare directly against cherry's 13-33% range.
-
-- **If apple-easy clears 60-80%**: task difficulty (small object + wide DR) is the
-  real bottleneck. Path forward: either use a bigger/easier object as the
-  cross-category policy's primary target, or invest in narrowing DR ranges for
-  cherry-class objects specifically, rather than more disturbance-injection
-  variants.
-- **If apple-easy also lands in the 15-30% range**: the bottleneck is more
-  fundamental than task difficulty — likely needs architecture-level changes
-  (Diff-DAgger, contact-force conditioning) regardless of which object is used.
-
-This result will be the single most informative data point for deciding where to
-spend the remaining time before the "days" deadline.
+**Toy task built**: `single_lift_apple_rigid_easy` — apple (~65mm, 3x cherry's size)
+with a deliberately narrow DR (`gentle_manip/configs/dr/rigid_orientation_apple_easy.yaml`):
+position half-range 0.04→0.02m, pitch/roll 20°→8°, scale/shape ranges tightened to
+near-nominal. Committed `59fba37`.
 
 ---
 
 ## Toy-task collection done, training launched (2026-08-10 ~13:53)
 
-**Apple-easy collection: 80/80 saved, 43.5% success (184 attempts)** — notably
-LOWER than cherry's ~80% collection success, despite the object being 3x bigger
-and DR being much narrower. Interesting on its own (worth revisiting if this
-becomes the path forward — possibly the CMA-ES search bounds/config are tuned
-around mushroom/cherry scale, or apple's size is genuinely closer to the gripper's
-practical stroke limit, as already flagged in `rigid_orientation_apple.yaml`'s own
-history). Not disqualifying — 80 clean episodes is within DP3's own reported
+**Apple-easy collection: 80/80 saved, 43.5% success (184 attempts)** — notably LOWER
+than cherry's ~80% collection success, despite the object being 3x bigger and DR
+much narrower. Not disqualifying — 80 clean episodes is within DP3's own reported
 40-demo/85%-success benchmark range.
 
-Converted (72 train / 8 val, episode lengths 209-217 steps — same FSM timing as
-every cherry run). Training launched: run `smcaf`, configs at
-`gentle_manip/dppo/cfg/single_lift_apple_rigid_easy_pcd/` (committed `6f76db3`).
-
-**Both cherry seed=7 (n=3 variance check) and apple-easy (toy isolation
-experiment) are now training in parallel** — GPU has ample headroom (2 lightweight
-BC runs, ~4GB combined of 8GB). Will canonical-eval each once plateaued.
+Converted (72 train / 8 val, episode lengths 209-217 steps). Training launched: run
+`smcaf`, configs at `gentle_manip/dppo/cfg/single_lift_apple_rigid_easy_pcd/`
+(committed `6f76db3`). Both cherry seed=7 (n=3 variance check) and apple-easy now
+training in parallel.
 
 ---
 
 ## Interruption + fix: real checkpoint-resume support built (2026-08-10 ~21:00)
 
-Both parallel trainings (cherry seed=7 at epoch ~494, apple-easy at epoch ~376)
-were silently killed by what looks like a host-level restart (GPU went fully
-empty, both processes vanished from `ps aux`, both logs stop within seconds of
-each other with no error — not an individual crash). Background monitors for
-these runs were also orphaned with no completion record. Real time lost: several
-hours of unattended compute with no way to recover it under the previous
-"resume = restart from scratch" limitation documented earlier in this log.
+Both parallel trainings (cherry seed=7 at epoch ~494, apple-easy at epoch ~376) were
+silently killed by what looks like a host-level restart (GPU went fully empty, both
+processes vanished, both logs stop within seconds of each other with no error).
+Several hours of unattended compute lost with no way to recover under the previous
+"resume = restart from scratch" limitation.
 
-**Fixed properly this time** instead of just restarting from scratch again:
-added real checkpoint-resume support to `TrainDiffusionAgent.run()`
+**Fixed properly**: added real checkpoint-resume support to `TrainDiffusionAgent.run()`
 (`third_party/dppo/agent/pretrain/train_diffusion_agent.py`) — pass
-`+resume_from=<run>/checkpoint/state_<N>.pt` on the hydra CLI and it now loads
-model+EMA+epoch and continues from `N+1` instead of restarting at epoch 1.
-Committed in the dppo submodule (`ed7bb3b`) and bumped in the parent repo
-(`acd67ce`). Known limitation: optimizer/LR-scheduler internal state isn't
-restored (wasn't saved by `save_model()` either) — acceptable for BC pretraining,
-not a full production-grade resume.
+`+resume_from=<run>/checkpoint/state_<N>.pt` on the hydra CLI, loads model+EMA+epoch
+and continues from `N+1`. Committed in the dppo submodule (`ed7bb3b`) and bumped in
+the parent repo (`acd67ce`). Known limitation: optimizer/LR-scheduler state isn't
+restored — acceptable for BC pretraining.
 
-**Both runs resumed successfully** from their last saved checkpoints (every 100
-epochs, so at most ~99 epochs of true loss vs. the ~2.5h+ of wall-clock time that
-would otherwise have been needed to redo them from scratch):
-- Cherry seed=7: resumed at epoch 401 (checkpoint saved at 400, was at ~494 when
-  killed — lost ~94 epochs of progress, not hours of compute).
-- Apple-easy: resumed at epoch 301 (checkpoint saved at 300, was at ~376 when
-  killed — lost ~76 epochs).
+**Both runs resumed successfully**: cherry seed=7 at epoch 401 (lost ~94 epochs, not
+hours), apple-easy at epoch 301 (lost ~76 epochs).
 
-Both training toward plateau again now. This resume capability should make any
-future interruption much cheaper to recover from.
+---
 
 ## Toy-task result: 65% — task difficulty confirmed as the bottleneck, not architecture
 
-**Apple-easy (bigger object, narrow DR) plateaued at epoch 630** (best val loss
-0.0318 at epoch 330, no improvement in 300 subsequent epochs — patience
-exhausted). Because checkpoints only save every 100 epochs, the true best-val
-epoch (330) wasn't itself checkpointed; evaluated the nearest available
-checkpoint by actual val loss among the saved ones (100/200/300/400/500/600),
-which was **`state_500.pt`** (val loss 0.0420).
+**Apple-easy plateaued at epoch 630** (best val loss 0.0318 at epoch 330). Evaluated
+the nearest saved checkpoint by actual val loss, `state_500.pt` (val loss 0.0420).
 
 **Canonical eval (n=100, num_envs=5, seed=0, scene_group_size=0 workaround,
 per-episode video) result: 65.0% success (65/100)** — `ever_success_rate` 70%,
-`ever_in_band_rate` 71%, `hold_failure_gap` 0.01 (i.e. almost every episode that
-reaches the target band also completes the hold — the policy isn't dropping the
-object after lifting, unlike the failure mode seen in cherry's eval videos).
-Approx. 95% CI [55.7%, 74.3%] — squarely inside the 60-80% target band even at
-the low end of the interval. Per-batch breakdown was noisy but consistent
-(40-100% across the 20 batches of 5 episodes each), no degenerate batches.
+`hold_failure_gap` 0.01 (almost every episode reaching the target band also
+completes the hold — no drop-after-lift failure mode, unlike cherry). Approx 95% CI
+[55.7%, 74.3%] — squarely inside the 60-80% target band.
 
-**This is the key diagnostic result for the whole cross-category effort.**
-Identical architecture, identical training recipe, identical eval harness as
-every cherry specialist this session (13-33% across n=3 seeds) — the only
-things that changed were (a) object size (~65mm apple vs. ~20mm cherry) and (b)
-DR range (narrowed pos_xy 0.04→0.02, pitch/roll 20°→8°, tighter shape/scale
-bounds). That alone closed a 40+ point gap. **Task difficulty (tiny object +
-wide randomization range), not the DP3/DPPO architecture or the demo-collection
-pipeline, was the bottleneck capping cherry's specialists.** This directly
-answers the diagnostic question the toy-task experiment was designed to answer.
+**The key diagnostic result for the whole cross-category effort.** Identical
+architecture/recipe/harness as every cherry specialist (13-33% across n=3 seeds) —
+only object size and DR range changed, closing a 40+ point gap. **Task difficulty,
+not the architecture or demo-collection pipeline, was the bottleneck capping
+cherry's specialists.**
 
-**Implication for "cross-category policy working within days"**: the fastest
-path to a working generalist is now clearer — build the category pool from
-objects/DR ranges in this same favorable regime (larger graspable objects,
-narrower per-category DR) rather than defaulting to cherry-like tight/small/
-wide-DR objects. Cherry may simply be a poor first-category choice for this
-architecture at this control frequency, independent of any future cross-category
-conditioning work.
+**Environment note (fixed)**: the apple-easy eval initially crashed the sim server
+with `ModuleNotFoundError: No module named 'gstaichi'` — traced to a stray
+`PYTHONPATH` env var (`.../Genesis_fork:...`, an old sibling clone) that shadowed the
+correctly-configured editable genesis install. Fixed by prefixing sim server
+launches with `env -u PYTHONPATH`.
 
-**Environment note (fixed):** the apple-easy eval initially crashed the sim
-server with `ModuleNotFoundError: No module named 'gstaichi'` — traced to a
-stray `PYTHONPATH` env var in the shell (`.../Genesis_fork:...`, an old sibling
-clone from a prior project) that shadowed the correctly-configured editable
-genesis install in `envs/sim/.venv`. Fixed by prefixing the sim server launch
-with `env -u PYTHONPATH` (the same pattern already used for the dppo training
-launches this session) — not an environment corruption, just a missed prefix.
+---
 
 ## Cherry seed=7 replicate: n=3 seed-variance estimate finalized
 
-Cherry seed=7 plateaued at epoch 890 (best val loss 0.0100 at epoch 590, no
-improvement in 300 subsequent epochs). Evaluated the nearest saved checkpoint
-by val loss (`state_600.pt`, val 0.0112, tied with `state_800.pt` but earlier —
-picked the earlier one to reduce overfitting risk). **Canonical eval result:
-29.0% success (29/100)**, `ever_success_rate` 36%, `hold_failure_gap` 0.01.
+Cherry seed=7 plateaued at epoch 890 (best val loss 0.0100 at epoch 590). Evaluated
+`state_600.pt` (val 0.0112). **Canonical eval result: 29.0% success (29/100)**,
+`ever_success_rate` 36%.
 
-**n=3 seed-variance estimate for the disturbed-180/lift-phase recipe on the
-IDENTICAL dataset is now closed out: 33.0% (original seed), 15.0% (seed 123),
-29.0% (seed 7) → mean 25.7%, range 15-33 points.** This confirms the earlier
-warning that the 33.0% single-seed number looked better than the recipe's true
-mean. Combined with the apple-easy result above, the picture is now clear:
-cherry's specialists cap out around 25-30% on average regardless of seed or
-demo-recipe tweaks (disturbance injection, grasp-phase vs. lift-phase, dataset
-size 180-250) — the object/DR combination itself is the ceiling, not any of the
-things that were being tuned.
+**n=3 seed-variance estimate for the disturbed-180/lift-phase recipe, closed out:
+33.0% (seed 42), 15.0% (seed 123), 29.0% (seed 7) → mean 25.7%, range 15-33 points.**
+Confirms the earlier warning that 33.0% overstated the recipe's true mean. Cherry's
+specialists cap out around 25-30% regardless of seed or demo-recipe tweaks — the
+object/DR combination itself is the ceiling. **This thread is closed; no more cherry
+recipe tuning is worth doing.**
 
-## Second confirmation launched: avocado-easy
+---
 
-To rule out that apple's 65% was a fluke of that specific object, launched the
-identical narrow-DR recipe on **avocado** (~95mm long axis, elongated/asymmetric
-— structurally different from apple/cherry's round shape). New configs:
-`rigid_orientation_avocado_easy.yaml` (narrowed the same way as apple:
-pos_xy 0.04→0.02, pitch/roll 20°→8°, tight scale/shape bounds) and
-`single_lift_avocado_rigid_easy.yaml`. Collection launched with the same
-80-episode/maxfevals=800/seed=0 recipe as apple-easy.
+## Second confirmation: avocado-easy
 
-**Collection result: 80/80 saved, but only 18.1% collection success rate**
-(362 failed / 442 total attempts, 93.5 min) — notably lower than apple's 43.5%.
-Consistent with the pre-existing note in `rigid_orientation_avocado.yaml`
-that avocado's min-extent (~61mm) sits close to the XArm7 gripper's practical
-stroke limit (~70mm), making CMA-ES grasp search harder. **Not necessarily
-predictive of trained-policy quality** — apple's own collection success (43.5%)
-was already much lower than cherry's (~80%), yet apple's trained policy still
-hit 65%. Proceeding to convert/train regardless, same as with apple.
+To rule out apple's 65% being a fluke of that specific object, launched the
+identical narrow-DR recipe on **avocado** (~95mm long axis, elongated/asymmetric).
+New configs: `rigid_orientation_avocado_easy.yaml`, `single_lift_avocado_rigid_easy.yaml`.
 
-Converted: 72 train / 8 val (matches apple exactly), episode lengths 209-217
-steps (same FSM timing as every other run). Training launched: run `wqlxl`,
-configs at `gentle_manip/dppo/cfg/single_lift_avocado_rigid_easy_pcd/`.
+**Collection: 80/80 saved, only 18.1% collection success rate** (vs. apple's 43.5%)
+— consistent with avocado's own DR config already flagging its min-extent (~61mm) as
+close to the gripper's practical stroke limit (~70mm). Not necessarily predictive of
+trained-policy quality (apple's own collection success was already much lower than
+cherry's, yet apple's policy still hit 65%).
 
-**Result: plateaued fast (epoch 660, best val 0.0315@360 — nearly identical val
-loss to apple-easy's 0.0318@330). Canonical eval on the best available
-checkpoint (`state_400.pt`, val 0.0350): 52.0% success (52/100)**,
-`ever_success_rate` 54%, `hold_failure_gap` 0.0 (every reach-band episode also
-completes the hold — same clean pattern as apple, no drop-after-lift failure
-mode). Approx 95% CI [42.2%, 61.8%] — the top of the interval just touches 60%,
-but the point estimate falls short of the 60-80% target.
+Converted (72/8 split). Training launched: run `wqlxl`.
 
-**Nuanced finding: partial replication.** Avocado-easy (52%) sits well above
-cherry's 25.7% mean but below apple-easy's 65% and short of the target band.
-The most likely explanation is avocado's own grasp-geometry difficulty
-(min-extent ~61mm vs. the gripper's ~70mm practical stroke — already flagged in
-`rigid_orientation_avocado.yaml`'s own history) rather than a failure of the
-"bigger object + narrow DR" recipe itself: avocado's collection success (18.1%)
-was already much lower than apple's (43.5%), and `ever_success_rate`≈`success_rate`
-here (54% vs 52%) shows the policy isn't dropping objects after a good grasp —
-it's failing to commit to a good grasp as often as apple's policy does. **Revised
-takeaway**: task difficulty (object size relative to gripper stroke + DR range)
-is a SPECTRUM, not binary — cherry (tiny, wide DR) is hardest, avocado (large but
-grasp-marginal) is intermediate, apple (large, comfortably graspable) is easiest.
-For the cross-category pool, prefer objects that are both large AND comfortably
-within the gripper's stroke margin, not just "large."
+**Result: plateaued at epoch 660 (best val 0.0315@360 — nearly identical to apple's
+0.0318@330). Canonical eval on `state_400.pt` (val 0.0350): 52.0% success (52/100)**,
+`ever_success_rate` 54%, `hold_failure_gap` 0.0. Approx 95% CI [42.2%, 61.8%].
+
+**Nuanced finding: partial replication.** Avocado (52%) sits well above cherry's
+25.7% mean but below apple's 65% and short of the target band.
+`ever_success_rate`≈`success_rate` shows the policy isn't dropping objects after a
+good grasp — it's failing to commit to a good grasp as often as apple's does.
+**Revised takeaway: task difficulty is a SPECTRUM (size, DR range, grasp margin), not
+binary** — cherry hardest, avocado (large but grasp-marginal) intermediate, apple
+(large, comfortably graspable) easiest.
+
+---
 
 ## Third confirmation + first real cross-category training run launched
 
-Launched **kiwi-easy** (43x46x60mm, egg-shaped, no gripper-margin warning in its
-DR config -- a cleaner "comfortable grasp" test than avocado) as a third
-confirmation, collecting now. Early signal is promising: 9/80 saved after only
-4 batches (vs. avocado's much slower early pace) -- consistent with the
-comfortable-grasp-margin hypothesis.
+Launched **kiwi-easy** (43x46x60mm, egg-shaped, no gripper-margin warning in its DR
+config — a cleaner "comfortable grasp" test than avocado) as a third confirmation.
+Early signal promising: 9/80 saved after only 4 batches.
 
 **In parallel, built the first genuine cross-category (Phase 2) training run.**
-`gentle_manip/scripts/merge_cross_category_demos.py` (pre-existing from an
-earlier session, unused until now) merges per-category `data.pkl` files by
-symlinking into a temp dir and calling `convert_demos.py` once -- confirmed it
-picks the LATEST run per category by mtime (verified: apple's aborted
-150-episode attempt `26-08-10-ali` has no `data.pkl` so is correctly skipped;
-apple's `26-08-10-cne` and avocado's `26-08-10-kul` -- the actual easy-recipe
-runs -- are picked). **Bug found and worked around**: passing `--demos-root`
-as a RELATIVE path breaks the script's symlinks (they're written relative to
-the temp dir, not the repo root) -- use the script's absolute default instead
-(don't pass `--demos-root` unless using an absolute path).
+`gentle_manip/scripts/merge_cross_category_demos.py` (pre-existing from an earlier
+session, unused until now) merges per-category `data.pkl` files by symlinking into a
+temp dir and calling `convert_demos.py` once — confirmed it picks the LATEST run per
+category by mtime. **Bug found and worked around**: passing `--demos-root` as a
+RELATIVE path breaks the script's symlinks — use the script's absolute default.
 
-Merged apple-easy + avocado-easy -> 160 episodes (144 train / 16 val, 33800
-steps) at `$DPPO_DATA_DIR/single_lift_cross_category_easy_pcd`. This is the
-**unconditioned baseline** merge (no category embedding) per the original
-research plan's Stage 6 recommendation ("do the free merge first"). New configs
-at `gentle_manip/dppo/cfg/single_lift_cross_category_easy_pcd/`:
-`pre_diffusion_pointnet.yaml` (training) + three eval configs pointing the SAME
-merged-normalization checkpoint at different single-category sim tasks --
-`eval_diffusion_pointnet_apple.yaml` / `_avocado.yaml` (**held-in**, both
-categories were in the training mix) and `eval_diffusion_pointnet_kiwi.yaml`
-(**zero-shot** -- kiwi was never in the merge, the actual generalization test
-this whole session has been building toward). Training launched: run `ioqec`.
+Merged apple-easy + avocado-easy → 160 episodes (144 train / 16 val) at
+`$DPPO_DATA_DIR/single_lift_cross_category_easy_pcd`. Unconditioned baseline merge
+(no category embedding), per the original research plan's Stage 6 recommendation
+("do the free merge first"). New configs at
+`gentle_manip/dppo/cfg/single_lift_cross_category_easy_pcd/`: training config + three
+eval configs pointing the same checkpoint at different single-category sim tasks
+(`_apple`/`_avocado` held-in, `_kiwi` zero-shot). Training launched: run `ioqec`.
 
-**Plan**: once `ioqec` plateaus, run all three evals. Compare apple/avocado
-held-in numbers against their solo specialist numbers (65.0% / 52.0%) to check
-for catastrophic interference from merging two categories into one policy: if
-held-in numbers land close to solo, the merge didn't hurt; if they collapse,
-multi-category BC needs more than a naive merge (motivating Stage 5's category
-conditioning). The kiwi zero-shot number is the actual deliverable -- first real
-cross-category generalization result for this project.
+---
 
 ## Kiwi-easy result: surprising tie with avocado
 
-Kiwi-easy plateaued at epoch 620 (best val loss 0.0291@320 -- the LOWEST val
-loss of any object trained this session). Canonical eval on the nearest
-checkpoint (`state_300.pt`, val 0.0312): **52.0% success (52/100)**,
-`ever_success_rate` 54%, `hold_failure_gap` 0.0. Approx 95% CI [42.2%, 61.8%].
+Kiwi-easy plateaued at epoch 620 (best val loss 0.0291@320 — the LOWEST val loss of
+any object trained this session). Canonical eval on `state_300.pt` (val 0.0312):
+**52.0% success (52/100)**, `ever_success_rate` 54%, `hold_failure_gap` 0.0.
 
-**This is a striking, unexpected result: kiwi's numbers are numerically
-IDENTICAL to avocado's** (success_rate 0.52/0.52, ever_success_rate 0.54/0.54,
-ever_in_band_rate 0.54/0.54, hold_failure_gap 0.0/0.0) -- despite kiwi having
-(a) the best collection success rate of any object this session (52.6% vs.
-apple's 43.5% and avocado's 18.1%), (b) the lowest BC val loss, and (c) no
-gripper-margin warning in its DR config (unlike avocado). The "comfortable
-grasp margin" refinement to the task-difficulty hypothesis predicted kiwi
-should beat avocado, not tie it.
+**Striking, unexpected result: kiwi's numbers are numerically IDENTICAL to
+avocado's** — despite kiwi having the best collection success rate (52.6%), lowest BC
+val loss, and no gripper-margin warning. The "comfortable grasp margin" hypothesis
+predicted kiwi should beat avocado, not tie it.
 
-**Complicates the picture -- most likely explanation: object SIZE itself
-(not just grasp comfort) matters independently.** Kiwi (43x46x60mm) is
-meaningfully smaller than both apple (65x60x65mm, 65% success) and avocado
-(62x95x61mm, 52% success). Revised reading of the full spectrum:
-cherry (~20mm, wide DR) 25.7% < {avocado (~61mm, marginal grasp) 52%, kiwi
-(~43-60mm, comfortable grasp) 52%} < apple (~60-65mm, comfortable AND largest)
-65%. Apple may simply be uniquely favorable (large across all three axes,
-comfortably within gripper stroke) rather than "large + comfortable" being a
-clean two-factor rule -- absolute size band matters on top of grasp-margin
-comfort. Not fully resolved with n=3 objects; would need more categories to
-properly disentangle size vs. grasp-margin as independent effects.
+**Complicates the picture — likely explanation: object SIZE itself matters
+independently of grasp comfort.** Kiwi (43x46x60mm) is meaningfully smaller than both
+apple and avocado. Revised spectrum: cherry (25.7%) < {avocado 52%, kiwi 52%} <
+apple (65%, uniquely favorable on all axes at once). Not fully resolved with n=3
+objects.
+
+---
 
 ## Cross-category generalist eval, part 1: apple held-in shows real interference
 
-Cross-category generalist (`ioqec`, apple+avocado merged, unconditioned)
-plateaued at epoch 760 (best val loss 0.0198, tied at epoch 460 and 700 --
-used `state_700.pt`, the more-trained of the tied-best checkpoints).
+`ioqec` (apple+avocado merged, unconditioned) plateaued at epoch 760 (best val loss
+0.0198, tied at epoch 460/700 — used `state_700.pt`).
 
-**Held-in eval on APPLE: 39.0% success (39/100)**, `ever_success_rate` 40%,
-`hold_failure_gap` 0.0. This is a substantial drop from apple-SOLO's 65.0% --
-roughly a 26-point regression from merging just ONE other category
-(avocado) into the training set with no conditioning signal. This is the
-"catastrophic interference from a naive merge" risk the original research
-plan's Stage 5/6 flagged as a real possibility, now confirmed empirically
-rather than theoretically. Avocado held-in and kiwi zero-shot evals next --
-the avocado-held-in number will show whether the interference is symmetric
-(both categories pulled toward some average) or whether apple specifically
-lost the most.
+**Held-in eval on APPLE: 39.0% success (39/100)**, `ever_success_rate` 40%. A
+substantial drop from apple-SOLO's 65.0% — roughly a 26-point regression from
+merging just ONE other category with no conditioning signal. Confirms the
+"catastrophic interference from a naive merge" risk empirically.
 
 ## Cross-category generalist eval, part 2: avocado held-in also regresses
 
-**Held-in eval on AVOCADO: 31.0% success (31/100)**, `ever_success_rate` 31%,
-`hold_failure_gap` 0.01. Down from avocado-SOLO's 52.0% (-21 points).
-
-**Both held-in categories regressed from their solo numbers**: apple 65.0%->
-39.0% (-26pts), avocado 52.0%->31.0% (-21pts). This rules out an asymmetric
-"one category dominates" story -- the naive unconditioned 2-category merge
-genuinely hurts BOTH categories relative to training a dedicated specialist on
-each. This is real evidence (not just a theoretical concern) that the original
-research plan's Stage 5 category-conditioning branch is NECESSARY, not just a
-nice-to-have refinement -- a bare merge of even 2 categories already shows
-meaningful interference at this model capacity/architecture. Kiwi zero-shot
-eval (the actual novel-category generalization number) running next.
+**Held-in eval on AVOCADO: 31.0% success (31/100)**, down from avocado-SOLO's 52.0%
+(−21 points). **Both held-in categories regressed** — rules out an asymmetric
+"one category dominates" story. Real evidence the category-conditioning branch
+(Stage 5) is necessary, not a nice-to-have.
 
 ## Cross-category generalist eval, part 3: kiwi zero-shot COLLAPSES
 
 **Zero-shot eval on KIWI (never in the training mix): 4.0% success (4/100)**,
-`ever_success_rate` 5%, `ever_in_band_rate` 5%. Essentially a collapse to
-near-random/failure level -- the SAME magnitude as this project's original
-(pre-this-session) 11-category mixed baseline (2.0%) and one-hot
-category-embedding variants (0.0-1.0%). This REPLICATES that early negative
-result, now with a cleaner, better-controlled setup (2 known-good categories,
-both independently verified at 52-65% solo) instead of 11 categories of
-uneven/unknown quality.
+`ever_success_rate` 5%. Essentially a collapse to near-random/failure level — the
+SAME magnitude as this project's original 11-category mixed baseline (2.0%). This
+REPLICATES that early negative result, now with a cleaner, better-controlled setup
+(2 known-good categories at 52-65% solo, not 11 categories of uneven quality).
 
-## Session summary: full results table + verdict
+**Session summary at this point** — see the **Summary** section at the top of this
+document for the consolidated Verdict 1 / Verdict 2 writeup that superseded the
+in-line version originally written here.
 
-| Policy | apple | avocado | kiwi | cherry |
-|---|---|---|---|---|
-| Solo specialist | **65.0%** | 52.0% | 52.0% | 25.7% (n=3 mean, range 15-33%) |
-| Cross-category generalist (apple+avocado merge, unconditioned) | 39.0% (held-in, -26pts) | 31.0% (held-in, -21pts) | **4.0% (ZERO-SHOT)** | not tested |
+---
 
-**Two independent, decisive findings from tonight's work:**
+## Fourth data point: pear-easy — complicates the grasp-margin story further
 
-1. **Task difficulty (object size + DR range + grasp margin) is real and
-   large** — solo specialists on favorable objects (apple/avocado/kiwi, all
-   "easy" narrow-DR recipes) land at 52-65%, categorically higher than
-   cherry's 25.7% mean despite IDENTICAL architecture/training recipe. This
-   fully explains why cherry alone never got near the 60-80% target no matter
-   how much the demo recipe was tuned (disturbance injection, dataset size,
-   phase choice) — the object/DR choice was the ceiling, not the recipe.
+Pear-easy (44.7% collection SR) plateaued at epoch 780 (best val loss 0.0314@480).
+Canonical eval on `state_500.pt` (val 0.0364): **44.0% success (44/100)**,
+`ever_success_rate` 46%, `hold_failure_gap` 0.0. Approx 95% CI [34.3%, 53.7%].
 
-2. **A naive unconditioned multi-category merge does NOT produce a working
-   cross-category policy** — even merging just 2 well-performing categories:
-   held-in performance drops substantially (both categories lose 20+ points
-   vs. their solo numbers) AND zero-shot generalization to an unseen category
-   is near-total collapse (4.0%, statistically indistinguishable from this
-   project's original 11-category 2.0% baseline). This is not a data-quality
-   problem this time (both source categories are independently confirmed
-   good, 52-65% solo) — it is architectural: an 8-dim state + point-cloud
-   input with NO category signal genuinely cannot serve multiple categories
-   from one unconditioned network at this model capacity, and does not
-   interpolate/extrapolate to new shapes without an explicit conditioning
-   mechanism.
+**Full four-object task-difficulty spectrum** — see the table in the Summary section
+at the top (Verdict 1).
 
-**Verdict on the two-phase plan**: **Phase 1 (specialist works) is now
-conclusively validated** — pick large, comfortably-graspable objects with
-narrow DR and this architecture reliably clears 50-65%. **Phase 2 (cross-
-category generalist) needs the category-conditioning branch (Stage 5 of the
-original research plan) — a bare merge is proven insufficient, not merely
-"not yet tried."** The VLM-based low-dimensional conditioning direction the
-user specified ahead of time (see Goal section, top of this doc) is now the
-clear, validated next step, no longer a hedge against an unproven risk.
+**Pear breaks the clean "grasp-margin severity" story**: pear's flag (moderate) is
+explicitly LESS severe than avocado's (severe), yet pear scored LOWER (44.0% vs
+52.0%). Collection success rates don't explain it either (pear 44.7% is close to
+apple's 43.5%, nothing like avocado's 18.1% outlier). **The fine ordering among the
+four "easy" objects doesn't reduce to any single simple rule identified so far** —
+likely reflects exact mesh geometry / per-shape CMA-ES search difficulty as much as
+any size/margin heuristic. Empirical per-category eval remains necessary.
 
-**Suggested next steps (not yet started, for the user's review)**:
-1. Build the Stage 5(A) VLM/low-dim category-embedding conditioning branch
-   into `DP3Encoder` (insertion point: `pointnet_extractor.py:276`,
-   `torch.cat([pn_feat, state_feat], dim=-1)`) — now justified by a real
-   negative result, not a hedge.
-2. Re-run the SAME apple+avocado merge WITH conditioning, eval held-in +
-   kiwi zero-shot again — directly comparable numbers to the unconditioned
-   39%/31%/4.0% baseline in this table.
-3. Consider a 3rd or 4th "easy" category in the training mix (mushroom and
-   pear are both untested this session but fit the "large, comfortable
-   grasp" profile from the registry) before drawing final conclusions about
-   conditioning's effect size, since n=2 held-in / n=1 zero-shot is a small
-   base to generalize from.
+This does not change the two headline verdicts (Phase 1 validated; naive Phase 2
+merge proven insufficient) — it only refines the "why some objects are easier than
+others" sub-question. GPU/processes clean at end of this run.
 
-All GPU processes and sim servers cleanly shut down at end of session; no
-orphaned Genesis subprocesses (`nvidia-smi --query-compute-apps` empty).
+---
 
-## Fourth data point: pear-easy -- complicates the grasp-margin story further
+## Conditioning experiments launched: Track A (registry) vs Track B (VLM) (2026-08-11)
 
-Pear-easy (44.7% collection SR) plateaued at epoch 780 (best val loss 0.0314
-@480). Canonical eval on the nearest checkpoint (`state_500.pt`, val 0.0364):
-**44.0% success (44/100)**, `ever_success_rate` 46%, `hold_failure_gap` 0.0.
-Approx 95% CI [34.3%, 53.7%].
+User asked for a detailed plan to build the VLM-based category-conditioning branch.
+Investigation found **most of the plumbing already existed from an earlier session,
+unused**: `category_embedding.py` (registry-derived one-hot+features embedding),
+`convert_demos.py --category-embed`, `pointcloud_dataset.py`'s
+`StitchedSequencePointCloudCategoryDataset`, `PointNetDiffusionMLP(category_embed_dim=...)`,
+and `genesis_venv.py`'s `category=` live-eval pinning — all built, all wired, all
+committed-but-uncommitted-in-the-submodule (the `category=` kwarg pass-through in
+`third_party/dppo/env/gym_utils/__init__.py` was sitting uncommitted in the working
+tree since before this session; committed now alongside this work).
 
-**Full four-object task-difficulty spectrum, canonical eval n=100 each:**
+**The catch**: this existing embedding is 15/21 dims of literal one-hot — exactly
+what the user's standing directive says NOT to build. Flagged this explicitly and
+asked the user how to sequence the work. **User chose: calibration check first
+(Track A, using the existing infra), then build the real VLM version (Track B)
+regardless of Track A's result.**
 
-| Object | Size (mm) | Grasp-margin flag (own DR config) | Collection SR | Solo eval SR |
-|---|---|---|---|---|
-| apple | 65x60x65 | severe (was reduced 45->20deg) | 43.5% | **65.0%** |
-| avocado | 62x95x61 | severe (was reduced 45->20deg) | 18.1% | 52.0% |
-| kiwi | 43x46x60 | none (kept full 45deg) | 52.6% | 52.0% |
-| pear | 62x52x65 | moderate (was reduced 45->30deg) | 44.7% | **44.0%** |
-| cherry | 20x17x20 | n/a (wide DR, not an "_easy" variant) | ~80% | 25.7% (n=3 mean) |
+### Track A — registry embedding calibration check
 
-**Pear breaks the clean "grasp-margin severity" story**: pear's flag
-(moderate) is explicitly LESS severe than avocado's (severe), yet pear scored
-LOWER (44.0% vs 52.0%). Collection success rates don't explain it either
-(pear 44.7% is close to apple's 43.5%, nothing like avocado's 18.1% outlier).
-**Revised, more honest conclusion**: object size/DR/grasp-margin all
-correlate with difficulty in the expected direction relative to cherry (every
-"easy" object beats cherry's 25.7% by a wide margin), but the FINE ordering
-among the four "easy" objects (65% > 52% ≈ 52% > 44%) doesn't reduce to any
-single simple rule identified so far — likely reflects some combination of
-exact geometry (not just bounding-box size), how well CMA-ES's SDF-based grasp
-search performs on that particular mesh shape, and possibly demonstration
-quality/diversity in ways not yet isolated. Apple remains the standout best
-performer and the safest choice if only one "easy" category is needed; for a
-larger category pool, all four are usable (44-65% is still a huge
-improvement over cherry) but expect meaningful per-category variance that
-DR/size heuristics alone won't fully predict — empirical per-category eval
-remains necessary, not just a size/margin lookup.
+Regenerated the apple+avocado merge with `--category-embed` (existing, unused flag)
+→ `single_lift_cross_category_easy_conditioned_pcd`, `category_embed_dim: 21`
+confirmed. New configs mirroring the unconditioned baseline's structure, with
+`category_embed_dim=21` in the network block and `env.specific.category: <name>` in
+each eval config (apple/avocado held-in, kiwi zero-shot — kiwi IS in the registry's
+fixed one-hot vocabulary but its slot was never activated during training, a fair
+"oracle-category-name" zero-shot test for this embedding style). Training launched:
+run `cfvpj`. Committed `dca1a72`.
 
-This does not change the session's two headline verdicts (Phase 1 validated;
-naive Phase 2 merge proven insufficient) — it only refines the "why some
-objects are easier than others" sub-question, which was always secondary to
-the two main findings. GPU/processes clean at end of this run.
+### Track B — true VLM embedding, built fresh
+
+The user's actual specified direction: a frozen vision-language model embedding,
+low-dimensional, not a one-hot. New module `gentle_manip/dppo/vlm_embedding.py`:
+frozen CLIP ViT-B/32 (`transformers`) embeds a canonical reference frame per
+category, reduced via a FIXED (seeded, non-learned) random Gaussian projection to
+24 dims — a standard Johnson-Lindenstrauss-style reduction, chosen over a learned
+projection head to keep the embedding genuinely parameter-free outside the policy,
+and over PCA (which would need many reference images per category to be well-posed;
+only one is available per category here).
+
+**Reference frames**: extracted frame 0 from tonight's own canonical eval render
+clips for apple/avocado/kiwi (same camera/rendering as live deployment) — saved to
+`gentle_manip/assets/category_reference_frames/<category>.png`. First attempt used
+demo-collection videos, which turned out to not consistently exist across categories
+(apple's collection had them, avocado/kiwi's didn't) — switched to eval render clips
+uniformly, which always exist per the canonical eval harness's per-episode video
+requirement.
+
+**`transformers` API bug found and fixed**: `transformers==5.15.0`'s
+`CLIPModel.get_image_features()` returns a `BaseModelOutputWithPooling` object, not a
+bare tensor as in older versions — needed `.pooler_output[0]` instead of `[0]`
+directly. Caught via a smoke test before wiring into the real pipeline.
+
+**Infrastructure decision — avoid touching the actively-training `envs/dppo`**:
+`envs/dppo` manages torch manually outside `pyproject.toml` (its own header warns `uv
+sync` can silently pull CPU torch) and Track A was actively training in it. Installed
+`transformers`+`pillow` in `envs/sim` only, and built
+`gentle_manip/scripts/precompute_vlm_embeddings.py` to compute+cache embeddings there
+once, to a disk cache (`gentle_manip/assets/category_reference_frames/vlm_embed_cache.npz`)
+that `vlm_embedding.embed()` reads with plain numpy — verified `envs/dppo` can call
+`embed()` successfully with zero `transformers` import needed. `envs/dppo` was never
+synced/modified.
+
+**Plumbing**: added an `--embed-source {registry,vlm}` flag to `convert_demos.py` and
+`merge_cross_category_demos.py`, and a `category_embed_source` kwarg to
+`genesis_venv.py::build_genesis_venv` (threaded through
+`third_party/dppo/env/gym_utils/__init__.py`, committed in the submodule + parent
+pointer bump) — both sources produce a `(D,)` vector through the identical
+`embed(category) -> np.ndarray` interface, so everything downstream is agnostic to
+which one produced it.
+
+Regenerated the merge with `--embed-source vlm` → `single_lift_cross_category_easy_vlm_pcd`,
+`category_embed_dim: 24` confirmed, `envs/dppo` never needed `transformers`. New
+configs mirroring Track A's structure (`category_embed_dim=24`,
+`category_embed_source: vlm` in each eval config's `env.specific`). Training
+launched: run `atwfy`. Committed `6ff453f`.
+
+**Both trainings running in parallel** (GPU has ample headroom — each uses ~1.7GB of
+7.66GB). Will evaluate both the same way as the unconditioned baseline (held-in
+apple, held-in avocado, zero-shot kiwi) once they plateau — 6 evals total, for a
+direct 3-way comparison against the 39%/31%/4.0% baseline. See the **Summary**
+section at the top of this document for the up-to-date status once results land.
