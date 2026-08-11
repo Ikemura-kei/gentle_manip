@@ -80,6 +80,8 @@ shape_meta:
       shape: [8]
     point_cloud:
       shape: [1024, 3]
+    category_embed:
+      shape: [24]
   action:
     shape: [7]
 
