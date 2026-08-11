@@ -1,0 +1,22 @@
+# [experiment] TOY/EASY rigid mushroom lift -- fifth data point on the task-difficulty
+# spectrum, and the first genuinely different SHAPE TOPOLOGY (cap+stem) tested this
+# session -- see rigid_orientation_mushroom_easy.yaml and
+# docs/cross_category_specialist_log.md.
+# Used by: grasp_synthesis collect_demos_synth_v2/v3.py; DPPO train/eval
+# Status: experimental
+task: single_lift_mushroom_rigid
+action: delta_pose_delta_gripper_fast_rot
+dr: rigid_orientation_mushroom_easy
+augmentation: l515_noise
+
+obs: superset_rigid
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400
