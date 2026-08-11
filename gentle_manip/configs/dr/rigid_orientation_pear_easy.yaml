@@ -1,0 +1,25 @@
+# [dr] TOY/EASY variant of rigid_orientation_pear -- fourth data point on the
+# task-difficulty spectrum (2026-08-11): apple-easy (comfortable grasp, largest)
+# 65.0%, avocado-easy (grasp-marginal) 52.0%, kiwi-easy (comfortable grasp,
+# smaller) 52.0% -- surprisingly tied avocado despite no grasp-margin flag,
+# suggesting absolute size ALSO matters independent of grasp comfort. Pear's
+# own rigid_orientation_pear.yaml already flags "moderate" grasp-margin concern
+# (min-extent ~52mm, "less severe than apple/avocado, less headroom than small
+# berries") -- an intermediate point between kiwi (no concern) and avocado
+# (severe concern) on the grasp-margin axis, at a size between kiwi and apple.
+# Used by: experiments (dr:) single_lift_pear_rigid_easy
+# Status: experimental
+#
+# Narrowed from rigid_orientation_pear.yaml the same way as every other _easy
+# variant: pos half-range 0.04->0.02, pitch/roll 30->8deg, yaw kept full, scale
+# tightened to near-nominal, shape DR reduced near zero.
+object_pos_xy: 0.02
+robot_init_pos_xyz: 0.01
+object_yaw_deg: 180
+object_pitch_roll_deg: 8
+
+object_scale:      [0.95, 1.05]
+object_bend_deg:   [-2.0, 2.0]
+object_twist_deg:  [-2.0, 2.0]
+object_taper:      [-0.02, 0.02]
+object_axis_scale: [0.97, 1.03]
