@@ -891,3 +891,10 @@ n=100), and zero-shot stays at collapse level. This is a genuine negative result
 not a data-quality artifact -- strengthens the case that Track B (the true VLM
 embedding) is doing something structurally different, not just "the same idea with
 better data." Track B evals next.
+
+## Track B eval results (in progress)
+
+**Held-in APPLE: 38.0% success (38/100)**, `ever_success_rate` 41%,
+`hold_failure_gap` 0.0. Essentially flat vs. the unconditioned baseline's 39.0%
+(within noise), slightly below Track A's 42.0%. Avocado and kiwi zero-shot evals
+next.
