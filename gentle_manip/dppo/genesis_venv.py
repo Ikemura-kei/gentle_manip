@@ -184,7 +184,7 @@ class GenesisMultiStepVecEnv:
 
 def build_genesis_venv(num_envs, obs_steps, act_steps, max_episode_steps, normalization_path,
                        obs_keys=None, pointcloud_key=None, host="127.0.0.1", port=5570,
-                       connect_timeout=240.0, category=None):
+                       connect_timeout=240.0, category=None, category_embed_source="registry"):
     """Factory used by DPPO's make_async (env_type="genesis"): connect a SimEnvClient to a
     running sim server, load demo normalization, and wrap it as a DPPO VectorEnv.
 
@@ -195,9 +195,12 @@ def build_genesis_venv(num_envs, obs_steps, act_steps, max_episode_steps, normal
 
     category: Stage 5(A) conditioning -- a bare registered category name (e.g. "mushroom",
     matching the sim server's --experiment single_lift_<category>_rigid). When set, resolves
-    gentle_manip.dppo.category_embedding.embed(category) ONCE and feeds that fixed vector to
-    every env/step of this eval run as cond["category_embed"]. None (default) = no category
-    conditioning, for the unconditioned baseline's eval.
+    embed(category) ONCE (source picked by category_embed_source: "registry" = Track A's
+    gentle_manip.dppo.category_embedding one-hot+features; "vlm" = Track B's
+    gentle_manip.dppo.vlm_embedding frozen-CLIP embedding -- must match whichever source the
+    checkpoint's training dataset was built with, via convert_demos.py --embed-source) and
+    feeds that fixed vector to every env/step of this eval run as cond["category_embed"].
+    category=None (default) = no category conditioning, for the unconditioned baseline's eval.
     """
     from gentle_manip.envs.rpc import SimEnvClient
     from gentle_manip.dppo.convert_demos import STATE_VIEW, PROPRIO_VIEW
@@ -207,7 +210,13 @@ def build_genesis_venv(num_envs, obs_steps, act_steps, max_episode_steps, normal
     client = SimEnvClient(host=host, port=int(port), connect_timeout=connect_timeout)
     category_embed = None
     if category is not None:
-        from gentle_manip.dppo.category_embedding import embed as _cat_embed
+        if category_embed_source == "registry":
+            from gentle_manip.dppo.category_embedding import embed as _cat_embed
+        elif category_embed_source == "vlm":
+            from gentle_manip.dppo.vlm_embedding import embed as _cat_embed
+        else:
+            raise ValueError(f"unknown category_embed_source: {category_embed_source!r} "
+                             f"(expected 'registry' or 'vlm')")
         category_embed = _cat_embed(category)
     return GenesisMultiStepVecEnv(
         client, obs_keys=list(obs_keys) if obs_keys else default_keys, n_envs=num_envs,

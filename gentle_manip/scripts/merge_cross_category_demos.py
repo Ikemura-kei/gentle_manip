@@ -50,9 +50,12 @@ def main() -> None:
     ap.add_argument("--view", default="student")
     ap.add_argument("--val-split", type=float, default=0.1)
     ap.add_argument("--category-embed", action="store_true",
-                    help="also store the Stage-5 per-category conditioning vector "
-                         "(gentle_manip.dppo.category_embedding), derived from each "
-                         "category's own symlink filename -- see convert_demos.py")
+                    help="also store the Stage-5 per-category conditioning vector, "
+                         "derived from each category's own symlink filename -- see "
+                         "convert_demos.py")
+    ap.add_argument("--embed-source", default="registry", choices=["registry", "vlm"],
+                    help="which category_embed to compute -- see convert_demos.py "
+                         "--embed-source. Ignored unless --category-embed is set.")
     args = ap.parse_args()
 
     overlap = set(args.categories) & set(args.held_out)
@@ -94,7 +97,7 @@ def main() -> None:
         "--val-split", str(args.val_split),
     ]
     if args.category_embed:
-        cmd.append("--category-embed")
+        cmd += ["--category-embed", "--embed-source", args.embed_source]
     print(f"\nRunning: {' '.join(cmd)}")
     subprocess.run(cmd, cwd=str(REPO), check=True)
 

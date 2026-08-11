@@ -70,14 +70,26 @@ def _load_episodes_by_path(paths: Sequence[Path]) -> List[tuple]:
 
 def convert(demo_paths: Sequence[Path], out_dir: Path, obs_keys: Sequence[str] = STATE_VIEW,
             pointcloud_key: str = None, val_split: float = 0.1, seed: int = 0,
-            category_embed: bool = False) -> dict:
+            category_embed: bool = False, embed_source: str = "registry") -> dict:
     if category_embed:
         # One category per SOURCE FILE (merge_cross_category_demos.py names each symlink
-        # "<category>.pkl") -- broadcast that file's fixed registry embedding to every
-        # episode/timestep loaded from it. Fails loudly (KeyError from category_embedding.embed)
-        # rather than silently skipping a path whose stem isn't a known food category, since a
-        # silent skip would desync which episodes got an embedding from which didn't.
-        from gentle_manip.dppo.category_embedding import embed as _cat_embed
+        # "<category>.pkl") -- broadcast that file's fixed embedding to every episode/
+        # timestep loaded from it. Fails loudly (KeyError/FileNotFoundError from the
+        # embed() call) rather than silently skipping a path whose stem isn't known,
+        # since a silent skip would desync which episodes got an embedding from which
+        # didn't. embed_source picks WHICH embedding: "registry" (Track A, cheap
+        # calibration check, category_embedding.py — one-hot + material/size features)
+        # or "vlm" (Track B, the user's actual specified direction — frozen CLIP image
+        # embedding of a reference scene frame, vlm_embedding.py). Same call signature
+        # (embed(category) -> (D,) array) either way, so everything downstream
+        # (StitchedSequencePointCloudCategoryDataset, PointNetDiffusionMLP,
+        # genesis_venv.py) is agnostic to which source produced the vector.
+        if embed_source == "registry":
+            from gentle_manip.dppo.category_embedding import embed as _cat_embed
+        elif embed_source == "vlm":
+            from gentle_manip.dppo.vlm_embedding import embed as _cat_embed
+        else:
+            raise ValueError(f"unknown embed_source: {embed_source!r} (expected 'registry' or 'vlm')")
         path_episodes = _load_episodes_by_path(demo_paths)
         episodes = [ep for _, ep in path_episodes]
         cat_embeds = [_cat_embed(p.stem) for p, _ in path_episodes]   # one (EMBED_DIM,) per episode
@@ -169,10 +181,15 @@ def main() -> None:
     ap.add_argument("--view", default="teacher",
                     help="which experiment view to use with --experiment (default: teacher)")
     ap.add_argument("--category-embed", action="store_true",
-                    help="also store a per-timestep Stage-5 category conditioning vector "
-                         "(gentle_manip.dppo.category_embedding), derived from each input "
-                         "file's stem -- requires demo files named '<category>.pkl' "
-                         "(merge_cross_category_demos.py's convention)")
+                    help="also store a per-timestep Stage-5 category conditioning vector, "
+                         "derived from each input file's stem -- requires demo files named "
+                         "'<category>.pkl' (merge_cross_category_demos.py's convention)")
+    ap.add_argument("--embed-source", default="registry", choices=["registry", "vlm"],
+                    help="which category_embed to compute: 'registry' (Track A, "
+                         "gentle_manip.dppo.category_embedding, cheap one-hot+features "
+                         "calibration check) or 'vlm' (Track B, gentle_manip.dppo."
+                         "vlm_embedding, frozen CLIP embedding -- the user's actual "
+                         "specified direction). Ignored unless --category-embed is set.")
     args = ap.parse_args()
 
     if args.experiment:
@@ -192,7 +209,8 @@ def main() -> None:
     paths = _find_demo_pkls(args.demos)
     print(f"converting {len(paths)} demo file(s): {[str(p) for p in paths]}")
     meta = convert(paths, args.out, obs_keys=obs_keys, pointcloud_key=args.pc_key,
-                   val_split=args.val_split, category_embed=args.category_embed)
+                   val_split=args.val_split, category_embed=args.category_embed,
+                   embed_source=args.embed_source)
     for k, v in meta.items():
         print(f"  {k}: {v}")
 
