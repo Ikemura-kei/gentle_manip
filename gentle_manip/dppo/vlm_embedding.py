@@ -37,13 +37,36 @@ import numpy as np
 
 VLM_EMBED_DIM = 24              # low-dimensional, per the user's standing directive
 _CLIP_MODEL_NAME = "openai/clip-vit-base-patch32"
-_REFERENCE_FRAME_DIR = Path(__file__).resolve().parents[1] / "assets" / "category_reference_frames"
+_ASSET_DIR = Path(__file__).resolve().parents[1] / "assets" / "category_reference_frames"
+_REFERENCE_FRAME_DIR = _ASSET_DIR
+_CACHE_PATH = _ASSET_DIR / "vlm_embed_cache.npz"
 _PROJECTION_SEED = 0            # fixed -- reproducible across processes/runs
 
 _clip_model = None
 _clip_processor = None
 _projection = None              # (clip_dim, VLM_EMBED_DIM) fixed random projection
 _embed_cache: dict[str, np.ndarray] = {}
+_disk_cache_loaded = False
+
+
+def _load_disk_cache() -> None:
+    """Populate _embed_cache from the precomputed on-disk cache, if present.
+
+    Precomputing (scripts/precompute_vlm_embeddings.py, run once in envs/sim, which
+    has `transformers` installed) and caching to disk lets envs WITHOUT transformers
+    (e.g. envs/dppo, which manages torch manually outside pyproject.toml and is risky
+    to `uv sync` while a training run is active in it -- see
+    docs/cross_category_specialist_log.md) still call embed() using only numpy,
+    as long as every category they need was precomputed.
+    """
+    global _disk_cache_loaded
+    if _disk_cache_loaded:
+        return
+    _disk_cache_loaded = True
+    if _CACHE_PATH.exists():
+        data = np.load(_CACHE_PATH)
+        for cat in data.files:
+            _embed_cache[cat] = data[cat]
 
 
 def _load_clip():
@@ -74,11 +97,16 @@ def _get_projection(clip_dim: int) -> np.ndarray:
 def embed(category: str) -> np.ndarray:
     """(VLM_EMBED_DIM,) float32 conditioning vector for a registered category name.
 
+    Checks the on-disk precomputed cache first (numpy-only, no transformers/torch
+    needed -- see _load_disk_cache); only falls back to a live CLIP forward pass
+    (needs transformers) if the category isn't cached yet.
+
     Raises FileNotFoundError if no reference frame has been captured for this
     category yet (gentle_manip/assets/category_reference_frames/<category>.png) --
     a configuration gap to fix (capture + save a frame), not something to
     silently zero-fill.
     """
+    _load_disk_cache()
     if category in _embed_cache:
         return _embed_cache[category]
 

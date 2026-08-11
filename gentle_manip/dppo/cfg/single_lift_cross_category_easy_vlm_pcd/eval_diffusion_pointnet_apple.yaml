@@ -1,0 +1,117 @@
+# [dppo-eval] Evaluate the Track B VLM-CONDITIONED cross-category (apple+avocado)
+# policy on APPLE -- HELD-IN eval. Compare against unconditioned 39.0% and Track A
+# (registry-conditioned) held-in apple result.
+# See pre_diffusion_pointnet.yaml in this dir for the conditioning rationale.
+# Used by: third_party/dppo/script/run.py (EvalHarnessAgent) via gentle_manip.dppo.train
+# Status: experimental
+#
+# env.specific.category="apple" + category_embed_source="vlm" resolves
+# gentle_manip.dppo.vlm_embedding.embed("apple") from the precomputed disk cache
+# (no live CLIP forward pass needed at eval time either).
+#
+# Start the sim server BEFORE running eval:
+#   env -u PYTHONPATH uv run --project envs/sim python -m gentle_manip.scripts.serl_sim_server \
+#       --experiment single_lift_apple_rigid_easy --view student \
+#       --num-envs 5 --render-rgb --subprocess --port 5570
+#
+# Then run eval:
+#   env -u PYTHONPATH uv run --project envs/dppo python -m gentle_manip.dppo.train \
+#       --config-name eval_diffusion_pointnet_apple \
+#       --config-path gentle_manip/dppo/cfg/single_lift_cross_category_easy_vlm_pcd \
+#       base_policy_path=<path/to/checkpoint.pt>
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${logdir}
+_target_: gentle_manip.dppo.eval_agent.EvalHarnessAgent
+
+name: ${env_name}_eval_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
+logdir: ${eval_base:${base_policy_path}}/eval_apple/${now:%Y-%m-%d}_${now:%H-%M-%S}
+base_policy_path: ???
+normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_cross_category_easy_vlm_pcd/normalization.npz
+experiment: single_lift_apple_rigid_easy
+
+seed: 42
+device: cuda:0
+env_name: single_lift_apple_rigid_easy_pcd
+obs_dim: 8
+action_dim: 7
+category_embed_dim: 24
+denoising_steps: 20
+ft_denoising_steps: 0
+cond_steps: 2
+pc_cond_steps: 1
+n_points: 1024
+visual_feature_dim: 256
+horizon_steps: 4
+act_steps: 4
+use_ddim: False
+ddim_steps: ${ft_denoising_steps}
+
+n_episodes: 100
+scene_group_size: 4
+record_batches: null
+n_steps: 100
+render_num: 5
+
+env:
+  n_envs: 5
+  name: ${env_name}
+  env_type: genesis
+  max_episode_steps: 400
+  reset_at_iteration: False
+  save_video: True
+  use_image_obs: True
+  best_reward_threshold_for_success: 0.2
+  specific:
+    obs_steps: ${cond_steps}
+    act_steps: ${act_steps}
+    normalization_path: ${normalization_path}
+    port: 5570
+    obs_keys: [ee_pos, ee_quat, gripper_width]
+    pointcloud_key: point_cloud
+    category: apple
+    category_embed_source: vlm
+
+shape_meta:
+  obs:
+    state:
+      shape: [8]
+    point_cloud:
+      shape: [1024, 3]
+  action:
+    shape: [7]
+
+wandb: null
+
+model:
+  _target_: model.diffusion.diffusion_eval.DiffusionEval
+  ft_denoising_steps: ${ft_denoising_steps}
+  predict_epsilon: True
+  denoised_clip_value: 1.0
+  randn_clip_value: 3
+  use_ddim: ${use_ddim}
+  ddim_steps: ${ddim_steps}
+  network_path: ${base_policy_path}
+  network:
+    _target_: gentle_manip.dppo.pointnet_diffusion.PointNetDiffusionMLP
+    action_dim: ${action_dim}
+    horizon_steps: ${horizon_steps}
+    cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+    category_embed_dim: ${category_embed_dim}
+    pc_cond_steps: ${pc_cond_steps}
+    visual_feature_dim: ${visual_feature_dim}
+    time_dim: 16
+    mlp_dims: [512, 512, 512]
+    activation_type: ReLU
+    residual_style: True
+    pointnet:
+      in_channels: 3
+      use_layernorm: True
+      final_norm: layernorm
+  horizon_steps: ${horizon_steps}
+  obs_dim: ${obs_dim}
+  action_dim: ${action_dim}
+  denoising_steps: ${denoising_steps}
+  device: ${device}
