@@ -58,7 +58,7 @@ env:
   env_type: genesis
   max_episode_steps: 400
   reset_at_iteration: False
-  save_video: False        # no per-episode video needed for data collection
+  save_video: True         # one clip per attempt (success AND failure), render/batchNN_envM.mp4
   use_image_obs: True
   best_reward_threshold_for_success: 0.2
   specific:

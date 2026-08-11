@@ -95,13 +95,23 @@ class RolloutCollectorAgent(EvalAgent):
         target_n = int(self.cfg.get("target_episodes", 150))
         policy = _DiffusionPolicy(self.model, self.obs_keys, self.device, self.act_steps)
 
+        # Per-trajectory video, same convention as the canonical eval harness (run_eval):
+        # ONE clip per episode attempt (success AND failure -- failures are valuable too,
+        # for inspecting collection quality), render/batchNN_envM.mp4 under this run's logdir.
+        render_dir = Path(self.logdir) / "render"
+        save_video = bool(self.cfg.env.get("save_video", True))
+        if save_video:
+            render_dir.mkdir(parents=True, exist_ok=True)
+
         saved: list = []
         attempts = 0
         for i in range(spec.n_batches):
             if spec.scene_group_size > 0 and i % spec.scene_group_size == 0 and hasattr(self.venv, "randomize_scene"):
                 self.venv.randomize_scene(spec.scene_seed_for_group(i // spec.scene_group_size))
             self.venv.seed([spec.seed_for_batch(i)] * self.n_envs)
-            obs = self.venv.reset_arg(None)
+            options = ([{"video_path": str(render_dir / f"batch{i:02d}_env{j}.mp4")}
+                       for j in range(self.n_envs)] if save_video else None)
+            obs = self.venv.reset_arg(options)
             policy.reset()
             info = {}
             for _t in range(spec.max_policy_steps):
