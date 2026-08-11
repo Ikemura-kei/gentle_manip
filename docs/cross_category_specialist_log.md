@@ -1022,3 +1022,24 @@ tonight's raw-demo merge, eval held-in on all three + zero-shot on kiwi
 (never touched by rollout collection either) -- directly comparable to
 tonight's baseline (39%/31%/4.0%, though now with 3 held-in categories instead
 of 2) and to Track A/B's conditioned results.
+
+## Bug found + fixed: rollout collector wasn't actually saving video (config flag was a no-op)
+
+User caught this: `rollout_collector.py`'s `RolloutCollectorAgent.run()` called
+`self.venv.reset_arg(None)` unconditionally -- the `save_video: True/False` cfg
+field only affected `EvalAgent.__init__`'s assertion checks, never actually got
+wired into a `video_path` per env like `run_eval` does. Fixed: build
+`render_dir = Path(self.logdir) / "render"` and pass
+`{"video_path": ...}` options per env per batch when `save_video` is set (mirrors
+`gentle_manip/evaluation/harness.py::run_eval`'s exact convention) -- one clip per
+ATTEMPT (success and failure both, since failed rollouts are valuable to inspect
+too), `render/batchNN_envM.mp4`. Smoke-tested: confirmed 5 clips written for a
+5-attempt batch.
+
+**Stopped and relaunched all 5 in-flight collections** (apple/avocado/pear
+rollouts + mushroom-easy/egg-easy demos) with video now enabled --
+`--record-video` added to the demo-collection commands, the fixed
+`collect_rollouts.yaml` (save_video: True) for the rollout collections. Small
+time cost (each was 15-40% through) but full compliance with the "save videos
+for evaluation rollouts and demos" requirement going forward. All 5 running
+again in parallel, GPU still comfortably light (~3.4GB of 7.66GB total).
