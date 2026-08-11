@@ -1043,3 +1043,25 @@ rollouts + mushroom-easy/egg-easy demos) with video now enabled --
 time cost (each was 15-40% through) but full compliance with the "save videos
 for evaluation rollouts and demos" requirement going forward. All 5 running
 again in parallel, GPU still comfortably light (~3.4GB of 7.66GB total).
+
+## Fifth data point: mushroom-easy -- second-best result, first different topology
+
+Mushroom-easy (85.1% collection SR, the highest of any category this session)
+plateaued at epoch 470 (best val loss 0.0330@170). Canonical eval on the nearest
+checkpoint (`state_300.pt`, val 0.0364): **63.0% success (63/100)**,
+`ever_success_rate` 71%, `ever_in_band_rate` 73%, `hold_failure_gap` 0.02.
+Approx 95% CI [53.5%, 72.5%].
+
+**Second-best result of the entire session, just behind apple's 65.0%** --
+and the first category with a genuinely different shape TOPOLOGY (cap+stem,
+not a round/oval fruit) to clear this well. Reinforces that "large + no
+gripper-margin flag" generalizes beyond round fruit shapes specifically:
+mushroom is smaller (33x32x35mm) than apple/avocado/pear but STILL landed
+near the top, consistent with kiwi's earlier result (43x46x60mm, also no
+margin flag, 52%) -- comfortable grasp margin appears to matter more than
+absolute size once above some minimum, though the "why does apple/mushroom
+beat kiwi/avocado" question from the four-object spectrum remains not fully
+resolved (see earlier section).
+
+Updated spectrum: **apple 65.0% > mushroom 63.0% > avocado 52.0% ≈ kiwi
+52.0% > pear 44.0% >> cherry 25.7%.**
