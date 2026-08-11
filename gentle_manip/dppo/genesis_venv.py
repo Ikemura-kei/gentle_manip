@@ -23,7 +23,8 @@ import numpy as np
 class GenesisMultiStepVecEnv:
     def __init__(self, client, obs_keys, n_envs: int, n_obs_steps: int, n_action_steps: int,
                  max_episode_steps: int, obs_min, obs_max, action_min, action_max,
-                 pointcloud_key: Optional[str] = None, category_embed: Optional[np.ndarray] = None):
+                 pointcloud_key: Optional[str] = None, category_embed: Optional[np.ndarray] = None,
+                 record_raw: bool = False):
         self.client = client                       # SimEnvClient (batched N-env rpc)
         self.obs_keys = list(obs_keys)             # proprio/state keys -> normalized "state"
         self.pointcloud_key = pointcloud_key       # e.g. "point_cloud" -> raw xyz modality
@@ -49,6 +50,15 @@ class GenesisMultiStepVecEnv:
         self._cnt = np.zeros(self.n_envs, np.int64)
         from gentle_manip.evaluation.video import MultiClipRecorder
         self._rec = MultiClipRecorder()            # per-env clips (per-trajectory eval video)
+        # RLDG-style rollout recording (gentle_manip/dppo/rollout_collector.py): opt-in,
+        # zero effect on every existing eval/finetune caller (default False). Captures the
+        # TRUE per-physical-sim-step raw obs/action (not the policy-chunk-level values
+        # available to an outside caller of step()) -- this is the only place with access
+        # to each sub-step of an executed action chunk, since step() sums/discards them
+        # after summing reward for the chunk.
+        self.record_raw = bool(record_raw)
+        self._raw_ep_buf: Optional[List[list]] = ([[] for _ in range(self.n_envs)]
+                                                   if self.record_raw else None)
 
     # ── normalization ──────────────────────────────────────────────────────────
     def _raw_state(self, obs: dict) -> np.ndarray:  # SimEnvClient obs -> (n_envs, obs_dim)
@@ -132,9 +142,18 @@ class GenesisMultiStepVecEnv:
         s_max, s_sum, s_cnt = None, None, 0         # von-Mises over the chunk (soft body)
         s_t10, s_t20 = None, None                   # top-10%/20% particle tail (chunk-max)
         for t in range(a.shape[1]):                 # execute the action chunk, sum reward
-            obs, r, _done, sub_info = self.client.step(self._unnorm_action(a[:, t]))
+            raw_action = self._unnorm_action(a[:, t])
+            obs, r, _done, sub_info = self.client.step(raw_action)
             reward += np.asarray(r, np.float32).reshape(self.n_envs)
             success = np.array([bool(d.get("success", False)) for d in sub_info])
+            if self.record_raw:
+                for j in range(self.n_envs):
+                    rec = {k: np.asarray(obs[k], np.float32)[j] for k in self.obs_keys}
+                    if self.pointcloud_key is not None:
+                        rec[self.pointcloud_key] = np.asarray(obs[self.pointcloud_key], np.float32)[j]
+                    rec["action"] = np.asarray(raw_action, np.float32)[j]
+                    rec["success"] = bool(success[j])
+                    self._raw_ep_buf[j].append(rec)
             if sub_info and "obj_z" in sub_info[0]:
                 obj_z = np.array([d["obj_z"] for d in sub_info], np.float32)
             if sub_info and "stress_max" in sub_info[0]:
@@ -165,8 +184,20 @@ class GenesisMultiStepVecEnv:
         if bool(truncated.all()):                   # synchronous horizon -> auto-reset all
             self._rec.flush()                       # write this episode's per-env clips; keep recording
             info["final_obs"] = obs_out
+            if self.record_raw:
+                info["raw_episodes"] = self.drain_raw_episodes()   # one list-of-steps per env
             obs_out = self._reset_all()
         return obs_out, reward, terminated, truncated, info
+
+    def drain_raw_episodes(self) -> List[list]:
+        """Pop and reset the per-env raw-trajectory buffers (only non-empty when
+        record_raw=True). Each env's list is a sequence of per-physical-step dicts
+        (one entry per obs_key + pointcloud_key + "action" + "success")."""
+        if not self.record_raw:
+            return [[] for _ in range(self.n_envs)]
+        eps = self._raw_ep_buf
+        self._raw_ep_buf = [[] for _ in range(self.n_envs)]
+        return eps
 
     def render(self, *args, **kwargs):
         try:
@@ -184,7 +215,8 @@ class GenesisMultiStepVecEnv:
 
 def build_genesis_venv(num_envs, obs_steps, act_steps, max_episode_steps, normalization_path,
                        obs_keys=None, pointcloud_key=None, host="127.0.0.1", port=5570,
-                       connect_timeout=240.0, category=None, category_embed_source="registry"):
+                       connect_timeout=240.0, category=None, category_embed_source="registry",
+                       record_raw=False):
     """Factory used by DPPO's make_async (env_type="genesis"): connect a SimEnvClient to a
     running sim server, load demo normalization, and wrap it as a DPPO VectorEnv.
 
@@ -201,6 +233,10 @@ def build_genesis_venv(num_envs, obs_steps, act_steps, max_episode_steps, normal
     checkpoint's training dataset was built with, via convert_demos.py --embed-source) and
     feeds that fixed vector to every env/step of this eval run as cond["category_embed"].
     category=None (default) = no category conditioning, for the unconditioned baseline's eval.
+
+    record_raw: forwarded to GenesisMultiStepVecEnv -- opt-in RLDG-style raw-trajectory
+    capture (gentle_manip/dppo/rollout_collector.py). False (default) = zero effect on
+    every other caller (training/eval).
     """
     from gentle_manip.envs.rpc import SimEnvClient
     from gentle_manip.dppo.convert_demos import STATE_VIEW, PROPRIO_VIEW
@@ -223,4 +259,4 @@ def build_genesis_venv(num_envs, obs_steps, act_steps, max_episode_steps, normal
         n_obs_steps=obs_steps, n_action_steps=act_steps, max_episode_steps=max_episode_steps,
         obs_min=stats["obs_min"], obs_max=stats["obs_max"],
         action_min=stats["action_min"], action_max=stats["action_max"],
-        pointcloud_key=pointcloud_key, category_embed=category_embed)
+        pointcloud_key=pointcloud_key, category_embed=category_embed, record_raw=record_raw)
