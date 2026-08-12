@@ -1065,3 +1065,37 @@ resolved (see earlier section).
 
 Updated spectrum: **apple 65.0% > mushroom 63.0% > avocado 52.0% ≈ kiwi
 52.0% > pear 44.0% >> cherry 25.7%.**
+
+## Sixth data point: egg-easy -- smooth ellipsoid, near the bottom of the spectrum
+
+Egg-easy (63.0% collection SR) plateaued at epoch 600 (best val loss
+0.0242@300, exactly the saved checkpoint). Canonical eval on `state_300.pt`:
+**43.0% success (43/100)**, `ever_success_rate` 44%, `hold_failure_gap` 0.0
+(clean hold, no drop-after-lift pattern). Approx 95% CI [33.3%, 52.7%].
+
+Close to pear's 44.0% -- egg (smooth, elongated single-axis ellipsoid) and
+pear (asymmetric teardrop) both land in the same "moderate" tier, well below
+apple/mushroom's 63-65% but still far above cherry's 25.7%.
+
+## Six-object task-difficulty spectrum, canonical eval n=100 each (final)
+
+| Object | Size (mm) | Shape | Grasp-margin flag | Collection SR | Solo eval SR |
+|---|---|---|---|---|---|
+| apple | 65x60x65 | round | severe (45->20deg) | 43.5% | **65.0%** |
+| mushroom | 33x32x35 | cap+stem | none (full 45deg) | 85.1% | **63.0%** |
+| avocado | 62x95x61 | oval | severe (45->20deg) | 18.1% | 52.0% |
+| kiwi | 43x46x60 | oval | none (full 45deg) | 52.6% | 52.0% |
+| pear | 62x52x65 | teardrop | moderate (45->30deg) | 44.7% | 44.0% |
+| egg | 44.6x58x45.1 | ellipsoid | none (full 45deg) | 63.0% | 43.0% |
+| cherry (wide DR) | 20x17x20 | round | n/a | ~80% | 25.7% (n=3 mean) |
+
+**Six categories, six different results, still no single clean rule** for the
+fine ordering -- collection SR doesn't predict eval SR (mushroom's 85.1%
+collection SR gave 63.0% eval, egg's 63.0% collection SR gave only 43.0% eval);
+grasp-margin flag doesn't predict it either (mushroom/kiwi/egg all have "none"
+but span 43-63%). **What DOES hold cleanly across all six: every "easy" object
+(narrow DR + reasonably-sized) beats cherry (tiny + wide DR) by 17-40 points,
+with zero exceptions.** This remains the one fully robust, actionable finding
+from the difficulty-spectrum work -- task/object selection matters enormously,
+but predicting exactly HOW MUCH for a novel object still requires an actual
+eval, not a lookup table.
