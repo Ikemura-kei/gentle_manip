@@ -1,28 +1,82 @@
-"""Orchestrate rigid-body demo collection across all registered food categories,
+"""Orchestrate demo collection across many food categories (rigid OR soft/MPM),
 one collect_demos_synth_v2.py subprocess per category, with resilience for an
-unattended multi-hour run: per-category timeout (so one bad category can't eat
-the whole budget), retry-once on crash, and a running summary written after every
-category so progress survives a mid-run interruption.
+unattended multi-hour/multi-day run: per-category timeout (so one bad category
+can't eat the whole budget), retry-on-crash with automatic --resume-dir (so a
+retry -- or a from-scratch RE-INVOCATION of this whole script after an external
+kill -- continues an existing partial collection instead of discarding it and
+starting over), and a running summary written after every category so progress
+survives a mid-run interruption. gentle_manip 25-category speed/scale pass
+(2026-08-13): generalized from rigid-only via --experiment-template (any
+`{category}` pattern, e.g. "single_lift_{category}_soft_easy").
 
-Usage:
+Usage (rigid, original pattern):
     uv run --project envs/sim python -m gentle_manip.scripts.collect_rigid_cross_category \
         --categories mushroom raspberry apple pear grape kiwi cherry blueberry egg avocado \
         --n-episodes 80 --n-envs 5 --maxfevals 800 --out-dir dataset/demos
+
+Usage (soft/MPM, 25-category fragile-food campaign):
+    uv run --project envs/sim python -m gentle_manip.scripts.collect_rigid_cross_category \
+        --experiment-template "single_lift_{category}_soft_easy" \
+        --categories tofu shiitake fish_raw ... --n-episodes 50 --n-envs 5
+
+Re-running the SAME command later (e.g. after a crash or an intentional pause)
+is safe and cheap: every category already at/above --n-episodes is skipped
+entirely, and every partially-collected category resumes via --resume-dir
+instead of re-collecting from episode 0.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import pickle
 import signal
 import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 REPO = Path(__file__).resolve().parents[2]
 MIN_AVAILABLE_MEM_GB = 4.0   # refuse to launch a new category below this (defense in depth
                             # on top of the process-group-kill fix -- see _run_with_group_kill)
+
+
+def _episode_count(run_dir: Path) -> int:
+    """Episodes already saved in a collect_demos_synth_v2.py run dir: data.pkl
+    (if merged) plus any leftover un-merged shard_*.pkl (if a prior attempt was
+    killed before its final merge). Lightweight, no genesis/torch imports --
+    the orchestrator stays a plain, fast-starting process."""
+    total = 0
+    data_path = run_dir / "data.pkl"
+    if data_path.exists():
+        with open(data_path, "rb") as f:
+            total += len(pickle.load(f)["episodes"])
+    for p in run_dir.glob("shard_*.pkl"):
+        with open(p, "rb") as f:
+            total += len(pickle.load(f)["episodes"])
+    return total
+
+
+def _find_resumable_run(cat_out: Path, target: int) -> Optional[Path]:
+    """Best existing run dir for this category to resume into, or None if there
+    isn't one worth resuming (no prior dir, or the closest one is already at
+    target -- a fresh collect_one call will just report success from it).
+    Picks the dir with the MOST episodes already saved, not the most recent by
+    mtime -- an early smoke-test dir must not be preferred over a much further-
+    along real run just because it happens to sort later."""
+    if not cat_out.exists():
+        return None
+    best_dir, best_n = None, -1
+    for d in cat_out.iterdir():
+        if not d.is_dir():
+            continue
+        n = _episode_count(d)
+        if n > best_n:
+            best_dir, best_n = d, n
+    if best_dir is None or best_n <= 0:
+        return None
+    return best_dir
 
 
 def _available_mem_gb() -> float:
@@ -71,13 +125,36 @@ def collect_one(category: str, n_episodes: int, n_envs: int, maxfevals: int,
                 shard_size: int = 5, disturbance_prob: float = 0.0,
                 disturbance_max_m: float = 0.02, disturbance_phase: list = None,
                 enable_regrasp_retry: bool = False,
-                max_regrasp_retries: int = 1) -> dict:
-    exp = f"single_lift_{category}_rigid"
+                max_regrasp_retries: int = 1,
+                experiment_template: str = "single_lift_{category}_rigid",
+                scene_dr_every: int = 1) -> dict:
+    exp = experiment_template.format(category=category)
     # collect_demos_synth_v2.py's own _make_run_dir() appends task_name (== exp,
     # for these single-object experiments) as a subdirectory of --out-dir itself --
     # pass the TOP-LEVEL dir here, not out_dir/exp, or the task-name dir nests twice.
     cat_out = out_dir / exp
     log_path = log_dir / f"{category}.log"
+
+    # gentle_manip 25-category speed/scale pass (2026-08-13): resume a partial
+    # collection instead of starting over -- covers BOTH an in-loop crash retry
+    # AND a from-scratch re-invocation of this whole orchestrator script after
+    # an external kill (same code path, same lookup, deliberately unified).
+    resume_dir = _find_resumable_run(cat_out, n_episodes)
+    if resume_dir is not None:
+        n_have = _episode_count(resume_dir)
+        if n_have >= n_episodes:
+            print(f"[orchestrator] {category}: already complete ({n_have}/{n_episodes} "
+                 f"episodes in {resume_dir}) -- skipping, no subprocess launched.", flush=True)
+            return {"category": category, "attempts": 0, "ok": True, "elapsed_s": 0.0,
+                    "saved": n_have, "attempted": n_have, "success_rate": None,
+                    "data_path": str(resume_dir / "data.pkl"), "complete": True,
+                    "resumed": True}
+        print(f"[orchestrator] {category}: resuming {resume_dir} "
+             f"({n_have}/{n_episodes} episodes already saved)", flush=True)
+
+    # NOTE: deliberately does NOT bake --resume-dir in here -- resume_dir can
+    # still change (from None to a freshly-discovered dir) between attempts
+    # inside the loop below, so it's appended fresh per-attempt instead.
     cmd = [
         "uv", "run", "--project", "envs/sim", "--no-sync", "python",
         "grasp_synthesis/collect_demos_synth_v2.py",
@@ -87,6 +164,7 @@ def collect_one(category: str, n_episodes: int, n_envs: int, maxfevals: int,
         "--maxfevals", str(maxfevals),
         "--out-dir", str(out_dir),
         "--shard-size", str(shard_size),
+        "--scene-dr-every", str(scene_dr_every),
     ]
     if disturbance_prob > 0:
         cmd += ["--disturbance-prob", str(disturbance_prob),
@@ -114,54 +192,58 @@ def collect_one(category: str, n_episodes: int, n_envs: int, maxfevals: int,
     sub_env.pop("PYTHONPATH", None)
 
     result = {"category": category, "attempts": 0, "ok": False, "elapsed_s": 0.0,
-             "saved": 0, "attempted": 0, "success_rate": None, "data_path": None}
-    # Captured ONCE, before any attempt -- see the call_start filter below. Using
-    # time.time() (not monotonic) deliberately: compared directly against
+             "saved": 0, "attempted": 0, "success_rate": None, "data_path": None,
+             "complete": False, "resumed": resume_dir is not None}
+    # Captured ONCE, before any attempt -- only used to find a FRESH run dir (no
+    # prior --resume-dir case, i.e. this category's very first attempt ever).
+    # Using time.time() (not monotonic) deliberately: compared directly against
     # st_mtime, which is also wall-clock.
     call_start = time.time()
-    for attempt in range(2):   # one retry on crash
+    # gentle_manip 25-category speed/scale pass (2026-08-13): bumped 2->4 retries
+    # given longer unattended runs are now expected; cheap because every retry
+    # resumes via --resume-dir instead of re-collecting from episode 0.
+    for attempt in range(4):
         result["attempts"] = attempt + 1
         t0 = time.time()
-        ok = _run_with_group_kill(cmd, REPO, log_path, timeout_s, sub_env)
-        result["elapsed_s"] = time.time() - t0
+        cur_cmd = cmd + (["--resume-dir", str(resume_dir)] if resume_dir is not None else [])
+        ok = _run_with_group_kill(cur_cmd, REPO, log_path, timeout_s, sub_env)
+        result["elapsed_s"] += time.time() - t0
 
-        # Regardless of ok/crash, check whether a usable data.pkl got written
-        # (shards are merged incrementally in some code paths -- best effort).
-        # Sort by mtime, NOT path string: run dirs are named "<date>-<3 random
-        # lowercase letters>" (_make_run_dir), so a lexicographic sort is only
-        # chronological within a single run -- across multiple runs on the same
-        # day (e.g. a pilot + this full run) it can pick a STALE, smaller dataset
-        # purely because its random suffix sorts later ("sdf" > "hki"). Confirmed
-        # this happened for tofu: a 6-episode pilot's dir outsorted the real
-        # 50-episode run's dir.
-        #
-        # ALSO filter to data.pkl written AFTER call_start: without this, a
-        # category with an EARLIER, unrelated, already-complete run (e.g. a plain
-        # collection run before a disturbance-injected one for the same category)
-        # has its stale data.pkl picked up and reported as THIS invocation's
-        # result even when this invocation's own run timed out and never merged
-        # its shards -- confirmed happening for cherry's disturbance-injected run
-        # (killed at the exact timeout boundary, shards never merged, but the
-        # plain run's data.pkl from ~2 hours earlier was silently reported as
-        # "saved=250" for the disturbed attempt instead).
-        run_dirs = (sorted((p for p in cat_out.glob("*/data.pkl") if p.stat().st_mtime >= call_start),
-                          key=lambda p: p.stat().st_mtime)
-                    if cat_out.exists() else [])
-        if run_dirs:
-            data_path = run_dirs[-1]
-            result["data_path"] = str(data_path)
-            stats_path = data_path.parent / "stats.yaml"
+        # Regardless of ok/crash, check whether a usable data.pkl / shards got
+        # written. If we already had a resume_dir, that's exactly the dir to
+        # re-check (its --resume-dir target). Otherwise (this category's first-
+        # ever attempt), find whatever new dir this attempt created: sort by
+        # mtime, NOT path string (run dirs are "<date>-<3 random lowercase
+        # letters>", so lexicographic sort is only chronological within a single
+        # run -- a stale pilot dir's random suffix can sort AFTER the real run's,
+        # see the tofu incident this fixed originally), and filter to dirs
+        # created after call_start so an unrelated older run for the same
+        # category isn't mistaken for this attempt's output.
+        if resume_dir is None:
+            candidates = (sorted((d for d in cat_out.iterdir()
+                                  if d.is_dir() and d.stat().st_mtime >= call_start),
+                                 key=lambda d: d.stat().st_mtime)
+                         if cat_out.exists() else [])
+            if candidates:
+                resume_dir = candidates[-1]
+
+        if resume_dir is not None:
+            n_saved = _episode_count(resume_dir)
+            result["data_path"] = str(resume_dir / "data.pkl")
+            result["saved"] = n_saved
+            stats_path = resume_dir / "stats.yaml"
             if stats_path.exists():
                 import yaml
                 stats = yaml.safe_load(stats_path.read_text())
-                result["saved"] = stats.get("episodes_saved", 0)
                 result["attempted"] = stats.get("total_attempts", 0)
                 result["success_rate"] = stats.get("success_rate")
-            result["ok"] = result["saved"] > 0
-            if result["ok"]:
+            result["ok"] = n_saved > 0
+            result["complete"] = n_saved >= n_episodes
+            if result["complete"]:
                 break
-        # A clean subprocess exit with zero usable demos is NOT success -- fall
-        # through to the retry rather than declaring victory on an empty run.
+        # Neither a clean-but-empty exit nor a partial (< n_episodes) collection
+        # counts as done -- fall through to the next attempt, which will now
+        # --resume-dir into whatever was just (partially) collected.
     return result
 
 
@@ -192,6 +274,14 @@ def main() -> None:
                     help="lift-phase failure detection + regrasp passthrough to "
                          "collect_demos_synth_v2.py (off by default).")
     ap.add_argument("--max-regrasp-retries", type=int, default=1)
+    ap.add_argument("--experiment-template", type=str, default="single_lift_{category}_rigid",
+                    help="`{category}` is substituted per item in --categories, e.g. "
+                         "'single_lift_{category}_soft_easy' for the MPM/soft roster "
+                         "(default: the original rigid pattern, unchanged behavior).")
+    ap.add_argument("--scene-dr-every", type=int, default=1,
+                    help="passthrough to collect_demos_synth_v2.py (default 1, its own default). "
+                         "MPM categories may want a higher value to amortize the slower "
+                         "scene-rebuild+settle cost across more episodes per rebuild.")
     args = ap.parse_args()
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -222,7 +312,9 @@ def main() -> None:
                         disturbance_max_m=args.disturbance_max_m,
                         disturbance_phase=args.disturbance_phase,
                         enable_regrasp_retry=args.enable_regrasp_retry,
-                        max_regrasp_retries=args.max_regrasp_retries)
+                        max_regrasp_retries=args.max_regrasp_retries,
+                        experiment_template=args.experiment_template,
+                        scene_dr_every=args.scene_dr_every)
         results.append(r)
         print(f"[orchestrator] {cat}: ok={r['ok']} saved={r['saved']}/{r['attempted']} "
              f"success_rate={r['success_rate']} elapsed={r['elapsed_s']:.0f}s attempts={r['attempts']}",

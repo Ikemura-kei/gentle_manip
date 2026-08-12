@@ -90,10 +90,27 @@ def _git_commit() -> str:
 
 # ── Synthesis ─────────────────────────────────────────────────────────────────
 
-def _synth_bounds(obj_pos: np.ndarray):
-    """Compute CMA-ES search bounds from object position."""
-    t_lb_xy = (obj_pos[:2] - 1.5 * OBJ_SIZE[:2]).tolist()
-    t_ub_xy = (obj_pos[:2] + 1.5 * OBJ_SIZE[:2]).tolist()
+def _mesh_half_extent(mesh_path: str) -> np.ndarray:
+    """(3,) AABB half-extent of the ACTUAL on-disk mesh CMA-ES will search against.
+
+    gentle_manip extension (2026-08-13, 25-category size range): OBJ_SIZE was a
+    fixed mushroom-scale (~3-4cm) constant, too tight for a 10-15cm chunk (beef,
+    watermelon) and unnecessarily loose for a ~2-3cm shrimp/blueberry. Falls back
+    to OBJ_SIZE on any load failure rather than crashing the whole batch.
+    """
+    try:
+        import trimesh
+        mesh = trimesh.load(str(mesh_path), process=False, force="mesh")
+        return np.asarray(mesh.extents, dtype=np.float64) / 2.0
+    except Exception as e:
+        print(f"  [warn] _mesh_half_extent({mesh_path}) failed ({e}); falling back to OBJ_SIZE")
+        return OBJ_SIZE
+
+
+def _synth_bounds(obj_pos: np.ndarray, obj_half_size: np.ndarray = OBJ_SIZE):
+    """Compute CMA-ES search bounds from object position and its actual mesh size."""
+    t_lb_xy = (obj_pos[:2] - 1.5 * obj_half_size[:2]).tolist()
+    t_ub_xy = (obj_pos[:2] + 1.5 * obj_half_size[:2]).tolist()
     tcp_z_min = float(obj_pos[2]) + FINGER_TO_TCP_Z - 0.04
     tcp_z_max = float(obj_pos[2]) + 0.25
     lb = t_lb_xy + [tcp_z_min, -1.0 * np.pi, -0.12 * np.pi, -0.49 * np.pi, 0.01]
@@ -819,11 +836,22 @@ def _write_shard(run_dir: Path, episodes: List[dict],
 
 
 def _merge_shards(run_dir: Path) -> Optional[Path]:
+    """Merge shard_*.pkl into data.pkl. If a data.pkl ALREADY exists (resume of a
+    previously-completed run being topped up further -- gentle_manip 25-category
+    speed pass, 2026-08-13), its episodes are folded in first so resuming never
+    loses prior work, regardless of whether the previous invocation crashed before
+    or after its own merge."""
     shards = sorted(run_dir.glob("shard_*.pkl"))
-    if not shards:
+    prior_path = run_dir / "data.pkl"
+    if not shards and not prior_path.exists():
         return None
     all_eps: List[dict] = []
     meta: Optional[dict] = None
+    if prior_path.exists():
+        with open(prior_path, "rb") as f:
+            d = pickle.load(f)
+        meta = dict(d["meta"])
+        all_eps.extend(d["episodes"])
     for p in shards:
         with open(p, "rb") as f:
             d = pickle.load(f)
@@ -842,6 +870,29 @@ def _merge_shards(run_dir: Path) -> Optional[Path]:
     return out
 
 
+def _count_existing_episodes(run_dir: Path) -> Tuple[int, int]:
+    """(episodes already saved, next free shard index) for --resume-dir.
+
+    Sums data.pkl's episode count (if a prior complete merge exists) plus every
+    leftover shard_*.pkl's episode count (if the previous invocation was killed
+    before its final merge) -- covers both crash points without needing to run
+    an actual merge just to count."""
+    total = 0
+    data_path = run_dir / "data.pkl"
+    if data_path.exists():
+        with open(data_path, "rb") as f:
+            d = pickle.load(f)
+        total += len(d["episodes"])
+    max_idx = -1
+    for p in sorted(run_dir.glob("shard_*.pkl")):
+        with open(p, "rb") as f:
+            d = pickle.load(f)
+        total += len(d["episodes"])
+        idx = int(p.stem.split("_")[1])
+        max_idx = max(max_idx, idx)
+    return total, max_idx + 1
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -857,6 +908,13 @@ def main() -> None:
     p.add_argument("--out-dir",    type=Path, default=Path("dataset") / "demos")
     p.add_argument("--shard-size", type=int, default=5,
                    help="episodes per shard file (merged into data.pkl at end)")
+    p.add_argument("--resume-dir", type=Path, default=None,
+                   help="crash recovery (gentle_manip 25-category speed pass, 2026-08-13): "
+                        "continue an existing run dir instead of creating a fresh one. Counts "
+                        "episodes already in data.pkl (if merged) plus any leftover un-merged "
+                        "shard_*.pkl (if the previous invocation was killed before merging), "
+                        "and only collects the remainder toward --n-episodes. Must be an "
+                        "existing directory previously created by this script.")
     p.add_argument("--description", type=str, default="",
                    help="free-text annotation saved in config.yaml")
 
@@ -968,6 +1026,7 @@ def main() -> None:
         return w, sdr, _resolve_actual_mesh(spec_dr, deform_dir)
 
     worker, scene_dr, actual_mesh = _make_worker()
+    obj_half_size = _mesh_half_extent(actual_mesh)
     if do_scene_dr:
         print(f"  scene DR ON (every {args.scene_dr_every} batch(es)) — deformed meshes → {deform_dir}")
 
@@ -982,18 +1041,26 @@ def main() -> None:
     print(f"  Mesh: {Path(actual_mesh).name}")
 
     # ── Output dir + config snapshot ──
-    run_dir  = _make_run_dir(args.out_dir, task_name)
+    if args.resume_dir is not None:
+        if not args.resume_dir.is_dir():
+            raise SystemExit(f"--resume-dir {args.resume_dir} does not exist")
+        run_dir = args.resume_dir
+        total_saved, shard_idx = _count_existing_episodes(run_dir)
+        print(f"  RESUME → {run_dir.resolve()}  ({total_saved} episode(s) already saved, "
+              f"continuing at shard {shard_idx})")
+    else:
+        run_dir     = _make_run_dir(args.out_dir, task_name)
+        total_saved = 0
+        shard_idx   = 0
     cfg_path = run_dir / "config.yaml"
     with open(cfg_path, "w") as f:
         yaml.safe_dump(collection_config, f, sort_keys=False)
     print(f"  Config → {cfg_path.resolve()}")
     print(f"  Data   → {run_dir.resolve()}/data.pkl  (shards flushed every {args.shard_size} ep)")
 
-    total_saved  = 0
     total_failed = 0
     batch_idx   = 0
     shard_buf:  List[dict] = []
-    shard_idx   = 0
     t0 = time.time()
 
     while total_saved < args.n_episodes:
@@ -1004,6 +1071,7 @@ def main() -> None:
         if do_scene_dr and batch_idx > 1 and (batch_idx - 1) % args.scene_dr_every == 0:
             worker.close()
             worker, scene_dr, actual_mesh = _make_worker()
+            obj_half_size = _mesh_half_extent(actual_mesh)
 
         print(f"\n── Batch {batch_idx}  [{total_saved}/{args.n_episodes} saved]"
               + (f"  scale={scene_dr['scale']:.3f} bend={scene_dr['bend_deg']:+.1f}°"
@@ -1016,14 +1084,29 @@ def main() -> None:
         worker.reset(object_dxy=object_dxy, object_euler=object_euler, home_offset=home_offset)
 
         # Extra settling until object velocity is small. MPM (soft-body) entities have
-        # no single rigid-body velocity (particle-based) -- gentle_manip extension
-        # (2026-08-12, first deformable toy-task specialist): fall back to a fixed
-        # settle-step budget for those instead of the velocity early-exit.
+        # no single rigid-body velocity (particle-based), but DO expose per-particle
+        # velocities via get_particles_vel() -- gentle_manip extension (2026-08-13,
+        # 25-category speed pass): use max-abs particle velocity as the MPM settling
+        # signal instead of burning the full fixed budget unconditionally every batch.
+        # min_steps guards against a spurious near-zero reading before the drop/impact
+        # has even happened. Threshold is looser than rigid's 0.003 m/s -- MPM carries
+        # small residual per-particle jitter even at rest (thermal-like elastic noise),
+        # so a rigid-tight threshold would rarely trip and silently degrade to the old
+        # fixed-600 behavior.
         obj = worker.handle.objects[0]
-        for _ in range(600):
+        mpm_settle = hasattr(obj, "get_particles_vel") and not hasattr(obj, "get_vel")
+        min_steps = 150 if mpm_settle else 0
+        for _step_i in range(600):
             worker.handle.scene.step()
+            if mpm_settle:
+                if _step_i + 1 < min_steps:
+                    continue
+                pvel = np.abs(_np(obj.get_particles_vel())).max()
+                if pvel < 0.01:
+                    break
+                continue
             if not hasattr(obj, "get_vel"):
-                continue    # MPM: no rigid velocity -- run the full fixed budget
+                continue    # neither rigid nor MPM velocity API -- run the full budget
             lin = np.abs(_np(obj.get_vel())).max()
             ang = np.abs(_np(obj.get_ang())).max()
             if lin < 0.003 and ang < 0.01:
@@ -1061,7 +1144,7 @@ def main() -> None:
         # ── Per-env CMA-ES grasp synthesis (parallel — one subprocess per env) ──
         payloads = []
         for i in range(n):
-            lb, ub = _synth_bounds(obj_pos_all[i])
+            lb, ub = _synth_bounds(obj_pos_all[i], obj_half_size)
             cma_seed = int(cma_seed_rng.integers(1, 2**31 - 1))
             payloads.append((actual_mesh, obj_pos_all[i], obj_quat_all[i],
                              left_pts, right_pts, args.maxfevals, lb, ub,
