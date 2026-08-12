@@ -1,0 +1,120 @@
+# [dppo-eval] Evaluate a PointNet diffusion policy (BC base or finetuned) on the live sim.
+# Used by: third_party/dppo/script/run.py (EvalHarnessAgent) via gentle_manip.dppo.train
+# Status: experimental (DPPO step-2 eval: point-cloud student policy on soft mushroom)
+#
+# Routes through the SHARED canonical eval harness (gentle_manip.evaluation.run_eval): the
+# fixed EvalSpec (n_episodes=100, num_envs=5, deterministic per-batch DR seed) -> summary.json
+# + episodes.csv (success + per-episode stress + per-episode object geometry) + env_config
+# snapshot + env-0 videos, written to the POLICY's run dir (<base_policy_run>/eval/<datetime>/).
+# FULL DR eval: scene_group_size>0 rebuilds the object geometry (size/shape/material) every K
+# batches from a deterministic group seed (apples-to-apples across evals). That needs the sim to
+# relaunch, so the server MUST be started with --subprocess:
+#   serl_sim_server --experiment single_lift_mushroom_soft_easy --view student --num-envs 5 \
+#                   --render-rgb --subprocess
+# (the experiment's dr=food_shape supplies the ranges). scene_group_size=0 -> fixed geometry, and
+# then plain --render-rgb (no --subprocess) suffices. base_policy_path -> a pre_diffusion_pointnet
+# (BC) or finetuned checkpoint. Run with envs/dppo.
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${logdir}
+_target_: gentle_manip.dppo.eval_agent.EvalHarnessAgent
+
+name: ${env_name}_eval_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
+# ONE output folder: eval lives inside the evaluated policy's own run dir, <run>/eval/<datetime>
+# (eval_base resolver = the checkpoint's run dir; registered in gentle_manip.dppo.train). hydra's
+# run.dir == this, and the harness writes summary/csv/config/render into the SAME dir.
+logdir: ${eval_base:${base_policy_path}}/eval/${now:%Y-%m-%d}_${now:%H-%M-%S}
+base_policy_path: ???        # set on CLI: a pre_diffusion_pointnet (BC) or finetuned checkpoint
+normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_mushroom_soft_easy_pcd/normalization.npz
+experiment: single_lift_mushroom_soft_easy   # env (experiment) config snapshotted into the eval dir
+
+seed: 42
+device: cuda:0
+env_name: single_lift_mushroom_soft_easy_pcd
+obs_dim: 8
+action_dim: 7
+denoising_steps: 20
+ft_denoising_steps: 0        # eval the base (BC) policy: no finetuned denoising steps
+cond_steps: 2
+pc_cond_steps: 1
+n_points: 1024
+visual_feature_dim: 256
+horizon_steps: 4
+act_steps: 4
+use_ddim: False              # full 20-step denoising for an honest BC eval
+ddim_steps: ${ft_denoising_steps}
+
+# CANONICAL eval spec (shared across algorithms) — 100 episodes / 5 sub-envs = 20 batches.
+n_episodes: 100
+scene_group_size: 4          # full DR: rebuild geometry every 4 batches -> 5 distinct sizes/shapes
+                             # across the 100 episodes (deterministic; needs the server --subprocess).
+                             # 0 = fixed geometry (only pose/orientation vary).
+record_batches: null         # null = record ALL batches, ALL envs -> one clip per episode
+                             # (100 videos, per-trajectory). Set a small int for a subset; 0 disables.
+n_steps: 75                  # (read by DPPO's EvalAgent base; harness derives its own horizon)
+render_num: 5
+
+env:
+  n_envs: 5                  # MUST match serl_sim_server --num-envs; part of the canonical spec
+  name: ${env_name}
+  env_type: genesis
+  max_episode_steps: 300
+  reset_at_iteration: False
+  # save_video: the genesis sim renders env 0 only, so this writes ONE mp4 (env 0's rollout)
+  # to <logdir>/render/eval_trial-0.mp4. REQUIRES the server started with --render-rgb (it
+  # builds the RGB frame camera + enables the 'render' rpc the bridge pulls frames from).
+  save_video: True
+  use_image_obs: True
+  # per-step reward ~0.2-0.34 while holding a lifted mushroom -> best-step >= 0.2 ~ "reached
+  # and held the lift". A PROXY (best single-step reward); read avg_episode_reward too.
+  best_reward_threshold_for_success: 0.2
+  specific:
+    obs_steps: ${cond_steps}
+    act_steps: ${act_steps}
+    normalization_path: ${normalization_path}
+    port: 5570
+    obs_keys: [ee_pos, ee_quat, gripper_width]
+    pointcloud_key: point_cloud
+
+shape_meta:
+  obs:
+    state:
+      shape: [8]
+    point_cloud:
+      shape: [1024, 3]
+  action:
+    shape: [7]
+
+wandb: null
+
+model:
+  _target_: model.diffusion.diffusion_eval.DiffusionEval
+  ft_denoising_steps: ${ft_denoising_steps}
+  predict_epsilon: True
+  denoised_clip_value: 1.0
+  randn_clip_value: 3
+  use_ddim: ${use_ddim}
+  ddim_steps: ${ddim_steps}
+  network_path: ${base_policy_path}
+  network:
+    _target_: gentle_manip.dppo.pointnet_diffusion.PointNetDiffusionMLP
+    action_dim: ${action_dim}
+    horizon_steps: ${horizon_steps}
+    cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+    pc_cond_steps: ${pc_cond_steps}
+    visual_feature_dim: ${visual_feature_dim}
+    time_dim: 16
+    mlp_dims: [512, 512, 512]
+    activation_type: ReLU
+    residual_style: True
+    pointnet:
+      in_channels: 3
+      use_layernorm: True
+      final_norm: layernorm
+  horizon_steps: ${horizon_steps}
+  obs_dim: ${obs_dim}
+  action_dim: ${action_dim}
+  denoising_steps: ${denoising_steps}
+  device: ${device}
