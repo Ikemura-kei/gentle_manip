@@ -660,7 +660,7 @@ def execute_and_collect(
         next_obs_batch = perception.process(raw_next)
         if priv_cfg is not None:
             next_obs_batch.update(_privileged_obs_batch(
-                state["object_center"], state["object_quat"], dr_vec, priv_cfg,
+                state["object_center"], state.get("object_quat"), dr_vec, priv_cfg,
                 contact_force=state.get("contact_force")))
         next_obs_list = [{k: next_obs_batch[k][i] for k in next_obs_batch}
                          for i in range(num_envs)]
@@ -765,8 +765,11 @@ def execute_and_collect(
         phase_idx[rolled_over]  += advance[rolled_over]
         phase_step[rolled_over]  = 0
 
-    # Success check from final object position
-    obj_z   = _np(worker.handle.objects[0].get_pos())[:, 2]
+    # Success check from final object position. `state["object_center"]` (already
+    # used for the privileged obs / regrasp checks above) works for BOTH rigid and
+    # MPM (soft-body) entities -- gentle_manip extension (2026-08-12) switched off
+    # `worker.handle.objects[0].get_pos()` (rigid-only; MPM has no `get_pos`).
+    obj_z   = state["object_center"][:, 2]
     success = obj_z > (grasp_pos[:, 2] + LIFT_HEIGHT * 0.5)
 
     # Post-process: trim long held-command runs (absolute mode only — see
@@ -1012,10 +1015,15 @@ def main() -> None:
         home_offset  = dr_cfg.sample_home_offset(rng, n)   # per-env arm-home jitter (sim-only DR)
         worker.reset(object_dxy=object_dxy, object_euler=object_euler, home_offset=home_offset)
 
-        # Extra settling until object velocity is small
+        # Extra settling until object velocity is small. MPM (soft-body) entities have
+        # no single rigid-body velocity (particle-based) -- gentle_manip extension
+        # (2026-08-12, first deformable toy-task specialist): fall back to a fixed
+        # settle-step budget for those instead of the velocity early-exit.
         obj = worker.handle.objects[0]
         for _ in range(600):
             worker.handle.scene.step()
+            if not hasattr(obj, "get_vel"):
+                continue    # MPM: no rigid velocity -- run the full fixed budget
             lin = np.abs(_np(obj.get_vel())).max()
             ang = np.abs(_np(obj.get_ang())).max()
             if lin < 0.003 and ang < 0.01:
@@ -1031,11 +1039,24 @@ def main() -> None:
                            float(scene_dr.get("bend_deg", 0.0))], dtype=np.float32)
         if priv_cfg is not None:
             init_obs_batch.update(_privileged_obs_batch(
-                init_state["object_center"], init_state["object_quat"], dr_vec, priv_cfg,
+                init_state["object_center"], init_state.get("object_quat"), dr_vec, priv_cfg,
                 contact_force=init_state.get("contact_force")))
 
         obj_pos_all  = init_state["object_center"].astype(np.float64)  # (N, 3)
-        obj_quat_all = _np(obj.get_quat()).astype(np.float64)           # (N, 4) wxyz
+        if hasattr(obj, "get_quat"):
+            obj_quat_all = _np(obj.get_quat()).astype(np.float64)       # (N, 4) wxyz
+        else:
+            # MPM (soft-body): no live rigid-orientation query -- gentle_manip
+            # extension (2026-08-12). The particles are generated already rotated
+            # by `object_euler` (sampled above, fed into worker.reset()), so that
+            # sampled euler IS the object's orientation -- there's no separate
+            # "settled" rigid transform to drift from it the way a rigid body has.
+            if object_euler is not None:
+                q_xyzw = Rot.from_euler("xyz", object_euler).as_quat()  # (N, 4) xyzw
+                obj_quat_all = np.concatenate(
+                    [q_xyzw[:, 3:4], q_xyzw[:, :3]], axis=1).astype(np.float64)
+            else:
+                obj_quat_all = np.tile(np.array([1.0, 0.0, 0.0, 0.0]), (n, 1))
 
         # ── Per-env CMA-ES grasp synthesis (parallel — one subprocess per env) ──
         payloads = []
