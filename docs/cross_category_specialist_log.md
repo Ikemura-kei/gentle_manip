@@ -1184,4 +1184,62 @@ expected for a first, untuned pass of a rigid-body-assuming SDF demonstrator
 against genuinely different (deformable, particle-based) contact dynamics, not
 a sign of a broken pipeline. Scaled to a full collection (`--n-episodes 50
 --scene-dr-every 4`, less frequent scene rebuild to control wall-clock cost
-given MPM's much lower sim FPS than rigid) -- in progress.
+given MPM's much lower sim FPS than rigid): 50/50 saved, 13.9% collection SR
+(360 attempts), 375.8 min elapsed.
+
+## Mushroom-soft-easy result: 75.0% -- HIGHEST of the entire session
+
+Converted (50 episodes -> 45 train / 5 val, 10850 total steps, obs_dim 8 +
+1024-pt cloud, identical DP3/DPPO pipeline to every rigid category), trained
+(run `rzxkj`, ran the full 3000 epochs, best val loss 0.0298 @ epoch 400,
+nearest saved checkpoint `state_500.pt` val 0.0337), canonical eval on
+`state_500.pt`:
+
+**success 75.0% (75/100)**, `ever_success_rate` 75.0% (identical --
+`hold_failure_gap` exactly 0.0, no hold-after-lift failures at all), stress
+`top20_ttop20_mean` 22.2 kPa (well under the 40 kPa yield -- gentle), stress
+`max_tmax_mean` 47.2 kPa (just above yield -- consistent with the material's
+intended "bruises under a firm grasp" design per the mushroom stress-reward
+tuning in the top-level CLAUDE.md).
+
+**This is the best result of the entire session** -- beating apple's 65.0%
+(previous best, rigid), and beating mushroom's OWN rigid variant (63.0%) by
+12 points on the exact same object mesh/category. Despite: (a) a much lower
+collection success rate than any rigid category (13.9% vs. 18-85%), (b) a
+demonstrator pipeline that needed multiple compatibility patches to even run
+on MPM entities, and (c) roughly an order of magnitude more wall-clock time
+to collect (375.8 min for 50 episodes vs. tens of minutes for rigid
+categories) -- the resulting POLICY is not just competitive but the best
+specialist trained this session.
+
+**A plausible mechanism** (not yet directly tested): a soft/deformable
+object can locally CONFORM to the gripper pads on contact -- the mushroom
+cap can compress and mold around imprecise finger placement in a way a rigid
+mesh cannot, effectively widening the real (dynamic) grasp margin beyond
+what the same nominal geometry gives a rigid object. If true, this predicts
+deformable objects should generally be at least as forgiving to grasp as
+their rigid counterpart, all else equal -- worth testing on a second
+deformable category (or a rigid-vs-soft variant of the SAME mesh at matched
+DR, isolating deformability as the only variable) before treating this as a
+general finding rather than a mushroom-specific one. The stress numbers also
+show the policy is landing in the intended gentle-but-firm regime (top20
+kPa << peak kPa ~ yield), suggesting the reward shaping is doing real work,
+not just that the task became trivially easy.
+
+**Session verdict on "trust the scaling law" for deformable extension:
+CONFIRMED, at least for one object.** The narrow-DR toy-task recipe that
+worked for all 6 rigid categories transfers cleanly to MPM/soft-body physics
+with only plumbing fixes (Genesis API compatibility), no task-difficulty
+degradation, and possibly better results than rigid. Updated full spectrum,
+all canonical eval n=100:
+
+| Object | Physics | Solo eval SR |
+|---|---|---|
+| **mushroom-soft** | **soft (MPM)** | **75.0%** |
+| apple | rigid | 65.0% |
+| mushroom-rigid | rigid | 63.0% |
+| avocado | rigid | 52.0% |
+| kiwi | rigid | 52.0% |
+| pear | rigid | 44.0% |
+| egg | rigid | 43.0% |
+| cherry (wide DR) | rigid | 25.7% (n=3 mean) |
