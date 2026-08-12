@@ -1,0 +1,21 @@
+# [experiment] TOY/EASY SOFT (MPM) scallop lift -- fragile-food 25-category campaign
+# (2026-08-13), mirroring single_lift_mushroom_soft_easy's validated recipe.
+# Used by: serl_sim_server.py; grasp_synthesis collect_demos_synth_v2.py; DP3/DPPO
+# Status: experimental
+task: single_lift_scallop_soft
+action: delta_pose_delta_gripper
+dr: food_shape_scallop_soft_easy
+augmentation: l515_noise
+
+obs: superset_soft
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+
+rl:
+  random_steps: 200
+  training_starts: 400
+  batch_size: 256
+  discount: 0.92
+  utd_ratio: 2
+  critic_lr: 1.0e-4

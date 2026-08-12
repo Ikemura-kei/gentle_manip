@@ -1,4 +1,4 @@
-# [task] Soft-MPM tofu single-lift: object + reward (dist/lift/stress) + success band + sim dynamics.
+# [task] Soft-MPM peach single-lift: object + reward (dist/lift/stress) + success band + sim dynamics.
 # Used by: experiments (task:) -> DP3/DPPO, demo collection
 # Status: experimental
 #
@@ -9,10 +9,10 @@
 success_z_min: 0.175
 success_z_max: 0.275
 hold_steps: 30
-object_name: "tofu"
+object_name: "peach"
 object_type: "soft"
 
-sim_substeps: 220
+sim_substeps: 400
 mpm_grid_density: 250
 
 success_scale: 0.2
