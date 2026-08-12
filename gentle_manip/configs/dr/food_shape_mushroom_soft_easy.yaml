@@ -1,0 +1,38 @@
+# [dr] TOY/EASY variant of food_shape for SOFT (MPM) mushroom -- first deformable
+# specialist this session, per user direction (2026-08-12): "extend to more
+# deformable fragile objects... trust the scaling law." Mirrors the exact
+# narrowing pattern that worked for all six RIGID "_easy" categories (apple 65%,
+# mushroom-rigid 63%, avocado/kiwi 52%, pear 44%, egg 43%, all >> cherry's
+# 25.7%) -- testing whether the same "large enough + narrow DR" recipe transfers
+# to the MPM/soft-body regime, or whether deformable dynamics change the
+# difficulty picture. mushroom-soft is the ONLY soft-body task with tuned,
+# validated sim stability params in this project (Config C: sim_substeps=220,
+# mpm_grid_density=250, E=0.3MPa -- see single_lift_mushroom_soft.yaml task
+# config), making it the lowest-risk first deformable object -- reuses an
+# already-characterized physics regime rather than tuning a new one from
+# scratch under time pressure.
+# Used by: experiments (dr:) single_lift_mushroom_soft_easy
+# Status: experimental
+#
+# Narrowed from food_shape.yaml the same way as every rigid _easy variant:
+# pos half-range 0.075->0.02, pitch/roll 15->8deg (already moderate for soft-
+# body stability, only a mild further cut), yaw kept full, scale/shape DR
+# reduced near zero. Material range narrowed to close to the Config C nominal
+# (E=3e5) rather than the wider food_shape range, to minimize risk of CFL
+# instability at a fixed substep count while testing the DR-narrowing
+# hypothesis in isolation from material-driven instability.
+object_pos_xy: 0.02
+robot_init_pos_xyz: 0.01
+object_yaw_deg: 180
+object_pitch_roll_deg: 8
+
+object_scale:      [0.95, 1.05]
+object_bend_deg:   [-2.0, 2.0]
+object_twist_deg:  [-2.0, 2.0]
+object_taper:      [-0.02, 0.02]
+object_axis_scale: [0.97, 1.03]
+
+object_E:  [2.8e5, 3.2e5]     # tight around the Config C nominal (3e5)
+object_nu: [0.34, 0.36]
+object_rho: [980, 1020]
+coup_friction: [3.5, 4.5]     # unchanged from food_shape.yaml

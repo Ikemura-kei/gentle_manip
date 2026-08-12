@@ -1,0 +1,22 @@
+# [experiment] TOY/EASY SOFT (MPM) mushroom lift -- first deformable specialist
+# this session, mirroring the six validated rigid "_easy" categories' narrow-DR
+# recipe. See food_shape_mushroom_soft_easy.yaml for full rationale.
+# Used by: serl_sim_server.py; grasp_synthesis collect_demos_synth_v2/v3.py; DP3/DPPO
+# Status: experimental
+task: single_lift_mushroom_soft
+action: delta_pose_delta_gripper
+dr: food_shape_mushroom_soft_easy
+augmentation: l515_noise
+
+obs: superset_soft
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+
+rl:
+  random_steps: 200
+  training_starts: 400
+  batch_size: 256
+  discount: 0.92
+  utd_ratio: 2
+  critic_lr: 1.0e-4
