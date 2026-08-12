@@ -18,15 +18,75 @@ the sim through the already-built self.venv).
 """
 from __future__ import annotations
 
+import os
 import pickle
 from datetime import datetime
 from pathlib import Path
+from typing import List, Optional, Tuple
 
 import numpy as np
 import torch
 from agent.eval.eval_agent import EvalAgent
 
 from gentle_manip.evaluation.eval_spec import EvalSpec
+
+SHARD_SIZE = 10   # episodes per incremental flush -- see _write_shard/_merge_shards
+
+
+def _write_shard(out_dir: Path, episodes: list, meta: dict, idx: int) -> Path:
+    meta = dict(meta)
+    meta["action_dim"] = int(episodes[0]["actions"].shape[1])
+    path = out_dir / f"shard_{idx:04d}.pkl"
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "wb") as f:
+        pickle.dump({"meta": meta, "episodes": episodes}, f)
+    os.replace(tmp, path)
+    return path
+
+
+def _count_existing_episodes(out_dir: Path) -> Tuple[int, int]:
+    """(episodes already saved, next free shard index) -- gentle_manip 25-category
+    speed/scale pass (2026-08-13), same crash-recovery pattern as
+    collect_demos_synth_v2.py's _count_existing_episodes."""
+    total = 0
+    data_path = out_dir / "data.pkl"
+    if data_path.exists():
+        with open(data_path, "rb") as f:
+            total += len(pickle.load(f)["episodes"])
+    max_idx = -1
+    for p in sorted(out_dir.glob("shard_*.pkl")):
+        with open(p, "rb") as f:
+            total += len(pickle.load(f)["episodes"])
+        max_idx = max(max_idx, int(p.stem.split("_")[1]))
+    return total, max_idx + 1
+
+
+def _merge_shards(out_dir: Path, meta: dict) -> Optional[Path]:
+    """Merge shard_*.pkl (+ a pre-existing data.pkl, if resuming a previously-
+    complete run to top it up further) into data.pkl."""
+    shards = sorted(out_dir.glob("shard_*.pkl"))
+    prior_path = out_dir / "data.pkl"
+    if not shards and not prior_path.exists():
+        return None
+    all_eps: list = []
+    if prior_path.exists():
+        with open(prior_path, "rb") as f:
+            all_eps.extend(pickle.load(f)["episodes"])
+    for p in shards:
+        with open(p, "rb") as f:
+            all_eps.extend(pickle.load(f)["episodes"])
+    meta = dict(meta)
+    meta["n_episodes"] = len(all_eps)
+    if all_eps:
+        meta["action_dim"] = int(all_eps[0]["actions"].shape[1])
+    out = out_dir / "data.pkl"
+    tmp = out.with_suffix(".tmp")
+    with open(tmp, "wb") as f:
+        pickle.dump({"meta": meta, "episodes": all_eps}, f)
+    os.replace(tmp, out)
+    for p in shards:
+        p.unlink()
+    return out
 
 
 class _DiffusionPolicy:
@@ -103,6 +163,23 @@ class RolloutCollectorAgent(EvalAgent):
         if save_video:
             render_dir.mkdir(parents=True, exist_ok=True)
 
+        # gentle_manip 25-category speed/scale pass (2026-08-13): resolve out_dir
+        # and flush shards incrementally instead of writing ONE atomic data.pkl
+        # only at the very end -- previously a kill mid-run persisted NOTHING.
+        # cfg.resume_dir (optional) continues a partially-collected prior run.
+        resume_dir = self.cfg.get("resume_dir", None)
+        out_dir = Path(resume_dir) if resume_dir else (
+            Path(self.cfg.get("out_dir")) if self.cfg.get("out_dir") else self._default_out_dir())
+        out_dir.mkdir(parents=True, exist_ok=True)
+        already_saved, shard_idx = _count_existing_episodes(out_dir) if resume_dir else (0, 0)
+        if resume_dir:
+            print(f"[rollout] RESUME → {out_dir} ({already_saved} episode(s) already saved)",
+                  flush=True)
+        meta = dict(task=self.cfg.env_name, obs_keys=list(self.venv.obs_keys) + (
+                    [self.venv.pointcloud_key] if self.venv.pointcloud_key else []),
+                    created=datetime.now().isoformat(), source="rldg_rollout",
+                    checkpoint=str(self.cfg.base_policy_path))
+
         saved: list = []
         attempts = 0
         for i in range(spec.n_batches):
@@ -125,26 +202,29 @@ class RolloutCollectorAgent(EvalAgent):
                 ep = _process_raw_episode(steps)
                 if ep is not None:
                     saved.append(ep)
-            print(f"[rollout] batch {i + 1}/{spec.n_batches}: {len(saved)}/{attempts} kept "
-                  f"({100 * len(saved) / max(attempts, 1):.1f}%)", flush=True)
-            if len(saved) >= target_n:
+            total_saved = already_saved + len(saved)
+            print(f"[rollout] batch {i + 1}/{spec.n_batches}: {total_saved}/{target_n} kept "
+                  f"({100 * (already_saved + len(saved)) / max(attempts, 1):.1f}% this run)",
+                  flush=True)
+            if len(saved) >= SHARD_SIZE:
+                _write_shard(out_dir, saved, meta, shard_idx)
+                shard_idx += 1
+                saved = []
+            if total_saved >= target_n:
                 break
 
-        if not saved:
+        if saved:
+            _write_shard(out_dir, saved, meta, shard_idx)
+
+        merged = _merge_shards(out_dir, meta)
+        if merged is None:
             raise RuntimeError(f"collected 0 successful rollouts after {attempts} attempts -- "
                                f"checkpoint may be broken or target_episodes/max_batches too low")
-
-        out_dir = Path(self.cfg.get("out_dir")) if self.cfg.get("out_dir") else self._default_out_dir()
-        out_dir.mkdir(parents=True, exist_ok=True)
-        meta = dict(task=self.cfg.env_name, obs_keys=list(self.venv.obs_keys) + (
-                    [self.venv.pointcloud_key] if self.venv.pointcloud_key else []),
-                    action_dim=int(saved[0]["actions"].shape[1]), n_episodes=len(saved),
-                    created=datetime.now().isoformat(), source="rldg_rollout",
-                    checkpoint=str(self.cfg.base_policy_path))
-        with open(out_dir / "data.pkl", "wb") as f:
-            pickle.dump({"meta": meta, "episodes": saved}, f)
-        print(f"[rollout] DONE — {len(saved)} successful episodes / {attempts} attempts "
-              f"({100 * len(saved) / attempts:.1f}%) -> {out_dir / 'data.pkl'}", flush=True)
+        with open(merged, "rb") as f:
+            final_n = len(pickle.load(f)["episodes"])
+        print(f"[rollout] DONE — {final_n} successful episodes total / {attempts} attempts "
+              f"this run ({100 * (final_n - already_saved) / max(attempts, 1):.1f}%) -> {merged}",
+              flush=True)
 
     def _default_out_dir(self) -> Path:
         # env_name like "single_lift_apple_rigid_easy_pcd" -> "single_lift_apple_rigid"
