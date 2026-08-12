@@ -1099,3 +1099,89 @@ with zero exceptions.** This remains the one fully robust, actionable finding
 from the difficulty-spectrum work -- task/object selection matters enormously,
 but predicting exactly HOW MUCH for a novel object still requires an actual
 eval, not a lookup table.
+
+## RLDG-style rollout-distilled generalist: canonical eval results (2026-08-12)
+
+Training run `gyoha` (`single_lift_cross_category_rollout_pcd`, unconditioned
+DP3, merged from apple/avocado/pear SPECIALIST ROLLOUTS -- 452 episodes, 407
+train/45 val, ~3x the raw-demo 2-category merge) plateaued at epoch 970 (best
+val loss 0.0178@670). Stopped cleanly, evaluated `state_700.pt` (nearest saved
+checkpoint to the best-val epoch) on the canonical harness across all four
+categories, held-in and zero-shot:
+
+| Category | Unconditioned baseline | Track A (one-hot embed) | Track B (VLM embed) | **RLDG (rollout-distilled)** | Solo specialist |
+|---|---|---|---|---|---|
+| apple (held-in) | 39.0% | 42.0% | 38.0% | **62.0%** | 65.0% |
+| avocado (held-in) | 31.0% | 32.0% | 31.0% | **38.0%** | 52.0% |
+| pear (held-in) | n/a* | n/a* | n/a* | **48.0%** | 44.0% |
+| kiwi (zero-shot) | 4.0% | 2.0% | 0.0% | **7.0%** | 52.0% |
+
+*pear wasn't part of the original 2-category (apple+avocado) merge that
+produced the baseline/Track A/B numbers -- it was added specifically for this
+3-category RLDG merge, so there's no prior comparison point; only the solo
+specialist column applies.
+
+**Verdict: RLDG-style rollout distillation is a real, substantial win on
+held-in performance** -- +23pt apple, +7pt avocado over the unconditioned
+raw-demo baseline, and pear's merged-policy number (48.0%) actually **beats
+its own solo specialist** (44.0%), the first time any generalist variant this
+session has matched or exceeded a specialist on its own category. This
+directly confirms the "garbage-in/garbage-out" hypothesis from the FINAL
+VERDICT section above: the raw CMA-ES demos were the bottleneck, not the
+architecture -- once the merge is built from successful ROLLOUTS of a working
+specialist instead of the raw scripted demonstrator's output, held-in
+performance jumps substantially with ZERO architecture change (still the
+plain unconditioned DP3Encoder).
+
+**Zero-shot kiwi also improves (4.0% -> 7.0%) but the generalization gap
+remains large.** RLDG nearly doubles the unconditioned baseline and clearly
+beats both embedding-conditioning tracks (2.0%, 0.0%) -- so data quality
+helps zero-shot too, not just held-in -- but 7.0% is still far below kiwi's
+own solo specialist (52.0%) and far below the RLDG policy's own held-in
+numbers (38-62%). **Rollout-distillation fixes the "policy quality" half of
+the cross-category problem but does NOT close the generalization gap by
+itself** -- the remaining gap is consistent with the original hypothesis that
+conditioning (category embedding / object-centric features) has something
+real to work with now that the underlying policy is competent, whereas at
+the old ~2-4% baseline quality a conditioning signal had nothing non-degenerate
+to condition. Natural next step if this thread continues: retry Track
+A/B-style category conditioning ON TOP of the rollout-distilled data, now that
+data quality is no longer the confound.
+
+## Extending to deformable (soft/MPM) objects: first specialist attempt (2026-08-12)
+
+Per direction to "trust the scaling law" and extend beyond rigid categories,
+attempted the first deformable specialist: `single_lift_mushroom_soft_easy`
+(narrow-DR variant of the existing, stability-tuned `single_lift_mushroom_soft`
+task -- Config C, `sim_substeps=220, mpm_grid_density=250, E=0.3MPa`, the only
+soft-body task in the project with validated sim stability).
+
+**Found and fixed a genuine, previously-latent incompatibility**: the CMA-ES
+collection FSM (`grasp_synthesis/collect_demos_synth_v2.py`) was written
+assuming a rigid-body Genesis API (`get_vel`/`get_ang`/`get_quat`/`get_pos`) at
+several points (settle-loop early-exit, per-env CMA-ES payload construction,
+final success check, privileged-obs orientation) -- never previously exercised
+against an MPM (soft-body) entity this session, since all 6 prior categories
+were rigid. `MPMEntity` (Genesis, particle-based) has none of these; it exposes
+`get_state`/`get_particles_pos`/`get_particles_vel`/etc. instead. Fixed with
+`hasattr` guards: settle-loop falls back to a fixed 600-step budget (no live
+velocity to check), CMA-ES/privileged-obs orientation falls back to the
+sampled `object_euler` (the mesh is generated already-rotated at spawn, so this
+is the exact value, not an approximation), and the final success check now
+reads `state["object_center"]` (already computed for both rigid and soft)
+instead of the rigid-only `get_pos()`. Also fixed a `KeyError: 'object_quat'`
+one level up -- `genesis_worker.read_state()` only populates `object_quat` for
+rigid objects by design (soft bodies have no single rigid orientation), but
+the privileged-obs call site was indexing it unconditionally even when the
+active `PrivilegedConfig` (`superset_soft.yaml`) never actually reads it --
+switched to `.get()`, matching the existing pattern for other optional fields
+in the same call. Committed (`9afa7cc`).
+
+Smoke-tested (`--n-episodes 3 --n-envs 3 --scene-dr-every 1`) after the fix:
+passed end-to-end, 3/16 attempts saved (18.8% collection SR), videos written
+correctly. Much lower collection SR than any rigid category (18-85% range) --
+expected for a first, untuned pass of a rigid-body-assuming SDF demonstrator
+against genuinely different (deformable, particle-based) contact dynamics, not
+a sign of a broken pipeline. Scaled to a full collection (`--n-episodes 50
+--scene-dr-every 4`, less frequent scene rebuild to control wall-clock cost
+given MPM's much lower sim FPS than rigid) -- in progress.
