@@ -133,6 +133,19 @@ MATERIALS: dict[str, Material] = {
     # DELIBERATELY LOW yield stress (cracks under light grip force, matching
     # real fragility) -- a documented simplification, not a citation.
     "egg": Material(youngs_modulus=2.0e6, poisson_ratio=0.30, density=1035.0, von_mises_yield_stress=8.0e3),
+    # egg (BOILED, not raw): fragile-food-25 campaign (2026-08-13) list item is
+    # "boiled egg", a genuinely homogeneous coagulated-protein solid (unlike raw
+    # egg's shell+liquid special case above) -- so this is a NEW preset, not a
+    # reuse of "egg". No direct boiled-egg-white compression-E citation was
+    # sought (out of scope for this quick pass); ESTIMATED by placing it between
+    # tofu (5.67e4, directly cited) and mushroom (3e5) on this file's own soft-
+    # solid scale -- a coagulated egg-white gel is qualitatively firmer than
+    # tofu but still well within MPM-friendly stiffness (the raw-egg preset's
+    # 2e6 Pa would need a substep count ~2.6x mushroom's Config C baseline for
+    # CFL stability, an avoidable cost for a food item that isn't actually that
+    # stiff once cooked). nu/density kept close to the raw-egg preset (density
+    # barely changes on boiling); yield = E * 0.15 heuristic (no citation).
+    "egg_boiled": Material(youngs_modulus=1.5e5, poisson_ratio=0.35, density=1030.0, von_mises_yield_stress=2.25e4),
 
     # ── Kitchen/protein items (raw vs. cooked -- same mesh, different material;
     # cooking denatures proteins and dramatically changes stiffness, not gross

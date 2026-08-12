@@ -157,6 +157,11 @@ OBJECT_MAP: dict[str, ObjectDef] = {
                          "axis_scale": (0.9, 1.1), "scale": (0.85, 1.15)},
         material_dr_mult={"E": (0.6, 1.5), "nu": (0.95, 1.05), "rho": (0.85, 1.15),
                           "yield": (0.6, 1.4)},
+        # E=4e5 is 1.33x mushroom's Config C nominal (substeps ~ sqrt(E)) -- a
+        # modest bump over the 220 baseline; fragile-food-25 campaign (2026-08-13),
+        # not yet empirically confirmed via a soft-MPM smoke test (kiwi was only
+        # ever run RIGID earlier this session).
+        sim_substeps_override=280,
     ),
     # cherry: tiny and near-spherical, same shape-DR profile as grape.
     "cherry": ObjectDef(
@@ -191,6 +196,21 @@ OBJECT_MAP: dict[str, ObjectDef] = {
     # just a taper range (rounder vs. more pointed eggs) and modest scale.
     "egg": ObjectDef(
         "egg", MATERIALS["egg"], object_type="soft",
+        size=(0.0446, 0.058, 0.0451), default_pos=(0.47, 0.0, 0.0225),
+        mesh_path=str(_OBJ_DIR / "egg.obj"),
+        shape_dr_ranges={"bend_deg": (-2.0, 2.0), "twist_deg": (-2.0, 2.0),
+                         "taper": (-0.08, 0.08), "axis_scale": (0.95, 1.05),
+                         "scale": (0.92, 1.08)},
+        material_dr_mult={"E": (0.7, 1.3), "nu": (0.95, 1.05), "rho": (0.95, 1.05),
+                          "yield": (0.5, 1.5)},
+    ),
+    # egg_boiled: fragile-food-25 campaign's "boiled egg" list item -- uses the
+    # SAME mesh as raw "egg" but the much softer, MPM-friendlier egg_boiled
+    # material (see materials.py -- the raw-egg preset's 2e6 Pa shell-stiffness
+    # would need ~2.6x mushroom's substep count for CFL stability, an avoidable
+    # cost for a cooked, genuinely-homogeneous-solid food item).
+    "egg_boiled": ObjectDef(
+        "egg_boiled", MATERIALS["egg_boiled"], object_type="soft",
         size=(0.0446, 0.058, 0.0451), default_pos=(0.47, 0.0, 0.0225),
         mesh_path=str(_OBJ_DIR / "egg.obj"),
         shape_dr_ranges={"bend_deg": (-2.0, 2.0), "twist_deg": (-2.0, 2.0),
@@ -276,6 +296,7 @@ OBJECT_MAP: dict[str, ObjectDef] = {
                          "axis_scale": (0.9, 1.1), "scale": (0.85, 1.2)},
         material_dr_mult={"E": (0.6, 1.5), "nu": (0.95, 1.05), "rho": (0.85, 1.15),
                           "yield": (0.6, 1.4)},
+        sim_substeps_override=300,   # E=5.3e5 is 1.77x mushroom's nominal -- see kiwi's note
     ),
     # blackberry: same near-spherical drupelet-cluster profile as raspberry
     # (same genus Rubus, matches materials.py's by-analogy material too).
@@ -301,6 +322,7 @@ OBJECT_MAP: dict[str, ObjectDef] = {
                          "axis_scale": (0.9, 1.1), "scale": (0.85, 1.15)},
         material_dr_mult={"E": (0.6, 1.5), "nu": (0.95, 1.05), "rho": (0.85, 1.15),
                           "yield": (0.6, 1.4)},
+        sim_substeps_override=400,   # E=8.9e5 is 2.97x mushroom's nominal -- see kiwi's note
     ),
     # banana: registered mesh is a capsule PIECE/chunk (banana_piece.obj), not
     # a thin round coin-slice -- user's "banana piece" list item.
@@ -326,6 +348,7 @@ OBJECT_MAP: dict[str, ObjectDef] = {
                          "axis_scale": (0.92, 1.08), "scale": (0.85, 1.2)},
         material_dr_mult={"E": (0.6, 1.5), "nu": (0.95, 1.05), "rho": (0.85, 1.15),
                           "yield": (0.6, 1.4)},
+        sim_substeps_override=380,   # E=8.0e5 is 2.67x mushroom's nominal -- see kiwi's note
     ),
     # chicken_breast: thick capsule lobe (deliberately chunkier than the real
     # flat fillet shape, per avoid-flat-profiles direction).
@@ -365,8 +388,10 @@ OBJECT_MAP: dict[str, ObjectDef] = {
     ),
     # watermelon (cube of flesh, not whole fruit): primitive box like tofu/beef
     # -- no shape_dr_ranges (mesh_deform doesn't apply to a box).
+    # E=5.36e5 is 1.79x mushroom's nominal -- see kiwi's note above.
     "watermelon": ObjectDef("watermelon", MATERIALS["watermelon"],
-                            size=(0.04, 0.04, 0.045), default_pos=(0.47, 0.0, 0.0225)),
+                            size=(0.04, 0.04, 0.045), default_pos=(0.47, 0.0, 0.0225),
+                            sim_substeps_override=300),
     # cheese (mozzarella cube): primitive box like tofu/beef.
     "cheese": ObjectDef("cheese", MATERIALS["mozzarella"],
                         size=(0.035, 0.035, 0.04), default_pos=(0.47, 0.0, 0.02)),
