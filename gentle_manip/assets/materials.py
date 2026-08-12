@@ -162,4 +162,95 @@ MATERIALS: dict[str, Material] = {
     # the range's midpoint. Higher collagen cross-linking + moisture loss vs.
     # fish_cooked -> denser, and nu drops (less free water, more structured).
     "beef_cooked": Material(youngs_modulus=1.5e5, poisson_ratio=0.35, density=1090.0, von_mises_yield_stress=2.25e4),
+
+    # ── Second cross-category batch: chicken/shrimp/scallop/watermelon/mozzarella/
+    # dumpling/pasta (literature-researched, not lab-calibrated -- same caveat as
+    # the produce set above: informed by published compression-test studies where
+    # available, but NOT force-sensor-validated for this project's specific meshes).
+    # yield = E * 0.15 heuristic unless a study gives a direct failure stress/strain.
+    #
+    # chicken_breast (raw): no direct compressive-E-in-Pa citation found despite a
+    # thorough search of poultry texture-analysis literature (studies report
+    # compression FORCE in N or a texturometer-software "Young's modulus" in N/s,
+    # neither convertible to Pa without the untabulated probe geometry). ESTIMATED
+    # via a directly-cited PROXY: a chicken-breast thermal-treatment kinetics study
+    # reports a raw/room-temperature dynamic storage modulus G'=13.5+-1.3 kPa
+    # (small-strain oscillatory rheology); converted to an apparent compressive E
+    # via the near-incompressible-tissue relation E ~= 3*G' (nu~0.5) -> ~40 kPa.
+    # This is a real cited measurement run through an idealized conversion, not a
+    # directly-measured compression E -- flagged as estimated, not directly cited.
+    # nu=0.40 (raw high-water lean muscle, same category as fish_raw). Density
+    # ~1050 kg/m^3 (general raw-poultry food-composition reference).
+    "chicken_breast_raw": Material(youngs_modulus=4.0e4, poisson_ratio=0.40, density=1050.0, von_mises_yield_stress=6.0e3),
+    # shrimp (raw, peeled): no direct compressive-E citation found -- shrimp texture
+    # studies (TPA, high-pressure processing, storage-quality papers) report
+    # compression/shear FORCE (N) and TPA hardness/springiness, never a tabulated
+    # stress-strain modulus. ESTIMATED BY ANALOGY to fish_raw (same "raw seafood
+    # muscle, high water, low connective tissue" category; fish_raw=22 kPa
+    # DIRECTLY CITED elsewhere in this file) -- shrimp muscle lacks the fish myotome
+    # flake-plane structure so nudged slightly stiffer. nu=0.40 (matches fish_raw).
+    # Density 1060 kg/m^3, within the DIRECTLY CITED apparent-density range for
+    # fresh seafood, 1042-1093 kg/m^3 at 20C (Rahman 1994, J. Food Process Eng.).
+    "shrimp_raw": Material(youngs_modulus=3.0e4, poisson_ratio=0.40, density=1060.0, von_mises_yield_stress=4.5e3),
+    # scallop (raw adductor muscle): no direct compressive-E citation found --
+    # scallop adductor-muscle papers (boiling, ultra-high-pressure processing)
+    # report TPA hardness/chewiness/shear-force trends under processing, never a
+    # baseline raw stress-strain modulus. ESTIMATED BY ANALOGY: adductor muscle is
+    # a single dense, uniformly-packed fast/slow fiber bundle (structurally
+    # different from -- and by every qualitative description firmer than -- fish
+    # or shrimp muscle), so placed above shrimp_raw, roughly at the tofu preset's
+    # firmness. nu=0.40 (raw seafood muscle category, ~78-80% water per retail
+    # scallop composition studies). Density 1070 kg/m^3, within the same DIRECTLY
+    # CITED fresh-seafood apparent-density range used for shrimp_raw above.
+    "scallop_raw": Material(youngs_modulus=5.0e4, poisson_ratio=0.40, density=1070.0, von_mises_yield_stress=7.5e3),
+    # watermelon (ripe flesh, not rind): E=0.536 MPa DIRECTLY CITED (Crimson Sweet
+    # cultivar, quasi-static compression / nonlinear-FEA bruising study -- red
+    # FLESH only, distinct from the much stiffer white/green rind at 0.9-4.9 MPa
+    # in the same study, which is not representative of the homogeneous body
+    # modeled here). Failure stress 27 kPa DIRECTLY CITED, same cultivar/study
+    # (Charleston Gray gives 37 kPa -- used Crimson Sweet's own 27 kPa to stay
+    # internally consistent with the E citation rather than mixing cultivars).
+    # nu=0.40 (very high water content, ~92%, near-incompressible -- same bump as
+    # grape). Density 950 kg/m^3 DIRECTLY CITED (buoyancy measurement, ~0.94 g/cm^3).
+    "watermelon": Material(youngs_modulus=5.36e5, poisson_ratio=0.40, density=950.0, von_mises_yield_stress=2.7e4),
+    # mozzarella (fresh): E=175 kPa DIRECTLY CITED (deformation modulus, uniaxial
+    # compression of 2 cm cheese cubes, isotropic w.r.t. compression direction --
+    # Fogaca et al. 2017, J. Texture Studies, "Influence of compression parameters
+    # on mechanical behavior of mozzarella cheese"). No direct failure stress/
+    # strain found (the same literature reports a "73% degree of elasticity"
+    # recovery metric, not a rupture point) -- yield = E * 0.15 heuristic. nu=0.35
+    # (moist but structured fat/protein matrix, not free-water muscle tissue --
+    # same category as tofu/gelatin, not bumped to 0.40 like the raw-seafood
+    # entries above). Density 1060 kg/m^3 (general fresh high-moisture mozzarella
+    # food-density reference; excludes an anomalous "low sodium" outlier figure
+    # found in the same search).
+    "mozzarella": Material(youngs_modulus=1.75e5, poisson_ratio=0.35, density=1060.0, von_mises_yield_stress=2.625e4),
+    # dumpling (cooked, dough-dominated whole-object approximation): no
+    # "dumpling"-specific compression-E citation found. ESTIMATED, extrapolated
+    # from a DIRECTLY CITED generic wheat-flour-dough elastic-modulus range of
+    # 10-42 kPa (texturometer compression study) -- used a representative value
+    # near that range's upper-middle, nudged up slightly for the starch
+    # gelatinization stiffening that occurs on boiling/steaming (the raw-dough
+    # citation predates cooking). Filling (ground meat/vegetable) is comparable
+    # or softer, so dough-dominated is a reasonable whole-body approximation. nu=
+    # 0.35 (moist starchy matrix, same category as gelatin/tofu). Density 1050
+    # kg/m^3, within the DIRECTLY CITED range for wet (unleavened/uncompressed)
+    # wheat dough, 975-1100 kg/m^3 (composite-dough thermophysical-properties
+    # literature) -- NOT bread-crumb density (baked+leavened, much lower/airier,
+    # not representative of a boiled/steamed dumpling wrapper).
+    "dumpling_cooked": Material(youngs_modulus=3.0e4, poisson_ratio=0.35, density=1050.0, von_mises_yield_stress=4.5e3),
+    # pasta (cooked, treated as one homogeneous bundle/mass of noodles): E DIRECTLY
+    # CITED at order-of-magnitude ~10^2 kPa for the fully-hydrated/saturated
+    # cooked state (Phys. of Fluids 2022, "Swelling, softening, and elastocapillary
+    # adhesion of cooked pasta" -- tracks E dropping ~5 orders of magnitude from
+    # dry E0=2.17 GPa through a glassy-to-rubbery cooking transition to the
+    # saturated plateau); picked a representative point mid-way through that
+    # cited order of magnitude. yield = E * 0.15 heuristic (no failure strain
+    # reported). nu=0.35 (moist starch gel matrix, gelatin/tofu category).
+    # Density 600 kg/m^3 DIRECTLY CITED (boiled/drained pasta bulk-density food
+    # reference) -- deliberately the BULK figure (air gaps between strands), not
+    # a single noodle's material density (~1050-1100 kg/m^3), since this preset
+    # approximates the whole BUNDLE as one homogeneous body (same air-pocket
+    # reasoning as the raspberry preset above).
+    "pasta_cooked": Material(youngs_modulus=1.5e5, poisson_ratio=0.35, density=600.0, von_mises_yield_stress=2.25e4),
 }
