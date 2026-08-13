@@ -228,6 +228,106 @@ model:
 '''
 
 
+ROLLOUT_TEMPLATE = '''# [dppo-rollout-collect] RLDG-style rollout harvest for {obj} (fragile-food 25-category campaign).
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${{logdir}}
+_target_: gentle_manip.dppo.rollout_collector.RolloutCollectorAgent
+
+name: ${{env_name}}_collect_rollouts
+logdir: ${{eval_base:${{base_policy_path}}}}/rollouts/${{now:%Y-%m-%d}}_${{now:%H-%M-%S}}
+base_policy_path: ???
+normalization_path: ${{oc.env:DPPO_DATA_DIR}}/single_lift_{obj}_soft_easy_pcd/normalization.npz
+experiment: single_lift_{obj}_soft_easy
+
+seed: 1000
+device: cuda:0
+env_name: single_lift_{obj}_soft_easy_pcd
+obs_dim: 8
+action_dim: 7
+denoising_steps: 20
+ft_denoising_steps: 0
+cond_steps: 2
+pc_cond_steps: 1
+n_points: 1024
+visual_feature_dim: 256
+horizon_steps: 4
+act_steps: 4
+use_ddim: False
+ddim_steps: ${{ft_denoising_steps}}
+
+target_episodes: 150
+max_batches: 80
+scene_group_size: 0
+n_steps: 75
+render_num: 1
+out_dir: null
+
+env:
+  n_envs: 5
+  name: ${{env_name}}
+  env_type: genesis
+  max_episode_steps: 300
+  reset_at_iteration: False
+  save_video: True
+  use_image_obs: True
+  best_reward_threshold_for_success: 0.2
+  specific:
+    obs_steps: ${{cond_steps}}
+    act_steps: ${{act_steps}}
+    normalization_path: ${{normalization_path}}
+    port: 5570
+    obs_keys: [ee_pos, ee_quat, gripper_width]
+    pointcloud_key: point_cloud
+    record_raw: true
+
+shape_meta:
+  obs:
+    state:
+      shape: [8]
+    point_cloud:
+      shape: [1024, 3]
+  action:
+    shape: [7]
+
+wandb: null
+
+model:
+  _target_: model.diffusion.diffusion_eval.DiffusionEval
+  ft_denoising_steps: ${{ft_denoising_steps}}
+  predict_epsilon: True
+  denoised_clip_value: 1.0
+  randn_clip_value: 3
+  use_ddim: ${{use_ddim}}
+  ddim_steps: ${{ddim_steps}}
+  network_path: ${{base_policy_path}}
+  network:
+    _target_: gentle_manip.dppo.pointnet_diffusion.PointNetDiffusionMLP
+    action_dim: ${{action_dim}}
+    horizon_steps: ${{horizon_steps}}
+    cond_dim: ${{eval:'${{obs_dim}} * ${{cond_steps}}'}}
+    pc_cond_steps: ${{pc_cond_steps}}
+    visual_feature_dim: ${{visual_feature_dim}}
+    time_dim: 16
+    mlp_dims: [512, 512, 512]
+    activation_type: ReLU
+    residual_style: True
+    pointnet:
+      in_channels: 3
+      use_layernorm: True
+      final_norm: layernorm
+  horizon_steps: ${{horizon_steps}}
+  obs_dim: ${{obs_dim}}
+  action_dim: ${{action_dim}}
+  denoising_steps: ${{denoising_steps}}
+  device: ${{device}}
+'''
+
+QUALITY_GATE = 0.25   # min solo eval SR to trust a category's rollouts for the RLDG merge
+
+
 def _run(cmd, cwd=REPO, env=None):
     print(f"[run_specialist] $ {' '.join(str(c) for c in cmd)}", flush=True)
     sub_env = os.environ.copy()
@@ -340,6 +440,55 @@ def eval_specialist(category: str, cfg_dir: Path, checkpoint: Path, port: int = 
             pass
 
 
+def collect_rollouts(category: str, checkpoint: Path, port: int = 5570) -> dict:
+    """Phase 5: RLDG-style rollout collection, gated on the specialist quality
+    bar (QUALITY_GATE) -- only trust rollouts from a specialist that actually
+    demonstrated it can do the task."""
+    cfg_dir = DPPO_CFG_DIR / f"single_lift_{category}_soft_easy_pcd"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    (cfg_dir / "collect_rollouts.yaml").write_text(ROLLOUT_TEMPLATE.format(obj=category))
+
+    server_log = RESULTS_DIR / "rollout_logs" / f"{category}_server.log"
+    server_log.parent.mkdir(parents=True, exist_ok=True)
+    sub_env = os.environ.copy()
+    sub_env.pop("PYTHONPATH", None)
+    server_cmd = ["uv", "run", "--project", "envs/sim", "python", "-m",
+                 "gentle_manip.scripts.serl_sim_server",
+                 "--experiment", f"single_lift_{category}_soft_easy", "--view", "student",
+                 "--num-envs", "5", "--render-rgb", "--subprocess", "--port", str(port)]
+    print(f"[run_specialist] {category}: starting sim server for rollout collection...", flush=True)
+    with open(server_log, "w") as logf:
+        server_proc = subprocess.Popen(server_cmd, cwd=str(REPO), stdout=logf, stderr=subprocess.STDOUT,
+                                       env=sub_env, start_new_session=True)
+    try:
+        t0 = time.time()
+        while time.time() - t0 < 120:
+            if server_log.exists() and "SIM_SERVER_READY" in server_log.read_text(errors="ignore"):
+                break
+            time.sleep(2)
+        else:
+            raise RuntimeError(f"sim server for {category} did not become ready in 120s")
+
+        rollout_log = RESULTS_DIR / "rollout_logs" / f"{category}.log"
+        cmd = ["uv", "run", "--project", "envs/dppo", "python", "-m", "gentle_manip.dppo.train",
+              "--config-name", "collect_rollouts", "--config-path", str(cfg_dir),
+              f"base_policy_path={checkpoint}"]
+        with open(rollout_log, "w") as logf:
+            r = subprocess.run(cmd, cwd=str(REPO), stdout=logf, stderr=subprocess.STDOUT,
+                               env=sub_env, timeout=14400)
+        text = rollout_log.read_text(errors="ignore")
+        m = re.search(r"DONE — (\d+) successful episodes.*-> (\S+)", text)
+        return {"ok": r.returncode == 0 and m is not None,
+               "n_episodes": int(m.group(1)) if m else None,
+               "data_path": m.group(2) if m else None, "rollout_log": str(rollout_log)}
+    finally:
+        try:
+            pgid = os.getpgid(server_proc.pid)
+            os.killpg(pgid, 9)
+        except ProcessLookupError:
+            pass
+
+
 def run_one(category: str) -> dict:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     result_path = RESULTS_DIR / f"{category}.json"
@@ -377,6 +526,21 @@ def run_one(category: str) -> dict:
         result["eval_success_rate"] = eval_result["success_rate"]
         result["eval_ok"] = eval_result["ok"]
         result["eval_log"] = eval_result["eval_log"]
+        result_path.write_text(json.dumps(result, indent=2))
+
+    # Phase 5: RLDG rollout collection, gated on the quality bar -- only a
+    # specialist that actually demonstrated competence gets its rollouts
+    # trusted for the generalist merge (see docs/cross_category_specialist_log.md's
+    # "garbage-in/garbage-out" finding from the RLDG verdict this session).
+    sr = result.get("eval_success_rate")
+    if sr is not None and sr < QUALITY_GATE:
+        result["rollout_status"] = f"skipped: eval_success_rate {sr} < QUALITY_GATE {QUALITY_GATE}"
+        result_path.write_text(json.dumps(result, indent=2))
+    elif result.get("checkpoint") and sr is not None and "rollout_data_path" not in result:
+        rollout_result = collect_rollouts(category, Path(result["checkpoint"]))
+        result["rollout_ok"] = rollout_result["ok"]
+        result["rollout_n_episodes"] = rollout_result.get("n_episodes")
+        result["rollout_data_path"] = rollout_result.get("data_path")
         result_path.write_text(json.dumps(result, indent=2))
 
     result["status"] = "done"
