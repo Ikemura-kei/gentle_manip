@@ -91,30 +91,69 @@ def _git_commit() -> str:
 # ── Synthesis ─────────────────────────────────────────────────────────────────
 
 def _mesh_half_extent(mesh_path: str) -> np.ndarray:
-    """(3,) AABB half-extent of the ACTUAL on-disk mesh CMA-ES will search against.
+    """(3,) AABB half-extent of the ACTUAL on-disk mesh CMA-ES will search against,
+    floored elementwise at OBJ_SIZE (mushroom-scale).
 
     gentle_manip extension (2026-08-13, 25-category size range): OBJ_SIZE was a
     fixed mushroom-scale (~3-4cm) constant, too tight for a 10-15cm chunk (beef,
-    watermelon) and unnecessarily loose for a ~2-3cm shrimp/blueberry. Falls back
-    to OBJ_SIZE on any load failure rather than crashing the whole batch.
+    watermelon) -- but it turns out OBJ_SIZE was ALSO ~3x mushroom's own true
+    AABB half-extent (~1.65cm), i.e. the search box was already far larger than
+    "object size" alone would suggest. That extra slack is load-bearing: CMA-ES
+    needs room to explore TCP positions/approach angles whose FINGER contact
+    points land correctly on the object, not just room for object-position
+    uncertainty -- a box straddling ~3.04cm (1.5x tofu's true 2.03cm half-extent)
+    turned out too tight and converged to a low-cost but visually offset,
+    one-finger-only near-miss on every attempt (confirmed via video across 4
+    different new objects at both maxfevals=300 and 400, ruling out a search-
+    budget explanation). Flooring at OBJ_SIZE preserves the proven-generous
+    mushroom-scale margin for small/similar objects and only GROWS the box for
+    genuinely larger ones, never shrinks it below what's validated to work.
     """
     try:
         import trimesh
         mesh = trimesh.load(str(mesh_path), process=False, force="mesh")
-        return np.asarray(mesh.extents, dtype=np.float64) / 2.0
+        half = np.asarray(mesh.extents, dtype=np.float64) / 2.0
+        return np.maximum(half, OBJ_SIZE)
     except Exception as e:
         print(f"  [warn] _mesh_half_extent({mesh_path}) failed ({e}); falling back to OBJ_SIZE")
         return OBJ_SIZE
 
 
-def _synth_bounds(obj_pos: np.ndarray, obj_half_size: np.ndarray = OBJ_SIZE):
+def _mesh_min_extent(mesh_path: str) -> float:
+    """Narrowest AABB extent (NOT floored at OBJ_SIZE) of the actual mesh -- used
+    only to cap the CMA-ES gripper-width search bound (see _synth_bounds).
+    gentle_manip extension (2026-08-13): a fixed 0.08m (8cm, the gripper's
+    mechanical max) upper bound left CMA-ES free to converge to a "wide open,
+    not touching" degenerate optimum for objects narrower than ~6cm (confirmed:
+    grasp_cost's nearness term is weakly-weighted enough that a wide, barely-
+    touching config can score as low cost as a properly-fitted one) -- visually
+    confirmed via video (gripper closes to a position offset from the object,
+    which just sits untouched) across 4 different new objects, 0% success over
+    100+ attempts each even at the settings mushroom succeeds on immediately.
+    Capping the search width near the object's own size removes that degenerate
+    region from the search space entirely.
+    """
+    try:
+        import trimesh
+        mesh = trimesh.load(str(mesh_path), process=False, force="mesh")
+        return float(np.asarray(mesh.extents, dtype=np.float64).min())
+    except Exception:
+        return 0.08
+
+
+def _synth_bounds(obj_pos: np.ndarray, obj_half_size: np.ndarray = OBJ_SIZE,
+                  obj_min_extent: float = 0.08):
     """Compute CMA-ES search bounds from object position and its actual mesh size."""
     t_lb_xy = (obj_pos[:2] - 1.5 * obj_half_size[:2]).tolist()
     t_ub_xy = (obj_pos[:2] + 1.5 * obj_half_size[:2]).tolist()
     tcp_z_min = float(obj_pos[2]) + FINGER_TO_TCP_Z - 0.04
     tcp_z_max = float(obj_pos[2]) + 0.25
+    # Width upper bound: the object's own narrowest extent + a modest approach
+    # margin (1.3x), capped at the gripper's mechanical max (0.08) -- removes
+    # the "wide open, not touching" degenerate optimum (see _mesh_min_extent).
+    width_ub = min(0.08, max(0.02, obj_min_extent * 1.3))
     lb = t_lb_xy + [tcp_z_min, -1.0 * np.pi, -0.12 * np.pi, -0.49 * np.pi, 0.01]
-    ub = t_ub_xy + [tcp_z_max,  1.0 * np.pi,  0.12 * np.pi,  0.49 * np.pi, 0.08]
+    ub = t_ub_xy + [tcp_z_max,  1.0 * np.pi,  0.12 * np.pi,  0.49 * np.pi, width_ub]
     return lb, ub
 
 
@@ -1027,6 +1066,7 @@ def main() -> None:
 
     worker, scene_dr, actual_mesh = _make_worker()
     obj_half_size = _mesh_half_extent(actual_mesh)
+    obj_min_extent = _mesh_min_extent(actual_mesh)
     if do_scene_dr:
         print(f"  scene DR ON (every {args.scene_dr_every} batch(es)) — deformed meshes → {deform_dir}")
 
@@ -1072,6 +1112,7 @@ def main() -> None:
             worker.close()
             worker, scene_dr, actual_mesh = _make_worker()
             obj_half_size = _mesh_half_extent(actual_mesh)
+            obj_min_extent = _mesh_min_extent(actual_mesh)
 
         print(f"\n── Batch {batch_idx}  [{total_saved}/{args.n_episodes} saved]"
               + (f"  scale={scene_dr['scale']:.3f} bend={scene_dr['bend_deg']:+.1f}°"
@@ -1144,7 +1185,7 @@ def main() -> None:
         # ── Per-env CMA-ES grasp synthesis (parallel — one subprocess per env) ──
         payloads = []
         for i in range(n):
-            lb, ub = _synth_bounds(obj_pos_all[i], obj_half_size)
+            lb, ub = _synth_bounds(obj_pos_all[i], obj_half_size, obj_min_extent)
             cma_seed = int(cma_seed_rng.integers(1, 2**31 - 1))
             payloads.append((actual_mesh, obj_pos_all[i], obj_quat_all[i],
                              left_pts, right_pts, args.maxfevals, lb, ub,

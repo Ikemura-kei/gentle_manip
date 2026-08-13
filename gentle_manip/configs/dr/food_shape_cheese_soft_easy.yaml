@@ -8,7 +8,18 @@
 object_pos_xy: 0.02
 robot_init_pos_xyz: 0.01
 object_yaw_deg: 180
-object_pitch_roll_deg: 8
+# pitch/roll forced to 0 (2026-08-13 fix): a BOX primitive can TIP onto a
+# different face during MPM settling under nonzero pitch/roll DR, but the
+# grasp-synthesis code's assumed object orientation (obj_quat_all, derived
+# from the SAMPLED euler, not the true post-settle pose -- MPMEntity has no
+# get_quat() to query the real one) then silently mismatches the box's
+# actual resting orientation, corrupting the CMA-ES coordinate frame and
+# causing every grasp attempt to miss (confirmed via video + 100+ zero-
+# success attempts for tofu at otherwise-proven-good settings; a mesh-based
+# object of similar size/material succeeded on its very first batch,
+# isolating this to box-tipping specifically). Yaw is still randomized
+# (rotation about the up axis doesn't change which face rests down).
+object_pitch_roll_deg: 0
 
 object_scale:      [0.95, 1.05]
 object_bend_deg:   [-2.0, 2.0]
