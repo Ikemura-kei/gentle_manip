@@ -1243,3 +1243,55 @@ all canonical eval n=100:
 | pear | rigid | 44.0% |
 | egg | rigid | 43.0% |
 | cherry (wide DR) | rigid | 25.7% (n=3 mean) |
+
+## Fragile-food 25-category campaign (2026-08-13) -- major scale-up
+
+User directive: pivot to a REAL 20-train + 5-zero-shot-test deformable
+generalist (RLDG + VLM combined for the first time), 50 demos/object, targets
+70%+ held-in / 50%+ zero-shot. Full roadmap in
+`/home/yif/.claude/plans/how-it-makes-trajectory-distributed-sun.md`.
+
+**Phase 0 (speed + crash-recovery infra) -- DONE, validated.** MPM settle-loop
+now has a real particle-velocity convergence check instead of always burning
+600 steps (~4x speedup, verified against mushroom-soft with no quality loss);
+`--resume-dir` added to `collect_demos_synth_v2.py` + the multi-category
+orchestrator (`collect_rigid_cross_category.py`, generalized via
+`--experiment-template` for soft/MPM); `train_with_resume.py` (auto
+`+resume_from=` on crash) and rollout-collector incremental writes; automated
+VLM reference-frame capture. All committed, resume-tested via a deliberate
+mid-run kill.
+
+**Phase 1 (asset registration) -- DONE.** 13 new objects registered
+(`gentle_manip/scripts/generate_fragile25_meshes.py`: procedural
+primitives + `mesh_deform`, deliberately avoiding flat/thin profiles per
+user direction; `repair_and_validate_mesh.py`-gated). 7 new literature-
+researched materials. Final 25-object roster (20 train / 5 zero-shot test:
+blackberry, scallop, watermelon, dumpling, gelatin): task/DR/experiment
+configs generated via `generate_fragile25_configs.py`, mirroring
+mushroom-soft-easy's validated structure.
+
+**Phase 2 (smoke test) -- found and fixed two real bugs.** An initial
+4-object smoke batch (tofu/chicken_breast/tomato/pasta_bundle) came back at
+**0% success over 100+ attempts each**, despite otherwise-proven settings.
+Root-caused via video inspection + isolation against the mushroom baseline
+(confirmed NOT a global regression):
+1. CMA-ES's gripper-width search bound was a fixed 8cm regardless of object
+   size; the grasp cost's weak nearness term let a wide, non-touching
+   "grasp" score as cheaply as a real one (video: gripper closing on empty
+   air next to an untouched object). Fixed by capping the width bound at
+   1.3x the object's own narrowest extent.
+2. **The one that actually mattered.** A BOX primitive can tip onto a
+   different face during MPM settling, but the grasp-synthesis code's
+   assumed object orientation is derived from the *sampled* DR euler angle,
+   not the object's true post-settle pose (MPMEntity has no `get_quat()` to
+   query the real one) -- if the box tips, every downstream computation
+   runs in the wrong coordinate frame. Isolated by testing chicken_breast
+   (mesh capsule, same size class) -- succeeded on its very first batch,
+   proving it was box-tipping-specific. Fixed by zeroing
+   `object_pitch_roll_deg` for the 3 box-primitive objects (tofu,
+   watermelon, cheese); verified tofu succeeds within ~15 attempts after
+   the fix. Both fixes committed (`661e9e6`).
+
+**Next**: broader smoke-test pass across the remaining objects, then Phase 3
+bulk collection (50 episodes x 20 train objects) via the crash-recoverable
+orchestrator.
