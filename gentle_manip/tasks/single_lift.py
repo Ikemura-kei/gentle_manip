@@ -37,6 +37,10 @@ class SingleLiftTask(BaseTask):
         self.sim_substeps: int = int(task_cfg.get("sim_substeps", 80))
         self.mpm_grid_density: float = float(task_cfg.get("mpm_grid_density", 300.0))
         self.cam_fov: float = float(task_cfg.get("cam_fov", 46.0))
+        # cam_ext (depth -> point cloud) extrinsic. Default = the calibrated L515 pose validated in
+        # the dev prototype; override cam_pos/cam_lookat in the task cfg for camera-placement studies.
+        self.cam_pos: tuple = tuple(task_cfg.get("cam_pos", (0.98910661, -0.00034108, 0.09825304)))
+        self.cam_lookat: tuple = tuple(task_cfg.get("cam_lookat", (-0.01056659, 0.0207823, 0.11265116)))
         # optional spawn-height override (m); None => registry default_pos z. Used to clear the
         # MPM domain padding at coarse grid_density (see ObjectEntry.spawn_z).
         _sz = task_cfg.get("object_spawn_z")
@@ -58,10 +62,9 @@ class SingleLiftTask(BaseTask):
             cameras=[
                 CameraEntry(
                     name="cam_ext",
-                    # pos=(0.98910661, -0.00034108, 0.09825304),
-                    # lookat=(0.0, 0.0, 0.09825304),
-                    pos=(0.98910661, -0.00034108,  0.09825304),
-                    lookat=(-0.01056659, 0.0207823,  0.11265116),
+                    # default = calibrated L515; task-cfg cam_pos/cam_lookat override (camera study)
+                    pos=self.cam_pos,
+                    lookat=self.cam_lookat,
                     # Genesis fov is VERTICAL: fov=49 -> VFOV 49, HFOV ~63 at 640x480.
                     # fov=60 was wider than the L515 (~55x70) and gave a larger cloud
                     # offset; narrowing minimizes it (see examples/sim2real_diagnose).

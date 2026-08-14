@@ -1,0 +1,24 @@
+# [experiment] SOFT mushroom lift — SCRIPTED grasp-synthesis eval (v2 SDF vs v3 FEM) under the harness.
+# Used by: scripts/eval_grasp_synth.py  (serl_sim_server --experiment single_lift_mushroom_soft_grasp_eval)
+# Status: active
+#
+# Same task / action / DR as single_lift_mushroom_soft_abs_action_eval (the config the v3 data
+# collection used) — SOFT MPM mushroom, absolute pose+gripper action, soft_orientation pose DR
+# (±45° pitch/roll, full yaw, 0.25 flip) + per-scene size/shape/material DR. ONLY the obs differs:
+# a privileged state view that also carries object ORIENTATION (superset_soft_grasp_eval), which the
+# grasp synthesizer needs. Scenarios are seed-driven so this stays apples-to-apple with the learned
+# eval. No augmentation (state view, no cameras).
+task: single_lift_mushroom_soft      # soft MPM, substep 220, Config C material
+action: abs_pose_abs_gripper
+dr: soft_orientation                # per-reset pose DR (yaw/pitch/roll + 0.25 flip) + per-scene shape/material
+
+obs: superset_soft_grasp_eval        # privileged: object_pos + object_rot6d + stress (no point cloud)
+views:
+  teacher: [privileged]
+
+rl:                                  # unused during scripted eval; mirrors the collection experiment
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400

@@ -65,10 +65,10 @@ from gentle_manip.domain_randomization.dr_config import DRConfig
 
 # ── Constants (keep in sync with run_grasp_synth.py) ─────────────────────────
 
-N_HOME_TO_PRE = 87          # home → grasp pose interpolation steps
+N_HOME_TO_PRE = 98          # home → grasp pose interpolation steps
 N_SETTLE      = 1           # hold at grasp pose before closing
-N_GRASP       = 39           # gripper close steps
-N_LIFT        = 70          # lift steps
+N_GRASP       = 37           # gripper close steps
+N_LIFT        = 66          # lift steps
 N_HOLD        = 12           # hold at lift height (success eval window)
 LIFT_HEIGHT   = 0.2         # metres above grasp position
 OBJ_SIZE      = np.array([0.05, 0.05, 0.04])   # rough mushroom AABB half-size
@@ -332,14 +332,33 @@ PHASES = [
 N_PHASES  = len(PHASES)
 _GRASP_IDX = [name for name, _ in PHASES].index("grasp")   # boundary the firm-check fires at
 
-# ── Robustness idea #1: force-based grasp firming ─────────────────────────────
+# ── Robustness idea #1: force/stress-based grasp firming ──────────────────────
 # At the moment an env finishes "grasp" (checked ONCE, per env, at the grasp->firm
-# boundary), read its just-measured contact force. If the grip came out weak (< 1N —
-# CMA-ES's SDF-based cost is a geometric proxy, not a physics guarantee of a firm
-# grip), close an EXTRA FIRM_EXTRA_CLOSE_M over the "firm" phase before lifting.
-# Bounded to fire once per env (a one-way linear FSM check, not a retry loop).
-FIRM_FORCE_THRESH_N  = 1.0     # below this measured contact force -> needs firming
-FIRM_EXTRA_CLOSE_M   = 0.0025  # additional close distance (meters) if triggered
+# boundary), read its just-measured grip signal. If the grasp came out weak, close
+# an EXTRA FIRM_EXTRA_CLOSE_M over the "firm" phase before lifting; otherwise skip
+# "firm" entirely. Bounded to fire once per env (a one-way linear FSM check, not a
+# retry loop). The signal is object-type dependent:
+#   RIGID: gripper->object contact FORCE (N). Weak ⟺ force < FIRM_FORCE_THRESH_N.
+#   SOFT:  von-Mises stress top-10% RISE over the settled-rest baseline (Pa) — a
+#          missed/grazing grasp barely perturbs the body, so its stress stays near
+#          rest. Weak ⟺ rise < FIRM_STRESS_THRESH_PA. (Force is None for MPM.)
+FIRM_FORCE_THRESH_N  = 1.0     # rigid: below this measured contact force -> needs firming
+FIRM_STRESS_THRESH_PA = 2000.0 # soft: below this top10 von-Mises rise (Pa) -> grasp came out WEAK
+FIRM_EXTRA_CLOSE_M   = 0.002   # BASE firm close (m, 2.0mm) — applied to EVERY soft grasp. This is the
+                               # unconditional grip margin the old soft path gave all grasps; dropping
+                               # it (skip-firm) cost ~15% success (skip-firm fails 39% vs firm 24%).
+FIRM_WEAK_EXTRA_CLOSE_M = 0.0025  # soft: ADDITIONAL close (m, 2.5mm) on top of the base when the grasp
+                               # came out weak (stress rise < FIRM_STRESS_THRESH_PA, or rigid force <
+                               # FIRM_FORCE_THRESH_N) — the "squeeze more only when NOT grasped"
+                               # robustness. Soft NEVER skips firm; weak firms base+extra = 4.5mm.
+
+
+def _stress_top10(vm: np.ndarray) -> np.ndarray:
+    """(N,) top-10%-mean von Mises per env from (N, n_p) particle stress — the same
+    bulk-deformation signal the reward/metric use (robust to particle count)."""
+    vm = np.asarray(vm, np.float32)
+    k = max(1, int(round(0.10 * vm.shape[1])))
+    return np.partition(vm, -k, axis=1)[:, -k:].mean(axis=1)
 
 # ── Post-processing: trim long held-command runs ──────────────────────────────
 HELD_RUN_MAX  = 8   # runs longer than this get trimmed
@@ -439,6 +458,10 @@ def execute_and_collect(
     # Mutable — "firm" phase tightens this once per env (idea #1); "lift"/"hold"/
     # a frozen (DONE) env all read the FINAL width, which is width_cls unless firmed.
     grip_target = width_cls.copy()
+    # Per-env firm close distance (m). SOFT firms EVERY grasp by the base amount (the grip
+    # margin the old path gave all grasps); a weak grasp (low stress rise) gets set to a LARGER
+    # value at the grasp->firm boundary. RIGID leaves this at base and skips firm when already firm.
+    firm_close = np.full(num_envs, FIRM_EXTRA_CLOSE_M, np.float32)
 
     home_pos  = np.tile(worker.robot.home_pos[None].astype(np.float32),  (num_envs, 1))
     home_quat = np.tile(worker.robot.home_quat[None].astype(np.float32), (num_envs, 1))
@@ -464,13 +487,12 @@ def execute_and_collect(
             pos, quat = pos_b[i], quat_b[i]
             grip = width_open[i] + alpha * (width_cls[i] - width_open[i])
         elif name == "firm":
-            # Idea #1: reaching this phase AT ALL means the grasp->firm check (main
-            # loop) found this env's grip too weak — envs that were already fine skip
-            # "firm" entirely (phase_idx jumps straight to "lift", no artificial no-op
-            # steps to generate-then-trim). So here it's always a real extra close.
+            # Close by this env's firm_close (base for a firm grasp; base+extra for a weak one).
+            # SOFT always passes through firm (never skipped) so the base grip margin is preserved;
+            # RIGID only reaches here when its grip was weak (strong rigid grips skip firm).
             pos, quat = pos_b[i], quat_b[i]
             alpha = (phase_step + 1) / dur
-            grip_target[i] = max(0.0, width_cls[i] - alpha * FIRM_EXTRA_CLOSE_M)
+            grip_target[i] = max(0.0, width_cls[i] - alpha * firm_close[i])
             grip = grip_target[i]
         elif name == "lift":
             alpha = (phase_step + 1) / dur
@@ -504,6 +526,11 @@ def execute_and_collect(
     # Per-env FSM state
     phase_idx  = np.zeros(num_envs, dtype=np.int64)
     phase_step = np.zeros(num_envs, dtype=np.int64)
+
+    # Soft firm-check baseline: top10 von-Mises of the SETTLED object (gripper still
+    # at home, no contact) — captured on the first step, used as the "no grasp" floor
+    # the grasp->firm rise is measured against. None until the first soft state.
+    rest_stress = None
 
     def _step(cur_pos, cur_quat, cur_grip, record_mask):
         nonlocal prev_pos, prev_quat, prev_grip
@@ -570,6 +597,12 @@ def execute_and_collect(
 
         cur_obs_list, state = _step(cur_pos_arr, cur_quat_arr, cur_grip_arr, record_mask=active)
 
+        # Capture the settled-rest stress baseline on the first step (soft only).
+        if rest_stress is None:
+            vm0 = state.get("von_mises_stress")
+            rest_stress = (_stress_top10(vm0) if vm0 is not None
+                           else np.zeros(num_envs, np.float32))
+
         # Advance phase state for envs that were active this step.
         # TODO(retry): this is where a robustness pass would check per-env
         # success/failure (e.g. at the "lift"/"hold" -> DONE boundary) and, on
@@ -590,13 +623,26 @@ def execute_and_collect(
         leaving_grasp = rolled_over & (phase_idx == _GRASP_IDX)
         if np.any(leaving_grasp):
             cf = state.get("contact_force")
-            if cf is not None:
-                for i in np.where(leaving_grasp)[0]:
+            if cf is not None:                        # RIGID: contact force (N). ALWAYS firm base;
+                for i in np.where(leaving_grasp)[0]:  # weak grip (force < thresh) firms base+extra.
                     if cf[i] < FIRM_FORCE_THRESH_N:
-                        print(f"    [firm] env {i}: grip force {cf[i]:.2f}N < "
-                              f"{FIRM_FORCE_THRESH_N}N -> closing {FIRM_EXTRA_CLOSE_M*1000:.1f}mm more")
-                    else:
-                        advance[i] = 2   # grip already fine -> skip "firm", straight to "lift"
+                        firm_close[i] = FIRM_EXTRA_CLOSE_M + FIRM_WEAK_EXTRA_CLOSE_M
+                        print(f"    [firm] env {i}: weak grip force {cf[i]:.2f}N < "
+                              f"{FIRM_FORCE_THRESH_N}N -> closing {firm_close[i]*1000:.1f}mm (base+extra)")
+                    # else: base firm close (never skip)
+            else:                                     # SOFT: von-Mises stress rise (Pa)
+                # Soft ALWAYS firms by the base amount (never skip — dropping it cost ~15% success:
+                # skip-firm fails 39% vs firm 24%). A WEAK grasp (low stress rise) firms MORE.
+                vm = state.get("von_mises_stress")
+                if vm is not None:
+                    cur = _stress_top10(vm)
+                    for i in np.where(leaving_grasp)[0]:
+                        rise = float(cur[i] - rest_stress[i])
+                        if rise < FIRM_STRESS_THRESH_PA:
+                            firm_close[i] = FIRM_EXTRA_CLOSE_M + FIRM_WEAK_EXTRA_CLOSE_M
+                            print(f"    [firm] env {i}: weak stress rise {rise:.0f}Pa < "
+                                  f"{FIRM_STRESS_THRESH_PA:.0f}Pa -> closing {firm_close[i]*1000:.1f}mm (base+extra)")
+                        # else: firm_close stays at base -> still firms, just not extra
 
         phase_idx[rolled_over]  += advance[rolled_over]
         phase_step[rolled_over]  = 0
@@ -715,6 +761,24 @@ def main() -> None:
     p.add_argument("--grasp-n-starts",    type=int,   default=6,    help="CMA multi-start count")
     p.add_argument("--grasp-gpu",         action="store_true",
                    help="use the GPU FEM solver (default CPU, so the metric doesn't compete with the sim GPU)")
+    # ── Grasp-pose DIVERSITY (default off = single-argmax, concentrated). Broadens the demo grasp-pose
+    # distribution (v3 otherwise pins pitch~0 + snaps yaw to a few gentle axes -> narrow/OOD-prone BC set).
+    p.add_argument("--grasp-diversity-tol", type=float, default=0.0,
+                   help="sample among feasible grasps within this FRACTION of the best gentleness score "
+                        "(0=off/argmax, e.g. 0.25 = accept up to 25%% worse score -> diverse but still gentle)")
+    p.add_argument("--grasp-jitter-deg",  type=float, default=0.0,
+                   help="max +/- random perturbation (deg) on the selected grasp's roll/pitch/yaw, re-verified "
+                        "to still hold within the diversity tolerance (needs --grasp-diversity-tol>0 for headroom)")
+    p.add_argument("--grasp-jitter-pos",  type=float, default=0.0,
+                   help="max +/- random position perturbation (m) applied with --grasp-jitter-deg")
+    p.add_argument("--grasp-align",       type=float, default=None,
+                   help="override the alignment weight w_align (default 3e4). LOWER it (e.g. 5e3) to let "
+                        "TILTED grasps stay near-optimal -> the diversity sampler/jitter can then broaden "
+                        "PITCH (w_align=3e4 pins pitch~0, capping diversity even with --grasp-diversity-tol)")
+    p.add_argument("--grasp-pitch-seed-deg", type=float, default=0.0,
+                   help="jitter the CMA multi-start PITCH seed by +/- this (deg). Every start otherwise "
+                        "seeds pitch 0, so even with a low --grasp-align CMA rarely explores tilt; seeding "
+                        "tilted starts broadens the demo pitch toward v2 (complement of the yaw seed-smear)")
     p.add_argument("--scene-dr-every", type=int, default=1,
                    help="re-randomize object SIZE+SHAPE every N batches by rebuilding the worker "
                         "(needs shape/scale fields in the experiment DR config; 0 = off, nominal "
@@ -899,11 +963,29 @@ def main() -> None:
             r = fg.synthesize_grasp(fem_obj, fem_pad_geo, obj_pos_all[i], obj_quat_all[i],
                                     E=args.grasp_E, density=args.grasp_density, mu=args.grasp_mu,
                                     table_z=args.table_z, maxfevals=args.maxfevals,
-                                    n_starts=args.grasp_n_starts, seed=cma_seed, accel=args.grasp_accel)
+                                    n_starts=args.grasp_n_starts, seed=cma_seed, accel=args.grasp_accel,
+                                    diversity_tol=args.grasp_diversity_tol, jitter_deg=args.grasp_jitter_deg,
+                                    jitter_pos=args.grasp_jitter_pos, w_align=args.grasp_align,
+                                    pitch_seed_deg=args.grasp_pitch_seed_deg)
+            if r.get("x") is None or r.get("stress_top10") is None:   # diversity found no feasible grasp;
+                print(f"  Env {i}: no feasible diverse grasp -> retry WITHOUT diversity")  # retry reliably
+                r = fg.synthesize_grasp(fem_obj, fem_pad_geo, obj_pos_all[i], obj_quat_all[i],
+                                        E=args.grasp_E, density=args.grasp_density, mu=args.grasp_mu,
+                                        table_z=args.table_z, maxfevals=args.maxfevals,
+                                        n_starts=args.grasp_n_starts, seed=cma_seed + 7, accel=args.grasp_accel)
             best_x = r["x"]
+            if best_x is None or r.get("stress_top10") is None:       # extremely rare: still nothing ->
+                # default straight-down grasp at the object xy so the FSM never sees None (this episode may
+                # not lift -> simply won't be saved, but the batch completes). tcp sits low (FINGER_TO_TCP_Z).
+                best_x = np.array([obj_pos_all[i][0], obj_pos_all[i][1],
+                                   float(obj_pos_all[i][2]) + FINGER_TO_TCP_Z, np.pi, 0.0, 0.0, 0.045])
+                r = {"x": best_x, "stress_top10": None, "grip": None, "align": None,
+                     "pressure": None, "min_pad_area": None, "width_face": None}
+                print(f"  Env {i}: SYNTH FAILED -> default top-down grasp (fallback)")
             all_best_x.append(best_x); all_grasp.append(r)
-            print(f"  Env {i}: stress={r['stress_top10']:.0f}Pa grip={r['grip']:.3f}N align={r['align']:.3f}"
-                  f"  tcp={best_x[:3].round(4)}  w={best_x[6]*1e3:.1f} mm")
+            if r.get("stress_top10") is not None:
+                print(f"  Env {i}: stress={r['stress_top10']:.0f}Pa grip={r['grip']:.3f}N align={r['align']:.3f}"
+                      f"  tcp={best_x[:3].round(4)}  w={best_x[6]*1e3:.1f} mm")
 
         def _save_grasp_pose(vid_dir, stem, i):
             """Render the METRIC's predicted grasp (pose + expected stress/grip/align) next to env i's

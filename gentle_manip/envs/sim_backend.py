@@ -203,6 +203,8 @@ class SimBackend:
             if self._deform_dir is None:
                 self._deform_dir = tempfile.mkdtemp(prefix="gm_deform_")
             updates["mesh_path"] = str(mesh_deform.save_deformed(nominal_mesh, shape, self._rng, self._deform_dir))
+            applied["mesh_path"] = updates["mesh_path"]   # exposed to clients (eval grasp-synth reads
+                                                          # the deformed mesh file, same box) via scene_params
             for k, deg in (("bend", "bend_deg"), ("twist", "twist_deg")):
                 if k in shape:
                     applied[deg] = float(_np.rad2deg(shape[k]))

@@ -1,0 +1,19 @@
+# [obs] Privileged state view for the SCRIPTED grasp-synthesis eval (v2 vs v3) on the SOFT sim.
+# Used by: scripts/eval_grasp_synth.py (via experiment single_lift_mushroom_soft_grasp_eval)
+# Status: active
+#
+# The grasp-synthesis policy (SDF/FEM) is a PRIVILEGED scripted expert: at reset it needs the true
+# object POSE (position + ORIENTATION) to orient the grasp, and during execution it reads the
+# von-Mises stress to fire the "firm" robustness check. superset_soft's teacher view carries
+# object_pos + stress but NOT orientation, so this dedicated eval obs adds object_rot6d. No point
+# cloud (the scripted policy doesn't use it; per-episode video comes from --render-rgb, not obs) —
+# keeps the eval server render-light. Scenarios are seed-driven, so using this privileged obs is
+# apples-to-apple with the learned-policy eval (same object poses/DR, different obs the POLICY sees).
+include_joint_pos: false
+include_joint_vel: false
+quat_noise_std: 0.003
+
+privileged:
+  object_pos: true      # priv_object_pos  (N,3) — grasp target centre
+  object_rot6d: true    # priv_object_rot6d (N,6) — settled orientation (Kabsch, soft) -> grasp frame
+  stress: true          # priv_stress (N,2) [mean, top10]/yield — the soft "firm" grip signal

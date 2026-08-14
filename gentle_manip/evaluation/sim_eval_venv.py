@@ -38,6 +38,8 @@ class SimEvalVenv:
         obs, r, _done, info = self.client.step(np.asarray(action, np.float32))
         self._cnt += 1
         out = {"success": np.array([bool(d.get("success", False)) for d in info])}
+        if info and "obj_z" in info[0]:                     # object height -> ever_in_band + obj_z cols
+            out["obj_z"] = np.array([d.get("obj_z", np.nan) for d in info], np.float32)
         if info and "stress_max" in info[0]:
             for key in ("stress_max", "stress_mean", "stress_top10", "stress_top20"):
                 if key in info[0]:

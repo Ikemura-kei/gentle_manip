@@ -80,3 +80,9 @@ grasp_synthesis/viz_out/
 # Scratch / writing files kept out of the repo
 tmp.csv
 paper_writing.txt
+
+# CMA-ES optimizer output logs (transient; written by cma in whatever cwd it runs — any directory)
+outcmaes/
+# Local A/B / camera-study demo sets (throwaway) + scratch orchestration scripts
+dataset/demos_divtest*/
+scratch_*.sh
