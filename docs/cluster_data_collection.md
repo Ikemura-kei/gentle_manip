@@ -89,6 +89,25 @@ To collect the **concentrated / argmax** grasps instead (old v3 behaviour), pass
 - The collector is **robust to a single bad env** (retries synthesis without diversity, then a
   default top-down grasp) — one unlucky mesh won't crash a run.
 
+## Videos & inspection (optional — OFF by default)
+
+The default command writes **no videos** — only `data.pkl` + `config.yaml` + `stats.yaml`. Two ways
+to get visuals, both optional:
+
+- **RGB execution clips + grasp-pose PNGs** — add `--record-video`. Writes `<run>/videos/ep*_env*_success.mp4`
+  (the scripted grasp executing) and a paired PNG showing the metric's predicted stress/grip/align/width,
+  for **every** saved episode. This is disk-heavy and slower on a 650-demo run — for a quick sanity check,
+  prefer a **small** run with video (e.g. `--n-episodes 20 --record-video`) over videos on the full set.
+
+- **Point-cloud videos** (what the policy actually sees) + grasp-pose distribution plots — NOT produced by
+  the collector; render them post-hoc from `data.pkl` (needs `envs/sim`, headless):
+  ```bash
+  MPLBACKEND=Agg env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/sim --no-sync \
+    python -m gentle_manip.visualization.visualize_demo <run>/data.pkl --video      # -> data_epN.mp4 (+ PNGs)
+  MPLBACKEND=Agg env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/sim --no-sync \
+    python examples/demo_analysis/grasp_pose_analysis.py <run>/data.pkl             # -> grasp_euler_distribution.png, orientation sphere
+  ```
+
 ## After collection (done locally, not on the cluster)
 
 Copy the run dir back, then: `gentle_manip.dppo.convert_demos … --view student --point-cloud`
