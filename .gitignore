@@ -83,6 +83,8 @@ paper_writing.txt
 
 # CMA-ES optimizer output logs (transient; written by cma in whatever cwd it runs — any directory)
 outcmaes/
+# tetgen tet-mesher scratch output (written to cwd by the tetgen lib during FEM build_grasp_fem)
+tetgen-tmpfile*
 # Local A/B / camera-study demo sets (throwaway) + scratch orchestration scripts
 dataset/demos_divtest*/
 misc_scripts/
