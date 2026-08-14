@@ -1,0 +1,25 @@
+# [experiment] (FIXED-HOME: robot init pose NOT randomized; shape/size DR kept) CANONICAL EVALUATION experiment for RIGID mushroom lift with orientation DR.
+# Used by: dppo eval (eval_diffusion_pointnet.yaml experiment:) / serl_sim_server --experiment
+# Status: active
+#
+# Evaluation composition for the rigid orientation-robustness experiment.  The DR uses
+# rigid_orientation (45° pitch/roll, full yaw, xy=0.04) matching the CMA-ES data collection,
+# so success numbers are on the SAME distribution the BC policy trained on.
+# No stress metrics (rigid has no von Mises).  No scene-rebuild needed (rigid is fast and
+# has no material/shape DR), so scene_group_size=0 in the eval config.
+task: single_lift_mushroom_rigid
+action: delta_pose_delta_gripper_fast_rot
+dr: rigid_orientation_fixedhome         # ±45° pitch/roll, full yaw — matches data collection
+augmentation: l515_noise      # sim-only point-cloud noise augmentation
+
+obs: superset_rigid           # privileged + point_cloud (no stress; rigid body)
+views:
+  teacher: [privileged]       # state + object pose/vel (for SERL, if ever used)
+  student: [point_cloud]      # deployable student: ee_pos + ee_quat + gripper + point_cloud
+
+rl:                           # mirrors single_lift_mushroom_rigid.yaml (unused at eval time)
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400

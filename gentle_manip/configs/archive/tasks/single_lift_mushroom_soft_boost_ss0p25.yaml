@@ -1,0 +1,25 @@
+# [task] Soft-MPM mushroom lift — FINE sim (235/250) + BOOSTED success/lift + stress.scale=0.25.
+# Used by: experiments/single_lift_mushroom_soft_boost_ss0p25 -> DPPO finetune
+# Status: experimental (2026-07-16)
+#
+success_z_min: 0.175
+success_z_max: 0.275          # widened from 0.225 — see single_lift_mushroom_rigid.yaml note
+hold_steps: 30
+object_name: mushroom
+object_type: soft
+sim_substeps: 220
+mpm_grid_density: 250
+success_scale: 2.0
+rewards:
+  stress:
+    scale: 0.25
+    cap: 1.5
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 0.1
+    decay: 8.0
+  lift:
+    scale: 0.2
+    grasp_gate_dist: 0.079
+    lift_target: 0.16

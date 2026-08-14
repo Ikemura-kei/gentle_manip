@@ -1,0 +1,25 @@
+# [task] Tofu soft single-lift (the original/minimal lift task).
+# Used by: experiments (task:), tests
+# Status: active
+#
+lift_height: 0.15    # metres above initial object z to qualify as "lifted"
+hold_steps: 30       # consecutive steps at height required for success (~3 s at 10 Hz)
+object_name: "tofu"
+object_type: "soft"  # "soft" (MPM) | "rigid" — rigid has no von_mises_stress; drop the stress reward below if set
+success_scale: 2.0
+
+rewards:
+  # Gentleness: penalty = -(von_mises / yield)^2 * scale. yield is auto-injected from
+  # the object's material, so cap is a FRACTION of yield (1.0 = bruising onset) and
+  # this block is material-agnostic.
+  stress:
+    scale: 1.0
+    cap: 1.5
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 1.0
+    decay: 20.0
+  lift:
+    scale: 1.0
+    grasp_gate_dist: 0.079

@@ -1,0 +1,33 @@
+# [collect] Teleop demo collection — rigid cube (legacy red_cube).
+# Used by: examples/collect_demos_sim.py
+# Status: legacy
+#
+# Sim demo-collection config — drives examples/collect_demos_sim.py end to end, so
+# every run is reproducible from one file. Sub-configs are referenced by NAME (file
+# stem) under their configs/<dir>/ folder; the collector inlines their contents into
+# a resolved YAML saved next to the demos.
+task_name: single_lift_cube_rigid
+object: red_cube
+object_type: rigid              # "rigid" | "soft"
+
+# ── sub-configs (names; null to skip the optional ones) ──────────────────────
+obs_config: point_cloud_1cam    # configs/obs/   (the DP3 obs; carries quat_noise_std)
+action_config: delta_pose_delta_gripper   # configs/action/
+dr: sim_demo                    # configs/dr/    (reset jitter: cube + arm pose); null to disable
+augmentation: l515_noise              # configs/augmentation/  (e.g. l515_noise); null to disable
+
+# ── output ───────────────────────────────────────────────────────────────────
+# Run dir = <out_dir>/<task_name>/<YY-MM-DD-abc>/ holding data.pkl + config copies.
+out_dir: dataset/demos
+
+# ── teleop / loop ────────────────────────────────────────────────────────────
+rate: 30.0                      # control rate (Hz)
+speed: 0.5                      # keyboard move/rot speed
+gripper_value: 0.05             # per-step gripper delta
+settle_steps: 40                # sim settle steps per reset
+action_noise_std: 0.01          # Gaussian noise (norm. action units) on POSE deltas only
+
+# ── idle trim (at save time) ─────────────────────────────────────────────────
+idle_threshold: 0.001
+keep_trailing_idle: 30
+max_interior_idle: 3
