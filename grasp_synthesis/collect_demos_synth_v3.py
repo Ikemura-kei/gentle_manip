@@ -761,21 +761,22 @@ def main() -> None:
     p.add_argument("--grasp-n-starts",    type=int,   default=6,    help="CMA multi-start count")
     p.add_argument("--grasp-gpu",         action="store_true",
                    help="use the GPU FEM solver (default CPU, so the metric doesn't compete with the sim GPU)")
-    # ── Grasp-pose DIVERSITY (default off = single-argmax, concentrated). Broadens the demo grasp-pose
-    # distribution (v3 otherwise pins pitch~0 + snaps yaw to a few gentle axes -> narrow/OOD-prone BC set).
-    p.add_argument("--grasp-diversity-tol", type=float, default=0.0,
+    # ── Grasp-pose DIVERSITY (ON by default — these defaults broaden the demo distribution to match v2's
+    # coverage: pitch σ≈14°, continuous yaw, at ~85% collect success. Set the knobs to 0/None for the old
+    # single-argmax, concentrated behaviour (v3 otherwise pins pitch~0 + snaps yaw to a few gentle axes).
+    p.add_argument("--grasp-diversity-tol", type=float, default=0.3,
                    help="sample among feasible grasps within this FRACTION of the best gentleness score "
-                        "(0=off/argmax, e.g. 0.25 = accept up to 25%% worse score -> diverse but still gentle)")
-    p.add_argument("--grasp-jitter-deg",  type=float, default=0.0,
+                        "(0=off/argmax; 0.3 default = accept up to 30%% worse score -> diverse but still gentle)")
+    p.add_argument("--grasp-jitter-deg",  type=float, default=20.0,
                    help="max +/- random perturbation (deg) on the selected grasp's roll/pitch/yaw, re-verified "
                         "to still hold within the diversity tolerance (needs --grasp-diversity-tol>0 for headroom)")
-    p.add_argument("--grasp-jitter-pos",  type=float, default=0.0,
+    p.add_argument("--grasp-jitter-pos",  type=float, default=0.003,
                    help="max +/- random position perturbation (m) applied with --grasp-jitter-deg")
-    p.add_argument("--grasp-align",       type=float, default=None,
-                   help="override the alignment weight w_align (default 3e4). LOWER it (e.g. 5e3) to let "
-                        "TILTED grasps stay near-optimal -> the diversity sampler/jitter can then broaden "
-                        "PITCH (w_align=3e4 pins pitch~0, capping diversity even with --grasp-diversity-tol)")
-    p.add_argument("--grasp-pitch-seed-deg", type=float, default=0.0,
+    p.add_argument("--grasp-align",       type=float, default=2000.0,
+                   help="alignment weight w_align (metric default 3e4; 2000 here). LOWER lets TILTED grasps "
+                        "stay near-optimal -> the diversity sampler/jitter can broaden PITCH (w_align=3e4 pins "
+                        "pitch~0). Pass 30000 to restore the strict flush-grasp metric.")
+    p.add_argument("--grasp-pitch-seed-deg", type=float, default=25.0,
                    help="jitter the CMA multi-start PITCH seed by +/- this (deg). Every start otherwise "
                         "seeds pitch 0, so even with a low --grasp-align CMA rarely explores tilt; seeding "
                         "tilted starts broadens the demo pitch toward v2 (complement of the yaw seed-smear)")
