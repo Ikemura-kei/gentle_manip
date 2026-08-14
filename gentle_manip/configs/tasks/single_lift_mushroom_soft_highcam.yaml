@@ -14,7 +14,7 @@ hold_steps: 30
 object_name: "mushroom"
 object_type: "soft"
 
-sim_substeps: 220
+sim_substeps: 235
 mpm_grid_density: 250
 
 success_scale: 0.2
