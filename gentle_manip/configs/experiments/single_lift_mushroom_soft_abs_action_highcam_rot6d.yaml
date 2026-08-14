@@ -1,0 +1,23 @@
+# [experiment] Camera-placement fork + 6D-rotation proprio of single_lift_mushroom_soft_abs_action.yaml.
+# Used by: collect_demos_synth_v3 (FEM-gentleness grasp collection on the SOFT sim, point-cloud viz)
+# Status: experimental (higher, top-down depth camera + rot6d proprio)
+#
+# Combines two changes vs single_lift_mushroom_soft_abs_action: task -> single_lift_mushroom_soft_highcam
+# (cam_ext +30cm, z=0.398, top-down, lookat (0.47, 0, 0)) AND obs -> superset_soft_rot6d (EE orientation
+# as a 6D rotation instead of the quaternion).
+task: single_lift_mushroom_soft_highcam   # camera fork (cam_ext +30cm, top-down)
+action: abs_pose_abs_gripper
+dr: soft_orientation
+augmentation: l515_noise
+
+obs: superset_soft_rot6d              # EE orientation as 6D rotation instead of quaternion
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400

@@ -1,11 +1,11 @@
-# [experiment] Camera-placement STUDY fork #2 of single_lift_mushroom_soft_abs_action.yaml.
+# [experiment] Camera-placement fork of single_lift_mushroom_soft_abs_action.yaml.
 # Used by: collect_demos_synth_v3 (FEM-gentleness grasp collection on the SOFT sim, point-cloud viz)
-# Status: experimental (camera study: cam_ext +30cm from original = 15cm above the highcam fork)
+# Status: experimental (higher, top-down depth camera)
 #
-# IDENTICAL to single_lift_mushroom_soft_abs_action EXCEPT task -> single_lift_mushroom_soft_highcam2,
+# IDENTICAL to single_lift_mushroom_soft_abs_action EXCEPT task -> single_lift_mushroom_soft_highcam,
 # which raises cam_ext +30cm (z=0.398) with the same lookat (0.47, 0, 0). Only the depth-camera
 # extrinsic differs.
-task: single_lift_mushroom_soft_highcam2   # camera-study fork #2 (cam_ext +30cm)
+task: single_lift_mushroom_soft_highcam   # camera fork (cam_ext +30cm, top-down)
 action: abs_pose_abs_gripper
 dr: soft_orientation
 augmentation: l515_noise
