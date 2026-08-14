@@ -85,6 +85,7 @@ paper_writing.txt
 outcmaes/
 # tetgen tet-mesher scratch output (written to cwd by the tetgen lib during FEM build_grasp_fem)
 tetgen-tmpfile*
-# Local A/B / camera-study demo sets (throwaway) + scratch orchestration scripts
+# Local A/B / camera-study / smoke demo sets (throwaway) + scratch orchestration scripts
 dataset/demos_divtest*/
+dataset/demos_smoke/
 misc_scripts/
