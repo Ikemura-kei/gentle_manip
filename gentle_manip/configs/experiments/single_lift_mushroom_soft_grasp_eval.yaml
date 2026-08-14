@@ -2,7 +2,7 @@
 # Used by: scripts/eval_grasp_synth.py  (serl_sim_server --experiment single_lift_mushroom_soft_grasp_eval)
 # Status: active
 #
-# Same task / action / DR as single_lift_mushroom_soft_abs_action_eval (the config the v3 data
+# Same task / action / DR as single_lift_mushroom_soft_abs_action (the config the v3 data
 # collection used) — SOFT MPM mushroom, absolute pose+gripper action, soft_orientation pose DR
 # (±45° pitch/roll, full yaw, 0.25 flip) + per-scene size/shape/material DR. ONLY the obs differs:
 # a privileged state view that also carries object ORIENTATION (superset_soft_grasp_eval), which the
