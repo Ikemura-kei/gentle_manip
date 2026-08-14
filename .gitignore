@@ -85,4 +85,4 @@ paper_writing.txt
 outcmaes/
 # Local A/B / camera-study demo sets (throwaway) + scratch orchestration scripts
 dataset/demos_divtest*/
-scratch_*.sh
+misc_scripts/
