@@ -794,8 +794,10 @@ def main() -> None:
                    help="RNG seed for pose DR")
     p.add_argument("--keep-failures", action="store_true",
                    help="also save episodes where the grasp failed (default: success only)")
-    p.add_argument("--record-video", action="store_true",
-                   help="write per-episode mp4 videos to <out-dir>/videos/ (slower)")
+    p.add_argument("--record-video", nargs="?", type=int, const=10**9, default=0,
+                   help="record per-episode mp4 videos + grasp-pose PNGs to <out-dir>/videos/ (slower). "
+                        "Bare `--record-video` = ALL episodes; `--record-video N` = only the FIRST N saved "
+                        "episodes (rendering stops after N -> no extra cost/disk on a long run). Off by default.")
     args = p.parse_args()
 
     # ── Load everything from the experiment config (same as training / eval) ──
@@ -1002,10 +1004,13 @@ def main() -> None:
                 print(f"    (grasp viz failed: {e})")
 
         # ── Execute scripted trajectory + collect data ──
+        # Record video only while under the first-N cap (args.record_video = N, or 10**9 for "all");
+        # once N saved, stop RENDERING (no per-step RGB cost/disk for the rest of the run).
+        rec_this_batch = args.record_video > 0 and total_saved < args.record_video
         print(f"  Executing …")
         obs_bufs, act_bufs, rew_bufs, success, frame_bufs = execute_and_collect(
             worker, all_best_x, init_obs_batch, perception, action_config,
-            record_video=args.record_video, priv_cfg=priv_cfg, dr_vec=dr_vec,
+            record_video=rec_this_batch, priv_cfg=priv_cfg, dr_vec=dr_vec,
         )
         print(f"  Success: {success.tolist()}")
 
@@ -1034,7 +1039,7 @@ def main() -> None:
             # Always save failure video (if recording) before skipping demo data.
             if not success[i]:
                 total_failed += 1
-                if args.record_video and frame_bufs[i]:
+                if rec_this_batch and frame_bufs[i]:
                     vid_dir = run_dir / "videos_failed"
                     vid_dir.mkdir(exist_ok=True)
                     vid_path = vid_dir / f"fail{total_failed:04d}_b{batch_idx}_env{i}.mp4"
@@ -1058,7 +1063,7 @@ def main() -> None:
             print(f"    ep {total_saved}: env {i}  {'✓' if success[i] else '✗'}  "
                   f"T={episode['actions'].shape[0]}")
 
-            if args.record_video and frame_bufs[i]:
+            if frame_bufs[i] and total_saved <= args.record_video:   # first-N cap (precise)
                 vid_dir = run_dir / "videos"
                 vid_dir.mkdir(exist_ok=True)
                 vid_path = vid_dir / f"ep{total_saved:04d}_env{i}_success.mp4"

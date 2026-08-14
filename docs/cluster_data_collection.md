@@ -11,8 +11,12 @@ on a cluster GPU node. For the deep dive (config structure, FSM, internals) see
 env -u PYTHONPATH -u ROS_DISTRO MUJOCO_GL=egl uv run --project envs/sim --no-sync \
   python grasp_synthesis/collect_demos_synth_v3.py \
     --experiment single_lift_mushroom_soft_abs_action \
-    --n-episodes 650 --n-envs 8 --grasp-gpu
+    --n-episodes 650 --n-envs 8 --grasp-gpu \
+    --record-video 50          # RGB clips + grasp PNGs for the FIRST 50 episodes only (sanity check)
 ```
+
+`--record-video 50` is the recommended default: it gives enough clips to eyeball that the collection is
+sane, and rendering stops after 50 so it costs almost nothing / little disk on the full 650-demo run.
 
 Output → `dataset/demos/single_lift_mushroom_soft/<YY-MM-DD-xyz>/data.pkl` (+ `config.yaml`,
 `stats.yaml`). That `data.pkl` is the input to DPPO training (`docs/dppo_dp3_training_recipe.md`).
@@ -54,7 +58,7 @@ write the identical demo schema.
 | `--scene-dr-every` | `1` (default) | rebuild the object mesh (fresh scale+shape DR) every N batches; needs shape/scale fields in the experiment `dr:` |
 | `--task-name` | *(experiment's task)* | override the **output folder name** only. Use it to keep the canonical `single_lift_mushroom_soft/` folder when the experiment's task cfg has a variant name (e.g. a camera-study fork). |
 | `--out-dir` | `dataset/demos` | output root |
-| `--record-video` | off | also write RGB execution clips + grasp-pose PNGs to `<run>/videos/` (slower) |
+| `--record-video` | off | RGB execution clips + grasp-pose PNGs to `<run>/videos/`. `--record-video N` = FIRST N episodes only (rendering stops after N); bare `--record-video` = all. **Recommend `50`.** |
 | `--seed` | `0` | RNG seed (pose DR). NOTE: CMA itself is not fully seeded — same-seed reruns are not bit-identical. |
 
 ### v3-only: grasp params + diversity
@@ -94,10 +98,11 @@ To collect the **concentrated / argmax** grasps instead (old v3 behaviour), pass
 The default command writes **no videos** — only `data.pkl` + `config.yaml` + `stats.yaml`. Two ways
 to get visuals, both optional:
 
-- **RGB execution clips + grasp-pose PNGs** — add `--record-video`. Writes `<run>/videos/ep*_env*_success.mp4`
-  (the scripted grasp executing) and a paired PNG showing the metric's predicted stress/grip/align/width,
-  for **every** saved episode. This is disk-heavy and slower on a 650-demo run — for a quick sanity check,
-  prefer a **small** run with video (e.g. `--n-episodes 20 --record-video`) over videos on the full set.
+- **RGB execution clips + grasp-pose PNGs** — add `--record-video N` (recommended `--record-video 50`).
+  Writes `<run>/videos/ep*_env*_success.mp4` (the scripted grasp executing) + a paired PNG with the
+  metric's predicted stress/grip/align/width, for the **first N** saved episodes. Rendering stops after N,
+  so on the full 650-demo run it costs almost nothing and only ~N clips of disk. Bare `--record-video`
+  (no N) records **all** episodes — disk-heavy on 650, usually not what you want.
 
 - **Point-cloud videos** (what the policy actually sees) + grasp-pose distribution plots — NOT produced by
   the collector; render them post-hoc from `data.pkl` (needs `envs/sim`, headless):
