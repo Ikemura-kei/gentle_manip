@@ -1,0 +1,33 @@
+# [obs] SUPERSET obs for SOFT objects — 6D-rotation proprioception variant of superset_soft.yaml.
+# Used by: experiments (obs:) demo collection; subviewed into teacher/student
+# Status: experimental (NN-friendlier orientation encoding: rot6d instead of quaternion)
+#
+# IDENTICAL to superset_soft.yaml EXCEPT the EE orientation is emitted as a continuous 6D rotation
+# (`ee_rot6d`, 6 dims) instead of the wxyz quaternion (`ee_quat`, 4 dims). The 6D is derived in the
+# SHARED PerceptionPipeline from the exact same (quat_noise_std-augmented + sign-canonicalized)
+# quaternion, so sim and real are treated identically and the augmentation flows through — only the
+# final obs encoding differs. rot6d is continuous, singularity-free, and sign-invariant, so it avoids
+# the quaternion double-cover the policy would otherwise have to learn around.
+#
+# NOTE: proprio dim becomes ee_pos(3) + ee_rot6d(6) + gripper(1) = 10 (vs 8 with a quaternion) — set
+# the training config's obs_dim accordingly. State views expose `ee_rot6d`, not `ee_quat`.
+include_joint_pos: false
+include_joint_vel: false
+quat_noise_std: 0.003
+ee_rot6d: true                # EE orientation -> 6D rotation (Zhou et al. 2019) instead of quaternion
+
+# Privileged (sim-only) — the state teacher's extra signal.
+privileged:
+  object_pos: true
+  object_vel: true
+  stress: true
+
+# Point cloud (the student's input) with the real-parity denoiser baked in.
+point_cloud:
+  cameras: ["cam_ext"]
+  crop_min: [0.2, -0.215, 0.004]
+  crop_max: [0.71,   0.215,  0.45]
+  max_points: 1024
+  outlier_removal:
+    voxel_size: 0.01
+    min_neighbors: 23

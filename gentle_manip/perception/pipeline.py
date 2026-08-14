@@ -5,6 +5,7 @@ from typing import Optional
 import numpy as np
 import gymnasium
 from gymnasium.spaces import Box, Dict
+from scipy.spatial.transform import Rotation as Rot
 
 from gentle_manip.envs.raw_obs import RawObs
 from gentle_manip.perception.obs_config import ObsConfig
@@ -77,6 +78,16 @@ class PerceptionPipeline:
         sign = np.sign(q[np.arange(q.shape[0]), dom]).astype(np.float32)
         sign[sign == 0.0] = 1.0
         obs["ee_quat"] = (q * sign[:, np.newaxis]).astype(np.float32)
+
+        # Optionally emit the EE orientation as a continuous 6D rotation (Zhou et al. 2019 — first two
+        # rotation-matrix columns) INSTEAD of the quaternion. Derived from the FINAL ee_quat above, so the
+        # quat-noise augmentation and sim/real handling are identical — only the obs encoding differs.
+        if self.cfg.ee_rot6d:
+            wxyz = obs["ee_quat"]                                     # (N, 4) wxyz
+            xyzw = np.concatenate([wxyz[:, 1:], wxyz[:, :1]], axis=1)
+            mat = Rot.from_quat(xyzw).as_matrix()                    # (N, 3, 3)
+            obs["ee_rot6d"] = np.concatenate([mat[:, :, 0], mat[:, :, 1]], axis=-1).astype(np.float32)
+            del obs["ee_quat"]                                       # either quat OR rot6d in the obs
 
         if self.cfg.include_joint_pos and raw.joint_pos is not None:
             obs["joint_pos"] = raw.joint_pos.astype(np.float32)      # (N, 7)
@@ -155,7 +166,10 @@ class PerceptionPipeline:
         spaces = {}
 
         spaces["ee_pos"]        = Box(-np.inf, np.inf, (3,),  np.float32)
-        spaces["ee_quat"]       = Box(-1.0,    1.0,    (4,),  np.float32)
+        if self.cfg.ee_rot6d:
+            spaces["ee_rot6d"]  = Box(-1.0,    1.0,    (6,),  np.float32)
+        else:
+            spaces["ee_quat"]   = Box(-1.0,    1.0,    (4,),  np.float32)
         spaces["gripper_width"] = Box(0.0,     np.inf, (1,),  np.float32)
 
         if self.cfg.include_joint_pos:

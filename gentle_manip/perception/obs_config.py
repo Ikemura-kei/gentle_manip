@@ -101,6 +101,14 @@ class ObsConfig:
     # never overfits one clean quaternion. 0.0 disables it.
     quat_noise_std: float = 0.0
 
+    # Represent the EE orientation in the FINAL obs as a continuous 6D rotation (Zhou et al. 2019 —
+    # first two rotation-matrix columns) INSTEAD of the wxyz quaternion. Derived in PerceptionPipeline
+    # from the exact same (noise-augmented + sign-canonicalized) ee_quat, so sim/real are identical and
+    # the quat augmentation flows through; only which one lands in the obs changes. NN-friendlier:
+    # continuous + singularity-free + sign-invariant (rot6d(q)==rot6d(-q)). When True the obs key is
+    # `ee_rot6d` (6,) and `ee_quat` is dropped.
+    ee_rot6d: bool = False
+
     point_cloud: Optional[PointCloudConfig] = None
     voxel: Optional[VoxelConfig] = None
     images: Optional[ImageConfig] = None
@@ -134,6 +142,7 @@ class ObsConfig:
             include_joint_pos=self.include_joint_pos and "joint_pos" in m,
             include_joint_vel=self.include_joint_vel and "joint_vel" in m,
             quat_noise_std=self.quat_noise_std,
+            ee_rot6d=self.ee_rot6d,
             point_cloud=self.point_cloud if "point_cloud" in m else None,
             voxel=self.voxel if "voxel" in m else None,
             images=self.images if "images" in m else None,
@@ -144,7 +153,7 @@ class ObsConfig:
     def obs_keys(self) -> list:
         """The obs-dict keys this config produces (matches PolicyEnv output). Used to
         subset a recorded superset demo down to a view."""
-        keys = ["ee_pos", "ee_quat", "gripper_width"]
+        keys = ["ee_pos", "ee_rot6d" if self.ee_rot6d else "ee_quat", "gripper_width"]
         if self.include_joint_pos:
             keys.append("joint_pos")
         if self.include_joint_vel:
@@ -235,6 +244,7 @@ class ObsConfig:
             include_joint_pos=d.get("include_joint_pos", False),
             include_joint_vel=d.get("include_joint_vel", False),
             quat_noise_std=d.get("quat_noise_std", 0.0),
+            ee_rot6d=d.get("ee_rot6d", False),
             point_cloud=pc,
             voxel=voxel,
             images=images,
