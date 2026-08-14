@@ -1,0 +1,24 @@
+# [experiment] SOFT mushroom lift, abs action — 6D-rotation proprioception variant.
+# Used by: collect_demos_synth_v3 (FEM-gentleness grasp collection); DPPO soft_abs_pcd_rot6d
+# Status: experimental (rot6d proprio: is a 6D-rotation EE-orientation policy non-degenerate vs quat?)
+#
+# IDENTICAL to single_lift_mushroom_soft_abs_action EXCEPT obs -> superset_soft_rot6d, which emits the
+# EE orientation as a 6D rotation (ee_rot6d, 6) instead of the quaternion (ee_quat, 4). Proprio dim
+# becomes 10 (ee_pos 3 + ee_rot6d 6 + gripper 1). Derived in the shared pipeline from the same
+# quat_noise_std-augmented quaternion, so sim/real are identical.
+task: single_lift_mushroom_soft
+action: abs_pose_abs_gripper
+dr: soft_orientation
+augmentation: l515_noise
+
+obs: superset_soft_rot6d              # EE orientation as 6D rotation instead of quaternion
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400
