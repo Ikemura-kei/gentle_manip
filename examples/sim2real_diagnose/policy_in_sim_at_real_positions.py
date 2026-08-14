@@ -115,7 +115,7 @@ def main():
 
     real = pickle.load(open(args.real, "rb"))["episodes"]
     obs_cfg = ObsConfig.from_dict(yaml.safe_load((_CFG / "obs/point_cloud_1cam_outlier.yaml").read_text()))
-    act_cfg = ActionConfig.from_dict(yaml.safe_load((_CFG / "action/delta_pose_delta_gripper.yaml").read_text()))
+    act_cfg = ActionConfig.from_dict(yaml.safe_load((_CFG / "action/delta_pose_delta_gripper_fast_rot.yaml").read_text()))
     task = SingleLiftTask(Experiment.load("single_lift_mushroom_soft").task_cfg)  # full cfg (210/250)
     nominal = np.array(get_object_def("mushroom").default_pos[:2], np.float32)
     backend = SimBackend(task.scene_spec, 1, config={"sim": {"settle_steps": 30}}, use_subprocess=False)

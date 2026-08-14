@@ -103,7 +103,7 @@ def main():
 
     obs_cfg = ObsConfig.from_dict(yaml.safe_load((_CFG / "obs" / f"{args.obs}.yaml").read_text()))
     act_cfg = ActionConfig.from_dict(
-        yaml.safe_load((_CFG / "action" / "delta_pose_delta_gripper.yaml").read_text()))
+        yaml.safe_load((_CFG / "action" / "delta_pose_delta_gripper_fast_rot.yaml").read_text()))
     aug_cfg = None
     if args.augmentation is not None:
         aug_path = args.augmentation if args.augmentation.is_file() else _CFG.parent / args.augmentation

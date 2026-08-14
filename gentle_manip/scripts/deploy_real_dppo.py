@@ -124,7 +124,7 @@ def main() -> None:
                    default=_PKG / "configs/obs/point_cloud_1cam_outlier.yaml",
                    help="must match the student's training point-cloud processing (crop/1024/outlier)")
     p.add_argument("--action-config", type=Path,
-                   default=_PKG / "configs/action/delta_pose_delta_gripper.yaml")
+                   default=_PKG / "configs/action/abs_pose_abs_gripper.yaml")
     p.add_argument("--cond-steps", type=int, default=2)
     p.add_argument("--act-steps", type=int, default=4)
     p.add_argument("--max-steps", type=int, default=20000)

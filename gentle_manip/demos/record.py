@@ -477,7 +477,7 @@ def main() -> None:
     p.add_argument("--obs-config", type=Path,
                    default=_PKG / "configs" / "obs" / "superset_real.yaml")
     p.add_argument("--action-config", type=Path,
-                   default=_PKG / "configs" / "action" / "delta_pose_delta_gripper.yaml")
+                   default=_PKG / "configs" / "action" / "abs_pose_abs_gripper.yaml")
     p.add_argument("--record-action-config", type=Path, default=None,
                    help="an ABSOLUTE-mode action config (e.g. abs_pose_abs_gripper.yaml) — "
                         "if set, teleop still drives the robot via --action-config (delta, "

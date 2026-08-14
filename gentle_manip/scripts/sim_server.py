@@ -32,7 +32,7 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=5560)
     ap.add_argument("--obs-config", type=Path, default=_PKG / "configs" / "obs" / "point_cloud_1cam.yaml")
     ap.add_argument("--action-config", type=Path,
-                    default=_PKG / "configs" / "action" / "delta_pose_delta_gripper.yaml")
+                    default=_PKG / "configs" / "action" / "abs_pose_abs_gripper.yaml")
     ap.add_argument("--object", default="red_cube")
     ap.add_argument("--object-type", default="soft", choices=("soft", "rigid"))
     ap.add_argument("--num-envs", type=int, default=1,

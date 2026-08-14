@@ -66,7 +66,7 @@ def main():
     task = SingleLiftTask({"object_name": args.object})
     obs_cfg = ObsConfig.from_dict(yaml.safe_load((_CFG / "obs" / f"{args.obs}.yaml").read_text()))
     act_cfg = ActionConfig.from_dict(
-        yaml.safe_load((_CFG / "action" / "delta_pose_delta_gripper.yaml").read_text())
+        yaml.safe_load((_CFG / "action" / "delta_pose_delta_gripper_fast_rot.yaml").read_text())
     )
     if obs_cfg.point_cloud is None:
         raise SystemExit(f"obs config {args.obs!r} has no point_cloud block")

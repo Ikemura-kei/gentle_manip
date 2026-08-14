@@ -41,7 +41,7 @@ def test_policy_env_sim_lifecycle():
     B = 2
     task = SingleLiftTask({"object_name": "tofu"})
     obs_cfg = ObsConfig.from_dict(_load("obs/point_cloud_1cam.yaml"))
-    act_cfg = ActionConfig.from_dict(_load("action/delta_pose_delta_gripper.yaml"))
+    act_cfg = ActionConfig.from_dict(_load("action/delta_pose_delta_gripper_fast_rot.yaml"))
 
     backend = SimBackend(task.scene_spec, B, config={"sim": {"settle_steps": 20}})
     env = PolicyEnv(backend, obs_cfg, act_cfg, task=task, max_episode_steps=4)
