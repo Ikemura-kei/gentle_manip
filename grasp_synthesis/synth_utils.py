@@ -30,32 +30,19 @@ N_FINGER_SAMPLE = 60              # surface points sampled per finger for SDF qu
 
 # ── SDF ──────────────────────────────────────────────────────────────────────
 
-def build_object_sdf(mesh_path: str, target_faces: int = 250, min_faces_for_decimation: int = 500):
+def build_object_sdf(mesh_path: str, simplify_reduction: float = 0.99):
     """Load mesh and return sdf_fn(pts: (N,3)) -> (N,) signed distances.
     Positive = outside the object, negative = inside.
 
-    The mesh is simplified toward `target_faces` before building the BVH so
-    that SDF queries run in ~2 ms instead of ~2 s on a dense scan (mushroom's
-    25k faces -> ~250). This target is now ADAPTIVE, not a fixed percentage:
-    a fixed 99% reduction (the original behavior) leaves a LOW-poly mesh (a
-    game-asset-quality fruit scan can be under 200 faces to begin with) with
-    0-10 faces -- degenerate, and trimesh's bounds_tree construction raises
-    "Bounds must be (n, dimension * 2)!" on it (confirmed crash on grape's
-    80-face mesh, and several other harvested meshes were one bad DR draw
-    away from the same fate -- see registry.py's per-category face counts).
-    Skip decimation entirely below `min_faces_for_decimation`: an already-
-    coarse mesh doesn't need it for speed, and decimating it further only
-    risks degeneracy for no benefit.
+    The mesh is simplified (99% face reduction by default, ~250 faces) before
+    building the BVH so that SDF queries run in ~2 ms instead of ~2 s.
     Sign is estimated via the face-normal dot-product test (fast, works for
     convex-ish meshes; occasional errors near concave creases are acceptable
     for CMA-ES grasp synthesis).
     """
     mesh = trimesh.load(str(mesh_path), force='mesh')
-    if len(mesh.faces) > min_faces_for_decimation:
-        reduction = 1.0 - (target_faces / len(mesh.faces))
-        mesh_s = mesh.simplify_quadric_decimation(reduction)
-    else:
-        mesh_s = mesh
+    # Simplify for fast BVH traversal (25k faces → ~250 faces)
+    mesh_s = mesh.simplify_quadric_decimation(simplify_reduction)
     trimesh.repair.fix_normals(mesh_s)
 
     def _sdf(pts: np.ndarray) -> np.ndarray:

@@ -104,19 +104,52 @@ def render_grasp_scene(obj, sigma_voigt, x_tcp, pad_geo, obj_com, obj_quat_wxyz,
 
 def render_grasp_pose(obj, pad_geo, x_tcp, obj_com, obj_quat_wxyz, table_z, out, *, E=3e5,
                       stress=None, grip=None, align=None, width_face=None, label=""):
-    """Collector entry: render the synthesized grasp POSE with the METRIC's predicted stress/force in the
-    title — pairs each execution video with what the planner expected. Recomputes the stress field once."""
+    """Collector entry: render the synthesized grasp in the WORLD frame — the object at ITS actual
+    orientation `obj_quat_wxyz` (so it lines up with the execution video) + the finger meshes at the
+    world grasp pose + ground grid, coloured by predicted von Mises stress, titled with stress/grip/
+    align/width. NB: the object is drawn as the NOMINAL (undeformed) mesh rotated by obj_quat — for soft
+    MPM `obj_quat` is the spawn-euler proxy (the sim exposes no MPM orientation), so this shows the pose
+    the PLANNER assumed; compare it to the video to sanity-check that assumption."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
     sig = grasp_stress_voigt(obj, x_tcp, pad_geo, obj_com, obj_quat_wxyz, E)
     if sig is None:
         return False
+    obj_com = np.asarray(obj_com, float)
+    q = np.asarray(obj_quat_wxyz, float)
+    R_obj = Rot.from_quat([q[1], q[2], q[3], q[0]])
+
+    tri, parent = boundary_faces(obj.tets)
+    otris = R_obj.apply(obj.verts)[tri]                          # object at world orientation (rel. COM)
+    _, ocolors, _ = _face_colors(obj, sig, "coolwarm")          # per-boundary-face von Mises colours
+
+    L, Rm = _finger_meshes()                                     # finger meshes at the WORLD grasp pose
+    Rt = Rot.from_euler("xyz", np.asarray(x_tcp[3:6], float)); w = float(x_tcp[6]); z = fg._z_off(w)
+    tcp = np.asarray(x_tcp[:3], float)
+    tL = np.array([0.0,  (w / 2 + fg.FINGER_GRIP_OFF), z]); tR = np.array([0.0, -(w / 2 + fg.FINGER_GRIP_OFF), z])
+    ltris = (Rt.apply(np.asarray(L.vertices, float) + tL) + tcp - obj_com)[L.faces]
+    rtris = (Rt.apply(np.asarray(Rm.vertices, float) + tR) + tcp - obj_com)[Rm.faces]
+
+    d = 0.045; xs = np.linspace(obj_com[0] - d, obj_com[0] + d, 9); ys = np.linspace(obj_com[1] - d, obj_com[1] + d, 9)
+    tsegs = ([np.array([[xv, ys[0], table_z], [xv, ys[-1], table_z]]) - obj_com for xv in xs]
+             + [np.array([[xs[0], yv, table_z], [xs[-1], yv, table_z]]) - obj_com for yv in ys])
+
+    lim = 1.15 * max(np.abs(otris).max(), np.abs(ltris).max(), 0.02)
     w_mm = (width_face if width_face is not None else float(x_tcp[6])) * 1e3
-    bits = [b for b in (
-        f"stress {stress:.0f} Pa" if stress is not None else None,
-        f"grip {grip:.2f} N" if grip is not None else None,
-        f"align {align:.3f}" if align is not None else None,
-        f"width {w_mm:.1f} mm") if b]
-    _fourview(obj, sig, x_tcp, pad_geo, obj_com, obj_quat_wxyz, table_z, out,
-              f"{label} — predicted grasp:  " + "   ".join(bits))
+    bits = [b for b in (f"stress {stress:.0f} Pa" if stress is not None else None,
+                        f"grip {grip:.2f} N" if grip is not None else None,
+                        f"align {align:.3f}" if align is not None else None,
+                        f"width {w_mm:.1f} mm") if b]
+    views = [("front (−y)", 14, -90), ("side (+x)", 14, 0), ("top", 88, -90), ("iso", 24, -55)]
+    fig = plt.figure(figsize=(13, 11))
+    for k, (name, elev, azim) in enumerate(views):
+        ax = fig.add_subplot(2, 2, k + 1, projection="3d")
+        _add_scene(ax, otris, ocolors, ltris, rtris, tsegs, lim, elev, azim, name)
+        ax.set_xlabel("x"); ax.set_ylabel("y")
+    fig.suptitle(f"{label} — predicted grasp (WORLD frame):  " + "   ".join(bits), fontsize=12)
+    fig.tight_layout(); fig.savefig(out, dpi=110); plt.close(fig)
     return True
 
 

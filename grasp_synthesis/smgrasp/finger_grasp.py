@@ -31,6 +31,13 @@ from .width_grasp import (width_grasp_stress, evaluate_grasp, grasp_alignment, i
 
 _ROOT = Path(__file__).resolve().parents[2]                     # repo root (for the finger STL assets)
 
+# Per-pad contact-PRESSURE penalty weight: score −= W_PRESS · (grip / smaller-pad contact area, Pa). The
+# physical gentleness signal (peak contact pressure ≈ what bruises) that the masked internal-stress term
+# MISSES — it penalizes pinch / one-pad-on-a-thin-part grasps that have a tiny contact area (high pressure)
+# but deceptively low bulk stress. Calibrated so a distributed cap grasp (~19 kPa/pad) beats a concentrated
+# one (~100 kPa/pad) despite the latter's slightly LOWER masked stress. See width_grasp.width_grasp_stress.
+W_PRESS = 0.1
+
 # ── Gripper geometry (verbatim from synth_utils; meters) ──────────────────────
 FINGER_TO_TCP_Z = -0.069863       # finger-local origin z below TCP origin, along tool z
 FINGER_GRIP_OFF = 0.0261          # finger body half-width (TCP y offset of each finger origin, + width/2)
@@ -162,7 +169,8 @@ def score_finger_grasp(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, densit
                        table_z: float = 0.0, ground_buf: float = 0.0035, g: float = 9.81,
                        accel: float = 0.0, max_indent: float = 0.01, obj_sdf=None,
                        pen_tol: float = 0.003, table_tol: float = 0.002,
-                       w_align: float = W_ALIGN, w_peak: float = W_PEAK, w_area: float = 0.0) -> dict:
+                       w_align: float = W_ALIGN, w_peak: float = W_PEAK, w_area: float = 0.0,
+                       w_press: float = W_PRESS) -> dict:
     """Score one 7-DOF TCP grasp candidate (higher = gentler; MAXIMIZED). Ladder mirrors
     `width_grasp.score_candidate` but in TCP space with the real finger pad, plus two TOLERANCE-based
     geometric pre-filters (cheap, no FEM): gross table scratch >> gross finger-body penetration >>
@@ -218,12 +226,20 @@ def score_finger_grasp(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, densit
         return {"score": -PEN_BASE * (2.0 - frac), "status": "ok", "holdable": False,
                 "stress_top10": r["stress_top10"], "grip": r["grip"]}
     align = grasp_alignment(obj, axis, prim["nodes"])
-    carea = _contact_area(obj, prim["nodes"]) if w_area else 0.0   # reward distributed (low-pressure) contact
-    score = -r["stress_top10"] - w_align * (1.0 - align) - w_peak * E * prim["hi_1"] + w_area * carea
+    # PER-PAD contact PRESSURE = grip / (smaller pad's contact area). This is the gentleness signal the
+    # masked internal von Mises stress MISSES: a pinch / one-pad-on-a-thin-part has a tiny contact area →
+    # high LOCAL pressure (what bruises) even at low grip, yet low bulk stress. Penalize the WORST pad
+    # (min area) so a good big pad can't dilute one bad pad (e.g. one finger on the mushroom stem).
+    nd, lm = prim["nodes"], prim["left_mask"]
+    aL = _contact_area(obj, nd[lm]); aR = _contact_area(obj, nd[~lm])
+    pressure = r["grip"] / max(min(aL, aR), 1e-6)                 # Pa (worst pad); grip is per-pad (= both)
+    carea = _contact_area(obj, nd) if w_area else 0.0            # optional whole-grasp area reward
+    score = (-r["stress_top10"] - w_align * (1.0 - align) - w_peak * E * prim["hi_1"]
+             - w_press * pressure + w_area * carea)
     return {"score": float(score), "status": "ok", "holdable": True,
             "stress_top10": float(r["stress_top10"]), "grip": float(r["grip"]), "align": float(align),
-            "contact_area": float(carea), "width_face": wface, "center": center, "axis": axis,
-            "delta_left": dl, "delta_right": dr}
+            "pressure": float(pressure), "min_pad_area": float(min(aL, aR)), "contact_area": float(carea),
+            "width_face": wface, "center": center, "axis": axis, "delta_left": dl, "delta_right": dr}
 
 
 def _closing_axis_world(x_tcp) -> np.ndarray:
@@ -236,7 +252,7 @@ def _distinct_tcp_poses(feasible, n, *, pos_thr, ang_thr):
     full x vectors (for round-2 width refinement across grasp basins)."""
     cos_thr = np.cos(ang_thr)
     picked = []
-    for x, _ in sorted(feasible, key=lambda f: -f[1]):
+    for x, _, _ in sorted(feasible, key=lambda f: -f[1]):
         ax = _closing_axis_world(x)
         if all(not (np.linalg.norm(x[:3] - px[:3]) < pos_thr and abs(ax @ _closing_axis_world(px)) > cos_thr)
                for px in picked):
@@ -256,9 +272,11 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                       bbox_margin: float = 1.2, z_lift=(0.02, 0.12), sigma: float = 0.15, maxfevals: int = 400,
                       n_starts: int = 6, g: float = 9.81, accel: float = 0.0, max_indent: float = 0.01,
                       obj_sdf=None, pen_tol: float = 0.003, table_tol: float = 0.002,
-                      w_align=None, w_peak: float = 0.0, w_area: float = 0.0, refine: bool = True,
-                      refine_scan: int = 25, seed: int = 0, verbose: bool = False,
-                      record_history: bool = False) -> dict:
+                      w_align=None, w_peak: float = 0.0, w_area: float = 0.0, w_press=None,
+                      refine: bool = True, refine_scan: int = 25, seed: int = 0, verbose: bool = False,
+                      record_history: bool = False,
+                      diversity_tol: float = 0.0, jitter_deg: float = 0.0, jitter_pos: float = 0.0,
+                      jitter_tries: int = 8, pitch_seed_deg: float = 0.0) -> dict:
     """CMA-ES over the 7-DOF TCP grasp maximizing the FEM gentleness score, with real finger geometry +
     table constraint. Multi-start over top-down approaches at diverse yaw (a good starting basin for a
     tabletop grasp); the search may tilt/translate from there. `obj_com` is the object world COM,
@@ -269,9 +287,12 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
     aln = {"w_area": w_area}
     if w_align is not None: aln["w_align"] = w_align
     if w_peak is not None:  aln["w_peak"] = w_peak
+    if w_press is not None: aln["w_press"] = w_press
     com = np.asarray(obj_com, float)
     if obj_sdf is None:                                          # build the penetration SDF once (reused)
         obj_sdf = build_object_sdf(obj)
+    _div_on = (diversity_tol > 0.0 or jitter_deg > 0.0 or jitter_pos > 0.0 or pitch_seed_deg > 0.0)
+    _drng = np.random.default_rng(seed) if _div_on else None    # one stream: seed smear + sampling/jitter
 
     best = {"score": -np.inf, "x": None, "res": None}
     history, feasible, n_eval, cur_round = [], [], [0], [1]      # cur_round: 1=CMA search, 2=width refine
@@ -286,7 +307,7 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
         n_eval[0] += 1
         res = _score(x)
         if is_real_grasp(res["score"]):
-            feasible.append((np.asarray(x, float).copy(), res["score"]))
+            feasible.append((np.asarray(x, float).copy(), res["score"], res))   # store res (no re-score later)
             if res["score"] > best["score"]:
                 best.update(score=res["score"], x=np.asarray(x, float).copy(), res=res)
         if record_history:                                       # record EVERY candidate (the search process)
@@ -327,8 +348,26 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
         return float(np.clip((proj.max() - proj.min()) - 2 * indent, 0.01, 0.079))
 
     yaws = np.linspace(-np.pi / 2, np.pi / 2, n_starts)
+    pitch_seeds = np.zeros(n_starts)
+    if _drng is not None:
+        if diversity_tol > 0.0:
+            # The fixed seed yaws ARE the discrete yaw bands in the demos: a near-axisymmetric object gives
+            # CMA no yaw gradient, so each grasp stays at its seed. Jitter the seeds by ±half the inter-seed
+            # gap per synthesis so, over the dataset, the bands smear into a CONTINUOUS yaw distribution.
+            gap = np.pi / max(n_starts - 1, 1)
+            yaws = yaws + _drng.uniform(-gap / 2, gap / 2, n_starts)
+        if pitch_seed_deg > 0.0:
+            # Every start seeds pitch 0, so even with w_align relaxed CMA rarely wanders far into tilt.
+            # Launch the starts from a jittered pitch so the search EXPLORES tilted grasps (v2-like pitch
+            # spread). Kept within the CMA pitch bound (±0.2π) below. KEEP every other start straight
+            # top-down (pitch 0): a reliable feasible seed always exists, so an unlucky deformed mesh where
+            # every tilted start misses/hits-ground still yields a valid grasp (never returns None).
+            pj = np.radians(_drng.uniform(-pitch_seed_deg, pitch_seed_deg, n_starts))
+            pj[::2] = 0.0
+            pitch_seeds = pj
     for i, yaw in enumerate(yaws):
         r, p, y = _down_quat_euler(yaw)
+        p = p + float(pitch_seeds[i])
         # place TCP so the pad centre sits over the object COM in xy, then set tz so the lowest finger
         # point clears the table (these fingers are ~61 mm — finger_min_world_z is linear in tz, slope +1,
         # so one eval gives the exact lift). Width is seeded at THIS axis's cross-section (see _seed_width).
@@ -338,6 +377,7 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
         s0 = np.array([tcp0[0], tcp0[1], tcp0[2], r, p, y, wi])
         s0[2] += (table_z + ground_buf + 0.003) - finger_min_world_z(s0, pad_geo)
         s0[2] = float(np.clip(s0[2], tz_lo, tz_hi))
+        s0[4] = float(np.clip(s0[4], lb[4], ub[4]))          # keep the (jittered) pitch seed in bounds
         cost(s0)
         es = cma.CMAEvolutionStrategy(list(s0), sigma,
                                       {"maxfevals": max(maxfevals // n_starts, 20), "bounds": [lb, ub],
@@ -356,9 +396,45 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                 x2 = xb.copy(); x2[6] = w
                 cost(x2)                                         # updates best if a gentler holdable width wins
 
-    r = best["res"] or {}
-    out = {"x": best["x"], "score": best["score"], "evals": n_eval[0],
+    # ── Diversity (opt-in): the single-argmax return concentrates the demo set on one peaked optimum
+    # (v3 pins pitch ~0 and snaps yaw to a few gentle axes). To cover the whole NEAR-GENTLE manifold
+    # instead — for a more learnable, less OOD-prone BC dataset — (1) SAMPLE among feasible grasps whose
+    # score is within `diversity_tol` of the best, and (3) JITTER its orientation/position, re-verifying
+    # the perturbed grasp still holds and stays within tolerance (so every recorded demo is still gentle).
+    # `seed` is per-env in the collector, so each env samples independently -> a broad dataset. Default
+    # (diversity_tol=0, jitter=0) is a NO-OP: `sel_*` stays `best` -> bit-identical to the argmax path.
+    sel_x, sel_res = best["x"], best["res"]
+    if sel_x is not None and _div_on:
+        drng = _drng                                                   # same stream (after the seed-yaw smear)
+        thr = best["score"] - diversity_tol * abs(best["score"])       # "near-gentle" acceptance floor
+        if diversity_tol > 0.0 and feasible:                           # (1) tolerance sampling (stored res)
+            near = [(x, res) for (x, s, res) in feasible if s >= thr and res.get("stress_top10") is not None]
+            if near:
+                sel_x, sel_res = near[int(drng.integers(len(near)))]
+                sel_x = sel_x.copy()
+        if jitter_deg > 0.0 or jitter_pos > 0.0:                       # (3) jitter within tolerance
+            base_x = sel_x.copy()
+            for _ in range(max(1, jitter_tries)):
+                xj = base_x.copy()
+                xj[3:6] = xj[3:6] + np.radians(drng.uniform(-jitter_deg, jitter_deg, 3))
+                if jitter_pos > 0.0:
+                    xj[:3] = xj[:3] + drng.uniform(-jitter_pos, jitter_pos, 3)
+                xj[6] = float(np.clip(xj[6], 0.008, 0.079))
+                rj = _score(xj)
+                if (is_real_grasp(rj["score"]) and rj.get("holdable") and rj["score"] >= thr
+                        and rj.get("stress_top10") is not None):
+                    sel_x, sel_res = xj, rj                            # accepted: still gentle + holdable
+                    break
+
+    # Fallback guard: if the selected grasp is somehow invalid (no stress readout), keep the argmax best
+    # (which is always a holdable "ok" grasp) so downstream never sees a None stress/grip.
+    if sel_res is None or sel_res.get("stress_top10") is None:
+        sel_x, sel_res = best["x"], best["res"]
+    r = sel_res or {}
+    out = {"x": sel_x if sel_x is not None else best["x"],
+           "score": r.get("score", best["score"]), "evals": n_eval[0],
            "stress_top10": r.get("stress_top10"), "grip": r.get("grip"), "align": r.get("align"),
+           "pressure": r.get("pressure"), "min_pad_area": r.get("min_pad_area"),
            "width_face": r.get("width_face")}
     if record_history:
         out["history"] = history

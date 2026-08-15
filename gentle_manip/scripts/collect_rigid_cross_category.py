@@ -176,7 +176,11 @@ def collect_one(category: str, n_episodes: int, n_envs: int, maxfevals: int,
     # inside the loop below, so it's appended fresh per-attempt instead.
     cmd = [
         "uv", "run", "--project", "envs/sim", "--no-sync", "python",
-        "grasp_synthesis/collect_demos_synth_v2.py",
+        # v3: FEM gentleness grasp synthesis (minimizes actual indentation stress via
+        # smgrasp.finger_grasp) instead of v2's purely geometric SDF cost -- the
+        # "current default"/RECOMMENDED collector per docs/cluster_data_collection.md.
+        # v2 is left untouched as the SDF baseline, just no longer wired in here.
+        "grasp_synthesis/collect_demos_synth_v3.py",
         "--experiment", exp,
         "--n-episodes", str(n_episodes),
         "--n-envs", str(n_envs),
@@ -184,6 +188,7 @@ def collect_one(category: str, n_episodes: int, n_envs: int, maxfevals: int,
         "--out-dir", str(out_dir),
         "--shard-size", str(shard_size),
         "--scene-dr-every", str(scene_dr_every),
+        "--grasp-gpu",   # runbook-recommended default: GPU FEM solve (~5-7x faster)
     ]
     if disturbance_prob > 0:
         cmd += ["--disturbance-prob", str(disturbance_prob),
