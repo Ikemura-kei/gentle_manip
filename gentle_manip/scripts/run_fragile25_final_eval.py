@@ -78,7 +78,7 @@ env:
     obs_steps: ${{cond_steps}}
     act_steps: ${{act_steps}}
     normalization_path: ${{normalization_path}}
-    port: 5570
+    port: {port}
     obs_keys: [ee_pos, ee_quat, gripper_width]
     pointcloud_key: point_cloud
     category: {obj}
@@ -134,7 +134,7 @@ def eval_one(category: str, role: str, checkpoint: str, port: int = 5570) -> dic
     cfg_dir = DPPO_CFG_DIR / MERGE_NAME / f"eval_{category}"
     cfg_dir.mkdir(parents=True, exist_ok=True)
     (cfg_dir / "eval_diffusion_pointnet.yaml").write_text(
-        EVAL_TEMPLATE.format(obj=category, role=role, merge_name=MERGE_NAME))
+        EVAL_TEMPLATE.format(obj=category, role=role, merge_name=MERGE_NAME, port=port))
 
     server_log = RESULTS_DIR / "final_eval_logs" / f"{category}_server.log"
     server_log.parent.mkdir(parents=True, exist_ok=True)
@@ -197,7 +197,7 @@ def main() -> None:
         if result_path.exists():
             results.append(json.loads(result_path.read_text()))
             continue
-        r = eval_one(cat, "held-in", checkpoint)
+        r = eval_one(cat, "held-in", checkpoint, port=5580)
         result_path.write_text(json.dumps(r, indent=2))
         results.append(r)
         print(f"[final_eval] {cat} (held-in): success_rate={r['success_rate']}", flush=True)
@@ -207,7 +207,7 @@ def main() -> None:
         if result_path.exists():
             results.append(json.loads(result_path.read_text()))
             continue
-        r = eval_one(cat, "zero-shot", checkpoint)
+        r = eval_one(cat, "zero-shot", checkpoint, port=5580)
         result_path.write_text(json.dumps(r, indent=2))
         results.append(r)
         print(f"[final_eval] {cat} (zero-shot): success_rate={r['success_rate']}", flush=True)

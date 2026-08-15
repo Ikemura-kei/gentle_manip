@@ -42,6 +42,23 @@ MIN_AVAILABLE_MEM_GB = 4.0   # refuse to launch a new category below this (defen
                             # on top of the process-group-kill fix -- see _run_with_group_kill)
 
 
+def _resolve_task_name(exp_name: str) -> str:
+    """The actual output-dir name collect_demos_synth_v2.py's _make_run_dir()
+    uses: the experiment config's `task:` field, NOT the experiment name itself.
+    They coincide for old rigid experiments (single_lift_<cat>_rigid, task ==
+    experiment) but diverge for the fragile25 "_easy" DR variants (experiment
+    single_lift_tofu_soft_easy -> task single_lift_tofu_soft). Using the raw
+    experiment name here made _find_resumable_run always miss (looked in a
+    directory that never existed), so every retry started a fresh run dir
+    instead of resuming -- confirmed via tofu burning 4 full-hour attempts
+    with 0 saved episodes each, while 5 separate 2-episode shards sat unmerged
+    in 5 different sibling directories the whole time. Genesis-free import
+    (gentle_manip.experiment loads only YAML + ObsConfig/ActionConfig), safe
+    to use in this lightweight orchestrator process."""
+    from gentle_manip.experiment import Experiment
+    return Experiment.load(exp_name)._raw.get("task", exp_name)
+
+
 def _episode_count(run_dir: Path) -> int:
     """Episodes already saved in a collect_demos_synth_v2.py run dir: data.pkl
     (if merged) plus any leftover un-merged shard_*.pkl (if a prior attempt was
@@ -129,10 +146,12 @@ def collect_one(category: str, n_episodes: int, n_envs: int, maxfevals: int,
                 experiment_template: str = "single_lift_{category}_rigid",
                 scene_dr_every: int = 1) -> dict:
     exp = experiment_template.format(category=category)
-    # collect_demos_synth_v2.py's own _make_run_dir() appends task_name (== exp,
-    # for these single-object experiments) as a subdirectory of --out-dir itself --
-    # pass the TOP-LEVEL dir here, not out_dir/exp, or the task-name dir nests twice.
-    cat_out = out_dir / exp
+    # collect_demos_synth_v2.py's own _make_run_dir() appends the experiment
+    # config's TASK name (which can differ from the experiment name itself,
+    # e.g. "_soft_easy" experiments -> "_soft" task) as a subdirectory of
+    # --out-dir -- pass the TOP-LEVEL dir here, not out_dir/exp, or the
+    # task-name dir nests twice / points at a directory that never exists.
+    cat_out = out_dir / _resolve_task_name(exp)
     log_path = log_dir / f"{category}.log"
 
     # gentle_manip 25-category speed/scale pass (2026-08-13): resume a partial

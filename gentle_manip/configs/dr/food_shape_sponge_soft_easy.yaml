@@ -8,7 +8,13 @@
 object_pos_xy: 0.02
 robot_init_pos_xyz: 0.01
 object_yaw_deg: 180
-object_pitch_roll_deg: 8
+# gentle_manip 25-category speed pass (2026-08-13): was 8 -- sponge (bread/
+# cake cube) has NO mesh_path in registry.py, so it's a plain Box primitive
+# just like tofu/watermelon/cheese/beef_raw -- zeroed preemptively (not yet
+# smoke-tested this campaign) after discovering beef_raw's identical
+# box-tipping bug (0/50 collection, gripper misses the object every time).
+# See beef_raw's DR config comment for the full mechanism.
+object_pitch_roll_deg: 0
 
 object_scale:      [0.95, 1.05]
 object_bend_deg:   [-2.0, 2.0]

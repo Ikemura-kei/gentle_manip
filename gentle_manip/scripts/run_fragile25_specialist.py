@@ -74,7 +74,16 @@ wandb:
   group: dppo-pretrain
 
 train:
-  n_epochs: 3000
+  # gentle_manip 25-category speed pass (2026-08-13): was 3000 -- mushroom's
+  # val loss (a 50-episode, single-object BC-pretrain, representative of
+  # every per-category specialist here) clearly plateaued by epoch ~500-600
+  # (bounced 0.030-0.040 with no further downward trend all the way to 700,
+  # while train loss kept creeping down -- the classic converged/overfitting
+  # signature) and find_best_checkpoint() already picks the lowest-val-loss
+  # checkpoint regardless of total run length, so training past the plateau
+  # is pure wasted wall-clock, not a quality risk either way. 1000 gives
+  # ~1.6x margin over the observed plateau point across ~18 more specialists.
+  n_epochs: 1000
   batch_size: 128
   learning_rate: 1e-4
   weight_decay: 1e-6
@@ -383,6 +392,20 @@ def write_configs(category: str) -> Path:
 
 def train(category: str, cfg_dir: Path) -> dict:
     from gentle_manip.scripts.train_with_resume import train_with_resume
+    # CORRECTED (2026-08-14): `task` must match what hydra_snapshot.py
+    # ACTUALLY registers. An earlier fix this session assumed it registers
+    # `config.get("env_name", exp_name)` and that PRE_TEMPLATE's `env:` field
+    # (WITH a "_pcd" suffix) would be picked up -- WRONG: hydra_snapshot.py
+    # looks up a config key literally named "env_name", which doesn't exist
+    # in ANY of these configs (they all use `env:`, not `env_name:`), so the
+    # lookup ALWAYS misses and falls back to `exp_name` (the `experiment:`
+    # field, PRE_TEMPLATE line ~156: "single_lift_<category>_soft_easy", NO
+    # "_pcd"). Passing the "_pcd"-suffixed guess here made find_run_dir_for_task()
+    # never match -- caught on raspberry: training completed successfully
+    # (train_ok=True) but run_dir stayed None, so run_one() silently skipped
+    # straight to eval/rollout being unreachable and marked "status": "done"
+    # after only finishing training. Recovered manually (see memory); this is
+    # the real fix so it doesn't repeat for every remaining category.
     result = train_with_resume(
         config_path=str(cfg_dir), config_name="pre_diffusion_pointnet",
         task=f"single_lift_{category}_soft_easy", max_retries=5, timeout_s=14400,

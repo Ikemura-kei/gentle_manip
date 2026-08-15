@@ -1,4 +1,4 @@
-# [dppo-eval] Canonical eval of the mushroom solo specialist (fragile-food 25-category campaign).
+# [dppo-eval] Fragile-25 combined RLDG+VLM generalist -- zero-shot eval on blackberry.
 defaults:
   - _self_
 hydra:
@@ -7,16 +7,17 @@ hydra:
 _target_: gentle_manip.dppo.eval_agent.EvalHarnessAgent
 
 name: ${env_name}_eval_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
-logdir: ${eval_base:${base_policy_path}}/eval/${now:%Y-%m-%d}_${now:%H-%M-%S}
+logdir: ${eval_base:${base_policy_path}}/eval_blackberry/${now:%Y-%m-%d}_${now:%H-%M-%S}
 base_policy_path: ???
-normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_mushroom_soft_easy_pcd/normalization.npz
-experiment: single_lift_mushroom_soft_easy
+normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_fragile25_generalist_pcd/normalization.npz
+experiment: single_lift_blackberry_soft_easy
 
 seed: 42
 device: cuda:0
-env_name: single_lift_mushroom_soft_easy_pcd
+env_name: single_lift_blackberry_soft_easy_pcd
 obs_dim: 8
 action_dim: 7
+category_embed_dim: 24
 denoising_steps: 20
 ft_denoising_steps: 0
 cond_steps: 2
@@ -47,9 +48,11 @@ env:
     obs_steps: ${cond_steps}
     act_steps: ${act_steps}
     normalization_path: ${normalization_path}
-    port: 5570
+    port: 5580
     obs_keys: [ee_pos, ee_quat, gripper_width]
     pointcloud_key: point_cloud
+    category: blackberry
+    category_embed_source: vlm
 
 shape_meta:
   obs:
@@ -57,6 +60,8 @@ shape_meta:
       shape: [8]
     point_cloud:
       shape: [1024, 3]
+    category_embed:
+      shape: [24]
   action:
     shape: [7]
 
@@ -78,6 +83,7 @@ model:
     cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
     pc_cond_steps: ${pc_cond_steps}
     visual_feature_dim: ${visual_feature_dim}
+    category_embed_dim: ${category_embed_dim}
     time_dim: 16
     mlp_dims: [512, 512, 512]
     activation_type: ReLU

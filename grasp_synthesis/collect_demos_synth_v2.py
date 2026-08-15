@@ -349,9 +349,27 @@ def _resolve_actual_mesh(spec_dr, deform_dir: Optional[str]) -> str:
     return str(dst)
 
 
+# ── Gentleness / crush detection (2026-08-14, user-flagged gap) ───────────────
+# Success previously meant ONLY "reached the target height" -- zero awareness of
+# whether the object was crushed getting there. This mirrors PolicyEnv._privileged_obs's
+# exact stress-fraction formula (mean, top10-median, both /yield_stress) so
+# priv_stress (once recorded) and the crush gate below use the SAME numbers
+# StressReward's shaping term already uses -- one definition of "how stressed",
+# reused for observability, shaping, AND now the hard success gate.
+
+def _stress_fraction(stress: np.ndarray, yield_stress: float) -> tuple:
+    """(mean_frac, top10_frac), each (N,) -- von Mises stress as a fraction of the
+    material's yield_stress (1.0 = at bruising onset). stress: (N, n_particles)."""
+    mean_s = np.mean(stress, axis=-1)
+    k = max(1, int(stress.shape[-1] * 0.1))
+    top10 = np.median(np.partition(stress, -k, axis=-1)[..., -k:], axis=-1)
+    return mean_s / yield_stress, top10 / yield_stress
+
+
 # ── Privileged obs (sim-only state-teacher fields) ────────────────────────────
 
-def _privileged_obs_batch(object_center, object_quat, dr_vec, priv_cfg, contact_force=None) -> dict:
+def _privileged_obs_batch(object_center, object_quat, dr_vec, priv_cfg, contact_force=None,
+                          stress=None, yield_stress=None) -> dict:
     """Sim-only privileged fields from raw worker state — mirrors
     PolicyEnv._privileged_obs exactly, but sourced from GenesisWorker state
     (object_center + object_quat + contact_force) since this collector bypasses PolicyEnv.
@@ -379,6 +397,16 @@ def _privileged_obs_batch(object_center, object_quat, dr_vec, priv_cfg, contact_
             np.asarray(dr_vec, np.float32)[None], (oc.shape[0], 1))     # (N, 2)
     if getattr(priv_cfg, "contact_force", False):
         out["priv_contact_force"] = np.asarray(contact_force, np.float32)[:, None]  # (N, 1)
+    if getattr(priv_cfg, "stress", False):
+        # gentle_manip 2026-08-14: this field was requested by superset_soft.yaml's
+        # `privileged.stress: true` but never actually computed here (only
+        # PolicyEnv._privileged_obs had it) -- collect_demos_synth_v2.py bypasses
+        # PolicyEnv (CMA-ES collection) so its own mirror silently dropped the
+        # field, making every already-recorded demo un-auditable for whether the
+        # object was crushed. Fixed: mirrors PolicyEnv._privileged_obs exactly.
+        if stress is not None and yield_stress is not None:
+            mean_frac, top10_frac = _stress_fraction(np.asarray(stress, np.float64), yield_stress)
+            out["priv_stress"] = np.stack([mean_frac, top10_frac], axis=-1).astype(np.float32)  # (N, 2)
     return out
 
 
@@ -510,6 +538,8 @@ def execute_and_collect(
     disturbance_phases: tuple = ("lift",),  # which phase(s) get an independent kick draw each
     enable_regrasp: bool = False,  # idea #2: lift-phase failure detection + regrasp (off by default)
     max_regrasp_retries: int = MAX_REGRASP_RETRIES,
+    yield_stress: Optional[float] = None,      # soft-body material yield (Pa); None = no crush gate
+    crush_frac_threshold: float = 1.35,        # stress/yield_stress above this = "crushed" (user-set margin above the 1.0 bruising-onset default)
 ) -> Tuple[List[List[dict]], List[List[np.ndarray]], List[List[float]], np.ndarray, List[List]]:
     """Execute the scripted grasp trajectory with DECOUPLED per-env phase control;
     record (obs, action, reward) per env.
@@ -573,7 +603,13 @@ def execute_and_collect(
         act_bufs:    list[N] of float32 action arrays (T_i steps each; 7-dim delta or
                      10-dim absolute, matching action_config.action_dim)
         rew_bufs:    list[N] of float rewards (0.0 throughout)
-        success:     (N,) bool — True if final object z > grasp_z + 0.5*LIFT_HEIGHT
+        success:     (N,) bool — True if final object z > grasp_z + 0.5*LIFT_HEIGHT AND the
+                     object's von Mises stress never exceeded crush_frac_threshold * yield_stress
+                     at any point in the episode (gentle_manip 2026-08-14, user-flagged gap:
+                     height alone previously counted a crushed-but-lifted object as a success).
+                     Persistent, not just at the final step -- damage doesn't heal, so once an
+                     env crosses the threshold it stays failed for the rest of the episode.
+                     No-op (height-only, as before) when yield_stress is None (rigid objects).
         frame_bufs:  list[N] of (H,W,3) uint8 frame lists; empty lists if record_video=False
     """
     scales = (np.asarray(action_config.scales, dtype=np.float64)
@@ -688,8 +724,14 @@ def execute_and_collect(
     phase_step = np.zeros(num_envs, dtype=np.int64)
     regrasp_count = np.zeros(num_envs, dtype=np.int64)   # idea #2: retries used so far
 
+    # Gentleness tracking (2026-08-14): persistent per-env "has this episode ever
+    # crushed the object" flag -- checked every step, not just at the final success
+    # check, since damage doesn't heal and a transient mid-episode crush should
+    # still fail the episode even if the object recovers height afterward.
+    crushed_mask = np.zeros(num_envs, dtype=bool)
+
     def _step(cur_pos, cur_quat, cur_grip, record_mask):
-        nonlocal prev_pos, prev_quat, prev_grip
+        nonlocal prev_pos, prev_quat, prev_grip, crushed_mask
 
         # Invert scripted target → normalized action (delta needs prev_*; absolute
         # is a stateless per-step transform of the current target alone).
@@ -717,9 +759,21 @@ def execute_and_collect(
         if priv_cfg is not None:
             next_obs_batch.update(_privileged_obs_batch(
                 state["object_center"], state.get("object_quat"), dr_vec, priv_cfg,
-                contact_force=state.get("contact_force")))
+                contact_force=state.get("contact_force"),
+                stress=state.get("von_mises_stress"), yield_stress=yield_stress))
         next_obs_list = [{k: next_obs_batch[k][i] for k in next_obs_batch}
                          for i in range(num_envs)]
+
+        # Gentleness gate: update the persistent crushed_mask from THIS step's stress,
+        # regardless of whether priv_cfg requests priv_stress in the recorded obs --
+        # the crush GATE and the RECORDED observation are separate concerns (a run
+        # collected without privileged.stress: true in its obs config should still
+        # reject crushed episodes).
+        if yield_stress is not None:
+            stress_now = state.get("von_mises_stress")
+            if stress_now is not None:
+                _, top10_frac = _stress_fraction(np.asarray(stress_now, np.float64), yield_stress)
+                crushed_mask = crushed_mask | (top10_frac > crush_frac_threshold)
 
         # Record (obs_t, action_t, reward_t=0) — ONLY for envs still active this step.
         # A DONE env's buffers simply stop growing here.
@@ -826,7 +880,15 @@ def execute_and_collect(
     # MPM (soft-body) entities -- gentle_manip extension (2026-08-12) switched off
     # `worker.handle.objects[0].get_pos()` (rigid-only; MPM has no `get_pos`).
     obj_z   = state["object_center"][:, 2]
-    success = obj_z > (grasp_pos[:, 2] + LIFT_HEIGHT * 0.5)
+    height_ok = obj_z > (grasp_pos[:, 2] + LIFT_HEIGHT * 0.5)
+    # Gentleness gate (2026-08-14, user-flagged): height alone isn't success -- an
+    # episode that ever crushed the object (crushed_mask, tracked every step above)
+    # fails regardless of final height. No-op for rigid objects (yield_stress=None).
+    success = height_ok & ~crushed_mask
+    n_crushed = int(np.sum(height_ok & crushed_mask))
+    if n_crushed > 0:
+        print(f"    [gentleness] {n_crushed} env(s) reached target height but were "
+             f"crushed (stress > {crush_frac_threshold}x yield) -- NOT counted as success")
 
     # Post-process: trim long held-command runs (absolute mode only — see
     # _trim_long_holds docstring for why delta mode is excluded).
@@ -999,6 +1061,14 @@ def main() -> None:
                         "genuine grasp-drop-retry example. See execute_and_collect's docstring.")
     p.add_argument("--max-regrasp-retries", type=int, default=MAX_REGRASP_RETRIES,
                    help="cap on regrasp attempts per env (bounds episode length)")
+    p.add_argument("--crush-frac-threshold", type=float, default=1.35,
+                   help="gentleness gate (2026-08-14, user-flagged): an episode whose "
+                        "von Mises top10 stress ever exceeds this fraction of the "
+                        "object's yield_stress is NOT counted as a success even if it "
+                        "reached the target height -- 1.0 = StressReward's own 'at "
+                        "bruising onset' semantics; default 1.35 allows a small margin "
+                        "(per-user request) above that literature-estimated threshold. "
+                        "No-op for rigid objects (no yield_stress).")
     args = p.parse_args()
 
     # ── Load everything from the experiment config (same as training / eval) ──
@@ -1164,7 +1234,8 @@ def main() -> None:
         if priv_cfg is not None:
             init_obs_batch.update(_privileged_obs_batch(
                 init_state["object_center"], init_state.get("object_quat"), dr_vec, priv_cfg,
-                contact_force=init_state.get("contact_force")))
+                contact_force=init_state.get("contact_force"),
+                stress=init_state.get("von_mises_stress"), yield_stress=task.object_yield_stress))
 
         obj_pos_all  = init_state["object_center"].astype(np.float64)  # (N, 3)
         if hasattr(obj, "get_quat"):
@@ -1206,6 +1277,7 @@ def main() -> None:
             disturbance_prob=args.disturbance_prob, disturbance_max_m=args.disturbance_max_m,
             disturbance_rng=disturbance_rng, disturbance_phases=tuple(args.disturbance_phase),
             enable_regrasp=args.enable_regrasp_retry, max_regrasp_retries=args.max_regrasp_retries,
+            yield_stress=task.object_yield_stress, crush_frac_threshold=args.crush_frac_threshold,
         )
         print(f"  Success: {success.tolist()}")
 

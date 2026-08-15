@@ -1,20 +1,20 @@
-# [dppo-eval] Canonical eval of the mushroom solo specialist (fragile-food 25-category campaign).
+# [dppo-rollout-collect] RLDG-style rollout harvest for raspberry (fragile-food 25-category campaign).
 defaults:
   - _self_
 hydra:
   run:
     dir: ${logdir}
-_target_: gentle_manip.dppo.eval_agent.EvalHarnessAgent
+_target_: gentle_manip.dppo.rollout_collector.RolloutCollectorAgent
 
-name: ${env_name}_eval_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
-logdir: ${eval_base:${base_policy_path}}/eval/${now:%Y-%m-%d}_${now:%H-%M-%S}
+name: ${env_name}_collect_rollouts
+logdir: ${eval_base:${base_policy_path}}/rollouts/${now:%Y-%m-%d}_${now:%H-%M-%S}
 base_policy_path: ???
-normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_mushroom_soft_easy_pcd/normalization.npz
-experiment: single_lift_mushroom_soft_easy
+normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_raspberry_soft_easy_pcd/normalization.npz
+experiment: single_lift_raspberry_soft_easy
 
-seed: 42
+seed: 1000
 device: cuda:0
-env_name: single_lift_mushroom_soft_easy_pcd
+env_name: single_lift_raspberry_soft_easy_pcd
 obs_dim: 8
 action_dim: 7
 denoising_steps: 20
@@ -28,11 +28,12 @@ act_steps: 4
 use_ddim: False
 ddim_steps: ${ft_denoising_steps}
 
-n_episodes: 100
-scene_group_size: 4
-record_batches: null
+target_episodes: 150
+max_batches: 80
+scene_group_size: 0
 n_steps: 75
-render_num: 5
+render_num: 1
+out_dir: null
 
 env:
   n_envs: 5
@@ -50,6 +51,7 @@ env:
     port: 5570
     obs_keys: [ee_pos, ee_quat, gripper_width]
     pointcloud_key: point_cloud
+    record_raw: true
 
 shape_meta:
   obs:

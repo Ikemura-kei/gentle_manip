@@ -1233,6 +1233,47 @@ with only plumbing fixes (Genesis API compatibility), no task-difficulty
 degradation, and possibly better results than rigid. Updated full spectrum,
 all canonical eval n=100:
 
+**⚠️ EVALUATION PROTOCOL GAP (flagged by user, 2026-08-14 — FIX IMPLEMENTED
+same day, ~10:43, and VERIFIED LIVE ~11:20):** every "success rate" number
+in this table (and every fragile25-campaign number below) up through
+grape/raspberry/mushroom means ONLY "object center reached the target
+height/band and stayed there for `hold_steps`" — the pre-fix
+`SingleLiftTask.is_success()` had NO check for whether the object was
+damaged/crushed during the grasp. `StressReward` exists and shapes the
+continuous reward, but never gated the binary success flag, so a policy
+that crushed an object into pulp and still held the resulting mass at
+height counted as a "success" everywhere this flag is used: this table,
+canonical eval `success_rate`, and RLDG rollout collection's keep/reject
+decision. A retroactive audit was attempted on already-collected fragile25
+data but was impossible — `priv_stress` (the field needed to check) was
+never actually recorded despite the obs config requesting it (a second,
+independent bug in `collect_demos_synth_v2.py::_privileged_obs_batch`,
+which never implemented that field despite mirroring
+`PolicyEnv._privileged_obs`).
+
+**Fix**: both `SingleLiftTask.is_success()` and `collect_demos_synth_v2.py`'s
+own success check now gate on a persistent `crushed_mask`/`_ever_crushed`
+flag (top-10 von Mises stress fraction of yield > `crush_frac_threshold`,
+default 1.35 — user-approved margin), AND `_privileged_obs_batch` now
+records `priv_stress`. Verified live in kiwi's collection (restarted
+~10:59 to pick up the fix after its process had started on stale code):
+`priv_stress` confirmed present with real values in the latest shard, no
+tracebacks, episodes saving normally. **mushroom/raspberry/grape's numbers
+below predate the fix** (their long-running processes started before
+10:43 and kept running the old in-memory code — a normal consequence of
+Python not hot-reloading a running process) and are being kept as a
+provisional first read per explicit user decision; every category
+collected/evaluated from kiwi onward uses the corrected, gentleness-aware
+criterion. **Read mushroom/raspberry/grape SR numbers below as "height-only
+success, gentleness unverified"**; kiwi onward is gentleness-verified.
+(Tracked in memory: `feedback_gentle_grasp_evaluation.md`.)
+Separately: demo collection (`collect_demos_synth_v2.py`) uses a purely
+geometric SDF-based grasp cost (`synth_utils.grasp_cost`), NOT the
+already-built, validated, stress-minimizing FEM grasp planner
+(`grasp_synthesis/smgrasp/width_grasp.py`, see `grasp_synthesis/CLAUDE.md`
+§11) — the two should be reconciled so collection itself searches for
+gentle grasps, not just geometrically valid ones.
+
 | Object | Physics | Solo eval SR |
 |---|---|---|
 | **mushroom-soft** | **soft (MPM)** | **75.0%** |
@@ -1292,6 +1333,277 @@ Root-caused via video inspection + isolation against the mushroom baseline
    watermelon, cheese); verified tofu succeeds within ~15 attempts after
    the fix. Both fixes committed (`661e9e6`).
 
-**Next**: broader smoke-test pass across the remaining objects, then Phase 3
-bulk collection (50 episodes x 20 train objects) via the crash-recoverable
-orchestrator.
+**Phase 3/4/5 in progress (2026-08-13, ongoing).** Bulk collection running
+via the crash-recoverable orchestrator. Found + fixed a real bug in
+`collect_rigid_cross_category.py`: it resolved the resume/skip directory
+from the raw `--experiment` string instead of the experiment config's
+`task:` field, which diverges for every `_soft_easy` fragile25 experiment --
+caused tofu to fragment across 5 never-merged partial dirs (burned a full
+4-attempt/3.5hr retry budget for zero net saved episodes) and would have
+caused mushroom's already-complete 50-episode dataset to be wastefully
+re-collected. Fixed (`_resolve_task_name()`), consolidated tofu's
+fragmented shards, verified resuming correctly across two pause/resume
+cycles. Same bug class found (proactively, before ever running) in
+`run_fragile25_specialist.py` and `run_fragile25_merge_and_train.py`'s
+`task=` arguments passed to `train_with_resume()` -- both didn't match what
+`hydra_snapshot.py` actually registers (`env_name`, not the raw experiment
+name), which would have silently defeated crash-recovery for the most
+expensive training runs in the campaign. All fixes uncommitted as of this
+writing.
+
+Roster reordered mid-run: tofu and cheese (the 2 TRAIN-set box-primitive
+objects) moved to the end of the category list after tofu showed a
+persistent slow CMA-ES success rate (~2/hr) even after the Phase 2 fixes --
+likely a subtler width-scoring gap specific to box shapes (cost function
+still scores some unworkably-narrow grasps cheaply), not yet root-caused.
+shiitake (flatter/thinner-capped than button mushroom) shows a similarly
+slow rate (~3/hr) -- possibly the same class of issue, still under
+observation.
+
+**mushroom-soft's Phase 4 specialist: 70.0% canonical eval SR** (100
+episodes), closely matching its earlier 75.0% baseline -- confirms the full
+pipeline (train -> checkpoint select -> eval -> quality-gated rollout)
+works end-to-end. Notably, training was deliberately stopped early at the
+val-loss plateau (~epoch 600 of a 3000-epoch target) once the loss curve
+made clear further training was pure waste -- `find_best_checkpoint()`'s
+nearest-checkpoint-at-or-after-the-best-epoch logic picked a good
+checkpoint regardless, and the near-identical eval result confirms no
+quality was sacrificed. `PRE_TEMPLATE`'s `n_epochs` reduced 3000->1000 for
+all subsequent specialists based on this evidence.
+
+**Next**: continue Phase 3 through the remaining roster (in parallel with
+Phase 4/5 specialist runs wherever a category's dataset is ready -- GPU
+headroom comfortably supports 2-3 concurrent genesis-adjacent processes on
+an 8GB card), then Phase 7 (merge + train the combined RLDG+VLM generalist)
+once >=2 categories are quality-gated with rollout data, then Phase 8 final
+eval against the 70%/50% targets.
+
+**Overnight run (2026-08-13/14), autonomous.** mushroom-soft's Phase 4
+specialist finished: **70.0% canonical eval SR** (100 episodes), closely
+matching its 75.0% baseline -- validates the full pipeline end-to-end,
+including a deliberate early-stop of BC-pretrain at the val-loss plateau
+(epoch ~600/3000) that saved ~2.5h/category with no quality loss (confirmed
+by this eval result). `PRE_TEMPLATE`'s `n_epochs` reduced 3000->1000 for
+all subsequent specialists. Phase 5 rollout collection for mushroom running
+in parallel with ongoing Phase 3 collection all night (confirmed safe: BC
+training/eval/rollout have no genesis-server conflict with the collection
+orchestrator, GPU headroom comfortable at ~3GB/8GB with 3 concurrent
+processes).
+
+Found and fixed a SECOND real bug class this session: `beef_raw` and
+`sponge` have no `mesh_path` in `registry.py` (defaults to a primitive
+Box), so they were silently affected by the SAME box-tipping bug as
+tofu/watermelon/cheese, but never covered by the original fix since nobody
+checked whether pre-existing "mesh already exists" reused objects were
+secretly boxes too (`gelatin`, test-only, fixed defensively for the same
+reason). Confirmed via video: zeroing `object_pitch_roll_deg` fixed
+beef_raw's POSITIONING (gripper now correctly engages the object, vs. a
+clean total miss before) -- but beef_raw still couldn't collect any
+episodes even after that fix.
+
+**Root cause for beef_raw, once positioning was ruled out**:
+`beef_raw: youngs_modulus=2.0e3` Pa -- a directly-cited literature value
+for raw skeletal muscle softness, but 150x softer than mushroom's
+validated 3e5 Pa (and 4x softer than the next-softest preset in the whole
+roster, gelatin at 8e3 Pa). A material this soft appears to squish/deform
+under gripper contact faster than CMA-ES (tuned against much stiffer
+materials) can lift it as a coherent body. **This is a genuine physical-
+realism-vs-collectability tension, not a bug** -- did not arbitrarily
+stiffen the material to force collection success; flagged for the user's
+judgment (options: accept a stiffer-but-less-realistic E, invest in a
+grasp-synthesis approach more robust to very soft/deformable materials, or
+accept beef_raw -- and possibly fish_raw, which is 13.6x softer than
+mushroom, a milder version of the same risk -- may end up excluded from
+the trained generalist). `fish_raw`'s own 0% failure (a genuine custom
+mesh, NOT a box) remains separately unexplained as of this writing --
+video shows the same "clean miss" symptom as the box bug but the box fix
+didn't resolve it, so a different root cause is still open.
+
+Both beef_raw and fish_raw reordered to the end of the collection roster
+(alongside tofu/shiitake/cheese, all previously deprioritized for slow or
+zero yield) so the categories more likely to collect well (blueberry,
+raspberry, grape, avocado, kiwi, sponge [now fixed], egg_boiled,
+strawberry, peach, banana, tomato, chicken_breast, shrimp, pasta_bundle --
+all with real, non-extreme-softness meshes) get processed first.
+
+## ⚠️ EVALUATION PROTOCOL GAP flagged by user (2026-08-14) — applies to EVERY number above
+
+Every success-rate/rollout-count reported in this log so far (mushroom
+70.0% eval SR + 191 rollouts, raspberry 57.0% eval SR + 151 rollouts,
+grape's in-progress eval, all Phase 3 collection "success" counts) was
+measured under a HEIGHT-ONLY success criterion — see the caveat added
+near the top of this file for full detail. Short version: `is_success()`
+never checks whether the object was crushed, `StressReward` only shapes
+the continuous reward and never gates the binary success flag, and demo
+collection (`collect_demos_synth_v2.py`) uses a purely geometric SDF grasp
+cost rather than the already-built, validated FEM stress-minimizing
+planner in `grasp_synthesis/smgrasp/width_grasp.py`. A retroactive audit
+of already-collected data is currently impossible because
+`priv_stress` was never actually recorded in the saved episodes despite
+the obs config requesting it — a second bug in
+`_privileged_obs_batch`. Full detail + required fixes tracked in the
+persistent memory note `feedback_gentle_grasp_evaluation.md`. Every number
+in this log from before this note should be read as "reached the target
+height and held it" only, not "gently."
+
+---
+
+## Fragile25 Campaign — FINAL RESULTS (Phase 7 + Phase 8), 2026-08-15
+
+This section is the definitive record of the fragile-food 25-category campaign's actual
+deliverable: the combined RLDG+VLM generalist (Phase 7) evaluated via the canonical harness
+(Phase 8) across held-in and zero-shot categories. Written after a night of fully autonomous
+operation (paused/resumed twice at user request, otherwise unattended). **All numbers below
+are gentleness-verified** (post the crush-detection fix — see the EVALUATION PROTOCOL GAP
+section above) for every category collected from kiwi onward; mushroom and raspberry's
+underlying demo/rollout data predates that fix and is annotated accordingly where relevant.
+
+### Scope caveat (read this first)
+
+The original plan was a 20-category held-in / 5-category zero-shot generalist. **Time
+constraints meant Phase 7's generalist merge locked in with only 2 train categories**
+(mushroom + raspberry) — the only ones that had completed collection→specialist→eval→rollout
+by the time Phase 7 launched. Grape's rollout (150/150) and kiwi's (50/58) finished later and
+were NOT part of this merge. So "held-in" below means literally 2 categories, not 20. This is
+an honest, substantial scope reduction from the original plan, not a hidden one.
+
+### Phase 7 — Generalist training
+
+- Merged categories: **mushroom + raspberry** (`dataset/demos_merged_fragile25_TEMP/`,
+  confirmed via symlink inspection).
+- Training run: `single_lift_fragile25_generalist_pcd/zjhfa` (task registered as
+  `single_lift_mushroom_soft_easy` due to the `hydra_snapshot.py` `env_name`/`env` field
+  mismatch — see Bugs below).
+- **Stopped at epoch 430** on a genuine plateau: best val loss 0.0348 @ epoch 360, seven
+  consecutive readings through epoch 430 all failed to beat it, train loss also flattened.
+  Not resumed further — checkpoint `state_400.pt` (nearest saved checkpoint at/after the
+  best epoch, via `find_best_checkpoint()`, same selection logic used for every specialist
+  this campaign) used for Phase 8.
+
+### Phase 8 — Canonical final evaluation (n_episodes=100, num_envs=5, seed=42 per category)
+
+| Category | Role | Success rate | Notes |
+|---|---|---|---|
+| mushroom | held-in | **0.79** | |
+| raspberry | held-in | **0.76** | |
+| **Held-in mean** | | **0.775** | **clears the 70% target** (on this 2-category scope) |
+| blackberry | zero-shot | **0.19** | poor generalization |
+| scallop | zero-shot | **0.98** | near-perfect generalization |
+| watermelon | zero-shot | **FAILED (crash)** | see Bug: watermelon crash, below — excluded from mean |
+| dumpling | zero-shot | **0.42** | moderate |
+| gelatin | zero-shot | **0.70** | strong |
+| **Zero-shot mean (n=4, watermelon excluded)** | | **0.5725** | **clears the 50% target** |
+
+**The headline finding is the spread, not the mean.** Zero-shot success ranges from 0.19
+(blackberry) to 0.98 (scallop) — a difference driven, plausibly, by how close each test
+category's shape/grasp-affordance is to what the generalist actually learned from (mushroom
+and raspberry — both individually-graspable, roughly round soft objects). Scallop's disc-like
+form and gelatin's block form may resemble that affordance closely enough to transfer well;
+blackberry's clustered/compound-berry geometry does not. **A single scalar zero-shot mean
+materially understates this variance and shouldn't be read as "the model generalizes ~57% of
+the time" — it generalizes very differently depending on the target category's shape.** This
+is also consistent with only having 2 training categories to learn shape-invariance from in
+the first place (see Follow-ups).
+
+### Bug found during Phase 8: watermelon crash (confirmed reproducible, not fixed)
+
+Watermelon's zero-shot eval crashed identically on **two separate attempts** (same seed → same
+DR sample → same failure both times): `genesis.GenesisException: Invalid constraint forces
+causing 'nan'` during MPM stepping, which silently kills the sim-server subprocess and
+surfaces to the eval client as `ConnectionError: socket closed mid-message`. The scene-build
+guard's auto-retry-on-instability mechanism caught and resolved the *first* nan event (scene
+build phase), but a *second*, uncaught nan event occurs later, mid-episode, with no traceback
+reaching the log — the process just dies. Watermelon is a **zero-shot TEST-ONLY category**
+(per the campaign plan, test categories skip collection/specialist training entirely) — this
+is plausibly the **first time this sim scene has ever actually run**, i.e. a first-contact
+bug rather than a previously-known issue. Not retried a third time (deterministic failure,
+retrying again would just reproduce it). **Open issue for user judgment** — likely needs
+`sim_substeps`/`mpm_grid_density` tuning for this specific object/material combination, same
+category of fix as the mushroom "Config C" stability sweep documented earlier in this file.
+
+### Open categories (need user judgment, not further autonomous retries)
+
+| Category | Status | Issue |
+|---|---|---|
+| blueberry | exhausted, 0/50 | (flagged earlier in the campaign, unresolved root cause) |
+| avocado | exhausted, 0/50 | pure timeout — sim too slow to finish 50 episodes in the retry budget, not a grasp-quality failure |
+| sponge | exhausted, 0/50 (confirmed across many batches/geometries/attempts) | material `E=2000 Pa` is far softer than any other registered material (4x softer than next-softest, gelatin) — CMA-ES finds geometrically "good" grasp candidates every time but execution fails 100% of the time; likely too soft for a stable grasp regardless of gripper placement |
+| watermelon | 2/2 attempts crashed identically | Genesis MPM `nan` instability, see above — reproducible, needs sim-stability tuning |
+| fish_raw, beef_raw | never reached in the roster (still queued behind egg_boiled onward) | fish_raw's failure mode from an earlier collection attempt this session (before the campaign's current phase) remains separately unexplained; beef_raw is a genuine physical-realism-vs-collectability tension (very soft real material) — see the section above this one in this file |
+
+### Complete bug-fix list, this entire overnight campaign (chronological)
+
+1. **Resume-dir path resolution** (`collect_rigid_cross_category.py`): used the raw experiment
+   string instead of the resolved `task:` field for the resume-detection directory, breaking
+   resume for every `_soft_easy` category. Fixed via `_resolve_task_name()`.
+2. **Wasted BC-pretrain compute**: mushroom's specialist trained to 3000 configured epochs but
+   plateaued ~600 — reduced the default ceiling to 1000 for future specialists.
+3. **Rollout stopping-condition staleness** (`rollout_collector.py`): `already_saved` never
+   incremented after a shard flush, causing multi-hour overruns past the target episode count.
+4. **Task-registration string mismatches** (×2, both self-corrected after being initially
+   diagnosed wrong): `hydra_snapshot.py` registers a run's task from `config.get("env_name",
+   exp_name)` — no config anywhere actually sets `env_name` (they all use `env:`), so
+   registration always falls back to `exp_name`. An initial fix assumed the opposite and had
+   to be reverted after raspberry's `run_dir` resolved to `null` despite successful training.
+5. **Relative-path symlink bug** (`rollout_collector.py::_default_out_dir`): returned a
+   relative path, breaking `build_merge()`'s symlink creation.
+6. **Wrong dataset class for `category_embed`** (`run_fragile25_merge_and_train.py`'s
+   `TRAIN_TEMPLATE`): used the base `StitchedSequencePointCloudDataset` instead of
+   `...Category...`, which would have caused a deterministic `KeyError` crash on the single
+   most expensive run of the campaign — caught before launch.
+7. **Evaluation-protocol / gentleness gap (user-flagged, two-part fix)**: `SingleLiftTask
+   .is_success()` and `collect_demos_synth_v2.py`'s own success check now gate on a persistent
+   crush flag (top-10 von Mises stress fraction of yield > 1.35, user-approved threshold);
+   `_privileged_obs_batch` now actually records `priv_stress` (previously silently missing
+   despite being requested by the obs config — meant no retroactive audit was even possible).
+   Verified live in kiwi's collection (real non-degenerate `priv_stress` values, no errors).
+8. **PYTHONPATH gotcha** (my own tooling, not a project bug): a stray `PYTHONPATH` inherited
+   from an unrelated conda environment shadowed the correct editable Genesis install with a
+   broken sibling clone when launching `uv run` directly outside the project's driver scripts
+   (which already strip `PYTHONPATH` for exactly this reason). Hit during the first
+   pause/resume cycle; fixed with `env -u PYTHONPATH` on manual launches going forward.
+9. **Phase 8 port-conflict bug** (`run_fragile25_final_eval.py`): the eval config template had
+   `port: 5570` hardcoded as a literal, even though `eval_one()` already accepted a `port`
+   parameter — it was silently never threaded into the rendered YAML, only into the server's
+   own `--port` CLI arg, so the eval CLIENT would always try 5570 regardless. Collided with
+   grape's rollout (also legitimately on 5570) with `OSError: Address already in use`. Fixed
+   properly: templated `port: {port}` and passed it through both call sites (mushroom/
+   raspberry-onward held-in and zero-shot evals use 5580, distinct from the 5570 default).
+10. **Orphaned sim server**: grape's sim server kept running ~40 minutes after its rollout
+    collection finished — an artifact of launching it manually during the pause/resume
+    (outside the normal specialist-driver supervision that would have cleaned it up), not a
+    project bug. Cleaned up, freed ~1GB+ GPU memory.
+11. **Watermelon crash** — see the dedicated section above. Diagnosed, not yet fixed (open
+    issue).
+
+### Follow-ups for later
+
+- **`hydra_snapshot.py`'s `env_name`/`env` field typo**: the registration code looks for a key
+  that no config ever actually sets, silently falling back to `exp_name` every time. Currently
+  worked around everywhere by callers hardcoding the correct fallback string, but the
+  underlying typo should be fixed at the source so future callers don't have to know this.
+- **Integrate `smgrasp/width_grasp.py`** (an already-built, validated, stress-minimizing FEM
+  grasp planner) as the actual CMA-ES objective in `collect_demos_synth_v2.py`, replacing the
+  purely geometric `synth_utils.grasp_cost`. This would make the demo-collection SEARCH itself
+  gentleness-seeking, not just the post-hoc crush gate that rejects bad outcomes — and would
+  likely help categories like sponge, where geometrically-valid candidates consistently fail
+  at execution because the search has no way to know a candidate is unholdable.
+- **SLURM cluster rendering**: the `XDG_RUNTIME_DIR`-not-existing fix got genuinely further
+  than any previous attempt (a real Genesis scene built and a renderer context construction
+  succeeded once), but hit a deeper wall — `eglQueryDevicesEXT` enumerates zero EGL devices on
+  repeat attempts, most likely `/dev/dri` render-node access excluded from the SLURM cgroup
+  device whitelist. This needs cluster-admin involvement to resolve, not something fixable
+  from a user job script alone.
+- **Zero-shot generalization needs more training-category diversity to be a fair test.** The
+  0.19-to-0.98 spread is consistent with the generalist having only learned shape-invariance
+  from 2 categories. Grape's (150/150 episodes) and kiwi's (50/58 episodes) rollout data are
+  both already complete and gentleness-verified — a natural next step would be a larger Phase
+  7 re-merge (4 categories instead of 2) to test whether the zero-shot spread narrows with
+  more training diversity, before drawing strong conclusions about the VLM-conditioning
+  mechanism itself.
+- **Watermelon's crash may not be unique to watermelon.** Since zero-shot TEST categories skip
+  the Phase 2 smoke-test step entirely (by design — they're never meant to go through
+  collection), any of the other 4 test categories could in principle have a similar
+  undiscovered instability that just didn't happen to trigger this time. A lightweight,
+  collection-free smoke test (build scene, step N times, check for nan) for all TEST
+  categories would catch this class of bug before it costs an eval run.

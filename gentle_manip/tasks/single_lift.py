@@ -44,6 +44,15 @@ class SingleLiftTask(BaseTask):
 
         self._initial_z: np.ndarray | None = None
         self._success_counter: np.ndarray | None = None
+        # Gentleness gate (2026-08-14, user-flagged): success previously meant ONLY
+        # "reached target height", so a policy that crushes the object and still
+        # holds the resulting mass at height counted as a success everywhere this
+        # flag is used (canonical eval success_rate, RLDG rollout keep/reject).
+        # crush_frac_threshold mirrors StressReward's own "1.0 = at bruising onset"
+        # semantics (fraction of the material's yield_stress); >1.0 allows a margin
+        # (user-set, default 1.35) above that literature-estimated threshold.
+        self.crush_frac_threshold: float = float(task_cfg.get("crush_frac_threshold", 1.35))
+        self._ever_crushed: np.ndarray | None = None
 
     @property
     def scene_spec(self) -> SceneSpec:
@@ -87,6 +96,7 @@ class SingleLiftTask(BaseTask):
         num_envs = sim_feedback.object_center.shape[0]
         self._initial_z = sim_feedback.object_center[:, 2].copy()
         self._success_counter = np.zeros(num_envs, dtype=np.int32)
+        self._ever_crushed = np.zeros(num_envs, dtype=bool)
 
     def is_success(self, sim_feedback: SimFeedback, raw_obs: RawObs) -> np.ndarray:
         if self._initial_z is None or self._success_counter is None:
@@ -97,5 +107,20 @@ class SingleLiftTask(BaseTask):
             in_target = (obj_z >= self.success_z_min) & (obj_z <= self.success_z_max)  # absolute band
         else:
             in_target = obj_z > (self._initial_z + self.lift_height)                   # relative
+
+        # Gentleness gate (soft-body only; no-op for rigid, which has no
+        # von_mises_stress). Persistent: once crushed, in_target stays False for the
+        # rest of the episode even if height/band conditions are later satisfied --
+        # damage doesn't heal, so a transient crush should permanently fail the
+        # episode, not just the step it happened on.
+        stress = sim_feedback.extra.get("von_mises_stress") if self.object_yield_stress else None
+        if stress is not None:
+            mean_s = np.mean(stress, axis=-1)
+            k = max(1, int(stress.shape[-1] * 0.1))
+            top10 = np.median(np.partition(stress, -k, axis=-1)[..., -k:], axis=-1)
+            frac = top10 / self.object_yield_stress
+            self._ever_crushed = self._ever_crushed | (frac > self.crush_frac_threshold)
+            in_target = in_target & ~self._ever_crushed
+
         self._success_counter = np.where(in_target, self._success_counter + 1, 0)
         return self._success_counter >= self.hold_steps

@@ -8,7 +8,22 @@
 object_pos_xy: 0.02
 robot_init_pos_xyz: 0.01
 object_yaw_deg: 180
-object_pitch_roll_deg: 8
+# gentle_manip 25-category speed pass (2026-08-13): was 8 -- fish_raw's
+# fillet mesh (size (0.07, 0.024, 0.0212), a thin flat slab) hit the SAME
+# box-tipping-class bug as tofu/watermelon/cheese (grasp synthesis assumes
+# the SAMPLED DR euler angle since MPMEntity has no get_quat() to query the
+# true post-settle pose; a flat/thin object with nonzero spawn pitch/roll
+# can settle into a meaningfully different orientation, desyncing every
+# downstream coordinate-frame computation). Confirmed via frame-by-frame
+# video inspection of collect_demos_synth_v2.py failure clips: the gripper
+# closes cleanly on EMPTY SPACE next to the (untouched) object every time --
+# not a width/reach issue, a pure position miss. 0/50 saved over 45 CMA-ES
+# attempts (9 batches) before this fix, vs. e.g. chicken_breast (a
+# ROTATIONALLY-SYMMETRIC capsule, unaffected by tipping since its silhouette
+# doesn't change) succeeding on its very first batch with the SAME
+# pitch_roll_deg: 8 -- the risk factor is asymmetric cross-section, not
+# nonzero pitch/roll per se.
+object_pitch_roll_deg: 0
 
 object_scale:      [0.95, 1.05]
 object_bend_deg:   [-2.0, 2.0]

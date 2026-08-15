@@ -1,0 +1,33 @@
+# [task] Soft-MPM cherry single-lift: object + reward (dist/lift/stress) + success band + sim dynamics.
+# Used by: experiments (task:) -> DP3/DPPO, demo collection
+# Status: experimental
+#
+# 12+4 generalist scale-up campaign (2026-08-15). Mirrors single_lift_grape_soft.yaml's
+# validated structure (registry.py notes cherry is "tiny and near-spherical, same
+# shape-DR profile as grape") -- only object_name differs; MPM stability params reuse
+# grape's validated Config-C-derived values since cherry has no registered
+# sim_substeps_override.
+success_z_min: 0.175
+success_z_max: 0.275
+hold_steps: 30
+object_name: "cherry"
+object_type: "soft"
+
+sim_substeps: 220
+mpm_grid_density: 250
+
+success_scale: 0.2
+
+rewards:
+  stress:
+    scale: 0.2
+    cap: 1.5
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 0.1
+    decay: 8.0
+  lift:
+    scale: 0.1
+    grasp_gate_dist: 0.079
+    lift_target: 0.16

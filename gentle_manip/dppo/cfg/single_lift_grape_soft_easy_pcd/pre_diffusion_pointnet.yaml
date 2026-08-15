@@ -1,4 +1,4 @@
-# [dppo-pretrain] BC-pretrain a PointNet diffusion policy on SOFT mushroom lift demos.
+# [dppo-pretrain] BC-pretrain a PointNet diffusion policy on SOFT grape lift demos.
 # Used by: third_party/dppo/script/run.py (TrainDiffusionAgent) via gentle_manip.dppo.train
 # Status: experimental (fragile-food 25-category campaign, 2026-08-13)
 defaults:
@@ -15,11 +15,11 @@ name: ${env}_pre_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
 logdir: ${oc.env:DPPO_LOG_DIR}/dppo-pretrain/${env}/${exp_id:}
 train_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/train.npz
 val_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/val.npz
-experiment: single_lift_mushroom_soft_easy
+experiment: single_lift_grape_soft_easy
 
 seed: 42
 device: cuda:0
-env: single_lift_mushroom_soft_easy_pcd
+env: single_lift_grape_soft_easy_pcd
 obs_dim: 8
 action_dim: 7
 denoising_steps: 20

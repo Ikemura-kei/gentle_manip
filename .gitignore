@@ -50,6 +50,13 @@ dataset/serl_clips/
 # DPPO pretrain npz — derived from dataset/demos via gentle_manip.dppo.convert_demos
 dataset/dppo/
 logs/
+# Scratch/smoke-test collection dirs + unrelated large local data (not campaign deliverables)
+dataset/demos_smoketest*/
+dataset/demos_merged*_TEMP/
+dataset/tactile_dp3/
+# tetgen tet-mesher scratch output (written to cwd during FEM build_grasp_fem)
+_skipped.face
+_skipped.node
 
 # Experiment registry — local index of local training runs (absolute run_dir paths, changes
 # every run). Rebuildable from the log tree via scripts/reconcile_experiments.py.

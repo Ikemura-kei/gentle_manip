@@ -209,7 +209,20 @@ class RolloutCollectorAgent(EvalAgent):
             if len(saved) >= SHARD_SIZE:
                 _write_shard(out_dir, saved, meta, shard_idx)
                 shard_idx += 1
+                # gentle_manip 25-category speed pass (2026-08-14): already_saved
+                # must track flushed episodes too, or total_saved silently goes
+                # stale after every flush (it'd keep computing from the ORIGINAL
+                # already_saved baseline + a `saved` buffer that just got reset to
+                # empty) -- the `total_saved >= target_n` stop check below would
+                # then almost never fire once a category's success rate is high
+                # enough to flush more than once, running the full n_batches
+                # regardless of having long since passed target_n. Caught on
+                # mushroom's rollout collection: ran 3.5+ hours across 53+ batches
+                # while total_saved's own prints bounced 4-14 (never near 150),
+                # yet the true on-disk total (16 shards) was already 191 episodes.
+                already_saved += len(saved)
                 saved = []
+                total_saved = already_saved
             if total_saved >= target_n:
                 break
 
@@ -233,4 +246,14 @@ class RolloutCollectorAgent(EvalAgent):
         ts = datetime.now().strftime("%y-%m-%d")
         import random, string
         suffix = "".join(random.choices(string.ascii_lowercase, k=3))
-        return Path("dataset/demos") / category_dir / f"{ts}-rollout-{suffix}"
+        # gentle_manip 25-category speed pass (2026-08-14): MUST be absolute --
+        # this path gets regex-parsed out of the "[rollout] DONE -> <path>" log
+        # line and used verbatim as a Path.symlink_to() TARGET in
+        # run_fragile25_merge_and_train.py's build_merge(). A relative symlink
+        # target resolves relative to the SYMLINK's own directory, not the cwd
+        # where this string was created -- caught when raspberry's rollout
+        # (real pipeline, relative path) broke Phase 7's merge with
+        # FileNotFoundError, while mushroom's (manually recovered, absolute
+        # path by accident) worked fine. Every future category's rollout
+        # inherits this fix automatically.
+        return (Path("dataset/demos") / category_dir / f"{ts}-rollout-{suffix}").resolve()

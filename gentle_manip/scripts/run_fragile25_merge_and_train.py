@@ -113,7 +113,14 @@ ema:
   decay: 0.995
 
 train_dataset:
-  _target_: gentle_manip.dppo.pointcloud_dataset.StitchedSequencePointCloudDataset
+  # gentle_manip 25-category speed pass (2026-08-14): MUST be the
+  # ...Category subclass, not the plain point-cloud dataset -- the plain
+  # class never sets conditions["category_embed"], which the model
+  # (category_embed_dim=24, PointNetDiffusionMLP) unconditionally reads in
+  # its forward pass. Caught via a real crash: 5 identical KeyError retries
+  # (train_with_resume kept relaunching a deterministic failure, since this
+  # isn't a transient crash) before tracing it to this line.
+  _target_: gentle_manip.dppo.pointcloud_dataset.StitchedSequencePointCloudCategoryDataset
   dataset_path: ${{train_dataset_path}}
   horizon_steps: ${{horizon_steps}}
   cond_steps: ${{cond_steps}}
@@ -121,7 +128,7 @@ train_dataset:
   device: ${{device}}
 
 val_dataset:
-  _target_: gentle_manip.dppo.pointcloud_dataset.StitchedSequencePointCloudDataset
+  _target_: gentle_manip.dppo.pointcloud_dataset.StitchedSequencePointCloudCategoryDataset
   dataset_path: ${{val_dataset_path}}
   horizon_steps: ${{horizon_steps}}
   cond_steps: ${{cond_steps}}
@@ -184,6 +191,20 @@ def main() -> None:
     (cfg_dir / "pre_diffusion_pointnet.yaml").write_text(
         TRAIN_TEMPLATE.format(merge_name=MERGE_NAME))
 
+    # CORRECTED (2026-08-14): an earlier fix this session assumed
+    # hydra_snapshot.py registers `config.get("env_name", exp_name)` and
+    # that TRAIN_TEMPLATE's `env:` field (MERGE_NAME) would be picked up --
+    # WRONG: the registration code looks up a key literally named
+    # "env_name", which no config here ever sets (they all use `env:`), so
+    # the lookup ALWAYS misses and falls back to `exp_name` (this file's
+    # TRAIN_TEMPLATE `experiment:` field, hardcoded to
+    # "single_lift_mushroom_soft_easy" -- just the obs-schema reference,
+    # unrelated to MERGE_NAME). Confirmed by re-deriving from raspberry's
+    # actual experiments.csv row this session: task registered = the
+    # `experiment:` field's literal value, not `env:`. Passing MERGE_NAME
+    # here would have made find_run_dir_for_task() never match, same
+    # silent-crash-recovery-defeat bug, for the single most expensive run
+    # in the campaign.
     result = train_with_resume(
         config_path=str(cfg_dir), config_name="pre_diffusion_pointnet",
         task="single_lift_mushroom_soft_easy", max_retries=5, timeout_s=21600,

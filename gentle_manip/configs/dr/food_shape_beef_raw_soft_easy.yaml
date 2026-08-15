@@ -8,7 +8,16 @@
 object_pos_xy: 0.02
 robot_init_pos_xyz: 0.01
 object_yaw_deg: 180
-object_pitch_roll_deg: 8
+# gentle_manip 25-category speed pass (2026-08-13): was 8 -- beef_raw has NO
+# mesh_path in registry.py (ObjectDef: "mesh_path: Optional[str] = None #
+# reserved; None => primitive box"), so it's a plain Box primitive exactly
+# like tofu/watermelon/cheese, just never recognized as one because the
+# original Phase 2 box-tipping fix only checked the 3 objects that were
+# LITERALLY named "box" in that pass's mental model. Confirmed via video:
+# 0/50 saved over 50 CMA-ES attempts, gripper closing on empty space next to
+# the untouched object every time -- the exact box-tipping signature (see
+# tofu's original fix comment in this same file family for the mechanism).
+object_pitch_roll_deg: 0
 
 object_scale:      [0.95, 1.05]
 object_bend_deg:   [-2.0, 2.0]
