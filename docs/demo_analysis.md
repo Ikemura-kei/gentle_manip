@@ -25,6 +25,20 @@ Outputs (into `$D/`): `grasp_euler_distribution.png` (roll/pitch/yaw histograms)
 per-axis position + orientation mean/σ/range. This is what surfaced the v3-vs-v2 diversity gap
 (concentrated pitch / discrete yaw bands → the diversity knobs; see `collect_demos_synth_v3.py`).
 
+## Per-trajectory obs-signal evolution — `examples/demo_analysis/obs_signal_evolution.py`
+
+Plots each observation channel **over time** for individual episodes — ee_pos, the orientation
+(`ee_rot6d` 6 components, or `ee_quat`; auto-detected), gripper_width, `priv_object_pos`, and
+optionally the action — as stacked panels. Good for eyeballing a trajectory's shape (approach →
+grasp → lift) and how the rot6d components behave.
+
+```bash
+run examples/demo_analysis/obs_signal_evolution.py $D/data.pkl --episodes 0 1 2 3 --with-action
+run examples/demo_analysis/obs_signal_evolution.py $D/data.pkl --episodes 0 1 2 3 4 5 --overlay
+```
+Outputs: `obs_signal_ep<i>.png` (one per episode) or `obs_signal_overlay.png` (all selected episodes
+overlaid per channel — a distribution-over-trajectories view).
+
 ## Other distribution/quality tools (`examples/demo_analysis/`)
 
 | script | what it shows | output |
