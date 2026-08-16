@@ -81,7 +81,15 @@ class SingleLiftTask(BaseTask):
             # to >=0 and passed. Dropping the floor gives real clearance + headroom for DR
             # pose tilts that dip a corner lower. Only extends the (empty) domain below the
             # plane; plane collision + physics unchanged.
-            mpm_bounds=((0.25, -0.15, -0.02), (0.75, 0.15, 0.32)),
+            #
+            # 2026-08-16: still not enough margin -- 4 overnight grasp-synthesis collections
+            # (soft_orientation DR: full-range pose/shape/scale) crashed on the SAME exception
+            # a few hours in (min z = -8.37e-3 vs the -8e-3 padded floor, ~370um over -- bigger
+            # violation than the 36um one above, wider DR ranges push particles further). Added
+            # 2mm of margin on ALL SIX faces (not just z) as a general safety buffer -- cheap
+            # (only extends the empty domain) and z is not provably the only direction that can
+            # be violated by some DR combination we haven't hit yet.
+            mpm_bounds=((0.248, -0.152, -0.022), (0.752, 0.152, 0.322)),
             mpm_grid_density=self.mpm_grid_density,
         )
 

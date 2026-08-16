@@ -2,12 +2,14 @@
 # Used by: third_party/dppo/script/run.py (EvalHarnessAgent) via gentle_manip.dppo.train
 # Status: experimental (DPPO step-2 eval: point-cloud student on the abs-action FEM-gentleness policy)
 #
-# Soft twin of single_lift_mushroom_soft_pcd/eval_diffusion_pointnet.yaml with action_dim=10 (abs) and
-# the soft_abs paths. Routes through the SHARED canonical harness (gentle_manip.evaluation.run_eval):
+# Soft twin of single_lift_mushroom_soft_abs_pcd/eval_diffusion_pointnet.yaml, for the
+# single_lift_mushroom_soft_abs_action_highcam experiment (camera-fork task, cam_ext +30cm
+# top-down; obs is superset_soft -- quaternion, obs_dim=8, NOT the rot6d sibling's 10).
+# Routes through the SHARED canonical harness (gentle_manip.evaluation.run_eval):
 # fixed EvalSpec (n_episodes=200, num_envs=5, deterministic per-batch DR seed) -> summary.json +
 # episodes.csv + env-config snapshot + per-episode videos, into <base_policy_run>/eval/<datetime>/.
 # scene_group_size>0 rebuilds geometry every K batches, so the server MUST be --subprocess:
-#   serl_sim_server --experiment single_lift_mushroom_soft_abs_action_rot6d --view student \
+#   serl_sim_server --experiment single_lift_mushroom_soft_abs_action_highcam --view student \
 #                   --num-envs 5 --render-rgb --subprocess --port 5570
 # Run with envs/dppo.
 defaults:
@@ -19,14 +21,14 @@ _target_: gentle_manip.dppo.eval_agent.EvalHarnessAgent
 
 name: ${env_name}_eval_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
 logdir: ${eval_base:${base_policy_path}}/eval/${now:%Y-%m-%d}_${now:%H-%M-%S}
-base_policy_path: ???        # set on CLI: the pre_diffusion_pointnet (BC) checkpoint (state_700.pt)
-normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_mushroom_soft_abs_pcd_rot6d/normalization.npz
-experiment: single_lift_mushroom_soft_abs_action_rot6d   # env (experiment) config snapshotted into eval dir
+base_policy_path: ???        # set on CLI: the pre_diffusion_pointnet (BC) checkpoint
+normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_mushroom_soft_abs_pcd_highcam/normalization.npz
+experiment: single_lift_mushroom_soft_abs_action_highcam   # env (experiment) config snapshotted into eval dir
 
 seed: 42
 device: cuda:0
-env_name: single_lift_mushroom_soft_abs_pcd_rot6d
-obs_dim: 10
+env_name: single_lift_mushroom_soft_abs_pcd_highcam
+obs_dim: 8
 action_dim: 10               # abs pos3 + 6D rotation6 + gripper1
 denoising_steps: 20
 ft_denoising_steps: 0        # eval the base (BC) policy: no finetuned denoising steps
@@ -60,13 +62,13 @@ env:
     act_steps: ${act_steps}
     normalization_path: ${normalization_path}
     port: 5570
-    obs_keys: [ee_pos, ee_rot6d, gripper_width]
+    obs_keys: [ee_pos, ee_quat, gripper_width]
     pointcloud_key: point_cloud
 
 shape_meta:
   obs:
     state:
-      shape: [10]
+      shape: [8]
     point_cloud:
       shape: [1024, 3]
   action:
