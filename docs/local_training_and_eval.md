@@ -57,7 +57,9 @@ alongside the flat proprio state.
 `gentle_manip.dppo.train` is the one launcher for every DPPO stage; the config's `_target_` picks
 it (`TrainDiffusionAgent` for pretrain). Useful overrides (hydra, `key=value` on the CLI):
 
-- `train.n_epochs=<N>` — default in the config (e.g. 700); lower for a quick check.
+- `train.n_epochs=<N>` — default in the config (e.g. 700); lower for a quick check. **Gotcha:** if you
+  drop it below the LR warmup (`train.lr_scheduler.warmup_steps`, default **100**), the cosine scheduler
+  asserts (`warmup > cycle`). For a short smoke also pass `train.lr_scheduler.warmup_steps=<small>`.
 - `train.save_model_freq=<N>` — checkpoint cadence (→ `state_<epoch>.pt`).
 - `wandb=null` (or `WANDB_MODE=offline`) — skip wandb.
 
