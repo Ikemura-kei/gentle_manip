@@ -21,6 +21,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from gentle_manip.actions.pipeline import _rot6d_to_quat   # rot6d -> wxyz quat (single source of truth)
+
 GW_EPS = 1e-3   # gripper-width drop that signals closing start
 
 
@@ -50,21 +54,30 @@ def main() -> None:
     episodes = d["episodes"]
     print(f"Loaded {len(episodes)} episodes from {data_pkl.name}")
 
+    # Orientation may be recorded as ee_quat (4-dim wxyz) OR ee_rot6d (6-dim, the
+    # ObsConfig.ee_rot6d collections -- ee_quat is dropped entirely in the pipeline when
+    # that flag is set). Detect from the first episode and convert rot6d -> wxyz quat via
+    # the same Gram-Schmidt inverse used elsewhere (actions/pipeline._rot6d_to_quat).
+    use_rot6d = "ee_rot6d" in episodes[0]["observations"]
+    orient_key = "ee_rot6d" if use_rot6d else "ee_quat"
+    print(f"  Orientation key: {orient_key}")
+
     # ── Extract grasp-moment poses ─────────────────────────────────────────────
-    grasp_pos  = []
-    grasp_quat = []   # wxyz convention
-    skipped    = 0
+    grasp_pos    = []
+    grasp_orient = []   # ee_quat (wxyz) or ee_rot6d, converted to wxyz quat below
+    skipped      = 0
     for ep in episodes:
         t = _find_grasp_step(ep)
         if t is None:
             skipped += 1
             continue
         grasp_pos.append(ep["observations"]["ee_pos"][t])
-        grasp_quat.append(ep["observations"]["ee_quat"][t])
+        grasp_orient.append(ep["observations"][orient_key][t])
 
     print(f"  Grasp step found: {len(grasp_pos)} / {len(episodes)}  (skipped {skipped})")
-    grasp_pos  = np.array(grasp_pos,  dtype=np.float64)   # (N, 3)
-    grasp_quat = np.array(grasp_quat, dtype=np.float64)   # (N, 4) wxyz
+    grasp_pos    = np.array(grasp_pos,    dtype=np.float64)   # (N, 3)
+    grasp_orient = np.array(grasp_orient, dtype=np.float64)   # (N, 4) or (N, 6)
+    grasp_quat = _rot6d_to_quat(grasp_orient) if use_rot6d else grasp_orient   # (N, 4) wxyz
 
     # scipy uses xyzw convention
     quat_xyzw = np.concatenate([grasp_quat[:, 1:], grasp_quat[:, :1]], axis=1)
