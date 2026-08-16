@@ -33,11 +33,14 @@ optionally the action — as stacked panels. Good for eyeballing a trajectory's 
 grasp → lift) and how the rot6d components behave.
 
 ```bash
+run examples/demo_analysis/obs_signal_evolution.py $D/data.pkl --episodes 0 1 2 3 --per-element   # clearest
 run examples/demo_analysis/obs_signal_evolution.py $D/data.pkl --episodes 0 1 2 3 --with-action
 run examples/demo_analysis/obs_signal_evolution.py $D/data.pkl --episodes 0 1 2 3 4 5 --overlay
 ```
-Outputs: `obs_signal_ep<i>.png` (one per episode) or `obs_signal_overlay.png` (all selected episodes
-overlaid per channel — a distribution-over-trajectories view).
+Modes: **`--per-element`** = one subplot per proprio scalar (ee_x/y/z, r6[0..5], gripper), each
+auto-scaled — the readable view (`obs_signal_ep<i>_perelem.png`). Default = channels grouped into
+panels (+`--with-action`). `--overlay` = all selected episodes overlaid per channel
+(`obs_signal_overlay.png`, distribution-over-trajectories view).
 
 ## Other distribution/quality tools (`examples/demo_analysis/`)
 
