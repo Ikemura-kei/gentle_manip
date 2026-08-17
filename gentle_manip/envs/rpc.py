@@ -149,7 +149,8 @@ def serve_env(env, host: str = "127.0.0.1", port: int = 5555, ready_msg: str = "
                         if info and "obj_z" in info[0]:            # object height (diagnostic; any task)
                             resp["obj_z"] = [float(i["obj_z"]) for i in info]
                         if info and "stress_max" in info[0]:      # soft body: per-env von-Mises
-                            for key in ("stress_max", "stress_mean", "stress_top10", "stress_top20"):
+                            for key in ("stress_max", "stress_mean", "stress_top10", "stress_top20",
+                                       "stress_top5mean", "stress_top5median"):
                                 if key in info[0]:
                                     resp[key] = [float(i[key]) for i in info]
                         send_msg(conn, resp, _as_arrays(obs))
@@ -260,7 +261,8 @@ class SimEnvClient:
             for k, d in enumerate(info):
                 d["obj_z"] = float(header["obj_z"][k])
         if header.get("stress_max") is not None:                            # soft body only
-            for key in ("stress_max", "stress_mean", "stress_top10", "stress_top20"):
+            for key in ("stress_max", "stress_mean", "stress_top10", "stress_top20",
+                       "stress_top5mean", "stress_top5median"):
                 vals = header.get(key)
                 if vals is not None:
                     for k, d in enumerate(info):

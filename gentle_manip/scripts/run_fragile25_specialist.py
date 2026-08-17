@@ -190,7 +190,7 @@ env:
     obs_steps: ${{cond_steps}}
     act_steps: ${{act_steps}}
     normalization_path: ${{normalization_path}}
-    port: 5570
+    port: {port}
     obs_keys: [ee_pos, ee_quat, gripper_width]
     pointcloud_key: point_cloud
 
@@ -287,7 +287,7 @@ env:
     obs_steps: ${{cond_steps}}
     act_steps: ${{act_steps}}
     normalization_path: ${{normalization_path}}
-    port: 5570
+    port: {port}
     obs_keys: [ee_pos, ee_quat, gripper_width]
     pointcloud_key: point_cloud
     record_raw: true
@@ -382,11 +382,11 @@ def convert(category: str, demo_dir: Path) -> Path:
     return out_dir
 
 
-def write_configs(category: str) -> Path:
+def write_configs(category: str, port: int = 5570) -> Path:
     cfg_dir = DPPO_CFG_DIR / f"single_lift_{category}_soft_easy_pcd"
     cfg_dir.mkdir(parents=True, exist_ok=True)
     (cfg_dir / "pre_diffusion_pointnet.yaml").write_text(PRE_TEMPLATE.format(obj=category))
-    (cfg_dir / "eval_diffusion_pointnet.yaml").write_text(EVAL_TEMPLATE.format(obj=category))
+    (cfg_dir / "eval_diffusion_pointnet.yaml").write_text(EVAL_TEMPLATE.format(obj=category, port=port))
     return cfg_dir
 
 
@@ -453,8 +453,20 @@ def eval_specialist(category: str, cfg_dir: Path, checkpoint: Path, port: int = 
         text = eval_log.read_text(errors="ignore")
         m = re.search(r"DONE — success ([\d.]+)", text)
         success_rate = float(m.group(1)) if m else None
+        # Same summary.json pickup as run_fragile25_final_eval.eval_one() -- full 6-metric
+        # picture (SR + 4 stress metrics + combined SR+gentleness), not just the headline SR.
+        summary = None
+        eval_base = Path(checkpoint).parent.parent / "eval"
+        if eval_base.exists():
+            run_dirs = sorted(eval_base.iterdir(), key=lambda p: p.stat().st_mtime)
+            for d in reversed(run_dirs):
+                sp = d / "summary.json"
+                if sp.exists():
+                    summary = json.loads(sp.read_text())
+                    summary["render_dir"] = str(d / "render")
+                    break
         return {"success_rate": success_rate, "ok": r.returncode == 0 and success_rate is not None,
-               "eval_log": str(eval_log)}
+               "eval_log": str(eval_log), "summary": summary}
     finally:
         try:
             pgid = os.getpgid(server_proc.pid)
@@ -469,7 +481,7 @@ def collect_rollouts(category: str, checkpoint: Path, port: int = 5570) -> dict:
     demonstrated it can do the task."""
     cfg_dir = DPPO_CFG_DIR / f"single_lift_{category}_soft_easy_pcd"
     cfg_dir.mkdir(parents=True, exist_ok=True)
-    (cfg_dir / "collect_rollouts.yaml").write_text(ROLLOUT_TEMPLATE.format(obj=category))
+    (cfg_dir / "collect_rollouts.yaml").write_text(ROLLOUT_TEMPLATE.format(obj=category, port=port))
 
     server_log = RESULTS_DIR / "rollout_logs" / f"{category}_server.log"
     server_log.parent.mkdir(parents=True, exist_ok=True)
@@ -512,10 +524,11 @@ def collect_rollouts(category: str, checkpoint: Path, port: int = 5570) -> dict:
             pass
 
 
-def run_one(category: str) -> dict:
+def run_one(category: str, port: int = 5570) -> dict:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     result_path = RESULTS_DIR / f"{category}.json"
     result = json.loads(result_path.read_text()) if result_path.exists() else {"category": category}
+    timing = result.setdefault("timing_s", {})
 
     if "demo_dir" not in result or not Path(result.get("demo_dir", "")).exists():
         demo_dir = find_latest_demo_dir(category)
@@ -527,14 +540,18 @@ def run_one(category: str) -> dict:
         result_path.write_text(json.dumps(result, indent=2))
 
     if "dppo_data_dir" not in result:
+        t0 = time.time()
         dppo_dir = convert(category, Path(result["demo_dir"]))
+        timing["convert"] = time.time() - t0
         result["dppo_data_dir"] = str(dppo_dir)
         result_path.write_text(json.dumps(result, indent=2))
 
-    cfg_dir = write_configs(category)
+    cfg_dir = write_configs(category, port=port)
 
     if "run_dir" not in result or not result.get("train_ok"):
+        t0 = time.time()
         train_result = train(category, cfg_dir)
+        timing["train"] = time.time() - t0
         result["run_dir"] = train_result["run_dir"]
         result["train_ok"] = train_result["ok"]
         result_path.write_text(json.dumps(result, indent=2))
@@ -545,7 +562,9 @@ def run_one(category: str) -> dict:
         result_path.write_text(json.dumps(result, indent=2))
 
     if result.get("checkpoint") and "eval_success_rate" not in result:
-        eval_result = eval_specialist(category, cfg_dir, Path(result["checkpoint"]))
+        t0 = time.time()
+        eval_result = eval_specialist(category, cfg_dir, Path(result["checkpoint"]), port=port)
+        timing["eval"] = time.time() - t0
         result["eval_success_rate"] = eval_result["success_rate"]
         result["eval_ok"] = eval_result["ok"]
         result["eval_log"] = eval_result["eval_log"]
@@ -560,7 +579,9 @@ def run_one(category: str) -> dict:
         result["rollout_status"] = f"skipped: eval_success_rate {sr} < QUALITY_GATE {QUALITY_GATE}"
         result_path.write_text(json.dumps(result, indent=2))
     elif result.get("checkpoint") and sr is not None and "rollout_data_path" not in result:
-        rollout_result = collect_rollouts(category, Path(result["checkpoint"]))
+        t0 = time.time()
+        rollout_result = collect_rollouts(category, Path(result["checkpoint"]), port=port)
+        timing["rollout"] = time.time() - t0
         result["rollout_ok"] = rollout_result["ok"]
         result["rollout_n_episodes"] = rollout_result.get("n_episodes")
         result["rollout_data_path"] = rollout_result.get("data_path")
@@ -575,8 +596,11 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--category", required=True)
+    ap.add_argument("--port", type=int, default=5570,
+                    help="sim server port -- use a distinct port per concurrently-running "
+                         "driver instance so eval/rollout sim servers don't collide")
     args = ap.parse_args()
-    result = run_one(args.category)
+    result = run_one(args.category, port=args.port)
     print(json.dumps(result, indent=2))
 
 

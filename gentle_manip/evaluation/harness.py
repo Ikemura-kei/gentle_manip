@@ -115,7 +115,8 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
         # / top-20%-mean (NOT plain time-mean — idle steps would dilute it, letting a dawdle-then-
         # grab policy look gentle). Spatial keys come from the venv info (see policy_env
         # _stress_summary): stress_mean / max / top10 / top20 (over particles, per step).
-        SKEYS = ["stress_mean", "stress_max", "stress_top10", "stress_top20"]
+        SKEYS = ["stress_mean", "stress_max", "stress_top10", "stress_top20",
+                "stress_top5mean", "stress_top5median"]
         buf = {k: [[] for _ in range(n)] for k in SKEYS}
         z_buf = [[] for _ in range(n)]     # object height per step (diagnostic; any task)
 
@@ -166,6 +167,13 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
         def _tmean(seq):                                  # plain time-mean — BACKUP only
             return float(np.mean(seq)) if seq else None
 
+        def _ttop5_median(seq):                           # median of the hottest 5% of timesteps
+            if not seq:                                   # (peak-interaction-window robust stat,
+                return None                                # vs. _ttop20's MEAN of hottest 20%)
+            a = np.sort(np.asarray(seq, float))[::-1]
+            m = max(1, int(np.ceil(0.05 * a.size)))
+            return float(np.median(a[:m]))
+
         # ever_in_band: object EVER within [z_min,z_max] at ANY single step, with NO
         # hold_steps requirement — the loose counterpart to ever_success (entered AND
         # held). Computed straight from the z_buf time series already collected above;
@@ -194,6 +202,13 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
                 "stress_top20_ttop20": _ttop20(b["stress_top20"]),
                 # backup: plain time-mean of the spatial-mean == old stress_mean (compare to old evals)
                 "stress_mean_tmean": _tmean(b["stress_mean"]),
+                # the 4 requested top-5%-vertex gentleness metrics: {mean, median} spatial reduction
+                # over the top-5% most-stressed vertices x {tmean (whole-rollout average), ttop5med
+                # (median over just the hottest 5% of TIMESTEPS — the peak-interaction window)}.
+                "stress_top5mean_tmean": _tmean(b["stress_top5mean"]),
+                "stress_top5median_tmean": _tmean(b["stress_top5median"]),
+                "stress_top5mean_ttop5med": _ttop5_median(b["stress_top5mean"]),
+                "stress_top5median_ttop5med": _ttop5_median(b["stress_top5median"]),
                 # object height diagnostic (any task with SimFeedback.object_center): peak reached,
                 # and the value at the LAST step — cross-reference against the task's success
                 # z-band (e.g. success_z_min/max) to tell "never got there" apart from "got there,

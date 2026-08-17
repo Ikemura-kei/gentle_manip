@@ -34,7 +34,8 @@ TRAIN = ["tofu", "mushroom", "shiitake", "fish_raw", "beef_raw", "blueberry",
         "raspberry", "grape", "avocado", "kiwi", "sponge", "egg_boiled",
         "strawberry", "peach", "banana", "tomato", "chicken_breast", "shrimp",
         "cheese", "pasta_bundle"]
-TEST = ["blackberry", "scallop", "watermelon", "dumpling", "gelatin"]
+TEST = ["blackberry", "scallop", "dumpling", "gelatin"]   # watermelon dropped: reproducible MPM
+                                                          # divergence in its DR range (2026-08-17)
 ROSTER = TRAIN + TEST
 
 TASK_TEMPLATE = '''# [task] Soft-MPM {obj} single-lift: object + reward (dist/lift/stress) + success band + sim dynamics.

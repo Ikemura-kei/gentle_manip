@@ -141,6 +141,7 @@ class GenesisMultiStepVecEnv:
         obj_z = None                                # last sub-step's object height (diagnostic)
         s_max, s_sum, s_cnt = None, None, 0         # von-Mises over the chunk (soft body)
         s_t10, s_t20 = None, None                   # top-10%/20% particle tail (chunk-max)
+        s_t5m, s_t5med = None, None                 # top-5% particle tail, mean/median (chunk-max)
         for t in range(a.shape[1]):                 # execute the action chunk, sum reward
             raw_action = self._unnorm_action(a[:, t])
             obs, r, _done, sub_info = self.client.step(raw_action)
@@ -167,6 +168,11 @@ class GenesisMultiStepVecEnv:
                     s_t10 = t10 if s_t10 is None else np.maximum(s_t10, t10)
                     t20 = np.array([d["stress_top20"] for d in sub_info], np.float32)
                     s_t20 = t20 if s_t20 is None else np.maximum(s_t20, t20)
+                if "stress_top5mean" in sub_info[0]:   # top-5% vertex tail: chunk-max
+                    t5m = np.array([d["stress_top5mean"] for d in sub_info], np.float32)
+                    s_t5m = t5m if s_t5m is None else np.maximum(s_t5m, t5m)
+                    t5med = np.array([d["stress_top5median"] for d in sub_info], np.float32)
+                    s_t5med = t5med if s_t5med is None else np.maximum(s_t5med, t5med)
             self._cnt += 1
             self._hist.append(self._modalities(obs))
             if self._rec.active:                    # pull all-env RGB for per-trajectory video
@@ -181,6 +187,8 @@ class GenesisMultiStepVecEnv:
             info["stress_max"], info["stress_mean"] = s_max, s_sum / s_cnt
             if s_t10 is not None:
                 info["stress_top10"], info["stress_top20"] = s_t10, s_t20
+            if s_t5m is not None:
+                info["stress_top5mean"], info["stress_top5median"] = s_t5m, s_t5med
         if bool(truncated.all()):                   # synchronous horizon -> auto-reset all
             self._rec.flush()                       # write this episode's per-env clips; keep recording
             info["final_obs"] = obs_out

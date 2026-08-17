@@ -32,6 +32,9 @@ CSV_FIELDS = ["episode", "batch", "env", "scenario_seed", "success", "ever_succe
               "stress_mean_tmax", "stress_mean_ttop20", "stress_max_tmax", "stress_max_ttop20",
               "stress_top10_tmax", "stress_top10_ttop20", "stress_top20_tmax", "stress_top20_ttop20",
               "stress_mean_tmean",
+              # 4 requested top-5%-vertex gentleness metrics (see harness.py) x combined SR+gentleness
+              "stress_top5mean_tmean", "stress_top5median_tmean",
+              "stress_top5mean_ttop5med", "stress_top5median_ttop5med",
               # object height diagnostic (any task with SimFeedback.object_center) — peak reached
               # and value at the final step; cross-reference against the task's success z-band.
               "obj_z_max", "obj_z_final",
@@ -77,7 +80,14 @@ STRESS_COLS = [
     ("stress_top10_tmax", False), ("stress_top10_ttop20", False),
     ("stress_top20_tmax", False), ("stress_top20_ttop20", True),  # headline interaction tail
     ("stress_mean_tmean", False),                                 # backup == old stress_mean
+    ("stress_top5mean_tmean", True), ("stress_top5median_tmean", False),
+    ("stress_top5mean_ttop5med", True), ("stress_top5median_ttop5med", False),
 ]
+
+# The primary top-5% gentleness metric used for the combined SR+gentleness score below —
+# "mean of the top-5% most-stressed vertices, averaged over the whole rollout" is the most
+# direct, least-outlier-prone reading of "how hard did we squeeze this object overall."
+PRIMARY_STRESS_COL = "stress_top5mean_tmean"
 
 
 def aggregate(records: List[Dict[str, Any]], **meta) -> Dict[str, Any]:
@@ -123,6 +133,20 @@ def aggregate(records: List[Dict[str, Any]], **meta) -> Dict[str, Any]:
         # all-episode backup mean (exposes the "gentle but failed" trap; compare to old evals)
         allm, _ = _mean_std([r.get("stress_mean_tmean") for r in records])
         out["stress_mean_tmean_mean_all"] = _nan(allm)
+
+        # Combined SR+gentleness score: 0.5*success_rate + 0.5*gentleness, where gentleness =
+        # 1 - clip(primary_stress / material_yield_stress, 0, 1) — normalizes the raw Pa reading
+        # against the object's own crush threshold (mat_yield, constant per category during
+        # eval) so categories with very different materials are comparable on a common 0-1 scale.
+        # Uses the SAME success-gated mean as the other headline stress cols (a failed episode's
+        # near-zero stress would otherwise fake "gentle" while not doing the task).
+        yield_vals = _clean([r.get("mat_yield") for r in succ_recs])
+        primary_vals = _clean([r.get(PRIMARY_STRESS_COL) for r in succ_recs])
+        if primary_vals.size and yield_vals.size:
+            yield_stress = float(np.median(yield_vals))
+            gentleness = 1.0 - float(np.clip(primary_vals.mean() / yield_stress, 0.0, 1.0))
+            out["gentleness_score"] = gentleness
+            out["combined_sr_gentleness"] = 0.5 * out["success_rate"] + 0.5 * gentleness
     return out
 
 

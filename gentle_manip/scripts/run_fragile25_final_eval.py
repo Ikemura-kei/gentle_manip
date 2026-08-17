@@ -1,7 +1,13 @@
 """Phase 8 driver: canonical eval of the combined RLDG+VLM generalist
-(Phase 7) across ALL 25 categories -- 20 held-in + 5 zero-shot (blackberry,
-scallop, watermelon, dumpling, gelatin). The actual deliverable: compare
-against the 70%+ held-in / 50%+ zero-shot targets.
+(Phase 7) across ALL 25 categories -- 20 held-in + 4 zero-shot (blackberry,
+scallop, dumpling, gelatin). The actual deliverable: compare against the
+70%+ held-in / 50%+ zero-shot targets.
+
+watermelon was DROPPED from the zero-shot test set (2026-08-17): its
+scene-DR range hits a reproducible MPM divergence (settle-check passes,
+then diverges mid-episode under grasp contact and hard-crashes the genesis
+subprocess -- confirmed with two different seeds, same failure). See
+project_generalist_12plus4_campaign.md memory for the full trace.
 
 Usage:
     python -m gentle_manip.scripts.run_fragile25_final_eval
@@ -26,7 +32,7 @@ from gentle_manip.scripts.run_fragile25_specialist import RESULTS_DIR, DPPO_CFG_
 from gentle_manip.scripts.run_fragile25_all_specialists import TRAIN  # noqa: E402
 from gentle_manip.scripts.run_fragile25_merge_and_train import MERGE_NAME  # noqa: E402
 
-TEST = ["blackberry", "scallop", "watermelon", "dumpling", "gelatin"]
+TEST = ["blackberry", "scallop", "dumpling", "gelatin"]
 
 EVAL_TEMPLATE = '''# [dppo-eval] Fragile-25 combined RLDG+VLM generalist -- {role} eval on {obj}.
 defaults:
@@ -168,8 +174,22 @@ def eval_one(category: str, role: str, checkpoint: str, port: int = 5570,
         text = eval_log.read_text(errors="ignore")
         m = re.search(r"DONE — success ([\d.]+)", text)
         sr = float(m.group(1)) if m else None
+        # Locate the run's own summary.json (written by the shared harness -- has success_rate
+        # PLUS all stress metrics + the combined SR+gentleness score) and merge it in, so callers
+        # get the full 6-metric picture, not just the regex-parsed headline success float.
+        summary = None
+        eval_base = Path(checkpoint).parent.parent / f"eval_{category}"
+        if eval_base.exists():
+            run_dirs = sorted(eval_base.iterdir(), key=lambda p: p.stat().st_mtime)
+            for d in reversed(run_dirs):
+                sp = d / "summary.json"
+                if sp.exists():
+                    summary = json.loads(sp.read_text())
+                    summary["render_dir"] = str(d / "render")
+                    break
         return {"category": category, "role": role, "success_rate": sr,
-               "ok": r.returncode == 0 and sr is not None, "eval_log": str(eval_log)}
+               "ok": r.returncode == 0 and sr is not None, "eval_log": str(eval_log),
+               "summary": summary}
     finally:
         try:
             os.killpg(os.getpgid(proc.pid), 9)

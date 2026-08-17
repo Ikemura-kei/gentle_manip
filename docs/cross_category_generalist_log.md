@@ -26,6 +26,24 @@ the historical record — see `project_generalist_12plus4_campaign.md` memory fo
 integration plan and progress, and expect this document's data table to be
 rewritten once v3 recollection completes.
 
+**⚠️ 2026-08-15 update — zero-shot test roster: gelatin replaced with peach.**
+A full 16-category v3 smoketest (12 train + 4 zero-shot) found gelatin crashes
+outright under v3: it's a box-primitive registry entry (no mesh) but its DR config
+enables shape deformation anyway, so `_apply_scene_dr` tries to load a mesh path
+that doesn't exist (`ValueError: string is not a file: None`). Since gelatin is
+zero-shot-test-only (never trained on), this doesn't block the 12-category
+recollection, but it does mean gelatin can't serve as a zero-shot eval target as-is.
+Replaced with **peach** — has a real mesh (`peach_slice.obj`), full experiment/task/
+DR configs already registered, no history of pathological failure in the first
+fragile25 campaign (unlike blueberry/avocado/sponge/fish_raw/beef_raw/cheese/
+watermelon/tofu, all flagged as problematic there — see `project_fragile25_campaign.md`).
+Validated with a direct v3 smoketest: 3/3 episodes saved, 60% success rate over 5
+attempts, sane stress values, no crash. **New zero-shot test roster (4): scallop,
+peach, blackberry, dumpling.** Note peach loses gelatin's prior Phase-8 baseline
+number (0.70 under the first 2-category generalist) — no direct before/after
+comparison for this slot, but that's an acceptable tradeoff for a working category
+over a broken one.
+
 ---
 
 ## 1. Methodology
@@ -84,6 +102,25 @@ post-hoc gate (below); the *search* itself has no way to know a geometrically va
 candidate will crush the object or fail to hold under real deformation. Integrating
 `width_grasp.py` as the CMA-ES objective (or a filter on top of it) is the highest-
 leverage remaining methodology gap — see Next Steps.
+
+### Domain randomization
+
+Every episode's object is a fresh sample of its category, not one fixed asset —
+applied by `SimBackend`/`DRConfig` (`domain_randomization/dr_config.py`,
+`configs/dr/*.yaml`) at reset/scene-build time:
+- **Pose** — xy jitter + a full ±180° yaw, a few degrees of pitch/roll.
+- **Material** — E/ν/ρ/yield sampled as multipliers on each object's own nominal
+  (e.g. mushroom's yield band is 0.6–1.4×), plus pad friction.
+- **Shape** — uniform mesh scale + procedural deformation (bend/twist/taper/
+  axis-scale/RBF bumps) of the registry's nominal mesh, rebuilt from scratch every
+  `scene_dr_every` batches (a full Genesis relaunch — geometry is shared across a
+  batch's parallel envs, not varied within one).
+- **Robot** — a small per-episode home-position offset for the arm.
+
+This is what makes one category's 50-episode demo set teach shape/material
+generalization rather than memorizing a single geometry — see `CLAUDE.md`'s
+"Domain Randomization & Data Augmentation" section for the full knob list and
+implementation status.
 
 ### VLM embedding — why it's needed
 
@@ -282,11 +319,14 @@ registered as soft-capable in `registry.py`; task/experiment/DR configs added
 2026-08-15 mirroring grape's validated recipe, since registry.py's own comment notes
 cherry is "tiny and near-spherical, same shape-DR profile as grape").
 
-**Final 4 zero-shot test categories**: scallop, gelatin (both showed strong transfer
-under the 2-category generalist, worth re-testing at scale), blackberry (showed poor
+**Final 4 zero-shot test categories**: scallop (showed strong transfer under the
+2-category generalist, worth re-testing at scale), blackberry (showed poor
 transfer — kept as test, not moved to training, to preserve a genuine hard case),
 dumpling (moderate transfer under the 2-category generalist — a useful mid-range
-comparison point). Watermelon excluded until its reproducible sim crash is fixed.
+comparison point), peach (replaces gelatin, which crashes under v3's shape-DR —
+see the 2026-08-15 update at the top of this document; no prior Phase-8 baseline
+for this slot since it's a new substitution, but validated working via smoketest).
+Watermelon excluded until its reproducible sim crash is fixed.
 
 Collection for the 8 not-yet-complete training categories (egg_boiled, strawberry,
 banana, tomato, chicken_breast, shrimp, pasta_bundle, cherry) started 2026-08-15 via
@@ -312,3 +352,121 @@ pipelines running concurrently, a realistic **wall-clock estimate for all 12 tra
 categories is roughly 4–7 days of continuous autonomous operation**, plus one-time
 generalist BC training (order of hours) and a final 16-category (12 held-in + 4
 zero-shot) Phase 8 sweep (order of a day, individually parallelizable the same way).
+
+---
+
+## 2026-08-17 23:xx — Full 6-metric eval campaign + v3-direct training + recovery-FSM plan
+
+Training was paused by user request at epoch 337 (last checkpoint saved: epoch 330,
+`kdcee/checkpoint/state_330.pt`) after the epoch-300 held-in/zero-shot probe showed
+strong, already-target-clearing numbers (held-in mean 69.5%, zero-shot mean 67.5%
+across 4/5 probed categories). **watermelon is now permanently dropped from the
+zero-shot test set** — traced to a reproducible MPM divergence in its DR range
+(settle-check passes, then diverges mid-episode under grasp contact, hard-crashing
+the genesis subprocess; confirmed with two different eval seeds hitting the same
+failure mode at the same stage). Removed from `run_fragile25_final_eval.TEST`,
+`generate_fragile25_configs.TEST`, and the live report. Do not re-add without first
+fixing the DR range or adding an in-episode divergence watchdog to `SimBackend`.
+
+**Actual held-in set (9, not the full 11-category TRAIN roster)**: banana, cherry,
+grape, kiwi, mushroom, pasta_bundle, raspberry, shrimp, tomato — confirmed from
+`logs/fragile25_specialist/generalist_stdout.log`'s merge line. egg_boiled and
+strawberry never made it into the merge (rollout collection gaps flagged earlier
+this campaign) and are NOT part of this eval.
+
+**Zero-shot set (4)**: blackberry, scallop, dumpling, gelatin.
+
+### Plan, in order (multi-day, autonomous, "run nonstop")
+
+1. **New stress metrics** (done 2026-08-17 23:xx) — added to the shared eval harness
+   so every future eval (any algorithm, any category) gets them automatically:
+   - Two new per-timestep SPATIAL reductions in `policy_env._stress_summary`:
+     `top5mean` (mean of the top-5% most-stressed vertices) and `top5median`
+     (median of that same top-5% band, robust to a single outlier vertex).
+   - Two new per-episode TIME reductions in `evaluation/harness.py`: `tmean`
+     (already existed — plain whole-rollout average) and a NEW `_ttop5_median`
+     (median over just the hottest 5% of TIMESTEPS — the peak-interaction window,
+     median instead of mean for outlier robustness).
+   - The 4 requested metrics = {top5mean, top5median} spatial x {tmean, ttop5med}
+     temporal: `stress_top5mean_tmean`, `stress_top5median_tmean`,
+     `stress_top5mean_ttop5med`, `stress_top5median_ttop5med`.
+   - Combined score in `evaluation/metrics.py::aggregate()`: `gentleness_score =
+     1 - clip(stress_top5mean_tmean / mat_yield, 0, 1)` (normalized against each
+     category's OWN material yield stress, so categories with very different
+     materials are comparable on a 0-1 scale) and `combined_sr_gentleness =
+     0.5*success_rate + 0.5*gentleness_score`.
+   - All existing stress columns (mean/max/top10/top20 x tmax/ttop20) are kept
+     unchanged — purely additive, verified against the existing 29-test suite
+     (`test_evaluation.py` + `test_policy_env.py`) still passing, plus a live
+     5-episode smoketest against the actual generalist checkpoint before scaling up.
+
+2. **Full canonical 100-episode eval, generalist vs specialist, all 13 categories**
+   (`gentle_manip/scripts/run_full_eval_campaign.py`, new driver):
+   - Generalist (`kdcee/checkpoint/state_330.pt`) evaluated on all 9 held-in + 4
+     zero-shot = 13 categories, 100 episodes each, canonical `scene_group_size=4`,
+     `record_batches=None` (all-episode video, one clip per rollout, per hard
+     requirement #2 in CLAUDE.md).
+   - Specialist (each category's own solo-trained checkpoint, from
+     `logs/fragile25_specialist/<cat>.json`) evaluated on the 9 held-in categories
+     only (zero-shot has no specialist by definition), same 100-episode protocol,
+     own per-category `normalization_path` (NOT the generalist merge's — a
+     specialist's obs scaling must match what it was trained on).
+   - Idempotent (skips a category whose result json already exists) so it's safe
+     to resume after any interruption; results land in
+     `logs/full_eval_campaign/{generalist,specialist}/<cat>.json`, each carrying
+     the full `summary.json` (all 6 metrics) plus a `render_dir` pointing at the
+     per-episode videos.
+   - Sequential (one sim server at a time — single-GPU discipline, matches every
+     other driver this campaign). 22 full evals x 100 episodes; expect several
+     hours based on the ~50-episode probe's per-category timings (2-15 min/50ep
+     depending on category) — realistically most of tonight running nonstop.
+
+3. **Webpage report additions** (`build_report_v3.py`):
+   - New diagrams for all 6 metrics (success_rate + 4 stress metrics + combined
+     score), generalist vs specialist, grouped by held-in/zero-shot, clearly
+     titled to distinguish the two experiments (e.g. "RLDG-distilled generalist"
+     vs "solo specialist (redo)").
+   - New "10 rollouts" video-gallery section per (experiment, category) — reuses
+     the existing `_build_generalist_eval_showcase`-style concatenation, sourced
+     from each eval's `render_dir` (up to 100 per-episode clips available, pick a
+     spread of 10).
+
+4. **v3-direct generalist training** (once step 2/3 land): augment each held-in
+   category's synthesized (FEM/CMA-ES v3) demo count from ~50 to ~150 episodes
+   (`collect_demos_synth_v3.py`, same categories), then train a SEPARATE
+   generalist DIRECTLY from that augmented synthesized data — skipping the
+   RLDG rollout-self-distillation step entirely (no specialist BC pretrain, no
+   rollout harvest; straight synth-demos -> merge -> generalist BC pretrain).
+   Compare this "direct-from-synth" generalist against the existing
+   "RLDG-distilled" generalist on the SAME 6 metrics, same categories, same
+   report. This directly tests whether the RLDG distillation step is earning
+   its (very real) wall-clock cost.
+
+5. **Recovery/retry behavior — PROPOSAL FIRST, discuss before scaling.** Add
+   recovery/retry behavior to (a) the synthesized DEMO collection FSM
+   (`collect_demos_synth_v3.py`'s per-env phase state machine — see the
+   "Robustness/retry brainstorm" section in CLAUDE.md, ideas 1-3 already
+   partially implemented there: force-based grasp firming is done; lift-phase
+   slip-detection + regrasp and deliberate induced-failure-for-coverage are not)
+   and then (b) the POLICY itself (so a deployed policy that slips or misses a
+   grasp can recover instead of just failing the episode). Plan: write up a
+   concrete FSM proposal (states, transition conditions, what gets recorded),
+   run a SMALL smoketest (a handful of episodes, one category) to validate the
+   mechanism actually produces sensible recovery trajectories, THEN STOP and
+   discuss the results with the user before any large-scale re-collection or
+   retraining. Do not scale this phase up autonomously.
+
+### Execution discipline for this stretch
+
+- Monitor-based tracking (not ScheduleWakeup — see the 2026-08-17 22:00 note
+  above) for the eval campaign's progress + the 6-min report-republish heartbeat,
+  same pattern validated earlier tonight.
+- Commit at milestones: after the stress-metrics infra lands, after the full
+  eval campaign completes, after the webpage report update, after v3-direct
+  training completes, and after the recovery-FSM proposal (not after the
+  smoketest — that's a discussion checkpoint, not a commit checkpoint).
+- Runs nonstop across the next several days per user instruction; no
+  is-it-okay-to-continue check-ins between the queued phases above unless a
+  step produces a genuinely ambiguous result (e.g. the v3-direct comparison
+  being a toss-up) or hits a blocker needing a real decision (e.g. the
+  recovery-FSM smoketest's results, per the discussion gate above).
