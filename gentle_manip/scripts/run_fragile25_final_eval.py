@@ -59,7 +59,7 @@ act_steps: 4
 use_ddim: False
 ddim_steps: ${{ft_denoising_steps}}
 
-n_episodes: 100
+n_episodes: {n_episodes}
 scene_group_size: 4
 record_batches: null
 n_steps: 75
@@ -130,11 +130,13 @@ model:
 '''
 
 
-def eval_one(category: str, role: str, checkpoint: str, port: int = 5570) -> dict:
+def eval_one(category: str, role: str, checkpoint: str, port: int = 5570,
+            n_episodes: int = 100) -> dict:
     cfg_dir = DPPO_CFG_DIR / MERGE_NAME / f"eval_{category}"
     cfg_dir.mkdir(parents=True, exist_ok=True)
     (cfg_dir / "eval_diffusion_pointnet.yaml").write_text(
-        EVAL_TEMPLATE.format(obj=category, role=role, merge_name=MERGE_NAME, port=port))
+        EVAL_TEMPLATE.format(obj=category, role=role, merge_name=MERGE_NAME, port=port,
+                             n_episodes=n_episodes))
 
     server_log = RESULTS_DIR / "final_eval_logs" / f"{category}_server.log"
     server_log.parent.mkdir(parents=True, exist_ok=True)

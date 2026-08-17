@@ -80,7 +80,7 @@ train:
     min_lr: 1e-5
   epoch_start_ema: 10
   update_ema_freq: 5
-  save_model_freq: 100
+  save_model_freq: 15
   val_freq: 10
 
 model:
