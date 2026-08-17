@@ -416,6 +416,7 @@ def execute_and_collect(
     record_video: bool = False,
     priv_cfg=None,                 # PrivilegedConfig or None — sim-only state-teacher fields
     dr_vec=None,                   # (2,) [scale, bend_deg] for priv_object_dr_params
+    extra_close: float = 0.0,      # squeeze this many meters TIGHTER than the synthesized width (all grasps)
 ) -> Tuple[List[List[dict]], List[List[np.ndarray]], List[List[float]], np.ndarray, List[List]]:
     """Execute the scripted grasp trajectory with DECOUPLED per-env phase control;
     record (obs, action, reward) per env.
@@ -454,7 +455,8 @@ def execute_and_collect(
     lift_b   = grasp_pos.copy(); lift_b[:, 2] += LIFT_HEIGHT
 
     width_open = np.full(num_envs, 0.08, np.float32)
-    width_cls  = np.array([p[2] - 0.0025 for p in poses], np.float32)
+    # Base close = synthesized width - 2.5mm; extra_close squeezes TIGHTER still (firmer grip, all grasps).
+    width_cls  = np.array([max(0.0, p[2] - 0.0025 - extra_close) for p in poses], np.float32)
     # Mutable — "firm" phase tightens this once per env (idea #1); "lift"/"hold"/
     # a frozen (DONE) env all read the FINAL width, which is width_cls unless firmed.
     grip_target = width_cls.copy()
@@ -802,6 +804,13 @@ def main() -> None:
                    help="home -> pre-grasp interpolation steps (the 'approach' phase length); "
                         f"default matches the module constant ({N_HOME_TO_PRE}). Recorded into "
                         "config.yaml's control.n_home_to_pre so a non-default run is clearly marked.")
+    p.add_argument("--n-grasp", type=int, default=N_GRASP,
+                   help=f"gripper-close steps (the 'grasp' phase length); default {N_GRASP}. A shorter "
+                        "close reaches the target width sooner (less dwell before the lift).")
+    p.add_argument("--grasp-extra-close", type=float, default=0.0,
+                   help="squeeze FURTHER IN than the synthesized width by this many meters (tighter grip) "
+                        "for EVERY grasp — e.g. 0.005 = close 5mm tighter. 0 (default) = no change. Use to "
+                        "make grasps firmer (a too-gentle grip -> premature lift / slip before secured).")
     args = p.parse_args()
 
     # Approach-phase length is configurable so a dataset can be collected with a shorter/longer
@@ -811,7 +820,7 @@ def main() -> None:
     PHASES = [
         ("approach", args.n_home_to_pre),
         ("settle",   N_SETTLE),
-        ("grasp",    N_GRASP),
+        ("grasp",    args.n_grasp),
         ("firm",     N_FIRM),
         ("lift",     N_LIFT),
         ("hold",     N_HOLD),
@@ -845,7 +854,8 @@ def main() -> None:
         "experiment":  args.experiment,
         "control":     {"n_envs": args.n_envs, "maxfevals": args.maxfevals,
                         "n_episodes": args.n_episodes, "scene_dr_every": args.scene_dr_every,
-                        "seed": args.seed, "n_home_to_pre": args.n_home_to_pre},
+                        "seed": args.seed, "n_home_to_pre": args.n_home_to_pre,
+                        "n_grasp": args.n_grasp, "grasp_extra_close": args.grasp_extra_close},
         "dr": exp.dr,
     }
 
@@ -1033,6 +1043,7 @@ def main() -> None:
         obs_bufs, act_bufs, rew_bufs, success, frame_bufs = execute_and_collect(
             worker, all_best_x, init_obs_batch, perception, action_config,
             record_video=rec_this_batch, priv_cfg=priv_cfg, dr_vec=dr_vec,
+            extra_close=args.grasp_extra_close,
         )
         print(f"  Success: {success.tolist()}")
 
