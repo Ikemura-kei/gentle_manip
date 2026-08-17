@@ -9,6 +9,9 @@
 # Submit (usually launched BY convert_and_pretrain.sbatch, not by hand):
 #   PRETRAIN_JID=<jid> DPPO_CFG_DIR=<dir> EXPERIMENT=<name> TARGETS="200 400 600 800" \
 #     sbatch --dependency=after:<jid> gentle_manip/scripts/arrhenius/pretrain_eval_watch.sbatch
+#   knobs (env): also NORM_CFG_DIR (defaults to DPPO_CFG_DIR) -- set it when DPPO_CFG_DIR is a
+#     cfg-only variant (e.g. a bigger-network study) training on an EXISTING dataset that lives
+#     under a different cfg dir name, so eval reads that dataset's real normalization.npz.
 #
 #SBATCH -J pretrain_watch
 #SBATCH -N 1
@@ -29,17 +32,27 @@ DPPO_CFG_DIR=${DPPO_CFG_DIR:?set DPPO_CFG_DIR=<gentle_manip/dppo/cfg/* dir name>
 EXPERIMENT=${EXPERIMENT:?set EXPERIMENT=<configs/experiments/*.yaml name>}
 TARGETS=${TARGETS:-"200 400 600 800"}
 STALL=420   # sim-log idle (s) after SIM_SERVER_READY, no summary.json => hung
+# NORM_CFG_DIR decouples "which dataset's normalization.npz" from "which cfg dir" -- defaults
+# to DPPO_CFG_DIR (unchanged behavior). Override it when a run trains on an EXISTING dataset
+# under a DIFFERENT cfg dir (e.g. a network-capacity study: same data, bigger mlp_dims/
+# visual_feature_dim in a sibling cfg dir) so eval reads the correct (already-existing)
+# normalization instead of looking for one under the new cfg dir's name.
+NORM_CFG_DIR=${NORM_CFG_DIR:-$DPPO_CFG_DIR}
 
-NORM=$REPO/dataset/dppo/$DPPO_CFG_DIR/normalization.npz
+NORM=$REPO/dataset/dppo/$NORM_CFG_DIR/normalization.npz
 CFG_ABS_DIR=$REPO/gentle_manip/dppo/cfg/$DPPO_CFG_DIR
 N_TARGETS=$(echo "$TARGETS" | wc -w)
 
 echo "[watch] host=$(hostname) job=${SLURM_JOB_ID:-NA} pretrain_jid=$PRETRAIN_JID cfg_dir=$DPPO_CFG_DIR experiment=$EXPERIMENT targets=[$TARGETS]"
 
 # ---- phase 1: find the pretrain run dir (from its OWN trainer log) -----------------------
+# NOTE: matches ANY dppo-pretrain path, not just .../${DPPO_CFG_DIR}/... -- the run's actual
+# logdir is keyed by the training env= override (DATA_ENV), which can differ from DPPO_CFG_DIR
+# (e.g. a network-capacity study: same data/env, a cfg-only sibling dir for the bigger model).
+# ${PRETRAIN_JID}_pretrain.log is already unique to this one job, so no extra filtering needed.
 RD=""
 for _ in $(seq 1 60); do
-    RD=$(grep -oE "/nobackup/[^ ]+/dppo-pretrain/${DPPO_CFG_DIR}/[^ ]+/config/" \
+    RD=$(grep -oE "/nobackup/[^ ]+/dppo-pretrain/[^ ]+/config/" \
          "$REPO/logs/slumr_logs/${PRETRAIN_JID}_pretrain.log" 2>/dev/null | head -1 | sed 's#/config/##')
     [ -n "$RD" ] && break
     st=$(squeue -j "$PRETRAIN_JID" -h -o '%T' 2>/dev/null)
