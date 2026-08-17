@@ -19,16 +19,17 @@ sys.path.insert(0, str(REPO))
 
 from gentle_manip.scripts.run_fragile25_specialist import run_one, RESULTS_DIR  # noqa: E402
 
-TRAIN = ["tofu", "mushroom", "shiitake", "fish_raw", "beef_raw", "blueberry",
-        "raspberry", "grape", "avocado", "kiwi", "sponge", "egg_boiled",
-        "strawberry", "peach", "banana", "tomato", "chicken_breast", "shrimp",
-        "cheese", "pasta_bundle"]
+TRAIN = ["mushroom", "raspberry", "grape", "kiwi", "egg_boiled", "strawberry",
+        "banana", "tomato", "shrimp", "pasta_bundle", "cherry"]
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--categories", nargs="+", default=None)
+    ap.add_argument("--port", type=int, default=5570,
+                    help="sim server port for this driver's eval/rollout stages -- give each "
+                         "concurrently-running driver instance a distinct port")
     args = ap.parse_args()
     categories = args.categories or TRAIN
 
@@ -42,7 +43,7 @@ def main() -> None:
                 continue
         print(f"\n{'='*70}\n[all_specialists] Starting {cat}\n{'='*70}", flush=True)
         try:
-            result = run_one(cat)
+            result = run_one(cat, port=args.port)
             print(f"[all_specialists] {cat}: status={result.get('status')} "
                  f"eval_success_rate={result.get('eval_success_rate')}", flush=True)
         except Exception as e:
