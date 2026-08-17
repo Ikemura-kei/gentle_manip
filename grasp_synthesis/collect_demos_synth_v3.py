@@ -798,7 +798,26 @@ def main() -> None:
                    help="record per-episode mp4 videos + grasp-pose PNGs to <out-dir>/videos/ (slower). "
                         "Bare `--record-video` = ALL episodes; `--record-video N` = only the FIRST N saved "
                         "episodes (rendering stops after N -> no extra cost/disk on a long run). Off by default.")
+    p.add_argument("--n-home-to-pre", type=int, default=N_HOME_TO_PRE,
+                   help="home -> pre-grasp interpolation steps (the 'approach' phase length); "
+                        f"default matches the module constant ({N_HOME_TO_PRE}). Recorded into "
+                        "config.yaml's control.n_home_to_pre so a non-default run is clearly marked.")
     args = p.parse_args()
+
+    # Approach-phase length is configurable so a dataset can be collected with a shorter/longer
+    # home->pre-grasp interpolation to study its effect on downstream policy learning; PHASES is
+    # module-level (execute_and_collect reads the globals directly), so rebuild it from the CLI value.
+    global PHASES, N_PHASES, _GRASP_IDX
+    PHASES = [
+        ("approach", args.n_home_to_pre),
+        ("settle",   N_SETTLE),
+        ("grasp",    N_GRASP),
+        ("firm",     N_FIRM),
+        ("lift",     N_LIFT),
+        ("hold",     N_HOLD),
+    ]
+    N_PHASES   = len(PHASES)
+    _GRASP_IDX = [name for name, _ in PHASES].index("grasp")
 
     # ── Load everything from the experiment config (same as training / eval) ──
     exp        = Experiment.load(args.experiment)
@@ -826,12 +845,15 @@ def main() -> None:
         "experiment":  args.experiment,
         "control":     {"n_envs": args.n_envs, "maxfevals": args.maxfevals,
                         "n_episodes": args.n_episodes, "scene_dr_every": args.scene_dr_every,
-                        "seed": args.seed},
+                        "seed": args.seed, "n_home_to_pre": args.n_home_to_pre},
         "dr": exp.dr,
     }
 
     print(f"\n=== collect_demos_synth  experiment={args.experiment}"
           f" — target {args.n_episodes} episodes, {args.n_envs} envs/batch")
+    if args.n_home_to_pre != N_HOME_TO_PRE:
+        print(f"  *** NON-DEFAULT n_home_to_pre={args.n_home_to_pre} "
+              f"(module default is {N_HOME_TO_PRE}) — recorded in config.yaml ***")
 
     rng = np.random.default_rng(args.seed)   # DR RNG (pose + scene) — must precede the first build
     # Separate stream (distinct offset so it never shares draws with `rng` above, keeping
