@@ -591,8 +591,10 @@ def execute_and_collect(
         phase_idx[rolled_over]  += advance[rolled_over]
         phase_step[rolled_over]  = 0
 
-    # Success check from final object position
-    obj_z   = _np(worker.handle.objects[0].get_pos())[:, 2]
+    # Success check from final object height. Rigid: get_pos; soft MPM: the particle-mean centre from
+    # the last step's state (MPMEntity has no get_pos).
+    _o = worker.handle.objects[0]
+    obj_z   = _np(_o.get_pos())[:, 2] if hasattr(_o, "get_pos") else np.asarray(state["object_center"])[:, 2]
     success = obj_z > (grasp_pos[:, 2] + LIFT_HEIGHT * 0.5)
 
     # Post-process: trim long held-command runs (absolute mode only — see
@@ -703,8 +705,10 @@ def main() -> None:
                    help="RNG seed for pose DR")
     p.add_argument("--keep-failures", action="store_true",
                    help="also save episodes where the grasp failed (default: success only)")
-    p.add_argument("--record-video", action="store_true",
-                   help="write per-episode mp4 videos to <out-dir>/videos/ (slower)")
+    p.add_argument("--record-video", nargs="?", type=int, const=10**9, default=0,
+                   help="write per-episode mp4 videos to <out-dir>/videos/ (slower). "
+                        "Bare `--record-video` = ALL episodes; `--record-video N` = only the FIRST N saved "
+                        "episodes get a clip (matches collect_demos_synth_v3.py's semantics).")
     args = p.parse_args()
 
     # ── Load everything from the experiment config (same as training / eval) ──
@@ -816,14 +820,19 @@ def main() -> None:
         home_offset  = dr_cfg.sample_home_offset(rng, n)   # per-env arm-home jitter (sim-only DR)
         worker.reset(object_dxy=object_dxy, object_euler=object_euler, home_offset=home_offset)
 
-        # Extra settling until object velocity is small
+        # Extra settling. Rigid objects roll → settle until velocity is small; soft MPM objects have no
+        # rigid get_vel/get_ang (and are placed resting, not dropped) → a brief fixed settle suffices.
+        # (Same fix as collect_demos_synth_v3.py -- MPMEntity has no get_vel/get_ang in this Genesis
+        # fork version; v2 had never hit this path before since it was last run pre-fork-upgrade.)
         obj = worker.handle.objects[0]
-        for _ in range(600):
-            worker.handle.scene.step()
-            lin = np.abs(_np(obj.get_vel())).max()
-            ang = np.abs(_np(obj.get_ang())).max()
-            if lin < 0.003 and ang < 0.01:
-                break
+        if hasattr(obj, "get_vel"):
+            for _ in range(600):
+                worker.handle.scene.step()
+                if np.abs(_np(obj.get_vel())).max() < 0.003 and np.abs(_np(obj.get_ang())).max() < 0.01:
+                    break
+        else:                                          # soft MPM
+            for _ in range(30):
+                worker.handle.scene.step()
 
         # Read initial state (depth rendered; this is obs_0 for every env)
         init_state     = worker.read_state()
@@ -838,8 +847,11 @@ def main() -> None:
                 init_state["object_center"], init_state["object_quat"], dr_vec, priv_cfg,
                 contact_force=init_state.get("contact_force")))
 
+        # Object pose (SETTLED), straight from read_state: rigid = get_quat, soft = Kabsch
+        # best-fit rotation of the settled particle cloud (worker.read_state handles both --
+        # MPMEntity itself has no get_quat, unlike the rigid case this was originally written for).
         obj_pos_all  = init_state["object_center"].astype(np.float64)  # (N, 3)
-        obj_quat_all = _np(obj.get_quat()).astype(np.float64)           # (N, 4) wxyz
+        obj_quat_all = np.asarray(init_state["object_quat"], np.float64)  # (N, 4) wxyz
 
         # ── Per-env CMA-ES grasp synthesis (parallel — one subprocess per env) ──
         payloads = []
@@ -858,10 +870,13 @@ def main() -> None:
                   f"  w={best_x[6]*1e3:.1f} mm")
 
         # ── Execute scripted trajectory + collect data ──
+        # Record video only while under the first-N cap (args.record_video = N, or 10**9 for "all");
+        # once N saved, stop RENDERING (no per-step RGB cost/disk for the rest of the run).
+        rec_this_batch = args.record_video > 0 and total_saved < args.record_video
         print(f"  Executing …")
         obs_bufs, act_bufs, rew_bufs, success, frame_bufs = execute_and_collect(
             worker, all_best_x, init_obs_batch, perception, action_config,
-            record_video=args.record_video, priv_cfg=priv_cfg, dr_vec=dr_vec,
+            record_video=rec_this_batch, priv_cfg=priv_cfg, dr_vec=dr_vec,
         )
         print(f"  Success: {success.tolist()}")
 
@@ -870,7 +885,7 @@ def main() -> None:
             # Always save failure video (if recording) before skipping demo data.
             if not success[i]:
                 total_failed += 1
-                if args.record_video and frame_bufs[i]:
+                if rec_this_batch and frame_bufs[i]:
                     vid_dir = run_dir / "videos_failed"
                     vid_dir.mkdir(exist_ok=True)
                     vid_path = vid_dir / f"fail{total_failed:04d}_b{batch_idx}_env{i}.mp4"
@@ -893,7 +908,7 @@ def main() -> None:
             print(f"    ep {total_saved}: env {i}  {'✓' if success[i] else '✗'}  "
                   f"T={episode['actions'].shape[0]}")
 
-            if args.record_video and frame_bufs[i]:
+            if frame_bufs[i] and total_saved <= args.record_video:   # first-N cap (precise)
                 vid_dir = run_dir / "videos"
                 vid_dir.mkdir(exist_ok=True)
                 vid_path = vid_dir / f"ep{total_saved:04d}_env{i}_success.mp4"

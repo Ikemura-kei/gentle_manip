@@ -1,0 +1,108 @@
+# [dppo-eval] Evaluate the ABS-action PointNet diffusion policy (BC base or finetuned) on live sim.
+# Used by: third_party/dppo/script/run.py (EvalHarnessAgent) via gentle_manip.dppo.train
+# Status: experimental (DPPO step-2 eval: point-cloud student on the abs-action FEM-gentleness policy)
+# NOTE: this _v2 dir is a data-isolation twin for the collect_demos_synth_v2.py (SDF-cost CMA-ES)
+# collection -- same experiment/schema as the sibling dir without the _v2 suffix (v3 FEM collection);
+# split ONLY so dataset/dppo/single_lift_mushroom_soft_abs_pcd_rot6d_v2/*.npz can't collide with the v3 dataset's npz.
+#
+# Soft twin of single_lift_mushroom_soft_pcd/eval_diffusion_pointnet.yaml with action_dim=10 (abs) and
+# the soft_abs paths. Routes through the SHARED canonical harness (gentle_manip.evaluation.run_eval):
+# fixed EvalSpec (n_episodes=200, num_envs=5, deterministic per-batch DR seed) -> summary.json +
+# episodes.csv + env-config snapshot + per-episode videos, into <base_policy_run>/eval/<datetime>/.
+# scene_group_size>0 rebuilds geometry every K batches, so the server MUST be --subprocess:
+#   serl_sim_server --experiment single_lift_mushroom_soft_abs_action_rot6d --view student \
+#                   --num-envs 5 --render-rgb --subprocess --port 5570
+# Run with envs/dppo.
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${logdir}
+_target_: gentle_manip.dppo.eval_agent.EvalHarnessAgent
+
+name: ${env_name}_eval_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
+logdir: ${eval_base:${base_policy_path}}/eval/${now:%Y-%m-%d}_${now:%H-%M-%S}
+base_policy_path: ???        # set on CLI: the pre_diffusion_pointnet (BC) checkpoint (state_700.pt)
+normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_mushroom_soft_abs_pcd_rot6d_v2/normalization.npz
+experiment: single_lift_mushroom_soft_abs_action_rot6d   # env (experiment) config snapshotted into eval dir
+
+seed: 42
+device: cuda:0
+env_name: single_lift_mushroom_soft_abs_pcd_rot6d_v2
+obs_dim: 10
+action_dim: 10               # abs pos3 + 6D rotation6 + gripper1
+denoising_steps: 20
+ft_denoising_steps: 0        # eval the base (BC) policy: no finetuned denoising steps
+cond_steps: 2
+pc_cond_steps: 1
+n_points: 1024
+visual_feature_dim: 256
+horizon_steps: 4
+act_steps: 4
+use_ddim: False              # full 20-step denoising for an honest BC eval
+ddim_steps: ${ft_denoising_steps}
+
+# CANONICAL eval spec (shared across algorithms) — 200 episodes / 5 sub-envs = 40 batches.
+n_episodes: 200
+scene_group_size: 4          # full DR: rebuild geometry every 4 batches (deterministic; needs --subprocess)
+record_batches: null         # null = record ALL batches, ALL envs -> one clip per episode
+n_steps: 75
+render_num: 5
+
+env:
+  n_envs: 5                  # MUST match serl_sim_server --num-envs
+  name: ${env_name}
+  env_type: genesis
+  max_episode_steps: 300
+  reset_at_iteration: False
+  save_video: True
+  use_image_obs: True
+  best_reward_threshold_for_success: 0.2
+  specific:
+    obs_steps: ${cond_steps}
+    act_steps: ${act_steps}
+    normalization_path: ${normalization_path}
+    port: 5570
+    obs_keys: [ee_pos, ee_rot6d, gripper_width]
+    pointcloud_key: point_cloud
+
+shape_meta:
+  obs:
+    state:
+      shape: [10]
+    point_cloud:
+      shape: [1024, 3]
+  action:
+    shape: [10]
+
+wandb: null
+
+model:
+  _target_: model.diffusion.diffusion_eval.DiffusionEval
+  ft_denoising_steps: ${ft_denoising_steps}
+  predict_epsilon: True
+  denoised_clip_value: 1.0
+  randn_clip_value: 3
+  use_ddim: ${use_ddim}
+  ddim_steps: ${ddim_steps}
+  network_path: ${base_policy_path}
+  network:
+    _target_: gentle_manip.dppo.pointnet_diffusion.PointNetDiffusionMLP
+    action_dim: ${action_dim}
+    horizon_steps: ${horizon_steps}
+    cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+    pc_cond_steps: ${pc_cond_steps}
+    visual_feature_dim: ${visual_feature_dim}
+    time_dim: 16
+    mlp_dims: [512, 512, 512]
+    activation_type: ReLU
+    residual_style: True
+    pointnet:
+      in_channels: 3
+      use_layernorm: True
+      final_norm: layernorm
+  horizon_steps: ${horizon_steps}
+  obs_dim: ${obs_dim}
+  action_dim: ${action_dim}
+  denoising_steps: ${denoising_steps}
+  device: ${device}

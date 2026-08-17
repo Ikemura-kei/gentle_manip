@@ -1,0 +1,60 @@
+#!/bin/bash
+# [arrhenius] Grasp-synthesis demo collection (v2, SDF-cost CMA-ES, CPU-only search -- no
+# --grasp-gpu, no FEM/v3-only diversity knobs) on the GH200 (aarch64) nodes. One process:
+# envs/sim_arrhenius running grasp_synthesis/collect_demos_synth_v2.py.
+# See docs/cluster_data_collection.md for the v2-vs-v3 comparison.
+#
+# Submit:  EXPERIMENT=<name> sbatch gentle_manip/scripts/arrhenius/collect_demos_synth_v2.sbatch
+#   knobs (env):  EXPERIMENT (required), N_EPISODES, N_ENVS, TASK_NAME (output-folder override),
+#                 RECORD_VIDEO, MAXFEVALS, SCENE_DR_EVERY, SEED, OUT_DIR
+#
+#SBATCH -J grasp_synth_v2
+#SBATCH -N 1
+#SBATCH -t 17:00:00
+#SBATCH -A naiss2026-3-141-gpu
+#SBATCH -p gpu
+#SBATCH --gres=gpu:1
+#SBATCH --output=/nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip/logs/slumr_logs/%j.out
+#SBATCH --error=/nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip/logs/slumr_logs/%j.err
+
+set -euo pipefail
+export PATH="$HOME/.local/bin:$PATH"
+REPO=/nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip
+cd "$REPO"
+
+# ---- knobs -------------------------------------------------------------------------
+EXPERIMENT=${EXPERIMENT:?set EXPERIMENT=<configs/experiments/*.yaml name>}
+N_EPISODES=${N_EPISODES:-650}
+N_ENVS=${N_ENVS:-8}
+RECORD_VIDEO=${RECORD_VIDEO:-50}
+MAXFEVALS=${MAXFEVALS:-}          # empty -> let the collector's own default (1145) apply
+SCENE_DR_EVERY=${SCENE_DR_EVERY:-}  # empty -> let the collector's own default (1) apply
+SEED=${SEED:-0}
+OUT_DIR=${OUT_DIR:-$REPO/dataset/demos}
+# TASK_NAME overrides only the OUTPUT FOLDER name (docs/cluster_data_collection.md) -- use it to
+# keep the canonical single_lift_mushroom_soft/ folder for a camera-study fork experiment whose
+# own task cfg has a variant name (e.g. single_lift_mushroom_soft_highcam).
+TASK_NAME=${TASK_NAME:-}
+
+echo "[sbatch] host=$(hostname) arch=$(uname -m) job=${SLURM_JOB_ID:-NA}"
+echo "[sbatch] experiment=$EXPERIMENT n_episodes=$N_EPISODES n_envs=$N_ENVS record_video=$RECORD_VIDEO task_name=${TASK_NAME:-<default>}"
+
+# NOTE: no --grasp-gpu here -- v2 has no GPU FEM grasp search (CPU-only CMA-ES over the SDF cost).
+ARGS=(--experiment "$EXPERIMENT" --n-episodes "$N_EPISODES" --n-envs "$N_ENVS"
+      --record-video "$RECORD_VIDEO" --seed "$SEED" --out-dir "$OUT_DIR")
+[ -n "$MAXFEVALS" ] && ARGS+=(--maxfevals "$MAXFEVALS")
+[ -n "$SCENE_DR_EVERY" ] && ARGS+=(--scene-dr-every "$SCENE_DR_EVERY")
+[ -n "$TASK_NAME" ] && ARGS+=(--task-name "$TASK_NAME")
+
+unset PYTHONPATH ROS_DISTRO 2>/dev/null || true
+export MUJOCO_GL=egl
+
+COLLECT_LOG=$REPO/logs/slumr_logs/${SLURM_JOB_ID:-local}_collect.log
+: > "$COLLECT_LOG"
+
+echo "[sbatch] launching: python grasp_synthesis/collect_demos_synth_v2.py ${ARGS[*]}"
+uv run --project envs/sim_arrhenius --no-sync python grasp_synthesis/collect_demos_synth_v2.py \
+    "${ARGS[@]}" 2>&1 | tee "$COLLECT_LOG"
+RC=${PIPESTATUS[0]}
+echo "[sbatch] collection finished (job ${SLURM_JOB_ID:-NA}) rc=$RC"
+exit $RC
