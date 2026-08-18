@@ -384,14 +384,23 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
             _wait_for_start(keys)                                   # hold until 'k'
             while steps < max_steps:
                 chunk = policy.predict()                            # (n_action_steps, act_dim)
-                if steps < 2 and action_mode == "absolute":
-                    chunk[:, 9] = 1.0 # Force the first two steps to open gripper fully, so the robot doesn't start with a grasped cube (which would be a
                 if pose_scale != 1.0 and action_mode == "delta":
                     chunk = chunk.copy()
                     chunk[:, :6] *= pose_scale                      # slow pose; keep gripper full-range
                 reset_now = False
                 for action in chunk:
-                    action = _cap_pos(_smooth(action))                         # smooth+cap only after the first 20 steps (warmup)
+                    if steps < 2:
+                        # First two EXECUTED steps of every (re-)start are forced to a NULL action so
+                        # the arm holds still while perception/filters warm up before the policy drives
+                        # it. absolute -> command the robot's CURRENT pose (no motion), gripper held
+                        # OPEN so we never begin already grasping; delta -> all-zeros (no pose delta,
+                        # no gripper change). Keyed on `steps`, so it re-applies after each SPACE re-home.
+                        if action_mode == "absolute":
+                            action = np.concatenate(
+                                [_current_raw_pose(obs), np.array([1.0], np.float32)]).astype(np.float32)
+                        else:
+                            action = np.zeros_like(action)
+                    action = _cap_pos(_smooth(action))
                     key = keys.poll()
                     if key in (" ", "r"):
                         print("  manual reset — re-homing")
