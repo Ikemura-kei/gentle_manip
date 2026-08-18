@@ -807,6 +807,12 @@ def main() -> None:
     p.add_argument("--n-grasp", type=int, default=N_GRASP,
                    help=f"gripper-close steps (the 'grasp' phase length); default {N_GRASP}. A shorter "
                         "close reaches the target width sooner (less dwell before the lift).")
+    p.add_argument("--n-lift", type=int, default=N_LIFT,
+                   help=f"lift-phase steps; default {N_LIFT}.")
+    p.add_argument("--n-firm", type=int, default=N_FIRM,
+                   help=f"'firm' phase steps (post-grasp extra squeeze idea #1); default {N_FIRM}. "
+                        "0 = NO firm phase at all — the grasp goes straight to lift at width_cls "
+                        "(matches the pre-firm v1 collector, e.g. the cho dataset).")
     p.add_argument("--grasp-extra-close", type=float, default=0.0,
                    help="squeeze FURTHER IN than the synthesized width by this many meters (tighter grip) "
                         "for EVERY grasp — e.g. 0.005 = close 5mm tighter. 0 (default) = no change. Use to "
@@ -821,8 +827,11 @@ def main() -> None:
         ("approach", args.n_home_to_pre),
         ("settle",   N_SETTLE),
         ("grasp",    args.n_grasp),
-        ("firm",     N_FIRM),
-        ("lift",     N_LIFT),
+    ]
+    if args.n_firm > 0:                    # --n-firm 0 drops the firm phase entirely (cho/v1 behaviour)
+        PHASES.append(("firm", args.n_firm))
+    PHASES += [
+        ("lift",     args.n_lift),
         ("hold",     N_HOLD),
     ]
     N_PHASES   = len(PHASES)
@@ -855,7 +864,8 @@ def main() -> None:
         "control":     {"n_envs": args.n_envs, "maxfevals": args.maxfevals,
                         "n_episodes": args.n_episodes, "scene_dr_every": args.scene_dr_every,
                         "seed": args.seed, "n_home_to_pre": args.n_home_to_pre,
-                        "n_grasp": args.n_grasp, "grasp_extra_close": args.grasp_extra_close},
+                        "n_grasp": args.n_grasp, "n_lift": args.n_lift, "n_firm": args.n_firm,
+                        "grasp_extra_close": args.grasp_extra_close},
         "dr": exp.dr,
     }
 
