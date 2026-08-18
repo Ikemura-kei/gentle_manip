@@ -397,17 +397,21 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
                     chunk[:, :6] *= pose_scale                      # slow pose; keep gripper full-range
                 reset_now = False
                 for action in chunk:
-                    if steps < 2:
-                        # First two EXECUTED steps of every (re-)start are forced to a NULL action so
-                        # the arm holds still while perception/filters warm up before the policy drives
-                        # it. absolute -> command the robot's CURRENT pose (no motion), gripper held
-                        # OPEN so we never begin already grasping; delta -> all-zeros (no pose delta,
-                        # no gripper change). Keyed on `steps`, so it re-applies after each SPACE re-home.
-                        if action_mode == "absolute":
-                            action = np.concatenate(
-                                [_current_raw_pose(obs), np.array([1.0], np.float32)]).astype(np.float32)
-                        else:
-                            action = np.zeros_like(action)
+                    # Warm-up overrides at every (re-)start, keyed on `steps` so they re-apply after
+                    # each SPACE re-home:
+                    #   - first 4 steps: force the gripper WIDE OPEN (last action dim = +1 -> open in
+                    #     BOTH absolute and delta) so we never begin already grasping;
+                    #   - first 2 steps: additionally HOLD POSE NULL so the arm stays still while
+                    #     perception / the EMA filter warm up (absolute -> the robot's CURRENT pose;
+                    #     delta -> zero pose delta). The gripper is handled by the 4-step rule above.
+                    if steps < 4:
+                        action = action.copy()
+                        action[-1] = 1.0                            # gripper wide open (last dim; +1 = open)
+                        if steps < 2:
+                            if action_mode == "absolute":
+                                action[:9] = _current_raw_pose(obs)  # pos(3) + rot6d(6); no motion
+                            else:
+                                action[:6] = 0.0                     # zero pose delta
                     action = _cap_pos(_smooth(action))
                     key = keys.poll()
                     if key in (" ", "r"):
