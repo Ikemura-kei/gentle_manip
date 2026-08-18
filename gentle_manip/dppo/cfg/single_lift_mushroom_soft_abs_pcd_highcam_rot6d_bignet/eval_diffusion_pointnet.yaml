@@ -1,18 +1,19 @@
 # [dppo-eval] Evaluate the ABS-action PointNet diffusion policy (BC base or finetuned) on live sim.
 # Used by: third_party/dppo/script/run.py (EvalHarnessAgent) via gentle_manip.dppo.train
 # Status: experimental (DPPO step-2 eval: point-cloud student on the abs-action FEM-gentleness policy)
-# NOTE: this _bignet dir is a network-capacity study twin of the sibling dir without the
-# _bignet suffix -- SAME data/experiment (single_lift_mushroom_soft_abs_action_rot6d, same
-# btd v3 collection zbqal trained on), only visual_feature_dim 256->512 and mlp_dims
-# [512,512,512]->[1024,1024,1024] differ. Uses the ORIGINAL dataset's npz directly (no
-# reconversion) -- see the launch command for the env=/NORM_CFG_DIR overrides that route to it.
+# NOTE: this _bignet dir is a FRESH dataset (same setup as dataset/demos/single_lift_mushroom_soft/
+# 26-08-17-hwo: n_home_to_pre=77, n_grasp=30, grasp_extra_close=0.005, regular MPM sampler, 650ep
+# target -- but highcam_rot6d instead of plain rot6d) with the bignet (3.5x original, 2,919,512
+# param) architecture applied -- visual_feature_dim=512, mlp_dims=[1024,1024,1024]. Copied from
+# single_lift_mushroom_soft_abs_pcd_highcam_rot6d (NOT the rot6d/_bignet dir -- experiment/task/
+# camera differ). Has its OWN npz.
 #
 # Soft twin of single_lift_mushroom_soft_pcd/eval_diffusion_pointnet.yaml with action_dim=10 (abs) and
 # the soft_abs paths. Routes through the SHARED canonical harness (gentle_manip.evaluation.run_eval):
 # fixed EvalSpec (n_episodes=200, num_envs=5, deterministic per-batch DR seed) -> summary.json +
 # episodes.csv + env-config snapshot + per-episode videos, into <base_policy_run>/eval/<datetime>/.
 # scene_group_size>0 rebuilds geometry every K batches, so the server MUST be --subprocess:
-#   serl_sim_server --experiment single_lift_mushroom_soft_abs_action_rot6d --view student \
+#   serl_sim_server --experiment single_lift_mushroom_soft_abs_action_highcam_rot6d --view student \
 #                   --num-envs 5 --render-rgb --subprocess --port 5570
 # Run with envs/dppo.
 defaults:
@@ -25,12 +26,12 @@ _target_: gentle_manip.dppo.eval_agent.EvalHarnessAgent
 name: ${env_name}_eval_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
 logdir: ${eval_base:${base_policy_path}}/eval/${now:%Y-%m-%d}_${now:%H-%M-%S}
 base_policy_path: ???        # set on CLI: the pre_diffusion_pointnet (BC) checkpoint (state_700.pt)
-normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_mushroom_soft_abs_pcd_rot6d_bignet/normalization.npz
-experiment: single_lift_mushroom_soft_abs_action_rot6d   # env (experiment) config snapshotted into eval dir
+normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_mushroom_soft_abs_pcd_highcam_rot6d_bignet/normalization.npz
+experiment: single_lift_mushroom_soft_abs_action_highcam_rot6d   # env (experiment) config snapshotted into eval dir
 
 seed: 42
 device: cuda:0
-env_name: single_lift_mushroom_soft_abs_pcd_rot6d_bignet
+env_name: single_lift_mushroom_soft_abs_pcd_highcam_rot6d_bignet
 obs_dim: 10
 action_dim: 10               # abs pos3 + 6D rotation6 + gripper1
 denoising_steps: 20
@@ -67,10 +68,6 @@ env:
     port: 5570
     obs_keys: [ee_pos, ee_rot6d, gripper_width]
     pointcloud_key: point_cloud
-    # EMA low-pass on the commanded pos+rot6d (jerk suppression), same mechanism as
-    # deploy_real.py's run_deploy_loop --smooth-alpha. null (default) = off; override e.g.
-    # env.specific.smooth_alpha=0.9 at launch. See GenesisMultiStepVecEnv._smooth.
-    smooth_alpha: null
 
 shape_meta:
   obs:

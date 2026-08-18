@@ -110,6 +110,26 @@ grep -q "SIM_SERVER_READY" "$SRV_LOG" || { echo "[sbatch] server not ready — t
 N_EPISODES=${N_EPISODES:-}
 NEP_OVR=(); [ -n "$N_EPISODES" ] && NEP_OVR=(n_episodes="$N_EPISODES")
 EVAL_EXP_OVR=(); [ -n "$EVAL_EXPERIMENT" ] && EVAL_EXP_OVR=(experiment="$EVAL_EXPERIMENT")
+# SCENE_GROUP_SIZE: override how often (every K batches) the harness rebuilds object geometry
+# (size/shape/material) -- default per the chosen CFG_NAME (canonical = 4, i.e. every 20
+# episodes at num_envs=5). Unset = use the config's own value; only override for a deliberate
+# DR-density diagnostic (denser rebuild = harder/more varied geometry per episode budget).
+SCENE_GROUP_SIZE=${SCENE_GROUP_SIZE:-}
+SGS_OVR=(); [ -n "$SCENE_GROUP_SIZE" ] && SGS_OVR=(scene_group_size="$SCENE_GROUP_SIZE")
+# SMOOTH_ALPHA: EMA low-pass on the commanded pos+rot6d (jerk suppression), same mechanism as
+# deploy_real.py's --smooth-alpha (GenesisMultiStepVecEnv._smooth). Unset (default) = off; the
+# target eval config must declare env.specific.smooth_alpha (currently: the *_bignet/*_bignet2
+# cfg dirs) for a plain override to apply -- otherwise use SMOOTH_ALPHA_NEW=1 to add the key.
+SMOOTH_ALPHA=${SMOOTH_ALPHA:-}
+SMOOTH_ALPHA_NEW=${SMOOTH_ALPHA_NEW:-0}
+SMOOTH_OVR=()
+if [ -n "$SMOOTH_ALPHA" ]; then
+    if [ "$SMOOTH_ALPHA_NEW" = "1" ]; then
+        SMOOTH_OVR=(+env.specific.smooth_alpha="$SMOOTH_ALPHA")
+    else
+        SMOOTH_OVR=(env.specific.smooth_alpha="$SMOOTH_ALPHA")
+    fi
+fi
 # Unique output subdir (optional). By default the eval writes to <run>/eval/<datetime> where the
 # datetime has 1-SECOND resolution and is stamped when the eval PROCESS starts — so evaluating
 # several checkpoints of the SAME run in parallel makes them collide on that dir and clobber each
@@ -122,12 +142,12 @@ if [ -n "${EVAL_SUBDIR:-}" ]; then
     LOGDIR_OVR=(logdir="$RUN_DIR/eval/$EVAL_SUBDIR")
     echo "[sbatch] unique eval logdir -> $RUN_DIR/eval/$EVAL_SUBDIR (EVAL_SUBDIR set)"
 fi
-echo "[sbatch] running eval of $CKPT (cfg=$CFG_NAME, n_episodes=${N_EPISODES:-<from cfg>}, ft_denoising=$FT_DENOISING, ${EVAL_EXP_OVR[*]:-exp=cfg-default})"
+echo "[sbatch] running eval of $CKPT (cfg=$CFG_NAME, n_episodes=${N_EPISODES:-<from cfg>}, ft_denoising=$FT_DENOISING, smooth_alpha=${SMOOTH_ALPHA:-off}, scene_group_size=${SCENE_GROUP_SIZE:-<from cfg>}, ${EVAL_EXP_OVR[*]:-exp=cfg-default})"
 uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.train \
     --config-path "$CFG_DIR" --config-name "$CFG_NAME" \
     base_policy_path="$CKPT" normalization_path="$NORM" \
     ft_denoising_steps="$FT_DENOISING" record_batches=null "${NEP_OVR[@]}" \
     env.specific.port="$PORT" \
-    "${EVAL_EXP_OVR[@]}" "${LOGDIR_OVR[@]}"
+    "${EVAL_EXP_OVR[@]}" "${LOGDIR_OVR[@]}" "${SMOOTH_OVR[@]}" "${SGS_OVR[@]}"
 
 echo "[sbatch] eval finished OK"

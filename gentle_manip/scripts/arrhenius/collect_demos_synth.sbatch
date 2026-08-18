@@ -5,7 +5,8 @@
 #
 # Submit:  EXPERIMENT=<name> sbatch gentle_manip/scripts/arrhenius/collect_demos_synth.sbatch
 #   knobs (env):  EXPERIMENT (required), N_EPISODES, N_ENVS, TASK_NAME (output-folder override),
-#                 RECORD_VIDEO, MAXFEVALS, SCENE_DR_EVERY, SEED, N_HOME_TO_PRE, OUT_DIR
+#                 RECORD_VIDEO, MAXFEVALS, SCENE_DR_EVERY, SEED, N_HOME_TO_PRE, N_GRASP,
+#                 GRASP_EXTRA_CLOSE, OUT_DIR
 #
 #SBATCH -J grasp_synth
 #SBATCH -N 1
@@ -32,6 +33,11 @@ SEED=${SEED:-0}
 N_HOME_TO_PRE=${N_HOME_TO_PRE:-}  # empty -> let the collector's own default (98) apply; overrides the
                                   # home->pre-grasp approach-phase length (--n-home-to-pre), recorded
                                   # into the run's config.yaml (control.n_home_to_pre) when set
+N_GRASP=${N_GRASP:-}             # empty -> let the collector's own default (37) apply; overrides the
+                                  # gripper-close phase length (--n-grasp)
+GRASP_EXTRA_CLOSE=${GRASP_EXTRA_CLOSE:-}  # empty -> let the collector's own default (0.0, no change)
+                                  # apply; squeeze this many meters tighter than the synthesized
+                                  # width for every grasp (--grasp-extra-close)
 DESCRIPTION=${DESCRIPTION:-}     # free-text note recorded into the run's config.yaml (description)
 OUT_DIR=${OUT_DIR:-$REPO/dataset/demos}
 # TASK_NAME overrides only the OUTPUT FOLDER name (docs/cluster_data_collection.md) -- use it to
@@ -40,7 +46,7 @@ OUT_DIR=${OUT_DIR:-$REPO/dataset/demos}
 TASK_NAME=${TASK_NAME:-}
 
 echo "[sbatch] host=$(hostname) arch=$(uname -m) job=${SLURM_JOB_ID:-NA}"
-echo "[sbatch] experiment=$EXPERIMENT n_episodes=$N_EPISODES n_envs=$N_ENVS record_video=$RECORD_VIDEO task_name=${TASK_NAME:-<default>} n_home_to_pre=${N_HOME_TO_PRE:-<default>}"
+echo "[sbatch] experiment=$EXPERIMENT n_episodes=$N_EPISODES n_envs=$N_ENVS record_video=$RECORD_VIDEO task_name=${TASK_NAME:-<default>} n_home_to_pre=${N_HOME_TO_PRE:-<default>} n_grasp=${N_GRASP:-<default>} grasp_extra_close=${GRASP_EXTRA_CLOSE:-<default>}"
 
 ARGS=(--experiment "$EXPERIMENT" --n-episodes "$N_EPISODES" --n-envs "$N_ENVS" --grasp-gpu
       --record-video "$RECORD_VIDEO" --seed "$SEED" --out-dir "$OUT_DIR")
@@ -48,6 +54,8 @@ ARGS=(--experiment "$EXPERIMENT" --n-episodes "$N_EPISODES" --n-envs "$N_ENVS" -
 [ -n "$SCENE_DR_EVERY" ] && ARGS+=(--scene-dr-every "$SCENE_DR_EVERY")
 [ -n "$TASK_NAME" ] && ARGS+=(--task-name "$TASK_NAME")
 [ -n "$N_HOME_TO_PRE" ] && ARGS+=(--n-home-to-pre "$N_HOME_TO_PRE")
+[ -n "$N_GRASP" ] && ARGS+=(--n-grasp "$N_GRASP")
+[ -n "$GRASP_EXTRA_CLOSE" ] && ARGS+=(--grasp-extra-close "$GRASP_EXTRA_CLOSE")
 [ -n "$DESCRIPTION" ] && ARGS+=(--description "$DESCRIPTION")
 
 unset PYTHONPATH ROS_DISTRO 2>/dev/null || true

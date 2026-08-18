@@ -21,9 +21,15 @@ import numpy as np
 
 
 class GenesisMultiStepVecEnv:
+    # Smoothed dims when smooth_alpha is set: pos(3)+rot6d(6) of the ABSOLUTE action layout,
+    # matching deploy_real.py's run_deploy_loop._SMOOTH_DIMS exactly. Gripper (dim 9) is always
+    # passed through raw so grasp/release stays decisive. Only meaningful for action_dim>=10
+    # (absolute mode); a delta-mode (7-dim) action has no such layout and is never smoothed.
+    _SMOOTH_DIMS = slice(0, 9)
+
     def __init__(self, client, obs_keys, n_envs: int, n_obs_steps: int, n_action_steps: int,
                  max_episode_steps: int, obs_min, obs_max, action_min, action_max,
-                 pointcloud_key: Optional[str] = None):
+                 pointcloud_key: Optional[str] = None, smooth_alpha: Optional[float] = None):
         self.client = client                       # SimEnvClient (batched N-env rpc)
         self.obs_keys = list(obs_keys)             # proprio/state keys -> normalized "state"
         self.pointcloud_key = pointcloud_key       # e.g. "point_cloud" -> raw xyz modality
@@ -41,6 +47,12 @@ class GenesisMultiStepVecEnv:
         self._act_range = (self.action_max - self.action_min) + 1e-6
         self._hist: Optional[deque] = None         # deque of per-step modality dicts
         self._cnt = np.zeros(self.n_envs, np.int64)
+        # EMA low-pass on the raw (normalized) action, one lag state per env, persisted across
+        # chunk re-plans and reset only at episode reset (see run_deploy_loop's smooth_alpha
+        # docstring for the exact formula/rationale — same mechanism, vectorized over n_envs).
+        # None (default) = off, action passed straight through unchanged.
+        self.smooth_alpha = float(smooth_alpha) if smooth_alpha is not None else None
+        self._prev_smoothed: Optional[np.ndarray] = None   # (n_envs, 9) or None
         from gentle_manip.evaluation.video import MultiClipRecorder
         self._rec = MultiClipRecorder()            # per-env clips (per-trajectory eval video)
 
@@ -54,6 +66,27 @@ class GenesisMultiStepVecEnv:
 
     def _unnorm_action(self, a: np.ndarray) -> np.ndarray:        # [-1,1] -> physical
         return ((a + 1.0) / 2.0 * self._act_range + self.action_min).astype(np.float32)
+
+    def _smooth(self, a: np.ndarray) -> np.ndarray:
+        """EMA low-pass on one sub-step's raw (normalized) action, vectorized over n_envs --
+        same formula as deploy_real.py's run_deploy_loop._smooth: smoothed = alpha*raw +
+        (1-alpha)*prev_smoothed, dims 0:9 (pos3+rot6d6) only, gripper (dim 9+) passed through
+        raw. No-op when smooth_alpha is None or the action has no absolute-mode layout
+        (act_dim < 10, e.g. delta mode). First sub-step after a reset seeds prev_smoothed from
+        that action itself (no artificial jump to smooth away in sim, unlike real hardware
+        homing) rather than an external "current pose" query.
+        """
+        if self.smooth_alpha is None or a.shape[-1] < 10:
+            return a
+        a = a.copy()
+        dims = a[:, self._SMOOTH_DIMS]
+        if self._prev_smoothed is None:
+            self._prev_smoothed = dims.copy()
+        else:
+            self._prev_smoothed = (self.smooth_alpha * dims
+                                    + (1.0 - self.smooth_alpha) * self._prev_smoothed)
+        a[:, self._SMOOTH_DIMS] = self._prev_smoothed
+        return a
 
     def _modalities(self, obs: dict) -> dict:       # sim obs -> {"state": norm, ["point_cloud": raw]}
         m = {"state": self._norm_obs(self._raw_state(obs))}
@@ -72,6 +105,7 @@ class GenesisMultiStepVecEnv:
         m = self._modalities(self.client.reset())
         self._hist = deque([m], maxlen=self.n_obs_steps + 1)
         self._cnt[:] = 0
+        self._prev_smoothed = None    # re-seeded from the first post-reset action (see step())
         return self._stacked()
 
     # ── DPPO VectorEnv API ─────────────────────────────────────────────────────
@@ -124,7 +158,7 @@ class GenesisMultiStepVecEnv:
         s_max, s_sum, s_cnt = None, None, 0         # von-Mises over the chunk (soft body)
         s_t10, s_t20 = None, None                   # top-10%/20% particle tail (chunk-max)
         for t in range(a.shape[1]):                 # execute the action chunk, sum reward
-            obs, r, _done, sub_info = self.client.step(self._unnorm_action(a[:, t]))
+            obs, r, _done, sub_info = self.client.step(self._unnorm_action(self._smooth(a[:, t])))
             reward += np.asarray(r, np.float32).reshape(self.n_envs)
             success = np.array([bool(d.get("success", False)) for d in sub_info])
             if sub_info and "obj_z" in sub_info[0]:
@@ -176,7 +210,7 @@ class GenesisMultiStepVecEnv:
 
 def build_genesis_venv(num_envs, obs_steps, act_steps, max_episode_steps, normalization_path,
                        obs_keys=None, pointcloud_key=None, host="127.0.0.1", port=5570,
-                       connect_timeout=240.0):
+                       connect_timeout=240.0, smooth_alpha=None):
     """Factory used by DPPO's make_async (env_type="genesis"): connect a SimEnvClient to a
     running sim server, load demo normalization, and wrap it as a DPPO VectorEnv.
 
@@ -184,6 +218,11 @@ def build_genesis_venv(num_envs, obs_steps, act_steps, max_episode_steps, normal
     + view whose obs order matches obs_keys / the demo converter. normalization_path is the
     demo converter's normalization.npz (obs_min/obs_max/action_min/action_max). Set
     pointcloud_key="point_cloud" for the DP3/PointNet student view (adds a raw-xyz modality).
+
+    smooth_alpha (absolute-mode action only, None = off): EMA low-pass on the commanded
+    pos+rot6d, same mechanism/formula as deploy_real.py's run_deploy_loop smooth_alpha --
+    see GenesisMultiStepVecEnv._smooth. Wired from the eval config's env.specific.smooth_alpha
+    (hydra), so it's set the same way as e.g. port/obs_keys.
     """
     from gentle_manip.envs.rpc import SimEnvClient
     from gentle_manip.dppo.convert_demos import STATE_VIEW, PROPRIO_VIEW
@@ -194,6 +233,6 @@ def build_genesis_venv(num_envs, obs_steps, act_steps, max_episode_steps, normal
     return GenesisMultiStepVecEnv(
         client, obs_keys=list(obs_keys) if obs_keys else default_keys, n_envs=num_envs,
         n_obs_steps=obs_steps, n_action_steps=act_steps, max_episode_steps=max_episode_steps,
-        obs_min=stats["obs_min"], obs_max=stats["obs_max"],
+        obs_min=stats["obs_min"], obs_max=stats["obs_max"], smooth_alpha=smooth_alpha,
         action_min=stats["action_min"], action_max=stats["action_max"],
         pointcloud_key=pointcloud_key)

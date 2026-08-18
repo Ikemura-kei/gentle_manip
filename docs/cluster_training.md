@@ -145,6 +145,26 @@ time_emb_params = 1072                       # fixed (time_dim=16)
 total = head_params + encoder_params + time_emb_params
 ```
 
+## Jerk-suppression smoothing in sim eval (matching `deploy_real.py`)
+
+`deploy_real.py`'s `run_deploy_loop` has a `--smooth-alpha` EMA low-pass filter on the commanded
+absolute pose (`smoothed = alpha*raw + (1-alpha)*prev_smoothed`, applied per physical step,
+persisted across chunk re-plans, pos(3)+rot6d(6) only — gripper always passed through raw so
+grasp/release stays decisive). The same mechanism is now available in the **sim eval harness**
+(`GenesisMultiStepVecEnv._smooth`, `gentle_manip/dppo/genesis_venv.py`), wired through
+`env.specific.smooth_alpha` in the eval config (default `null` = off, absolute-mode actions
+only — a no-op for delta-mode/act_dim<10).
+
+- Declared (opt-in, default `null`) in the `*_bignet`/`*_bignet2` eval configs so far; add the
+  same `env.specific.smooth_alpha: null` block to any other eval config you want it available
+  in, or pass `SMOOTH_ALPHA_NEW=1` to `dppo_eval.sbatch` to add it ad-hoc via Hydra's `+` syntax
+  without editing the YAML.
+- `dppo_eval.sbatch` knob: `SMOOTH_ALPHA=0.9` (whatever value); leave unset for the normal,
+  unsmoothed eval.
+- **Always give a smoothed eval its own `EVAL_SUBDIR`** (e.g. `state_200_eval_smooth09`) — it
+  is a different protocol from the canonical unsmoothed eval of the same checkpoint, and
+  reusing the default subdir name overwrites the original harness result for that checkpoint.
+
 ## More-data studies (combine an existing dataset with a fresh collection)
 
 `gentle_manip/scripts/merge_demo_datasets.py` merges N demo run dirs into a **new** combined

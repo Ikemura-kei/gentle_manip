@@ -68,6 +68,10 @@ env:
     port: 5570
     obs_keys: [ee_pos, ee_rot6d, gripper_width]
     pointcloud_key: point_cloud
+    # EMA low-pass on the commanded pos+rot6d (jerk suppression), same mechanism as
+    # deploy_real.py's run_deploy_loop --smooth-alpha. null (default) = off; override e.g.
+    # env.specific.smooth_alpha=0.9 at launch. See GenesisMultiStepVecEnv._smooth.
+    smooth_alpha: null
 
 shape_meta:
   obs:
