@@ -1,0 +1,25 @@
+# [obs] SUPERSET obs for RIGID objects — 6D-rotation proprioception variant of superset_rigid.yaml.
+# Used by: experiments (obs:) rigid rot6d collection/eval; subviewed into teacher/student
+# Status: active
+#
+# IDENTICAL to superset_rigid.yaml EXCEPT the EE orientation is emitted as a continuous 6D rotation
+# (ee_rot6d, 6) instead of the wxyz quaternion (ee_quat, 4). Derived in the shared PerceptionPipeline
+# from the same quat (sign-invariant). Proprio dim = ee_pos(3) + ee_rot6d(6) + gripper(1) = 10.
+include_joint_pos: false
+include_joint_vel: false
+quat_noise_std: 0.003
+ee_rot6d: true                # EE orientation -> 6D rotation instead of quaternion
+
+privileged:
+  object_pos: true
+  object_vel: true
+  stress: false          # rigid -> no von Mises
+
+point_cloud:
+  cameras: ["cam_ext"]
+  crop_min: [0.2, -0.215, 0.004]
+  crop_max: [0.71,   0.215,  0.45]
+  max_points: 1024
+  outlier_removal:
+    voxel_size: 0.01
+    min_neighbors: 23

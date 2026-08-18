@@ -1,0 +1,24 @@
+# [experiment] RIGID mushroom lift, abs action — 6D-rotation proprioception variant.
+# Used by: dppo eval (single_lift_mushroom_rigid_abs_pcd_rot6d) / serl_sim_server --experiment
+# Status: active (experiment (3): does rot6d proprio help sim2real on the cho backbone?)
+#
+# IDENTICAL to single_lift_mushroom_rigid_abs_action EXCEPT obs -> superset_rigid_rot6d, which emits
+# the EE orientation as a 6D rotation (ee_rot6d, 6) instead of the quaternion. Proprio dim = 10.
+# DR is rigid_orientation (matches the cho data collection: no flip, no material). Used to EVAL a
+# rot6d policy trained on the rot6d-augmented cho demos (obs geometry must match training).
+task: single_lift_mushroom_rigid
+action: abs_pose_abs_gripper
+dr: rigid_orientation         # ±45° pitch/roll, full yaw, xy=0.04 — matches cho collection
+augmentation: l515_noise
+
+obs: superset_rigid_rot6d     # privileged + point_cloud, EE orientation as 6D rotation
+views:
+  teacher: [privileged]
+  student: [point_cloud]       # ee_pos + ee_rot6d + gripper + point_cloud (obs_dim 10)
+
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400

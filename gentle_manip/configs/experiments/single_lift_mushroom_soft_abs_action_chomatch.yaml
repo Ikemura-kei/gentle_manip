@@ -1,0 +1,28 @@
+# [experiment] SOFT mushroom lift matching the cho RIGID setup EXCEPT the physics (soft MPM).
+# Used by: collect_demos_synth.py (v1 SDF) / dppo convert+eval for experiment (4)
+# Status: active (experiment (4): isolate "soft sim only" vs the cho rigid baseline)
+#
+# The ONLY change from the cho / single_lift_mushroom_rigid_abs_action recipe is task rigid -> soft:
+#   - task: single_lift_mushroom_soft (soft MPM, ~210 substeps / grid 250 from the task cfg)
+#   - dr: rigid_orientation  (SAME as cho: ±45° pitch/roll, full yaw, xy=0.04, scale/bend/twist/
+#     taper/axis — deliberately NO flip and NO material randomization, so soft physics is the only
+#     variable; the soft object uses its nominal material preset)
+#   - obs: superset_soft  -> student is quat point cloud (ee_pos + ee_quat + gripper + point_cloud),
+#     obs_dim 8, IDENTICAL proprio to cho (so training reuses the rigid_abs_pcd DPPO cfg unchanged).
+# Collect with the v1 SDF collector at cho's FSM constants (87/1/39/70/12, no firm), exactly as cho.
+task: single_lift_mushroom_soft
+action: abs_pose_abs_gripper
+dr: rigid_orientation         # cho's DR — no flip, no material; soft sim is the only change
+augmentation: l515_noise
+
+obs: superset_soft            # soft superset (privileged incl. von Mises) + point_cloud; student = quat cloud
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400
