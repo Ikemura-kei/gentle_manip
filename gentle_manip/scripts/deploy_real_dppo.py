@@ -47,6 +47,35 @@ def _proprio_dim(obs_config) -> int:
     return 3 + (6 if getattr(obs_config, "ee_rot6d", False) else 4) + 1
 
 
+def _load_net_arch(ckpt: Path) -> dict:
+    """Network architecture + dims read from the checkpoint's OWN training config
+    (`<run>/.hydra/config.yaml`, where `<run>` = ckpt.parents[1]). This makes the adapter load
+    ANY trained net size (e.g. a wider vpstw with visual_feature_dim=512, mlp_dims=[1024]*3)
+    without hardcoded arch flags. All fields read are literals (no OmegaConf interpolation).
+    Returns {} (adapter falls back to the small-net defaults) if the config is absent."""
+    import yaml
+    cfg_path = Path(ckpt).resolve().parents[1] / ".hydra" / "config.yaml"
+    if not cfg_path.exists():
+        print(f"  [warn] no hydra config at {cfg_path}; using default network arch", flush=True)
+        return {}
+    cfg = yaml.safe_load(open(cfg_path))
+    # network block lives under `model` (top-level `network` kept as a fallback for older configs).
+    net = (cfg.get("model", {}) or {}).get("network") or cfg.get("network", {}) or {}
+    arch = {
+        "obs_dim":            cfg.get("obs_dim"),
+        "action_dim":         cfg.get("action_dim"),
+        "cond_steps":         cfg.get("cond_steps"),
+        "horizon_steps":      cfg.get("horizon_steps"),
+        "denoising_steps":    cfg.get("denoising_steps"),
+        "visual_feature_dim": cfg.get("visual_feature_dim", net.get("visual_feature_dim")),
+        "pc_cond_steps":      cfg.get("pc_cond_steps", net.get("pc_cond_steps")),
+        "mlp_dims":           net.get("mlp_dims"),
+        "time_dim":           net.get("time_dim"),
+        "pointnet":           net.get("pointnet"),
+    }
+    return {k: v for k, v in arch.items() if v is not None}
+
+
 class DPPOPolicyAdapter:
     """obs dict -> raw [-1,1] action chunk for a DPPO PointNet diffusion policy.
 
@@ -61,7 +90,10 @@ class DPPOPolicyAdapter:
     def __init__(self, ckpt: str, normalization_path: str, *, obs_dim: int = 8,
                  action_dim: int = 7, cond_steps: int = 2, act_steps: int = 4,
                  horizon_steps: int = 4, denoising_steps: int = 20, ft_denoising_steps: int = 10,
-                 proprio_view: "list | None" = None, device: str = "cuda:0") -> None:
+                 proprio_view: "list | None" = None,
+                 visual_feature_dim: int = 256, mlp_dims: "list | None" = None,
+                 time_dim: int = 16, pc_cond_steps: int = 1, pointnet: "dict | None" = None,
+                 device: str = "cuda:0") -> None:
         import torch  # noqa: F401
         from model.diffusion.diffusion_eval import DiffusionEval
         from gentle_manip.dppo.pointnet_diffusion import PointNetDiffusionMLP
@@ -71,11 +103,15 @@ class DPPOPolicyAdapter:
         self._cond_steps = int(cond_steps)
         # proprio keys, in order, whose concat forms the normalized "state" (quat OR rot6d student).
         self._view = list(proprio_view) if proprio_view else ["ee_pos", "ee_quat", "gripper_width"]
+        # Network arch (visual_feature_dim / mlp_dims / time_dim / pointnet) MUST match the trained
+        # checkpoint — read from its hydra config by main() so any net size loads; these defaults are
+        # the original small net.
         net = PointNetDiffusionMLP(
             action_dim=action_dim, horizon_steps=horizon_steps, cond_dim=obs_dim * cond_steps,
-            pc_cond_steps=1, visual_feature_dim=256, time_dim=16, mlp_dims=[512, 512, 512],
+            pc_cond_steps=pc_cond_steps, visual_feature_dim=visual_feature_dim, time_dim=time_dim,
+            mlp_dims=list(mlp_dims) if mlp_dims else [512, 512, 512],
             activation_type="ReLU", residual_style=True,
-            pointnet={"in_channels": 3, "use_layernorm": True, "final_norm": "layernorm"})
+            pointnet=pointnet or {"in_channels": 3, "use_layernorm": True, "final_norm": "layernorm"})
         # Same construction as cfg/.../eval_diffusion_pointnet.yaml (network_path loads weights).
         self.model = DiffusionEval(
             network_path=str(ckpt), ft_denoising_steps=int(ft_denoising_steps), use_ddim=False,
@@ -181,10 +217,28 @@ def main() -> None:
     proprio_view = _proprio_view(obs_config)
     obs_dim = _proprio_dim(obs_config)
     print(f"proprio view = {proprio_view}  (obs_dim={obs_dim})")
+    # Network arch (+ dims) come from the checkpoint's own training config so any net size loads.
+    arch = _load_net_arch(args.ckpt)
+    if arch.get("obs_dim") and arch["obs_dim"] != obs_dim:
+        print(f"  [warn] ckpt obs_dim={arch['obs_dim']} != obs-config-derived {obs_dim} "
+              f"(check --obs-config); using the ckpt's {arch['obs_dim']}", flush=True)
+    if arch:
+        print(f"  net arch from ckpt config: visual_feature_dim={arch.get('visual_feature_dim')} "
+              f"mlp_dims={arch.get('mlp_dims')} obs_dim={arch.get('obs_dim')} "
+              f"action_dim={arch.get('action_dim')}", flush=True)
     policy = DPPOPolicyAdapter(
-        args.ckpt, args.normalization, obs_dim=obs_dim, action_dim=action_config.action_dim,
-        proprio_view=proprio_view, cond_steps=args.cond_steps, act_steps=args.act_steps,
-        ft_denoising_steps=args.ft_denoising_steps, device=args.device)
+        args.ckpt, args.normalization,
+        obs_dim=arch.get("obs_dim", obs_dim),
+        action_dim=arch.get("action_dim", action_config.action_dim),
+        proprio_view=proprio_view,
+        cond_steps=arch.get("cond_steps", args.cond_steps), act_steps=args.act_steps,
+        horizon_steps=arch.get("horizon_steps", 4),
+        denoising_steps=arch.get("denoising_steps", 20),
+        ft_denoising_steps=args.ft_denoising_steps,
+        visual_feature_dim=arch.get("visual_feature_dim", 256),
+        mlp_dims=arch.get("mlp_dims"), time_dim=arch.get("time_dim", 16),
+        pc_cond_steps=arch.get("pc_cond_steps", 1), pointnet=arch.get("pointnet"),
+        device=args.device)
     run_deploy_loop(env, policy, args.max_steps, args.rate,
                     pose_scale=args.pose_scale, record_path=args.record,
                     shard_size=args.shard_size, action_config=action_config,
