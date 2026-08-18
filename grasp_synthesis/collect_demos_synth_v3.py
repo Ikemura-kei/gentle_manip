@@ -250,6 +250,19 @@ def _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir):
         return nominal_spec, {"scale": nominal_scale, "bend_deg": 0.0}
 
     nominal_mesh = o.mesh_path or get_object_def(o.name).mesh_path
+    if nominal_mesh is None:
+        # Primitive box (e.g. gelatin -- no scanned mesh asset) -- no mesh to
+        # deform/export, but `scale` still applies directly to the box's own size
+        # (scene_builder.py: size = s * entry.scale), so apply just that and skip
+        # the mesh pipeline entirely. Ported from collect_demos_synth_v2.py's
+        # identical guard (v3 dropped it on fork, crashing on any mesh-less
+        # category -- see gelatin's zero-episode collection failure, 2026-08-19).
+        new_scale = nominal_scale * float(shp.get("scale", 1.0))
+        new_obj = dataclasses.replace(o, scale=new_scale)
+        new_spec = dataclasses.replace(nominal_spec, objects=[new_obj, *nominal_spec.objects[1:]])
+        scene_dr = {"scale": float(shp.get("scale", 1.0)), "bend_deg": 0.0}
+        return new_spec, scene_dr
+
     mesh = trimesh.load(str(nominal_mesh), process=False, force="mesh")
     shape = {k: shp[k] for k in ("bend", "twist", "taper", "rbf", "axis_scale", "axis_scale_ax")
              if k in shp}
@@ -264,6 +277,32 @@ def _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir):
     scene_dr = {"scale": float(shp.get("scale", 1.0)),
                 "bend_deg": float(np.rad2deg(shp.get("bend", 0.0)))}
     return new_spec, scene_dr
+
+
+def _resolve_actual_mesh(spec_dr, deform_dir: Optional[str]) -> str:
+    """Real, on-disk mesh path for the FEM grasp synthesis (build_elastic_object needs a
+    file). Ported from collect_demos_synth_v2.py's identical helper (2026-08-19) -- v3's
+    own `_make_worker` was instead silently falling back to MUSHROOM_MESH for any
+    primitive-box (mesh_path=None) category, which would have made the FEM synthesis
+    search for a gentle grasp on the WRONG object's geometry entirely (caught via
+    gelatin's zero-episode collection failure -- no mesh asset exists for it).
+
+    A mesh-based object already has one (`o.mesh_path`, possibly the DR-deformed
+    export from `_apply_scene_dr`). A primitive-box object (e.g. gelatin) has
+    `mesh_path=None` by design -- there is no mesh to fall back on, so write a box
+    .obj matching the ACTUAL simulated size (registry nominal size * the object's
+    current scale, which already carries any scene-DR scale factor)."""
+    o = spec_dr.objects[0]
+    if o.mesh_path is not None:
+        return o.mesh_path
+    import trimesh
+    from gentle_manip.assets.registry import get_object_def
+    size = tuple(s * float(o.scale or 1.0) for s in get_object_def(o.name).size)
+    box = trimesh.creation.box(extents=size)
+    out_dir = deform_dir or tempfile.gettempdir()
+    dst = Path(out_dir) / f"{o.name}_box_{size[0]:.4f}x{size[1]:.4f}x{size[2]:.4f}.obj"
+    box.export(str(dst))
+    return str(dst)
 
 
 # ── Gentleness / crush detection (ported from collect_demos_synth_v2.py, 2026-08-15) ──
@@ -943,7 +982,7 @@ def main() -> None:
         w = GenesisWorker(spec_dr, num_envs=args.n_envs, show_viewer=False,
                           settle_steps=settle_steps, settle_max_steps=settle_max_steps,
                           settle_vel_thresh=settle_vel_thresh, render_obs_cameras=True)
-        return w, sdr, (w.handle.spec.objects[0].mesh_path or MUSHROOM_MESH)
+        return w, sdr, _resolve_actual_mesh(spec_dr, deform_dir)
 
     worker, scene_dr, actual_mesh = _make_worker()
     if do_scene_dr:
