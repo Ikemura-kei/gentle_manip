@@ -311,15 +311,23 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
     def _current_raw_pose(obs: dict) -> np.ndarray:
         """9-dim raw-space pose built from the robot's ACTUAL current state: dims 0:3 =
         position, inverse-mapped through the same affine pos_min/pos_max transform
-        ActionPipeline uses; dims 3:9 = a valid 6D rotation rep from the current ee_quat
+        ActionPipeline uses; dims 3:9 = a valid 6D rotation rep of the current EE orientation
         (first two columns of its rotation matrix — the priv_object_rot6d convention;
-        already orthonormal, so a Gram-Schmidt pass reproduces this exact rotation)."""
+        already orthonormal, so a Gram-Schmidt pass reproduces this exact rotation).
+
+        Orientation source depends on the obs config: a rot6d student's obs already carries
+        `ee_rot6d` (same [col0(3), col1(3)] convention — use directly), while a quat student's
+        obs carries `ee_quat` (build the 6D from it). The rot6d config DELETES `ee_quat`, so we
+        must read `ee_rot6d` when present."""
         phys_pos = np.asarray(obs["ee_pos"], np.float32)[0]         # (3,), num_envs=1 squeeze
         t = (phys_pos - _pos_min) / (_pos_max - _pos_min)
         pos_raw = _clip_lo + t * (_clip_hi - _clip_lo)
-        quat_wxyz = np.asarray(obs["ee_quat"], np.float32)[0]
-        R = Rotation.from_quat(quat_wxyz[[1, 2, 3, 0]]).as_matrix()  # wxyz -> scipy's xyzw
-        rot6d = R[:, :2].reshape(-1, order="F")                     # [col0(3), col1(3)]
+        if "ee_rot6d" in obs:
+            rot6d = np.asarray(obs["ee_rot6d"], np.float32)[0]      # already [col0(3), col1(3)]
+        else:
+            quat_wxyz = np.asarray(obs["ee_quat"], np.float32)[0]
+            R = Rotation.from_quat(quat_wxyz[[1, 2, 3, 0]]).as_matrix()  # wxyz -> scipy's xyzw
+            rot6d = R[:, :2].reshape(-1, order="F")                 # [col0(3), col1(3)]
         return np.concatenate([pos_raw, rot6d]).astype(np.float32)
 
     # EMA low-pass filter state for absolute-mode smoothing (see run_deploy_loop docstring).
