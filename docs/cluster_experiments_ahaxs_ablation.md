@@ -37,7 +37,11 @@ Experiment config `single_lift_mushroom_rigid_abs_action` IS the cho recipe (rig
   configs referenced below). `git pull` on master.
 - Envs: **training/convert/eval-agent** in `envs/dppo`; **collection + eval sim server** in `envs/sim`.
   Prefix genesis/sim commands with `env -u PYTHONPATH -u ROS_DISTRO MUJOCO_GL=egl`.
-- `DPPO_DATA_DIR` (converted npz root, `.../dataset/dppo`), `DPPO_LOG_DIR` (`.../logs`) must be set.
+- **Do NOT export `DPPO_LOG_DIR`/`DPPO_DATA_DIR`** — the `gentle_manip.dppo.train` launcher defaults them
+  to `<repo>/logs/dppo` and `<repo>/dataset/dppo`. If your env sets `DPPO_LOG_DIR`, it MUST end in
+  `logs/dppo` (not just `logs`), or runs land at `logs/dppo-pretrain/…` off from every other run.
+- **`wandb=null` for every train command here** (or `WANDB_MODE=offline`): `env` has a subdir (`.../<id>`),
+  and the wandb project `gentle-manip-${env}` rejects the `/`. The train commands below already include it.
 - Each collection lands in `dataset/demos/single_lift_mushroom_rigid/<date-id>/`; convert with
   `--out $DPPO_DATA_DIR/single_lift_mushroom_rigid/<id>` and train with `env=single_lift_mushroom_rigid/<id>`.
 - **Eval gotchas:** the sim server needs `--subprocess` (all these carry shape DR, scene_group_size 4);
@@ -64,12 +68,12 @@ cluster, convert it from the raw demos first (see (2)'s convert step, pointing a
 # Run A — reproduce ahaxs exactly (2000 epochs)
 env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/dppo python -m gentle_manip.dppo.train \
   --config-path gentle_manip/dppo/cfg/single_lift_mushroom_rigid_abs_pcd --config-name pre_diffusion_pointnet \
-  env=single_lift_mushroom_rigid/cho train.n_epochs=2000 train.save_model_freq=400
+  env=single_lift_mushroom_rigid/cho train.n_epochs=2000 train.save_model_freq=400 wandb=null
 
 # Run B — a DEDICATED 800-epoch run (cosine LR schedule over 800, NOT the same as Run A's state_800)
 env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/dppo python -m gentle_manip.dppo.train \
   --config-path gentle_manip/dppo/cfg/single_lift_mushroom_rigid_abs_pcd --config-name pre_diffusion_pointnet \
-  env=single_lift_mushroom_rigid/cho train.n_epochs=800 train.save_model_freq=200
+  env=single_lift_mushroom_rigid/cho train.n_epochs=800 train.save_model_freq=200 wandb=null
 ```
 Sweep-eval Run A's checkpoints (400/800/1200/1600/2000) — **`state_800` reproduces ahaxs, expect
 ≈ 0.76**. Run B's `state_800` (dedicated 800-epoch schedule) is a separate data point: does the
@@ -99,7 +103,7 @@ env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/dppo python -m gentle_mani
 # train — ahaxs params (2000 epochs)
 env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/dppo python -m gentle_manip.dppo.train \
   --config-path gentle_manip/dppo/cfg/single_lift_mushroom_rigid_abs_pcd --config-name pre_diffusion_pointnet \
-  env=single_lift_mushroom_rigid/<id> train.n_epochs=2000 train.save_model_freq=400
+  env=single_lift_mushroom_rigid/<id> train.n_epochs=2000 train.save_model_freq=400 wandb=null
 ```
 Eval with experiment `single_lift_mushroom_rigid_abs_action`.
 
@@ -124,7 +128,7 @@ env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/dppo python -m gentle_mani
 # train — rot6d DPPO cfg, ahaxs params
 env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/dppo python -m gentle_manip.dppo.train \
   --config-path gentle_manip/dppo/cfg/single_lift_mushroom_rigid_abs_pcd_rot6d --config-name pre_diffusion_pointnet \
-  env=single_lift_mushroom_rigid/<ID3> train.n_epochs=2000 train.save_model_freq=400
+  env=single_lift_mushroom_rigid/<ID3> train.n_epochs=2000 train.save_model_freq=400 wandb=null
 ```
 Eval uses the **rot6d** cfg + experiment (obs must match): server `--experiment
 single_lift_mushroom_rigid_abs_action_rot6d`, eval `--config-path .../single_lift_mushroom_rigid_abs_pcd_rot6d`,
@@ -159,7 +163,7 @@ env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/dppo python -m gentle_mani
 env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/dppo python -m gentle_manip.dppo.train \
   --config-path gentle_manip/dppo/cfg/single_lift_mushroom_rigid_abs_pcd --config-name pre_diffusion_pointnet \
   env=single_lift_mushroom_soft/<id> experiment=single_lift_mushroom_soft_abs_action_chomatch \
-  train.n_epochs=2000 train.save_model_freq=400
+  train.n_epochs=2000 train.save_model_freq=400 wandb=null
 ```
 Eval: server `--experiment single_lift_mushroom_soft_abs_action_chomatch` (soft is slow — this is the
 long pole); eval agent with `experiment=single_lift_mushroom_soft_abs_action_chomatch` and the matching

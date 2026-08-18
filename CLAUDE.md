@@ -1000,6 +1000,21 @@ Key files from old code and where they map:
   (unlike soft, where `single_lift_mushroom_soft_eval.yaml` locks `sim_substeps`).
   State-based variants use the `_state` suffix (e.g. `single_lift_mushroom_rigid_state`).
 - **Every training run gets a short global ID + registry entry.** `gentle_manip/utils/experiment_registry.py` mints a unique **5-letter ID** (e.g. `cqwxw`) that names the TRAINING run dir (`logs/<algo>/<task>/<id>/`) and is recorded in the project-root `experiments.csv` (id, algo, task, name, run_dir, created, commit, status). SERL calls `new_id()`+`add_entry()` in `train_serl.py`; DPPO uses the `${exp_id:}` OmegaConf resolver (registered in `dppo/train.py`) inside the logdir template, and the `ExperimentSnapshot` hydra callback writes the row. The wandb run name == the ID. **Eval runs keep datetime naming** (they nest under the policy's run dir) and are NOT registered. Reconcile the table with disk (drop deleted runs, back-fill orphans) via `python -m gentle_manip.scripts.reconcile_experiments` (`--list` just prints it).
+- **DPPO run paths — do NOT export `DPPO_LOG_DIR`/`DPPO_DATA_DIR` in launch scripts.** The
+  `gentle_manip.dppo.train` launcher already `os.environ.setdefault`s them to the correct repo-relative
+  roots — `DPPO_LOG_DIR = <repo>/logs/dppo`, `DPPO_DATA_DIR = <repo>/dataset/dppo` (`dppo/train.py:32-33`).
+  The logdir template is `${DPPO_LOG_DIR}/dppo-pretrain/${env}/${exp_id:}`, so a run only lands under
+  `logs/dppo/dppo-pretrain/…` when `DPPO_LOG_DIR` ends in `logs/dppo`. Setting `DPPO_LOG_DIR=<repo>/logs`
+  (missing the `/dppo`) silently shifts every run up one level to `logs/dppo-pretrain/…` — off from
+  `experiments.csv` and every other run, and any eval glob that assumes the standard path won't find it.
+  If you set it at all, use `<repo>/logs/dppo`; otherwise leave both unset and let the launcher default.
+  (`convert_demos --out` DOES take an explicit path — put it at `$DPPO_DATA_DIR/<env>/`, matching the
+  `env=` you train with, i.e. `dataset/dppo/<env>/`.)
+- **DPPO wandb project names can't contain `/`.** The project is `gentle-manip-${env}`, so an `env` with a
+  subdir (e.g. `single_lift_mushroom_rigid/cak`) makes an invalid wandb project → the run crashes at init
+  with `UsageError: Invalid project name … found '/'`. Pass `wandb=null` (or `WANDB_MODE=offline`, or a
+  wandb entity that tolerates it) for any run whose `env` has a `/`. Cluster runs may already have wandb
+  configured; local runs generally need `wandb=null`.
 - **Every training run writes an `EXPERIMENT.md`** into its run dir (`logs/<algo>/<task>/<run>/`) — applies to ANY training (SERL, DP3, …), not just SERL. It records the git commit, **motivation**, **hypothesis**, key config, and empty **Observations** + **Final summary** sections to be filled during/after the run (by the agent when monitoring/stopping, and by the user adding insights). Helpers in `gentle_manip/utils/run_paths.py`: `write_experiment_md(...)` at launch, `append_experiment_note(run_dir, note)` during, and fill the Final summary (duration, learner steps, replay-buffer size at end, return/succeed, verdict) when the run ends. `train_serl.py` takes `--motivation` / `--hypothesis` and writes it automatically; wire the same into any new trainer. This is the single place to track *why* each run happened and *what it showed*.
 - **Task / dataset naming — HARD RULE:** `{single,multi}_{task}_{object}_{soft,rigid,real}`.
   - `_soft` = sim MPM (deformable), `_rigid` = sim rigid body, `_real` = real-robot data. The suffix encodes BOTH data source and physics type; the obs modality (point cloud, tactile, …) is NOT part of the name — use `--description` or the config snapshot for that.
