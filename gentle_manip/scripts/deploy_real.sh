@@ -67,21 +67,7 @@
 # so the very first commanded action is bounded too, not just steady-state jitter.
 # Sim eval of this checkpoint (band 0.175-0.275): success 0.76, ever_success 0.815 (see
 # logs/dppo/dppo-pretrain/single_lift_mushroom_rigid/cho/ahaxs/eval/).
-#
-ckpt=logs/dppo/dppo-pretrain/single_lift_mushroom_rigid/cho/ahaxs/checkpoint/state_800.pt
-normalization=dataset/dppo/single_lift_mushroom_rigid/cho/normalization.npz
 
-uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-  --ckpt ${ckpt} \
-  --ft-denoising-steps 0 \
-  --normalization ${normalization} \
-  --obs-config gentle_manip/configs/obs/point_cloud_1cam_outlier.yaml \
-  --action-config gentle_manip/configs/action/abs_pose_abs_gripper.yaml \
-  --smooth-alpha 0.99 \
-  --max-pos-step-m 0.01 \
-  --record dataset/real_deploy/tmp \
-  --shard-size 10 \
-  --max-steps 5000
 
 # ckpt=logs/dppo/dppo-pretrain/single_lift_mushroom_rigid/rpk/fjyis/checkpoint/state_3500.pt
 # normalization=dataset/dppo/single_lift_mushroom_rigid/rpk/normalization.npz
@@ -113,3 +99,60 @@ uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.p
 #   --pose-scale 0.999 \
 #   --record dataset/real_deploy/luqsl249 \
 #   --shard-size 10
+
+# Working very nicely:
+# ckpt=logs/dppo/dppo-pretrain/single_lift_mushroom_rigid/cho/ahaxs/checkpoint/state_800.pt
+# normalization=dataset/dppo/single_lift_mushroom_rigid/cho/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} \
+#   --ft-denoising-steps 0 \
+#   --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_outlier.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_abs_gripper.yaml \
+#   --smooth-alpha 0.6 \
+#   --max-pos-step-m 0.015 \
+#   --record dataset/real_deploy/tmp \
+#   --shard-size 10 \
+#   --max-steps 5000
+
+# ckpt=logs/dppo/dppo-pretrain/single_lift_mushroom_soft_abs_pcd_rot6d/bwvei/checkpoint/state_400.pt
+# normalization=dataset/dppo/single_lift_mushroom_soft_abs_pcd_rot6d/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --normalization ${normalization} \
+#   --ckpt ${ckpt} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_outlier_rot6d.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_abs_gripper.yaml \
+#   --ft-denoising-steps 0 \
+#   --smooth-alpha 0.6 \
+#   --max-pos-step-m 0.015 \
+#   --record dataset/real_deploy/tmp \
+#   --shard-size 10 \
+#   --max-steps 5000
+
+ckpt=./logs/dppo/dppo-pretrain/single_lift_mushroom_soft_abs_pcd_rot6d_hwo/vpstw/checkpoint/state_600.pt
+normalization=./dataset/dppo/single_lift_mushroom_soft_abs_pcd_rot6d_hwo/normalization.npz
+uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+  --normalization ${normalization} \
+  --ckpt ${ckpt} \
+  --obs-config gentle_manip/configs/obs/point_cloud_1cam_outlier_rot6d.yaml \
+  --action-config gentle_manip/configs/action/abs_pose_abs_gripper.yaml \
+  --ft-denoising-steps 0 \
+  --smooth-alpha 0.6 \
+  --max-pos-step-m 0.015 \
+  --record dataset/real_deploy/tmp \
+  --shard-size 10 \
+  --max-steps 5000
+
+# ckpt=./logs/dppo/dppo-pretrain/single_lift_mushroom_soft_abs_pcd_rot6d_v2/ndkwc/checkpoint/state_800.pt # or 200
+# normalization=./dataset/dppo/single_lift_mushroom_soft_abs_pcd_rot6d_v2/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --normalization ${normalization} \
+#   --ckpt ${ckpt} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_outlier_rot6d.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_abs_gripper.yaml \
+#   --ft-denoising-steps 0 \
+#   --smooth-alpha 0.6 \
+#   --max-pos-step-m 0.015 \
+#   --record dataset/real_deploy/tmp \
+#   --shard-size 10 \
+#   --max-steps 5000

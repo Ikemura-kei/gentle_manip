@@ -66,6 +66,31 @@ def _align_quat_sign(reference, query):
     return query * sign
 
 
+def _rot6d_to_quat_wxyz(r6):
+    """rot6d [col0(3), col1(3)] -> wxyz quaternion (Gram-Schmidt, matches the pipeline's
+    ee_rot6d encoding). Vectorized over the leading dim. Lets a rot6d student's recorded/sim
+    obs reuse the existing quaternion comparison + plots."""
+    from scipy.spatial.transform import Rotation
+    r6 = np.asarray(r6, np.float32).reshape(-1, 6)
+    a1, a2 = r6[:, :3], r6[:, 3:6]
+    b1 = a1 / (np.linalg.norm(a1, axis=1, keepdims=True) + 1e-8)
+    a2p = a2 - np.sum(b1 * a2, axis=1, keepdims=True) * b1
+    b2 = a2p / (np.linalg.norm(a2p, axis=1, keepdims=True) + 1e-8)
+    b3 = np.cross(b1, b2)
+    R = np.stack([b1, b2, b3], axis=-1)                 # (N,3,3), columns = b1,b2,b3
+    q_xyzw = Rotation.from_matrix(R).as_quat()          # (N,4) xyzw
+    return q_xyzw[:, [3, 0, 1, 2]].astype(np.float32)   # -> wxyz
+
+
+def _obs_ori_quat(obs, T=None):
+    """(T,4) wxyz from an obs dict that stores EITHER ee_quat OR ee_rot6d."""
+    if "ee_quat" in obs:
+        q = np.asarray(obs["ee_quat"], np.float32)
+    else:
+        q = _rot6d_to_quat_wxyz(np.asarray(obs["ee_rot6d"], np.float32))
+    return q if T is None else q[:T]
+
+
 def find_settled_spawn(env, backend, target_xy: np.ndarray, default_xy: np.ndarray,
                       max_corrections: int = 5, max_random_tries: int = 6,
                       tol: float = 0.006, rng=None):
@@ -317,7 +342,7 @@ def main():
 
         obs_ep  = ep["observations"]
         re_ee   = np.asarray(obs_ep["ee_pos"],        np.float32)[:T]
-        re_quat = np.asarray(obs_ep["ee_quat"],       np.float32)[:T]
+        re_quat = _obs_ori_quat(obs_ep, T)            # ee_quat OR ee_rot6d -> wxyz
         re_gw   = np.asarray(obs_ep["gripper_width"], np.float32)[:T, 0]
         re_pc   = np.asarray(obs_ep["point_cloud"],   np.float32)[:T]
 
@@ -347,7 +372,18 @@ def main():
             sim_obs.append(env.step(actions[t][None, :])[0])
 
         sim_ee   = np.stack([o["ee_pos"][0]          for o in sim_obs])
-        sim_quat = np.stack([o["ee_quat"][0]          for o in sim_obs])
+        if "ee_quat" in sim_obs[0]:
+            sim_quat = np.stack([o["ee_quat"][0]      for o in sim_obs])
+        else:
+            sim_quat = _rot6d_to_quat_wxyz(np.stack([o["ee_rot6d"][0] for o in sim_obs]))
+
+        # Raw rot6d channels (the ACTUAL obs the rot6d policy consumes) — plotted directly for a
+        # rot6d student instead of the derived quaternion. None for a quat student.
+        _has_r6 = "ee_rot6d" in obs_ep
+        if _has_r6:
+            re_r6  = np.asarray(obs_ep["ee_rot6d"], np.float32)[:T]
+            sim_r6 = np.stack([o["ee_rot6d"][0] for o in sim_obs])
+            r6_mae = float(np.abs(sim_r6 - re_r6).mean())
         sim_gw   = np.array([o["gripper_width"][0, 0] for o in sim_obs])
 
         re_quat_aligned = _align_quat_sign(sim_quat, re_quat)
@@ -371,7 +407,8 @@ def main():
             f"ep {ep_idx}: T={T}  cube_xy={cube_xy.round(3)}"
             f"  ee_err(mm)={(ee_err*1000).round(1)}"
             f"  quat_ang(deg)={quat_ang_err:.2f}"
-            f"  gw_err(mm)={gw_err*1000:.1f}"
+            + (f"  r6_mae={r6_mae:.4f}" if _has_r6 else "")
+            + f"  gw_err(mm)={gw_err*1000:.1f}"
             f"  cloud_zoff(mm)={zoff*1000:.1f}"
             f"  obj_xy_drift(mm)={obj_xy_drift*1000:.1f}"
             + (f"  spawn_tries={n_spawn_tries}" if args.search_spawn else ""),
@@ -390,41 +427,64 @@ def main():
             ax.set_title(f"ee_pos {lbl} (m)")
             ax.grid(alpha=0.3);  ax.legend(fontsize=8)
 
-        quat_labels = ("w", "x", "y", "z")
-        for i in range(3):
-            ax = fig.add_subplot(4, 3, i + 4)
-            ax.plot(ts_ax, re_quat_aligned[:, i], label="real", lw=2)
-            ax.plot(ts_ax, sim_quat[:, i],        "--", label="sim", lw=2)
-            ax.set_title(f"ee_quat {quat_labels[i]}")
+        if _has_r6:
+            # rot6d student: plot the 6 RAW rot6d obs channels (real vs sim) — slots 4..9.
+            for i in range(6):
+                ax = fig.add_subplot(4, 3, i + 4)
+                ax.plot(ts_ax, re_r6[:, i],  label="real", lw=2)
+                ax.plot(ts_ax, sim_r6[:, i], "--", label="sim", lw=2)
+                ax.set_title(f"ee_rot6d r6[{i}]")
+                ax.grid(alpha=0.3);  ax.legend(fontsize=8)
+
+            ax = fig.add_subplot(4, 3, 10)
+            ax.plot(ts_ax, re_gw,  label="real", lw=2)
+            ax.plot(ts_ax, sim_gw, "--", label="sim", lw=2)
+            ax.set_title("gripper_width (m)")
             ax.grid(alpha=0.3);  ax.legend(fontsize=8)
 
-        ax = fig.add_subplot(4, 3, 7)
-        ax.plot(ts_ax, re_quat_aligned[:, 3], label="real", lw=2)
-        ax.plot(ts_ax, sim_quat[:, 3],        "--", label="sim", lw=2)
-        ax.set_title(f"ee_quat {quat_labels[3]}")
-        ax.grid(alpha=0.3);  ax.legend(fontsize=8)
+            ax = fig.add_subplot(4, 3, 11)
+            for i in range(6):
+                ax.plot(ts_ax, np.abs(sim_r6[:, i] - re_r6[:, i]), lw=1.1, label=f"r6[{i}]")
+            ax.set_title("rot6d |sim-real| per element")
+            ax.grid(alpha=0.3);  ax.legend(fontsize=6, ncol=3)
+        else:
+            quat_labels = ("w", "x", "y", "z")
+            for i in range(3):
+                ax = fig.add_subplot(4, 3, i + 4)
+                ax.plot(ts_ax, re_quat_aligned[:, i], label="real", lw=2)
+                ax.plot(ts_ax, sim_quat[:, i],        "--", label="sim", lw=2)
+                ax.set_title(f"ee_quat {quat_labels[i]}")
+                ax.grid(alpha=0.3);  ax.legend(fontsize=8)
 
-        ax = fig.add_subplot(4, 3, 8)
-        ax.plot(ts_ax, re_gw,  label="real", lw=2)
-        ax.plot(ts_ax, sim_gw, "--", label="sim", lw=2)
-        ax.set_title("gripper_width (m)")
-        ax.grid(alpha=0.3);  ax.legend(fontsize=8)
+            ax = fig.add_subplot(4, 3, 7)
+            ax.plot(ts_ax, re_quat_aligned[:, 3], label="real", lw=2)
+            ax.plot(ts_ax, sim_quat[:, 3],        "--", label="sim", lw=2)
+            ax.set_title(f"ee_quat {quat_labels[3]}")
+            ax.grid(alpha=0.3);  ax.legend(fontsize=8)
 
-        ax = fig.add_subplot(4, 3, 9)
-        ax.plot(ts_ax, np.rad2deg(quat_ang), lw=2, color="tab:purple")
-        ax.set_title("quat angular diff (deg)")
-        ax.grid(alpha=0.3)
+            ax = fig.add_subplot(4, 3, 8)
+            ax.plot(ts_ax, re_gw,  label="real", lw=2)
+            ax.plot(ts_ax, sim_gw, "--", label="sim", lw=2)
+            ax.set_title("gripper_width (m)")
+            ax.grid(alpha=0.3);  ax.legend(fontsize=8)
 
-        ax = fig.add_subplot(4, 3, 10)
+            ax = fig.add_subplot(4, 3, 9)
+            ax.plot(ts_ax, np.rad2deg(quat_ang), lw=2, color="tab:purple")
+            ax.set_title("quat angular diff (deg)")
+            ax.grid(alpha=0.3)
+
+        ax = fig.add_subplot(4, 3, 12 if _has_r6 else 10)
         ax.plot(ts_ax, re_zm,  label="real", lw=2)
         ax.plot(ts_ax, sim_zm, "--", label="sim", lw=2)
         ax.set_title("point-cloud zmean(t) (m)")
         ax.grid(alpha=0.3);  ax.legend(fontsize=8)
 
+        ori_str = (f"rot6d MAE {r6_mae:.4f} (quat ang {quat_ang_err:.2f} deg)" if _has_r6
+                   else f"quat ang {quat_ang_err:.2f} deg")
         fig.suptitle(
             f"Deploy ep {ep_idx} [{args.experiment}] (fov={fov}) — "
             f"ee err {(ee_err*1000).round(1)} mm | "
-            f"quat ang {quat_ang_err:.2f} deg | "
+            f"{ori_str} | "
             f"gw {gw_err*1000:.1f} mm | "
             f"cloud zmean {zoff*1000:.1f} mm"
         )

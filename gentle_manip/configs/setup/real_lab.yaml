@@ -44,4 +44,4 @@ cameras:
 # by this vector, so every backprojected point comes out shifted the same way — a quick
 # real-side test without touching the calibrated world_T_cam constants. REMOVE once the
 # real offset is confirmed/ruled out (either fold it into a recalibration, or delete this).
-point_cloud_shift: [0.014, -0.015, 0.0]
+point_cloud_shift: [0.014, -0.011, 0.0]
