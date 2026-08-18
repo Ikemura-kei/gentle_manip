@@ -464,6 +464,7 @@ def execute_and_collect(
     # margin the old path gave all grasps); a weak grasp (low stress rise) gets set to a LARGER
     # value at the grasp->firm boundary. RIGID leaves this at base and skips firm when already firm.
     firm_close = np.full(num_envs, FIRM_EXTRA_CLOSE_M, np.float32)
+    _has_firm  = any(n == "firm" for n, _ in PHASES)   # --n-firm 0 drops the phase: skip the check too
 
     home_pos  = np.tile(worker.robot.home_pos[None].astype(np.float32),  (num_envs, 1))
     home_quat = np.tile(worker.robot.home_quat[None].astype(np.float32), (num_envs, 1))
@@ -623,7 +624,7 @@ def execute_and_collect(
         # relying on the trim pass to clean it up afterward — no artificial stops.
         advance = np.ones(num_envs, dtype=np.int64)   # normal: one phase forward
         leaving_grasp = rolled_over & (phase_idx == _GRASP_IDX)
-        if np.any(leaving_grasp):
+        if _has_firm and np.any(leaving_grasp):
             cf = state.get("contact_force")
             if cf is not None:                        # RIGID: contact force (N). ALWAYS firm base;
                 for i in np.where(leaving_grasp)[0]:  # weak grip (force < thresh) firms base+extra.
