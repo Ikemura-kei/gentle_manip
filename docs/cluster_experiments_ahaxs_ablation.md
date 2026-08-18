@@ -18,8 +18,15 @@ time from the `cho`/`ahaxs` recipe** to find what matters.
 - DR: **`rigid_orientation`** — ±45° pitch/roll, full yaw, xy 0.04, scale/bend/twist/taper/axis.
   **No flip, no material randomization.**
 - collection control: 650 episodes, 8 envs, maxfevals 1145, scene_dr_every 1, seed 0.
-- training: **2000 epochs**, batch 128, lr 1e-4, ckpt/500, small net (visual_feature_dim 256,
-  mlp_dims [512,512,512]). Reference sim success ≈ **0.76** (state ~2000).
+- training: **2000 epochs**, batch 128, lr 1e-4, **ckpt every 400 epochs** (`save_model_freq=400`),
+  small net (visual_feature_dim 256, mlp_dims [512,512,512]).
+- **Deployed/reference checkpoint = `state_800`** (epoch 800 of the 2000-epoch cosine run). ahaxs was
+  trained on the cluster; only `state_800` + `state_1200` were pulled down, and **`state_800` deploys
+  best** — an earlier checkpoint generalizing better (same pattern bwvei showed: peak at 400, worse by
+  800). Its sim success ≈ **0.76** (`state_800`). So **eval a checkpoint SWEEP** (400/800/1200/1600/2000)
+  for every run below and report each, but **`state_800` is the primary comparison point**, not the
+  last checkpoint. NOTE: `state_800` from a 2000-epoch run is NOT the same as a dedicated 800-epoch run
+  (the cosine LR schedule differs) — that's why (1) does both.
 
 Experiment config `single_lift_mushroom_rigid_abs_action` IS the cho recipe (rigid, quat, abs,
 `rigid_orientation` DR). DPPO cfg dir: `gentle_manip/dppo/cfg/single_lift_mushroom_rigid_abs_pcd`.
@@ -57,15 +64,17 @@ cluster, convert it from the raw demos first (see (2)'s convert step, pointing a
 # Run A — reproduce ahaxs exactly (2000 epochs)
 env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/dppo python -m gentle_manip.dppo.train \
   --config-path gentle_manip/dppo/cfg/single_lift_mushroom_rigid_abs_pcd --config-name pre_diffusion_pointnet \
-  env=single_lift_mushroom_rigid/cho train.n_epochs=2000 train.save_model_freq=500
+  env=single_lift_mushroom_rigid/cho train.n_epochs=2000 train.save_model_freq=400
 
-# Run B — same, 800 epochs
+# Run B — a DEDICATED 800-epoch run (cosine LR schedule over 800, NOT the same as Run A's state_800)
 env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/dppo python -m gentle_manip.dppo.train \
   --config-path gentle_manip/dppo/cfg/single_lift_mushroom_rigid_abs_pcd --config-name pre_diffusion_pointnet \
   env=single_lift_mushroom_rigid/cho train.n_epochs=800 train.save_model_freq=200
 ```
-Eval the last ckpt of each (see the shared eval block at the bottom, experiment
-`single_lift_mushroom_rigid_abs_action`). **Expect ≈ 0.76** if `ahaxs` reproduces.
+Sweep-eval Run A's checkpoints (400/800/1200/1600/2000) — **`state_800` reproduces ahaxs, expect
+≈ 0.76**. Run B's `state_800` (dedicated 800-epoch schedule) is a separate data point: does the
+shorter schedule match the intermediate checkpoint? Use the shared eval block, experiment
+`single_lift_mushroom_rigid_abs_action`.
 
 ---
 
@@ -90,7 +99,7 @@ env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/dppo python -m gentle_mani
 # train — ahaxs params (2000 epochs)
 env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/dppo python -m gentle_manip.dppo.train \
   --config-path gentle_manip/dppo/cfg/single_lift_mushroom_rigid_abs_pcd --config-name pre_diffusion_pointnet \
-  env=single_lift_mushroom_rigid/<id> train.n_epochs=2000 train.save_model_freq=500
+  env=single_lift_mushroom_rigid/<id> train.n_epochs=2000 train.save_model_freq=400
 ```
 Eval with experiment `single_lift_mushroom_rigid_abs_action`.
 
@@ -115,7 +124,7 @@ env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/dppo python -m gentle_mani
 # train — rot6d DPPO cfg, ahaxs params
 env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/dppo python -m gentle_manip.dppo.train \
   --config-path gentle_manip/dppo/cfg/single_lift_mushroom_rigid_abs_pcd_rot6d --config-name pre_diffusion_pointnet \
-  env=single_lift_mushroom_rigid/<ID3> train.n_epochs=2000 train.save_model_freq=500
+  env=single_lift_mushroom_rigid/<ID3> train.n_epochs=2000 train.save_model_freq=400
 ```
 Eval uses the **rot6d** cfg + experiment (obs must match): server `--experiment
 single_lift_mushroom_rigid_abs_action_rot6d`, eval `--config-path .../single_lift_mushroom_rigid_abs_pcd_rot6d`,
@@ -150,7 +159,7 @@ env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/dppo python -m gentle_mani
 env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/dppo python -m gentle_manip.dppo.train \
   --config-path gentle_manip/dppo/cfg/single_lift_mushroom_rigid_abs_pcd --config-name pre_diffusion_pointnet \
   env=single_lift_mushroom_soft/<id> experiment=single_lift_mushroom_soft_abs_action_chomatch \
-  train.n_epochs=2000 train.save_model_freq=500
+  train.n_epochs=2000 train.save_model_freq=400
 ```
 Eval: server `--experiment single_lift_mushroom_soft_abs_action_chomatch` (soft is slow — this is the
 long pole); eval agent with `experiment=single_lift_mushroom_soft_abs_action_chomatch` and the matching
@@ -166,16 +175,18 @@ PORT=<pick a free port per run>
 env -u PYTHONPATH -u ROS_DISTRO MUJOCO_GL=egl uv run --project envs/sim python \
   -m gentle_manip.scripts.serl_sim_server --experiment single_lift_mushroom_rigid_abs_action \
   --view student --num-envs 5 --render-rgb --subprocess --port $PORT   # wait for SIM_SERVER_READY
-# eval agent (envs/dppo)
+# eval agent (envs/dppo) — RE-RUN this per checkpoint in the sweep (400/800/1200/1600/2000),
+# reusing the SAME running server. state_800 is the primary comparison point.
 env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/dppo python -m gentle_manip.dppo.train \
   --config-path gentle_manip/dppo/cfg/single_lift_mushroom_rigid_abs_pcd --config-name eval_diffusion_pointnet \
-  env=single_lift_mushroom_rigid/<id> base_policy_path=<.../checkpoint/state_2000.pt> \
+  env=single_lift_mushroom_rigid/<id> base_policy_path=<.../checkpoint/state_800.pt> \
   normalization_path=$DPPO_DATA_DIR/single_lift_mushroom_rigid/<id>/normalization.npz \
   env.specific.port=$PORT
 ```
 Results land in `<run>/eval/<datetime>/summary.json` (success_rate) + per-episode videos.
 
 ## What to report back
-Per experiment: sim `success_rate` of the last (and 800/2000) ckpt vs the **0.76** `ahaxs` baseline,
-plus the collection `success_rate`. The headline question each answers:
+Per experiment: the checkpoint SWEEP sim `success_rate` (400/800/1200/1600/2000), **with `state_800`
+called out** vs the **0.76** `ahaxs` baseline (also its best-of-sweep), plus the collection
+`success_rate`. The headline question each answers:
 (1) reproducible? (2) collection-stable? (3) rot6d help/hurt? (4) does soft physics cost sim2real?
