@@ -1,0 +1,31 @@
+# [obs] 1-cam point cloud, real-deploy denoise-only — rot6d proprioception variant.
+# Used by: deploy_real_dppo.py (rot6d policies, e.g. logs/dppo/.../single_lift_mushroom_soft_abs_pcd_rot6d)
+# Status: active
+#
+# IDENTICAL to point_cloud_1cam_outlier.yaml EXCEPT the EE orientation is emitted as a 6D
+# rotation (`ee_rot6d`, 6 dims) instead of the wxyz quaternion — matching how the rot6d student
+# was trained (superset_soft_rot6d.yaml). Proprio dim = ee_pos(3) + ee_rot6d(6) + gripper(1) = 10.
+# The 6D is derived in the SHARED PerceptionPipeline from the same quat_noise_std-augmented +
+# sign-canonicalized quaternion, so sim and real are identical. rot6d is sign-invariant, so the
+# real-vs-sim quaternion sign-flip is structurally a non-issue here.
+#
+# Point-cloud block (cam_ext, crop, 1024, outlier_removal) is byte-for-byte the same as the
+# student's training config (superset_soft_rot6d.yaml) so the cloud the policy sees matches.
+include_joint_pos: false
+include_joint_vel: false
+
+quat_noise_std: 0.003
+ee_rot6d: true                # EE orientation -> 6D rotation (Zhou et al. 2019) instead of quaternion
+
+point_cloud:
+  cameras: ["cam_ext"]
+  crop_min: [0.2, -0.215, 0.004]
+  crop_max: [0.71,   0.215,  0.45]
+  max_points: 1024
+
+  # Real-only flying-pixel / edge denoiser (no-op on clean sim) — matches the training config.
+  outlier_removal:
+    voxel_size: 0.01
+    min_neighbors: 23
+  # object_focus intentionally omitted — the arm IS present in the training clouds; stripping it
+  # from real only would create a mismatch (same rationale as point_cloud_1cam_outlier.yaml).

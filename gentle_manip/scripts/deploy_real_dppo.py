@@ -14,6 +14,12 @@ import numpy as np
 #   uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
 #     --ckpt <run>/checkpoint/state_249.pt --ft-denoising-steps 10   # 0 for a BC checkpoint
 #
+# Handles BOTH orientation encodings: the proprio view + obs_dim are DERIVED from --obs-config
+# (ee_quat -> 8-dim state, ee_rot6d -> 10-dim), so a rot6d student (e.g. state_800.pt from
+# single_lift_mushroom_soft_abs_pcd_rot6d) works with the rot6d defaults; pass the matching
+# --normalization (same converted dataset) and --obs-config. For a quat student, pass
+# --obs-config .../point_cloud_1cam_outlier.yaml + its normalization.npz.
+#
 # Reuses run_deploy_loop from deploy_real.py (the shared receding-horizon loop + safety keys).
 _THIS = Path(__file__).resolve()
 _REPO = _THIS.parents[2]
@@ -29,8 +35,16 @@ from gentle_manip.scripts.deploy_real import (                       # noqa: E40
     _load_yaml, _resolve_config, run_deploy_loop)
 
 # Ordered proprio state view the DPPO point-cloud student was trained on (== PROPRIO_VIEW in
-# convert_demos): concat -> 8-dim state (3 + 4 + 1).
-_PROPRIO_VIEW = ["ee_pos", "ee_quat", "gripper_width"]
+# convert_demos): concat -> state. Orientation is ee_quat (8-dim total) OR ee_rot6d (10-dim),
+# depending on the obs config the student trained with — derived from ObsConfig, never hardcoded.
+def _proprio_view(obs_config) -> list:
+    ori = "ee_rot6d" if getattr(obs_config, "ee_rot6d", False) else "ee_quat"
+    return ["ee_pos", ori, "gripper_width"]
+
+
+def _proprio_dim(obs_config) -> int:
+    # ee_pos(3) + orientation(6 rot6d | 4 quat) + gripper(1)
+    return 3 + (6 if getattr(obs_config, "ee_rot6d", False) else 4) + 1
 
 
 class DPPOPolicyAdapter:
@@ -47,7 +61,7 @@ class DPPOPolicyAdapter:
     def __init__(self, ckpt: str, normalization_path: str, *, obs_dim: int = 8,
                  action_dim: int = 7, cond_steps: int = 2, act_steps: int = 4,
                  horizon_steps: int = 4, denoising_steps: int = 20, ft_denoising_steps: int = 10,
-                 device: str = "cuda:0") -> None:
+                 proprio_view: "list | None" = None, device: str = "cuda:0") -> None:
         import torch  # noqa: F401
         from model.diffusion.diffusion_eval import DiffusionEval
         from gentle_manip.dppo.pointnet_diffusion import PointNetDiffusionMLP
@@ -55,6 +69,8 @@ class DPPOPolicyAdapter:
         self.device = device
         self.n_action_steps = int(act_steps)
         self._cond_steps = int(cond_steps)
+        # proprio keys, in order, whose concat forms the normalized "state" (quat OR rot6d student).
+        self._view = list(proprio_view) if proprio_view else ["ee_pos", "ee_quat", "gripper_width"]
         net = PointNetDiffusionMLP(
             action_dim=action_dim, horizon_steps=horizon_steps, cond_dim=obs_dim * cond_steps,
             pc_cond_steps=1, visual_feature_dim=256, time_dim=16, mlp_dims=[512, 512, 512],
@@ -82,7 +98,7 @@ class DPPOPolicyAdapter:
     # ── obs handling (mirrors GenesisMultiStepVecEnv, n_envs=1) ────────────────────
     def _modalities(self, obs: dict) -> dict:
         raw = np.concatenate(
-            [np.asarray(obs[k], np.float32).reshape(1, -1) for k in _PROPRIO_VIEW], axis=1)
+            [np.asarray(obs[k], np.float32).reshape(1, -1) for k in self._view], axis=1)
         state = (2.0 * (raw - self.obs_min) / self._obs_range - 1.0).astype(np.float32)
         pc = np.asarray(obs["point_cloud"], np.float32).reshape(1, -1, 3)   # raw xyz (meters)
         return {"state": state, "point_cloud": pc}
@@ -107,7 +123,7 @@ class DPPOPolicyAdapter:
                 for k, v in self._stacked().items()}
         with torch.no_grad():
             traj = self.model(cond=cond, deterministic=True).trajectories.cpu().numpy()
-        chunk = traj[0, : self.n_action_steps]        # (act_steps, 7) normalized [-1, 1]
+        chunk = traj[0, : self.n_action_steps]        # (act_steps, action_dim) normalized [-1, 1]
         # un-normalize to the raw [-1, 1] action PolicyEnv.step expects (it applies ActionPipeline).
         return ((chunk + 1.0) / 2.0 * self._act_range + self.action_min).astype(np.float32)
 
@@ -118,11 +134,14 @@ def main() -> None:
     p.add_argument("--ft-denoising-steps", type=int, default=10,
                    help="10 for a finetuned checkpoint, 0 for a BC (pretrained) checkpoint")
     p.add_argument("--normalization", type=Path,
-                   default=_REPO / "dataset/dppo/single_lift_mushroom_soft_pcd/normalization.npz")
+                   default=_REPO / "dataset/dppo/single_lift_mushroom_soft_abs_pcd_rot6d/normalization.npz",
+                   help="normalization.npz from the SAME converted dataset the ckpt trained on "
+                        "(its obs_min/max width must match the proprio dim: 10 rot6d / 8 quat)")
     p.add_argument("--setup", type=Path, default=_PKG / "configs/setup/real_lab.yaml")
     p.add_argument("--obs-config", type=Path,
-                   default=_PKG / "configs/obs/point_cloud_1cam_outlier.yaml",
-                   help="must match the student's training point-cloud processing (crop/1024/outlier)")
+                   default=_PKG / "configs/obs/point_cloud_1cam_outlier_rot6d.yaml",
+                   help="must match the student's training obs (orientation encoding + point-cloud "
+                        "crop/1024/outlier). rot6d default; use point_cloud_1cam_outlier.yaml for a quat student")
     p.add_argument("--action-config", type=Path,
                    default=_PKG / "configs/action/abs_pose_abs_gripper.yaml")
     p.add_argument("--cond-steps", type=int, default=2)
@@ -157,9 +176,14 @@ def main() -> None:
 
     backend = RealBackend(setup)
     env = PolicyEnv(backend, obs_config, action_config, task=None, max_episode_steps=10 ** 9)
+    # Proprio view + obs_dim are DERIVED from the obs config (quat -> 8, rot6d -> 10), so the adapter
+    # matches whatever the student trained on without hardcoding either representation.
+    proprio_view = _proprio_view(obs_config)
+    obs_dim = _proprio_dim(obs_config)
+    print(f"proprio view = {proprio_view}  (obs_dim={obs_dim})")
     policy = DPPOPolicyAdapter(
-        args.ckpt, args.normalization, action_dim=action_config.action_dim,
-        cond_steps=args.cond_steps, act_steps=args.act_steps,
+        args.ckpt, args.normalization, obs_dim=obs_dim, action_dim=action_config.action_dim,
+        proprio_view=proprio_view, cond_steps=args.cond_steps, act_steps=args.act_steps,
         ft_denoising_steps=args.ft_denoising_steps, device=args.device)
     run_deploy_loop(env, policy, args.max_steps, args.rate,
                     pose_scale=args.pose_scale, record_path=args.record,
