@@ -18,10 +18,15 @@ class PointCloudConfig:
     #     < outlier_min_neighbors valid points (removes L515 flying-pixel/edge noise).
     #   focus_z_lo / focus_r_ee: object focus — keep only points that are low
     #     (z < focus_z_lo) OR near the EE (within focus_r_ee), dropping the arm body.
+    #   focus_arm_weight: if set (0<w<1), SOFT-focus instead of hard drop — arm-body points get
+    #     sampling weight w (fewer of them survive the subsample), object/near-EE points weight 1,
+    #     so the max_points budget concentrates on the object while keeping SOME arm context. 0 =
+    #     hard drop (== focus_object); None/1 = no downweight. Needs focus_z_lo set.
     outlier_voxel_size: Optional[float] = None
     outlier_min_neighbors: int = 2
     focus_z_lo: Optional[float] = None
     focus_r_ee: float = 0.13
+    focus_arm_weight: Optional[float] = None
 
     # Depth range (camera-frame z, meters). Points outside [depth_min, depth_max] are
     # discarded before backprojection. depth_max=1.0 is enough for our workspace
@@ -203,6 +208,7 @@ class ObsConfig:
                 outlier_voxel_size=out_d.get("voxel_size"),
                 outlier_min_neighbors=out_d.get("min_neighbors", 2),
                 focus_z_lo=foc_d.get("z_lo"),
+                focus_arm_weight=foc_d.get("arm_weight"),
                 focus_r_ee=foc_d.get("r_ee", 0.13),
                 depth_min=float(pc_d.get("depth_min", 0.01)),
                 depth_max=float(pc_d.get("depth_max", 3.0)),

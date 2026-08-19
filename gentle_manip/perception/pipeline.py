@@ -14,6 +14,7 @@ from gentle_manip.perception.pointcloud_ops import (
     crop_pointcloud,
     remove_outliers_voxel,
     focus_object,
+    focus_weights,
     subsample_pointcloud,
     pointcloud_to_voxel_grid,
 )
@@ -112,14 +113,26 @@ class PerceptionPipeline:
                     self.cfg.point_cloud.outlier_voxel_size,
                     self.cfg.point_cloud.outlier_min_neighbors,
                 )
+            weights = None
             if self.cfg.point_cloud.focus_z_lo is not None:
-                pts, valid = focus_object(
-                    pts, valid, raw.ee_pos,
-                    self.cfg.point_cloud.focus_z_lo,
-                    self.cfg.point_cloud.focus_r_ee,
-                )
+                aw = self.cfg.point_cloud.focus_arm_weight
+                if aw is not None and 0.0 < aw < 1.0:
+                    # SOFT focus: downweight the arm body (object + near-EE stay full-weight) so the
+                    # fixed max_points budget concentrates on the object, WITHOUT dropping the arm
+                    # entirely — a weighted subsample instead of the hard mask below.
+                    weights = focus_weights(
+                        pts, raw.ee_pos, self.cfg.point_cloud.focus_z_lo,
+                        self.cfg.point_cloud.focus_r_ee, aw,
+                    )
+                else:
+                    # HARD focus (arm_weight None/0): drop the arm body outright.
+                    pts, valid = focus_object(
+                        pts, valid, raw.ee_pos,
+                        self.cfg.point_cloud.focus_z_lo,
+                        self.cfg.point_cloud.focus_r_ee,
+                    )
             obs["point_cloud"] = subsample_pointcloud(
-                pts, valid, self.cfg.point_cloud.max_points
+                pts, valid, self.cfg.point_cloud.max_points, weights=weights
             )                                                         # (N, max_points, 3)
 
         if self.cfg.voxel is not None:

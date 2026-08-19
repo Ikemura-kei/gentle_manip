@@ -1,0 +1,23 @@
+# [experiment] SOFT mushroom lift, abs action, rot6d + SOFT ARM-FOCUS point cloud.
+# Used by: collect_demos_synth_v3 (FEM) / DPPO training + eval
+# Status: experimental (does object-focused point sampling help the policy?)
+#
+# IDENTICAL to single_lift_mushroom_soft_abs_action_rot6d EXCEPT obs -> superset_soft_rot6d_armfocus,
+# which soft-downweights arm-body points so the 1024-point budget concentrates on the object (weighted
+# subsample, arm_weight 0.15; finger-safe near-EE region full weight). Train + deploy consistently.
+task: single_lift_mushroom_soft
+action: abs_pose_abs_gripper
+dr: soft_orientation
+augmentation: l515_noise
+
+obs: superset_soft_rot6d_armfocus     # rot6d + arm-downweighted point cloud
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400

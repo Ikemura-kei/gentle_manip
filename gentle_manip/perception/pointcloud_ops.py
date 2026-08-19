@@ -104,12 +104,38 @@ def focus_object(
     return points, valid & (low | near)
 
 
+def focus_weights(
+    points: np.ndarray,
+    ee_pos: np.ndarray,
+    z_lo: float,
+    r_ee: float,
+    arm_weight: float,
+) -> np.ndarray:
+    """SOFT version of focus_object: instead of DROPPING the arm, return per-point SAMPLING WEIGHTS
+    so a weighted subsample keeps FEWER arm points and MORE object points (better object coverage for
+    the same max_points budget), while never starving the object region.
+
+    Weight 1.0 for the "object region" — LOW (z < z_lo, table + resting object) OR NEAR the EE
+    (within r_ee, gripper fingers + grasped/lifted object); ``arm_weight`` (<1) everywhere else (the
+    forearm/upper-arm body). The near-EE region is the finger-safe zone: it always stays full-weight,
+    so a grasped object is never downweighted. arm_weight=0 reproduces focus_object (hard drop);
+    arm_weight=1 is a no-op. Heuristic only (points + ee_pos, both in RawObs) — no CAD/FK, so it runs
+    identically in sim and real. Feed the result to subsample_pointcloud(..., weights=).
+
+    Returns: (num_envs, M) float32 weights.
+    """
+    low = points[..., 2] < z_lo
+    near = np.linalg.norm(points - ee_pos[:, np.newaxis, :], axis=-1) < r_ee
+    return np.where(low | near, 1.0, float(arm_weight)).astype(np.float32)
+
+
 def subsample_pointcloud(
     points: np.ndarray,
     valid: np.ndarray,
     max_points: int,
     seed: int = 0,
     vectorized: bool = False,
+    weights: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """
     Sample exactly max_points from each env's valid points.
@@ -123,15 +149,20 @@ def subsample_pointcloud(
         max_points: target number of output points per env.
         seed:       RNG seed for reproducibility.
         vectorized: if True, use argsort-based batch sampling (no Python loop).
-                    If False, loop over envs. Both produce identical output.
+                    If False, loop over envs. Both produce identical output when weights is None.
+        weights:    optional (num_envs, M) float >0 — per-point sampling weight. Points with
+                    higher weight are more likely to be kept (weighted sampling WITHOUT replacement,
+                    Efraimidis-Spirakis). Use to REDISTRIBUTE the fixed max_points budget toward the
+                    object (weight 1) and away from the arm body (weight <1) — see focus_weights.
+                    None = uniform (current behaviour).
 
     Returns:
         (num_envs, max_points, 3) float32. Zero-padded where valid count < max_points.
     """
     if vectorized:
-        return _subsample_batched(points, valid, max_points, seed)
+        return _subsample_batched(points, valid, max_points, seed, weights)
     else:
-        return _subsample_loop(points, valid, max_points, seed)
+        return _subsample_loop(points, valid, max_points, seed, weights)
 
 
 def _subsample_batched(
@@ -139,17 +170,22 @@ def _subsample_batched(
     valid: np.ndarray,
     max_points: int,
     seed: int,
+    weights: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """
-    Vectorized sampling: assign each point a random score in [0,1] if valid,
-    else -inf. Argsort descending floats valid points to the top. Take top max_points.
+    Vectorized sampling: assign each valid point a key, argsort descending, take top max_points.
+    Uniform key U(0,1) (weights None) OR the weighted key U^(1/w) (weights given) — the
+    Efraimidis-Spirakis A-ES key for weighted sampling without replacement, so higher-weight points
+    win more slots on average.
     """
     num_envs = points.shape[0]
     rng = np.random.default_rng(seed)
 
-    scores = np.where(valid,
-                      rng.uniform(size=valid.shape).astype(np.float32),
-                      -np.inf)                          # (num_envs, M)
+    u = rng.uniform(size=valid.shape).astype(np.float32)
+    if weights is not None:
+        w = np.maximum(np.asarray(weights, np.float32), 1e-6)   # w>0; higher w -> key closer to 1
+        u = u ** (1.0 / w)
+    scores = np.where(valid, u, -np.inf)                        # (num_envs, M)
 
     top_idx = np.argsort(-scores, axis=1)[:, :max_points]  # (num_envs, max_points)
 
@@ -168,8 +204,10 @@ def _subsample_loop(
     valid: np.ndarray,
     max_points: int,
     seed: int,
+    weights: Optional[np.ndarray] = None,
 ) -> np.ndarray:
-    """Per-env loop sampling. Simpler but slower for large num_envs."""
+    """Per-env loop sampling. Simpler but slower for large num_envs. weights (N,M) -> weighted
+    sampling without replacement (same A-ES key as the batched path, so identical distribution)."""
     num_envs = points.shape[0]
     rng = np.random.default_rng(seed)
     out = np.zeros((num_envs, max_points, 3), dtype=np.float32)
@@ -179,7 +217,12 @@ def _subsample_loop(
         if idx.size == 0:
             continue
         if idx.size >= max_points:
-            chosen = rng.choice(idx, size=max_points, replace=False)
+            if weights is None:
+                chosen = rng.choice(idx, size=max_points, replace=False)
+            else:
+                w = np.maximum(weights[i, idx].astype(np.float32), 1e-6)
+                key = rng.uniform(size=idx.size).astype(np.float32) ** (1.0 / w)   # A-ES key
+                chosen = idx[np.argsort(-key)[:max_points]]
         else:
             chosen = idx                                # zero-pad the rest
         out[i, : len(chosen)] = points[i, chosen]
