@@ -84,16 +84,23 @@ def _read_dr_rows(dr_csv: Path) -> list:
 
 
 def _replay_succeeded(frames_pos, yield_stress: float, frames_stress,
-                      min_rise_m: float = 0.08) -> bool:
+                      min_rise_m: float = 0.04) -> tuple:
     """A replay counts as a successful gentle lift iff the object's centroid
     rose meaningfully (holds -> actually lifted, not a missed/slipped grasp)
     and never exceeded yield stress (holds -> gentle, matching the same
     height+no-crush success definition used everywhere else in this
-    project)."""
+    project). min_rise_m=0.04 (not the original demo's own ~0.15-0.2m rise):
+    a REPLAY on a freshly-reset scene often lifts somewhat less than the
+    original collection run even when the grasp genuinely holds (dr_params.csv
+    row/episode misalignment means the replay's reset conditions are only an
+    approximation of what the episode's actions were actually tuned for) --
+    0.04m is comfortably above resting-state jitter (<1cm) while not
+    rejecting genuine, visually-clear lifts. Returns (ok, rise, peak_stress)
+    so callers can log the real numbers instead of just pass/fail."""
     z = np.stack(frames_pos).mean(axis=1)[:, 2]
     rise = float(z[-10:].mean() - z[0])
     peak_stress = float(np.max([s.max() for s in frames_stress]))
-    return rise >= min_rise_m and peak_stress <= yield_stress
+    return rise >= min_rise_m and peak_stress <= yield_stress, rise, peak_stress
 
 
 def _replay_one(worker, ep, dr, n_frames_cap):
@@ -137,14 +144,20 @@ def _replay_and_capture(category: str, n_frames_cap: int = 260, max_tries: int =
             print(f"[{category}] trying episode {i}/{n_candidates-1} from {run_dir.name}, "
                  f"{len(ep['actions'])} steps", flush=True)
             frames_pos, frames_stress = _replay_one(worker, ep, dr, n_frames_cap)
-            if fallback is None:
-                fallback = (frames_pos, frames_stress)
-            if _replay_succeeded(frames_pos, task.object_yield_stress, frames_stress):
+            ok, rise, peak_stress = _replay_succeeded(
+                frames_pos, task.object_yield_stress, frames_stress)
+            print(f"[{category}]   episode {i}: rise={rise*100:.1f}cm "
+                 f"peak_stress={peak_stress/task.object_yield_stress*100:.0f}%yield "
+                 f"-> {'OK' if ok else 'reject'}", flush=True)
+            if fallback is None or rise > fallback[2]:
+                fallback = (frames_pos, frames_stress, rise)
+            if ok:
                 print(f"[{category}] episode {i} replayed as a successful lift -- using it",
                      flush=True)
                 return frames_pos, frames_stress, task.object_yield_stress
         print(f"[{category}] WARNING: none of the first {n_candidates} episodes replayed as a "
-             f"clean successful lift -- falling back to episode 0's replay anyway", flush=True)
+             f"clean successful lift -- using the best-rise candidate "
+             f"({fallback[2]*100:.1f}cm) instead", flush=True)
         return fallback[0], fallback[1], task.object_yield_stress
     finally:
         worker.close()
@@ -219,8 +232,12 @@ def main():
 
     clip_paths = []
     for cat in args.categories:
-        frames_pos, frames_stress, yield_stress = _replay_and_capture(cat, args.max_frames)
         out_path = args.out_dir / f"{cat}_stress_closeup.mp4"
+        if out_path.exists():
+            print(f"[{cat}] already rendered -- skipping", flush=True)
+            clip_paths.append(out_path)
+            continue
+        frames_pos, frames_stress, yield_stress = _replay_and_capture(cat, args.max_frames)
         _render_category_video(cat, frames_pos, frames_stress, yield_stress, out_path)
         clip_paths.append(out_path)
 
