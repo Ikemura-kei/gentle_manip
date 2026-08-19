@@ -89,3 +89,6 @@ tetgen-tmpfile*
 dataset/demos_divtest*/
 dataset/demos_smoke/
 misc_scripts/
+
+# local arm-focus demo viz (not tracked)
+dataset/demos_armfocus/
