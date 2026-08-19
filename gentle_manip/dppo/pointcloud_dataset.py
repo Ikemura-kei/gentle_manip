@@ -27,6 +27,14 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
         data = np.load(dataset_path, allow_pickle=False)
         total = int(np.sum(data["traj_lengths"][:max_n_episodes]))
         self.point_clouds = torch.from_numpy(data["point_cloud"][:total]).float().to(device)
+        # Auxiliary-objective LABELS (training-only), aligned per-transition. Present iff the
+        # converter wrote them; the model reads them from conditions only when aux heads are on
+        # (extra condition keys are ignored by the baseline network). The label is for the CURRENT
+        # step (index `start`), matching the last conditioning cloud (pc_cond_steps=1).
+        self.aux_contact = (torch.from_numpy(data["aux_contact"][:total]).float().to(device)
+                            if "aux_contact" in data.files else None)
+        self.aux_object_pos = (torch.from_numpy(data["aux_object_pos"][:total]).float().to(device)
+                               if "aux_object_pos" in data.files else None)
 
     def __getitem__(self, idx):
         batch = super().__getitem__(idx)             # {"state": (cond_steps, Do)}, actions
@@ -36,4 +44,8 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
                           for t in reversed(range(self.pc_cond_steps))])
         conditions = dict(batch.conditions)
         conditions["point_cloud"] = pc               # (pc_cond_steps, N, 3)
+        if self.aux_contact is not None:
+            conditions["aux_contact"] = self.aux_contact[start]        # (1,) binary
+        if self.aux_object_pos is not None:
+            conditions["aux_object_pos"] = self.aux_object_pos[start]  # (3,) normalized
         return Batch(batch.actions, conditions)

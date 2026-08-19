@@ -64,6 +64,17 @@ class TactileConfig:
     # GelSight Mini images are passed through as-is (no processing in pipeline)
 
 
+# Thresholds for the binary PrivilegedConfig.contact label (shared by PolicyEnv and the
+# grasp-synthesis collector so the two stay in sync).
+#   SOFT: max(finger-link -> nearest-particle distance) < this = pad touching the object.
+#   Calibrated from the finger-link geometry: the link origin sits ~0.042 m behind the pad
+#   face, so the grasp/hold distance plateaus at ~0.042 m while a free approach is >0.10 m;
+#   0.05 m = plateau + ~8 mm captures contact without leaking the descent.
+CONTACT_DIST_THRESH_M = 0.05
+#   RIGID: gripper-object contact-force magnitude (N) above which we call it contact.
+CONTACT_FORCE_THRESH_N = 0.5
+
+
 @dataclass
 class PrivilegedConfig:
     """SIM-ONLY privileged observations for a state-based RL *teacher* (distilled to a
@@ -82,6 +93,13 @@ class PrivilegedConfig:
                                   # force magnitudes between the robot (gripper) and the object,
                                   # Newtons. Rigid bodies have no von Mises stress; this is the
                                   # analogous "how hard is the grip" scalar. Requires a rigid task.
+    contact: bool = False         # PROPER binary gripper-object contact (num_envs, 1) — an AUX
+                                  # objective LABEL (training-only). SOFT: both finger links within
+                                  # CONTACT_DIST_THRESH_M of the nearest object particle (geometric —
+                                  # MPM has no rigid contact pairs, and stress is NOT contact: the
+                                  # object stresses under gravity with nothing touching it). RIGID:
+                                  # contact_force > CONTACT_FORCE_THRESH_N. Distinct from stress /
+                                  # contact_force (which are magnitudes, not a clean touch/no-touch).
 
 
 @dataclass
@@ -186,6 +204,8 @@ class ObsConfig:
                 keys.append("priv_stress")
             if self.privileged.contact_force:
                 keys.append("priv_contact_force")
+            if self.privileged.contact:
+                keys.append("priv_contact")
         return keys
 
     def validate(self) -> None:
@@ -244,6 +264,7 @@ class ObsConfig:
                 object_dr_params=bool(pv.get("object_dr_params", False)),
                 stress=bool(pv.get("stress", False)),
                 contact_force=bool(pv.get("contact_force", False)),
+                contact=bool(pv.get("contact", False)),
             )
 
         cfg = cls(

@@ -64,6 +64,10 @@ class XArm7Sim:
             self.robot.set_dofs_force_range(-flim, flim, self.grip_dofs)
 
         self.ee = robot_entity.get_link(cfg.EE_LINK)
+        # Gripper finger links — used for PROPER soft-body contact detection (geometric
+        # finger<->particle proximity, since MPM has no rigid contact pairs for get_contacts).
+        self.left_finger = robot_entity.get_link("left_finger")
+        self.right_finger = robot_entity.get_link("right_finger")
 
         self.default_joint_angles = np.array(
             overrides.get("default_joint_angles", cfg.DEFAULT_JOINT_ANGLES), dtype=np.float32
@@ -190,6 +194,14 @@ class XArm7Sim:
         )
         self.robot.set_dofs_position(grip, self.grip_dofs)
         self.robot.control_dofs_position(grip, self.grip_dofs)
+
+    def finger_positions(self) -> tuple:
+        """World positions of the two gripper finger links, (B,3) each. Used for
+        geometric gripper<->soft-object contact detection in the worker."""
+        return (
+            _np(self.left_finger.get_pos()).astype(np.float32),
+            _np(self.right_finger.get_pos()).astype(np.float32),
+        )
 
     # ── state read (numpy; matches RawObs robot fields) ──────────────────────────
     def read_state(self) -> dict:

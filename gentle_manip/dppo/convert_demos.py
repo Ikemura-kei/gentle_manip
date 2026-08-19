@@ -66,6 +66,23 @@ def convert(demo_paths: Sequence[Path], out_dir: Path, obs_keys: Sequence[str] =
     clouds = ([np.asarray(ep["observations"][pointcloud_key], np.float32) for ep in episodes]
               if pointcloud_key else None)
 
+    # Auxiliary-objective LABELS (training-only privileged targets; auto-detected when the demo
+    # recorded them). aux_contact = binary gripper-object contact (0/1, kept raw); aux_object_pos =
+    # object COM, normalized to [-1,1] like the state so its MSE is balanced. Independent of the
+    # state view — the point-cloud student's state (PROPRIO_VIEW) does NOT contain these.
+    obs0 = episodes[0]["observations"]
+    aux_contact = ([np.asarray(ep["observations"]["priv_contact"], np.float32).reshape(len(ep["actions"]), 1)
+                    for ep in episodes] if "priv_contact" in obs0 else None)
+    aux_objpos = ([np.asarray(ep["observations"]["priv_object_pos"], np.float32).reshape(len(ep["actions"]), 3)
+                   for ep in episodes] if "priv_object_pos" in obs0 else None)
+    op_min = op_max = None
+    if aux_objpos is not None:
+        all_op = np.concatenate(aux_objpos, axis=0)
+        op_min, op_max = all_op.min(0), all_op.max(0)
+
+    def norm_op(o):
+        return 2 * (o - op_min) / (op_max - op_min + 1e-6) - 1
+
     # normalization stats over ALL data (raw units)
     all_s = np.concatenate(states, axis=0)
     all_a = np.concatenate(actions, axis=0)
@@ -100,18 +117,26 @@ def convert(demo_paths: Sequence[Path], out_dir: Path, obs_keys: Sequence[str] =
                       terminals=np.zeros(len(s), bool), traj_lengths=tl)
         if clouds is not None:                       # (T_total, N, 3) raw xyz
             arrays["point_cloud"] = np.concatenate([clouds[i] for i in idxs], axis=0)
+        if aux_contact is not None:                  # (T_total, 1) binary 0/1
+            arrays["aux_contact"] = np.concatenate([aux_contact[i] for i in idxs], axis=0)
+        if aux_objpos is not None:                   # (T_total, 3) object COM, normalized [-1,1]
+            arrays["aux_object_pos"] = np.concatenate([norm_op(aux_objpos[i]) for i in idxs], axis=0)
         np.savez_compressed(out_dir / f"{split_name}.npz", **arrays)
         return len(idxs)
 
     n_tr = _write("train", train_idx)
     n_va = _write("val", val_idx)
-    np.savez_compressed(out_dir / "normalization.npz", obs_min=obs_min, obs_max=obs_max,
-                        action_min=action_min, action_max=action_max)
+    norm = dict(obs_min=obs_min, obs_max=obs_max, action_min=action_min, action_max=action_max)
+    if aux_objpos is not None:                        # object_pos normalization (aux target)
+        norm["aux_object_pos_min"] = op_min
+        norm["aux_object_pos_max"] = op_max
+    np.savez_compressed(out_dir / "normalization.npz", **norm)
 
     meta = dict(obs_keys=list(obs_keys), obs_dim=int(obs_dim), action_dim=int(act_dim),
                 n_episodes=n, n_train_traj=n_tr, n_val_traj=n_va,
                 total_steps=int(all_s.shape[0]), out_dir=str(out_dir),
-                point_cloud=(None if clouds is None else list(clouds[0].shape[1:])))
+                point_cloud=(None if clouds is None else list(clouds[0].shape[1:])),
+                aux_contact=(aux_contact is not None), aux_object_pos=(aux_objpos is not None))
     return meta
 
 

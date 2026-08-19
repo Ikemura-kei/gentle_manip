@@ -1,12 +1,18 @@
-# [dppo-pretrain] BC-pretrain a PointNet diffusion policy on SOFT mushroom lift demos — ABSOLUTE action.
+# [dppo-pretrain] BC-pretrain a PointNet diffusion policy on SOFT mushroom lift demos — ABSOLUTE action,
+# QUAT proprio + AUX-OBJECTIVE ablation base.
 # Used by: third_party/dppo/script/run.py (TrainDiffusionAgent) via gentle_manip.dppo.train
-# Status: experimental (DPPO step-2 point-cloud student on the abs-action FEM-gentleness collection, jcw)
+# Status: experimental (aux-objective ablation: baseline vs +contact vs +object-pos vs +both)
 #
-# Soft twin of single_lift_mushroom_rigid_abs_pcd/pre_diffusion_pointnet.yaml: action_dim=10
-# (abs pos3 + 6D rotation6 + gripper1), experiment=single_lift_mushroom_soft_abs_action. Same student
-# view as the delta soft_pcd config (8-dim proprio + 1024-pt cloud), just the abs action head.
-# Data = gentle_manip.dppo.convert_demos --view student --point-cloud on the jcw (26-08-08) dataset.
-# Run with envs/dppo.
+# Quat twin of single_lift_mushroom_soft_abs_pcd_rot6d/pre_diffusion_pointnet.yaml (bwvei, 0.81@ep400):
+# obs_dim 8 (ee_pos3 + ee_QUAT4 + gripper1) instead of 10 (rot6d), and the model is AuxDiffusionModel
+# with BOTH aux heads OFF / weights 0 -> behaviorally IDENTICAL to the plain DiffusionModel baseline.
+# The three aux variants are launched from THIS config with simple overrides (keys already present):
+#   +contact : model.network.aux_contact=true      model.aux_contact_weight=1.0
+#   +objpos  : model.network.aux_object_pos=true    model.aux_object_pos_weight=1.0
+#   +both    : all four of the above
+# Data = gentle_manip.dppo.convert_demos --view student --point-cloud on the aux (armfocus) dataset;
+# the converter auto-writes priv_contact + priv_object_pos aux labels. Epochs = 1000 (300 demos = half
+# of bwvei's 600, so ~2x epochs-to-peak; peak ~ep800). Run with envs/dppo.
 defaults:
   - _self_
 hydra:
@@ -22,12 +28,12 @@ name: ${env}_pre_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
 logdir: ${oc.env:DPPO_LOG_DIR}/dppo-pretrain/${env}/${exp_id:}
 train_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/train.npz
 val_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/val.npz   # held-out split (BY TRAJECTORY)
-experiment: single_lift_mushroom_soft_abs_action   # env snapshot (task+obs+dr+ABS action); soft
+experiment: single_lift_mushroom_soft_abs_action_armfocus  # env snapshot (task+obs+dr+ABS action); soft
 
 seed: 42
 device: cuda:0
 env: single_lift_mushroom_soft_abs_pcd
-obs_dim: 8                    # proprio only (ee_pos3 + ee_quat4 + gripper1); cloud is separate
+obs_dim: 8                     # proprio only (ee_pos3 + ee_QUAT4 + gripper1); cloud is separate
 action_dim: 10                # abs pos3 + 6D rotation6 + gripper1
 denoising_steps: 20
 horizon_steps: 4
@@ -36,14 +42,14 @@ pc_cond_steps: 1             # clouds encoded per step (<= cond_steps)
 n_points: 1024
 visual_feature_dim: 256
 
-wandb:                          # enabled; disable per-run with `wandb=null`, or WANDB_MODE=offline
+wandb:                          # ONLINE; all four ablation runs share this project (env is shared)
   entity: ${oc.env:DPPO_WANDB_ENTITY,null}   # null -> logged-in default account
   project: gentle-manip-${env}
   run: ${exp_id:}               # wandb run name == the experiment ID (matches the log dir)
-  group: dppo-pretrain
+  group: dppo-pretrain-aux
 
 train:
-  n_epochs: 700                 # per user: 700 iterations
+  n_epochs: 1000                # 300 demos (half of bwvei) -> ~2x epochs-to-peak; peak ~ep800
   batch_size: 128
   learning_rate: 1e-4
   weight_decay: 1e-6
@@ -53,13 +59,15 @@ train:
     min_lr: 1e-5
   epoch_start_ema: 10
   update_ema_freq: 5
-  save_model_freq: 100          # per user: checkpoint every 100 epochs
+  save_model_freq: 100          # checkpoint every 100 epochs -> eval @ 200..600,800,1000
   val_freq: 10
 
 model:
-  _target_: model.diffusion.diffusion.DiffusionModel
+  _target_: gentle_manip.dppo.aux_diffusion.AuxDiffusionModel
   predict_epsilon: True
   denoised_clip_value: 1.0
+  aux_contact_weight: 0.0       # >0 enables the contact BCE aux loss (variant: +contact / +both)
+  aux_object_pos_weight: 0.0    # >0 enables the object-pos MSE aux loss (variant: +objpos / +both)
   network:
     _target_: gentle_manip.dppo.pointnet_diffusion.PointNetDiffusionMLP
     action_dim: ${action_dim}
@@ -71,6 +79,8 @@ model:
     mlp_dims: [512, 512, 512]
     activation_type: ReLU
     residual_style: True
+    aux_contact: false          # build the contact head (variant: +contact / +both)
+    aux_object_pos: false       # build the object-pos head (variant: +objpos / +both)
     pointnet:
       in_channels: 3
       use_layernorm: True

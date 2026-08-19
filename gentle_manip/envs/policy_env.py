@@ -9,7 +9,11 @@ from gymnasium.spaces import Box, Dict
 from gentle_manip.envs.raw_obs import RawObs
 from gentle_manip.envs.sim_feedback import SimFeedback
 from gentle_manip.perception.augmentation import AugmentationConfig, build_augmentor
-from gentle_manip.perception.obs_config import ObsConfig
+from gentle_manip.perception.obs_config import (
+    ObsConfig,
+    CONTACT_DIST_THRESH_M,
+    CONTACT_FORCE_THRESH_N,
+)
 from gentle_manip.perception.pipeline import PerceptionPipeline
 from gentle_manip.actions.action_config import ActionConfig
 from gentle_manip.actions.pipeline import ActionPipeline
@@ -154,6 +158,8 @@ class PolicyEnv:
                 extra["priv_stress"] = Box(0.0, np.inf, (2,), np.float32)
             if self._priv.contact_force:
                 extra["priv_contact_force"] = Box(0.0, np.inf, (1,), np.float32)
+            if self._priv.contact:
+                extra["priv_contact"] = Box(0.0, 1.0, (1,), np.float32)
             space = Dict({**space.spaces, **extra})
         self.observation_space = space
         self.action_space = self.action_pipeline.build_action_space()
@@ -338,6 +344,17 @@ class PolicyEnv:
             # magnitudes, Newtons) — the analogue of priv_stress for rigid tasks.
             cf = np.asarray(sf.extra["contact_force"], dtype=np.float32)   # (N,)
             out["priv_contact_force"] = cf[:, None]                       # (N, 1)
+        if self._priv.contact:
+            # PROPER binary gripper-object contact (aux label). Soft: both finger links
+            # within CONTACT_DIST_THRESH_M of the nearest particle (geometric — see
+            # obs_config). Rigid: contact_force above CONTACT_FORCE_THRESH_N.
+            if "gripper_object_dist" in sf.extra:                         # soft
+                d = np.asarray(sf.extra["gripper_object_dist"], dtype=np.float32)   # (N,)
+                contact = (d < CONTACT_DIST_THRESH_M).astype(np.float32)
+            else:                                                         # rigid
+                cf = np.asarray(sf.extra["contact_force"], dtype=np.float32)
+                contact = (cf > CONTACT_FORCE_THRESH_N).astype(np.float32)
+            out["priv_contact"] = contact[:, None]                       # (N, 1)
         return out
 
     def _require_sim_feedback(self) -> SimFeedback:

@@ -1,0 +1,24 @@
+# [experiment] SOFT mushroom lift, abs action, quat + ARM-FOCUS cloud + privileged AUX LABELS.
+# Used by: collect_demos_synth_v3 (FEM) / DPPO aux-objective training + eval
+# Status: experimental (auxiliary-objective IL ablation: baseline vs +contact vs +object-pos vs both)
+#
+# IDENTICAL to single_lift_mushroom_soft_abs_action EXCEPT obs -> superset_soft_armfocus, which adds
+# the arm-focus point cloud (denser object points) and records the AUX LABELS: priv_object_pos
+# (position regression) + priv_contact (PROPER binary gripper-object contact, geometric — not a stress
+# proxy). Quat student (obs_dim 8), abs action (action_dim 10). Collect with FEM (v3) + 2.5mm squeeze.
+task: single_lift_mushroom_soft
+action: abs_pose_abs_gripper
+dr: soft_orientation          # ±45 pitch/roll, full yaw, flip + material DR (standard soft)
+augmentation: l515_noise
+
+obs: superset_soft_armfocus   # quat + arm-focus cloud + privileged aux labels
+views:
+  teacher: [privileged]
+  student: [point_cloud]       # ee_pos + ee_quat + gripper + point_cloud (obs_dim 8)
+
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400

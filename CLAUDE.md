@@ -554,6 +554,16 @@ class PrivilegedConfig:
     contact_force:    bool = False  # priv_contact_force (N,1) — sum of gripper-object contact
                                     #   force magnitudes (Newtons, rigid only). The rigid-body
                                     #   analogue of `stress`; see SimFeedback.extra["contact_force"].
+    contact:          bool = False  # priv_contact     (N,1)  — PROPER binary gripper-object contact
+                                    #   (an AUX-objective LABEL, training-only). SOFT: both finger
+                                    #   links within CONTACT_DIST_THRESH_M (0.05) of the nearest MPM
+                                    #   particle — geometric, since MPM has no rigid contact pairs and
+                                    #   stress is NOT contact (a soft body stresses under gravity with
+                                    #   nothing touching it). RIGID: contact_force > CONTACT_FORCE_THRESH_N
+                                    #   (0.5). Worker: XArm7Sim.finger_positions() -> state["gripper_object_dist"];
+                                    #   thresholds in perception/obs_config.py, shared by PolicyEnv +
+                                    #   the collector so the two stay in sync. Distinct from stress /
+                                    #   contact_force (magnitudes, not a clean touch/no-touch).
 ```
 
 `object_quat` vs `object_rot6d`: for the EE quaternion (small workspace range) the sign-flip

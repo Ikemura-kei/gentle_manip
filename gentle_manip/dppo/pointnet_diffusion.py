@@ -75,7 +75,8 @@ class PointNetDiffusionMLP(nn.Module):
     def __init__(self, action_dim, horizon_steps, cond_dim,
                  pointnet=None, pc_cond_steps=1, visual_feature_dim=256,
                  time_dim=16, mlp_dims=(512, 512, 512), activation_type="ReLU",
-                 out_activation_type="Identity", use_layernorm=False, residual_style=True):
+                 out_activation_type="Identity", use_layernorm=False, residual_style=True,
+                 aux_contact=False, aux_object_pos=False, aux_hidden=128):
         super().__init__()
         pn = dict(pointnet or {})
         pn.setdefault("out_channels", visual_feature_dim)
@@ -92,14 +93,39 @@ class PointNetDiffusionMLP(nn.Module):
                               activation_type=activation_type,
                               out_activation_type=out_activation_type,
                               use_layernorm=use_layernorm)
+        # Auxiliary-objective heads on the noise-independent cond feature [pointnet_feat ⊕ state]
+        # (width = visual_feature_dim + cond_dim). Training-only; NOT used at inference — the
+        # deployed policy calls forward() only, so these add ZERO deployment cost. A head exists
+        # iff its flag is on, so the baseline (both off) is bit-identical to the original module.
+        self._aux_dim = visual_feature_dim + cond_dim
+        self.contact_head = (nn.Sequential(nn.Linear(self._aux_dim, aux_hidden), nn.ReLU(),
+                                           nn.Linear(aux_hidden, 1)) if aux_contact else None)
+        self.pos_head = (nn.Sequential(nn.Linear(self._aux_dim, aux_hidden), nn.ReLU(),
+                                       nn.Linear(aux_hidden, 3)) if aux_object_pos else None)
+
+    def _cond_encoded(self, cond: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """[pointnet_feat ⊕ flattened proprio] — the shared conditioning feature."""
+        B = cond["state"].shape[0]
+        state = cond["state"].view(B, -1)
+        feat = _encode_clouds(self.backbone, cond["point_cloud"], self.pc_cond_steps)
+        return torch.cat([feat, state], dim=-1)
+
+    def aux_predict(self, cond: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        """Auxiliary predictions from the conditioning feature only (no noise/time). Returns the
+        contact LOGIT (B,1) and/or normalized object position (B,3) for whichever heads exist."""
+        ce = self._cond_encoded(cond)
+        out = {}
+        if self.contact_head is not None:
+            out["contact_logit"] = self.contact_head(ce)
+        if self.pos_head is not None:
+            out["object_pos"] = self.pos_head(ce)
+        return out
 
     def forward(self, x, time, cond: Dict[str, torch.Tensor], **kwargs):
         """x: (B, Ta, Da); time: (B,); cond: {state:(B,To,Do), point_cloud:(B,Tpc,N,3)}."""
         B, Ta, Da = x.shape
         x = x.view(B, -1)
-        state = cond["state"].view(B, -1)
-        feat = _encode_clouds(self.backbone, cond["point_cloud"], self.pc_cond_steps)
-        cond_encoded = torch.cat([feat, state], dim=-1)
+        cond_encoded = self._cond_encoded(cond)
         time_emb = self.time_embedding(time.view(B, 1)).view(B, self.time_dim)
         x = torch.cat([x, time_emb, cond_encoded], dim=-1)
         return self.mlp_mean(x).view(B, Ta, Da)
