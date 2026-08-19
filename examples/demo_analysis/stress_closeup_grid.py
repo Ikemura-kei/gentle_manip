@@ -41,6 +41,29 @@ REPO = Path(__file__).resolve().parents[2]
 
 STRESS_CMAP = LinearSegmentedColormap.from_list("gentle_stress", ["#f6e27a", "#e8892f", "#b5251f"])
 
+# Tracking-camera params -- MUST match _render_category_video's matplotlib
+# view_init(elev=14, azim=50) and its EMA-smoothed centroid tracking exactly,
+# so the RGB video is the same viewpoint on the same rollout, not just "some
+# real camera somewhere" (caught live 2026-08-19: the first RGB pass used the
+# scene's static cam_ext -- a totally different framing from the closeup's
+# custom zoomed/tracking view, and a SEPARATE replay call, so neither the
+# viewpoint nor the exact rollout matched).
+TRACK_ELEV_DEG = 14.0
+TRACK_AZIM_DEG = 50.0
+TRACK_DIST_MULT = 2.75   # ~= 1/tan(fov/2) for fov=40, so the object's half_extent
+                        # fills the frame similarly to the plot's tight ±half_extent axes
+TRACK_FOV = 40.0
+TRACK_EMA_ALPHA = 0.15  # must match _render_category_video's alpha
+
+
+def _spherical_offset(half_extent: float) -> np.ndarray:
+    r = half_extent * TRACK_DIST_MULT
+    elev = np.deg2rad(TRACK_ELEV_DEG)
+    azim = np.deg2rad(TRACK_AZIM_DEG)
+    return np.array([r * np.cos(elev) * np.cos(azim),
+                     r * np.cos(elev) * np.sin(azim),
+                     r * np.sin(elev)])
+
 
 def _find_episodes_and_dr(category: str):
     """Prefer the main (full) collection dir; fall back to the smoketest dir.
@@ -103,7 +126,17 @@ def _replay_succeeded(frames_pos, yield_stress: float, frames_stress,
     return rise >= min_rise_m and peak_stress <= yield_stress, rise, peak_stress
 
 
-def _replay_one(worker, ep, dr, n_frames_cap, capture_rgb: bool = False):
+def _replay_one(worker, ep, dr, n_frames_cap, capture_rgb: bool = False, track_cam=None):
+    """capture_rgb=True (with track_cam) renders from a camera whose pose is
+    updated EVERY step to match the stress plot's own tracking math exactly
+    (same EMA-smoothed centroid, same elev/azim, same distance) -- computed
+    causally (only past/current frames), so the RGB frames line up 1:1 in time
+    with frames_pos/frames_stress from this SAME call. Called with the SAME
+    (episode, dr row) pair as the search that found it; a single-env (num_envs=1)
+    MPM replay of identical actions from an identical reset is deterministic in
+    practice (the documented MPM non-determinism is specifically a multi-env
+    parallel-atomics effect), so this reproduces the same rollout, not a
+    different lift of the same category."""
     object_dxy = np.array([[dr["obj_dx"], dr["obj_dy"]]], dtype=np.float32)
     object_euler = np.deg2rad(np.array(
         [[dr["roll_deg"], dr["pitch_deg"], dr["yaw_deg"]]], dtype=np.float32))
@@ -113,16 +146,29 @@ def _replay_one(worker, ep, dr, n_frames_cap, capture_rgb: bool = False):
     obs = ep["observations"]
     T = min(len(ep["actions"]), n_frames_cap)
     frames_pos, frames_stress, frames_rgb = [], [], []
+    half_extent = None
+    center_ema = None
     for t in range(T):
         cur_pos  = obs["ee_pos"][t][None].astype(np.float32)
         cur_quat = obs["ee_quat"][t][None].astype(np.float32)
         cur_grip = obs["gripper_width"][t].astype(np.float32)  # already (1,) — no extra batch dim
         worker.step(cur_pos, cur_quat, cur_grip)
         st = worker.handle.objects[0].get_state()
-        frames_pos.append(_np(st.pos)[0].copy())        # (n_p, 3)
+        pos = _np(st.pos)[0].copy()
+        frames_pos.append(pos)                            # (n_p, 3)
         frames_stress.append(_np(st.von_mises)[0].copy())  # (n_p,)
-        if capture_rgb:
-            frames_rgb.append(worker.render_rgb())       # (H, W, 3) uint8, cam_ext
+        if capture_rgb and track_cam is not None:
+            center = pos.mean(axis=0)
+            if half_extent is None:
+                # Object size doesn't change during a lift -- fine to fix from
+                # frame 0 rather than needing the whole trajectory in advance.
+                half_extent = max(np.percentile(np.linalg.norm(pos - center, axis=-1), 98) * 1.6,
+                                  0.018)
+            center_ema = center if center_ema is None else (
+                TRACK_EMA_ALPHA * center + (1 - TRACK_EMA_ALPHA) * center_ema)
+            cam_pos = center_ema + _spherical_offset(half_extent)
+            track_cam.set_pose(pos=cam_pos, lookat=center_ema)
+            frames_rgb.append(_np(track_cam.render(rgb=True, depth=False)[0]).astype(np.uint8))
     return frames_pos, frames_stress, frames_rgb
 
 
@@ -139,10 +185,17 @@ def _replay_and_capture(category: str, n_frames_cap: int = 260, max_tries: int =
     exp = Experiment.load(f"single_lift_{category}_soft_easy")
     task = SingleLiftTask(exp.task_cfg)
     spec = task.scene_spec
+    # Extra camera purely for the tracking-shot RGB video -- pose is overwritten
+    # every frame via set_pose(), so its spec-time pos/lookat are placeholders.
+    from gentle_manip.scenes.scene_spec import CameraEntry
+    spec.cameras = list(spec.cameras) + [
+        CameraEntry(name="cam_track", pos=(0.5, -0.5, 0.5), lookat=(0.3, 0.0, 0.1),
+                   fov=TRACK_FOV, resolution=(320, 240))]
 
     worker = GenesisWorker(spec, num_envs=1, show_viewer=False,
                            settle_steps=30, settle_max_steps=200,
                            settle_vel_thresh=0.002, render_obs_cameras=True)
+    track_cam = worker.handle.cameras["cam_track"][0]
     try:
         fallback = None
         winner = None
@@ -172,7 +225,7 @@ def _replay_and_capture(category: str, n_frames_cap: int = 260, max_tries: int =
 
         ep, dr = winner
         frames_pos, frames_stress, frames_rgb = _replay_one(
-            worker, ep, dr, n_frames_cap, capture_rgb=True)
+            worker, ep, dr, n_frames_cap, capture_rgb=True, track_cam=track_cam)
         return frames_pos, frames_stress, frames_rgb, task.object_yield_stress
     finally:
         worker.close()
@@ -238,14 +291,14 @@ def _render_category_video(category: str, frames_pos, frames_stress, yield_stres
 
 
 def _render_rgb_video(frames_rgb, out_path: Path, fps: int = 30):
-    """Companion RGB video from the scene's cam_ext (real color, same replay as
-    the stress closeup) -- added 2026-08-19 so viewers can see the actual robot
-    grasp next to the abstract stress-colored point cloud, for clarity of HOW
-    each object is actually being grasped. Not pixel-aligned with the stress
-    plot's custom zoomed/tracking matplotlib camera (that view doesn't exist as
-    a real Genesis camera) -- cam_ext is the scene's one calibrated external
-    camera, giving the same workspace vantage used everywhere else in this repo
-    (eval renders, demo collection, etc.)."""
+    """Companion RGB video from a REAL Genesis tracking camera whose pose
+    matches the stress plot's own view_init/EMA-centroid math frame-for-frame
+    (see cam_track / _spherical_offset) -- so viewers see the actual robot
+    grasp from the SAME viewpoint on the SAME rollout as the abstract
+    stress-colored point cloud, not just some other camera's take on the same
+    category. Fixed 2026-08-19: the first version used the scene's static
+    cam_ext (a totally different, non-tracking framing) from a SEPARATE replay
+    call, so neither the viewpoint nor the exact timing matched."""
     import imageio
     imageio.mimwrite(str(out_path), [f for f in frames_rgb], fps=fps, quality=8)
     print(f"  -> {out_path}  ({len(frames_rgb)} rgb frames)")
