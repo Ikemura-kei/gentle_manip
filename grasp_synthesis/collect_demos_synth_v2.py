@@ -948,17 +948,29 @@ def _merge_shards(run_dir: Path) -> Optional[Path]:
         return None
     all_eps: List[dict] = []
     meta: Optional[dict] = None
+    prior_n = 0
     if prior_path.exists():
         with open(prior_path, "rb") as f:
             d = pickle.load(f)
         meta = dict(d["meta"])
         all_eps.extend(d["episodes"])
+        prior_n = len(d["episodes"])
     for p in shards:
         with open(p, "rb") as f:
             d = pickle.load(f)
         if meta is None:
             meta = dict(d["meta"])
         all_eps.extend(d["episodes"])
+    # Monotonicity guard (2026-08-19, ported from the identical v3 fix): never
+    # write a merge SMALLER than what's already on disk -- guards against a race
+    # between overlapping/late-finishing attempts, whichever the exact mechanism.
+    if len(all_eps) < prior_n:
+        print(f"[_merge_shards] REFUSING to shrink {prior_path}: "
+             f"on-disk has {prior_n} episodes, this merge only computed "
+             f"{len(all_eps)} (from {len(shards)} shard(s)) -- leaving data.pkl "
+             f"and shards untouched. Likely a race with another attempt's merge.",
+             flush=True)
+        return prior_path
     meta["n_episodes"] = len(all_eps)
     meta["created"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     out = run_dir / "data.pkl"

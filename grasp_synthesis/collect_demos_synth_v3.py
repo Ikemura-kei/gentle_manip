@@ -804,17 +804,34 @@ def _merge_shards(run_dir: Path) -> Optional[Path]:
         return None
     all_eps: List[dict] = []
     meta: Optional[dict] = None
+    prior_n = 0
     if prior_path.exists():
         with open(prior_path, "rb") as f:
             d = pickle.load(f)
         meta = dict(d["meta"])
         all_eps.extend(d["episodes"])
+        prior_n = len(d["episodes"])
     for p in shards:
         with open(p, "rb") as f:
             d = pickle.load(f)
         if meta is None:
             meta = dict(d["meta"])
         all_eps.extend(d["episodes"])
+    # Monotonicity guard (2026-08-19): a merge must never REDUCE the episode
+    # count vs. the data.pkl already on disk -- this exact silent shrink (49->10,
+    # then again 40->30) has now happened twice on this run_dir, most likely a
+    # race between an overlapping/late-finishing prior attempt's own end-of-run
+    # merge (reading a smaller pre-collection snapshot) and this one. Rather than
+    # write a merge that's SMALLER than what's already safely on disk, abort and
+    # leave data.pkl + the shards untouched so nothing is lost -- the next merge
+    # attempt (or a manual one) can retry once the race has settled.
+    if len(all_eps) < prior_n:
+        print(f"[_merge_shards] REFUSING to shrink {prior_path}: "
+             f"on-disk has {prior_n} episodes, this merge only computed "
+             f"{len(all_eps)} (from {len(shards)} shard(s)) -- leaving data.pkl "
+             f"and shards untouched. Likely a race with another attempt's merge.",
+             flush=True)
+        return prior_path
     meta["n_episodes"] = len(all_eps)
     meta["created"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     out = run_dir / "data.pkl"
