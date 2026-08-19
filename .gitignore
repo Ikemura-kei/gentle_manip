@@ -87,3 +87,8 @@ grasp_synthesis/viz_out/
 # Scratch / writing files kept out of the repo
 tmp.csv
 paper_writing.txt
+
+# Report-generation scratch (persistent alternative to /tmp, which gets cleared
+# periodically on this box and has twice wiped the in-progress GRACE report
+# build script + rendered videos mid-campaign, 2026-08-19)
+.report_scratch/

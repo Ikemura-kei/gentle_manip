@@ -42,8 +42,18 @@ REPO = Path(__file__).resolve().parents[2]
 STRESS_CMAP = LinearSegmentedColormap.from_list("gentle_stress", ["#f6e27a", "#e8892f", "#b5251f"])
 
 
-def _find_episode_and_dr(category: str):
-    """Prefer the main (full) collection dir; fall back to the smoketest dir."""
+def _find_episodes_and_dr(category: str):
+    """Prefer the main (full) collection dir; fall back to the smoketest dir.
+    Returns ALL episodes (not just the first) plus the dr_params.csv rows, so
+    the caller can try several candidates and verify each one actually lifts
+    the object on replay -- dr_params.csv only logs a PREFIX of attempts (seen
+    live: 20 rows for a 50-episode banana collection, since it's rewritten
+    per resume-attempt rather than accumulated across the whole run), so row
+    index i is not reliably episode i beyond the first several; combined with
+    MPM's known rollout non-determinism, blindly replaying episode 0 against
+    dr row 0 can silently reproduce a FAILED lift even though the original
+    collected episode succeeded (caught live 2026-08-19 -- several of the
+    first-rendered closeups showed a failed/missed grasp on replay)."""
     candidates = [
         REPO / "dataset/demos" / f"single_lift_{category}_soft",
         REPO / "dataset/demos_smoketest_v3_all16" / f"single_lift_{category}_soft",
@@ -51,6 +61,8 @@ def _find_episode_and_dr(category: str):
     for base in candidates:
         run_dirs = sorted(base.glob("*")) if base.exists() else []
         for run_dir in run_dirs:
+            if "rollout" in run_dir.name:
+                continue   # RLDG rollout dirs -- not raw v3 synthesis output
             data_pkl = run_dir / "data.pkl"
             shard = sorted(run_dir.glob("shard_*.pkl"))
             src = data_pkl if data_pkl.exists() else (shard[0] if shard else None)
@@ -59,21 +71,56 @@ def _find_episode_and_dr(category: str):
                 with open(src, "rb") as f:
                     d = pickle.load(f)
                 if d["episodes"]:
-                    return d["episodes"][0], dr_csv, run_dir
+                    return d["episodes"], dr_csv, run_dir
     raise FileNotFoundError(f"No v3 episode+dr_params found for category={category}")
 
 
-def _read_dr_row0(dr_csv: Path) -> dict:
+def _read_dr_rows(dr_csv: Path) -> list:
     import csv
     with open(dr_csv) as f:
-        row = next(csv.DictReader(f))
-    return {k: float(v) for k, v in row.items() if k not in ("batch", "env", "success", "flipped")}
+        rows = list(csv.DictReader(f))
+    return [{k: float(v) for k, v in row.items() if k not in ("batch", "env", "success", "flipped")}
+           for row in rows]
 
 
-def _replay_and_capture(category: str, n_frames_cap: int = 260):
-    ep, dr_csv, run_dir = _find_episode_and_dr(category)
-    dr = _read_dr_row0(dr_csv)
-    print(f"[{category}] replaying from {run_dir.name}, {len(ep['actions'])} steps")
+def _replay_succeeded(frames_pos, yield_stress: float, frames_stress,
+                      min_rise_m: float = 0.08) -> bool:
+    """A replay counts as a successful gentle lift iff the object's centroid
+    rose meaningfully (holds -> actually lifted, not a missed/slipped grasp)
+    and never exceeded yield stress (holds -> gentle, matching the same
+    height+no-crush success definition used everywhere else in this
+    project)."""
+    z = np.stack(frames_pos).mean(axis=1)[:, 2]
+    rise = float(z[-10:].mean() - z[0])
+    peak_stress = float(np.max([s.max() for s in frames_stress]))
+    return rise >= min_rise_m and peak_stress <= yield_stress
+
+
+def _replay_one(worker, ep, dr, n_frames_cap):
+    object_dxy = np.array([[dr["obj_dx"], dr["obj_dy"]]], dtype=np.float32)
+    object_euler = np.deg2rad(np.array(
+        [[dr["roll_deg"], dr["pitch_deg"], dr["yaw_deg"]]], dtype=np.float32))
+    home_offset = np.array([[dr["home_dx"], dr["home_dy"], dr["home_dz"]]], dtype=np.float32)
+    worker.reset(object_dxy=object_dxy, object_euler=object_euler, home_offset=home_offset)
+
+    obs = ep["observations"]
+    T = min(len(ep["actions"]), n_frames_cap)
+    frames_pos, frames_stress = [], []
+    for t in range(T):
+        cur_pos  = obs["ee_pos"][t][None].astype(np.float32)
+        cur_quat = obs["ee_quat"][t][None].astype(np.float32)
+        cur_grip = obs["gripper_width"][t].astype(np.float32)  # already (1,) — no extra batch dim
+        worker.step(cur_pos, cur_quat, cur_grip)
+        st = worker.handle.objects[0].get_state()
+        frames_pos.append(_np(st.pos)[0].copy())        # (n_p, 3)
+        frames_stress.append(_np(st.von_mises)[0].copy())  # (n_p,)
+    return frames_pos, frames_stress
+
+
+def _replay_and_capture(category: str, n_frames_cap: int = 260, max_tries: int = 8):
+    episodes, dr_csv, run_dir = _find_episodes_and_dr(category)
+    dr_rows = _read_dr_rows(dr_csv)
+    n_candidates = min(len(episodes), max_tries)
 
     exp = Experiment.load(f"single_lift_{category}_soft_easy")
     task = SingleLiftTask(exp.task_cfg)
@@ -83,24 +130,22 @@ def _replay_and_capture(category: str, n_frames_cap: int = 260):
                            settle_steps=30, settle_max_steps=200,
                            settle_vel_thresh=0.002, render_obs_cameras=False)
     try:
-        object_dxy = np.array([[dr["obj_dx"], dr["obj_dy"]]], dtype=np.float32)
-        object_euler = np.deg2rad(np.array(
-            [[dr["roll_deg"], dr["pitch_deg"], dr["yaw_deg"]]], dtype=np.float32))
-        home_offset = np.array([[dr["home_dx"], dr["home_dy"], dr["home_dz"]]], dtype=np.float32)
-        worker.reset(object_dxy=object_dxy, object_euler=object_euler, home_offset=home_offset)
-
-        obs = ep["observations"]
-        T = min(len(ep["actions"]), n_frames_cap)
-        frames_pos, frames_stress = [], []
-        for t in range(T):
-            cur_pos  = obs["ee_pos"][t][None].astype(np.float32)
-            cur_quat = obs["ee_quat"][t][None].astype(np.float32)
-            cur_grip = obs["gripper_width"][t].astype(np.float32)  # already (1,) — no extra batch dim
-            worker.step(cur_pos, cur_quat, cur_grip)
-            st = worker.handle.objects[0].get_state()
-            frames_pos.append(_np(st.pos)[0].copy())        # (n_p, 3)
-            frames_stress.append(_np(st.von_mises)[0].copy())  # (n_p,)
-        return frames_pos, frames_stress, task.object_yield_stress
+        fallback = None
+        for i in range(n_candidates):
+            ep = episodes[i]
+            dr = dr_rows[min(i, len(dr_rows) - 1)]
+            print(f"[{category}] trying episode {i}/{n_candidates-1} from {run_dir.name}, "
+                 f"{len(ep['actions'])} steps", flush=True)
+            frames_pos, frames_stress = _replay_one(worker, ep, dr, n_frames_cap)
+            if fallback is None:
+                fallback = (frames_pos, frames_stress)
+            if _replay_succeeded(frames_pos, task.object_yield_stress, frames_stress):
+                print(f"[{category}] episode {i} replayed as a successful lift -- using it",
+                     flush=True)
+                return frames_pos, frames_stress, task.object_yield_stress
+        print(f"[{category}] WARNING: none of the first {n_candidates} episodes replayed as a "
+             f"clean successful lift -- falling back to episode 0's replay anyway", flush=True)
+        return fallback[0], fallback[1], task.object_yield_stress
     finally:
         worker.close()
 
