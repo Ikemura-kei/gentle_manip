@@ -20,7 +20,8 @@ VIOLIN_METRICS = ["stress_mean_tmax", "stress_top10_tmax", "stress_max_tmax"]
 
 def load(run_dir: Path):
     rows = list(csv.DictReader(open(run_dir / "episodes.csv")))
-    summ = json.load(open(run_dir / "summary.json"))
+    sp = run_dir / "summary.json"
+    summ = json.load(open(sp)) if sp.exists() else {}   # policy evals may ship episodes.csv only
     def col(c):
         out = []
         for r in rows:
@@ -28,6 +29,9 @@ def load(run_dir: Path):
             except (ValueError, KeyError, TypeError): out.append(np.nan)
         return np.array(out)
     succ = col("success")
+    summ.setdefault("success_rate", float((succ > 0.5).mean()))   # backfill if no summary.json
+    summ.setdefault("git_commit", "?")
+    summ.setdefault("grasp_extra_close", "n/a")
     d = {"success": succ, "summary": summ, "n": len(rows)}
     for m in set([PRIMARY] + VIOLIN_METRICS):
         d[m] = col(m)

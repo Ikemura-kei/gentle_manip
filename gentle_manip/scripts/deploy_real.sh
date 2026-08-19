@@ -110,7 +110,7 @@
 #   --obs-config gentle_manip/configs/obs/point_cloud_1cam_outlier.yaml \
 #   --action-config gentle_manip/configs/action/abs_pose_abs_gripper.yaml \
 #   --smooth-alpha 0.6 \
-#   --max-pos-step-m 0.015 \
+#   --max-pos-step-m 0.0065 \
 #   --record dataset/real_deploy/tmp \
 #   --shard-size 10 \
 #   --max-steps 5000
@@ -152,7 +152,7 @@
 #   --action-config gentle_manip/configs/action/abs_pose_abs_gripper.yaml \
 #   --ft-denoising-steps 0 \
 #   --smooth-alpha 0.6 \
-#   --max-pos-step-m 0.015 \
+#   --max-pos-step-m 0.0065 \
 #   --record dataset/real_deploy/tmp \
 #   --shard-size 10 \
 #   --max-steps 5000
@@ -166,13 +166,27 @@
 #   --action-config gentle_manip/configs/action/abs_pose_abs_gripper.yaml \
 #   --ft-denoising-steps 0 \
 #   --smooth-alpha 0.6 \
-#   --max-pos-step-m 0.015 \
+#   --max-pos-step-m 0.0065 \
 #   --record dataset/real_deploy/tmp \
 #   --shard-size 10 \
 #   --max-steps 5000
 
-ckpt=/home/kei/kei/gentle_manip/logs/dppo/dppo-pretrain/single_lift_mushroom_rigid/cho/nrwts/checkpoint/state_800.pt
-normalization=dataset/dppo/single_lift_mushroom_rigid/cho/normalization.npz
+# ckpt=/home/kei/kei/gentle_manip/logs/dppo/dppo-pretrain/single_lift_mushroom_rigid/cho/kydpe/checkpoint/state_800.pt
+# normalization=dataset/dppo/single_lift_mushroom_rigid/cho/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --normalization ${normalization} \
+#   --ckpt ${ckpt} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_outlier.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_abs_gripper.yaml \
+#   --ft-denoising-steps 0 \
+#   --smooth-alpha 0.6 \
+#   --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/tmp \
+#   --shard-size 10 \
+#   --max-steps 5000
+
+ckpt=logs/dppo-pretrain/single_lift_mushroom_rigid/cak/lfjih/checkpoint/state_800.pt
+normalization=/home/kei/kei/gentle_manip/dataset/dppo/single_lift_mushroom_rigid/cak/normalization.npz
 uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
   --normalization ${normalization} \
   --ckpt ${ckpt} \
@@ -180,7 +194,7 @@ uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.p
   --action-config gentle_manip/configs/action/abs_pose_abs_gripper.yaml \
   --ft-denoising-steps 0 \
   --smooth-alpha 0.6 \
-  --max-pos-step-m 0.015 \
+  --max-pos-step-m 0.0065 \
   --record dataset/real_deploy/tmp \
   --shard-size 10 \
   --max-steps 5000
