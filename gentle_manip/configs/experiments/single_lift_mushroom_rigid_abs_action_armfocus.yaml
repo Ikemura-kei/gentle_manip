@@ -1,0 +1,24 @@
+# [experiment] RIGID mushroom lift, abs action, quat + SOFT ARM-FOCUS point cloud.
+# Used by: collect_demos_synth{,_v3} (SDF + FEM) / DPPO training + eval (single_lift_mushroom_rigid_abs_pcd)
+# Status: experimental (arm-focus point cloud on the cho rigid backbone; SDF vs FEM+2mm A/B)
+#
+# IDENTICAL to single_lift_mushroom_rigid_abs_action EXCEPT obs -> superset_rigid_armfocus, which
+# soft-downweights arm-body points so the 1024-point budget concentrates on the object (arm_weight
+# 0.15; finger-safe near-EE sphere full weight). DR = rigid_orientation (cho: no flip, no material).
+# Quat student (obs_dim 8), abs action (action_dim 10). Train + deploy consistently with this obs.
+task: single_lift_mushroom_rigid
+action: abs_pose_abs_gripper
+dr: rigid_orientation         # cho's DR — ±45 pitch/roll, full yaw, xy 0.04, no flip, no material
+augmentation: l515_noise
+
+obs: superset_rigid_armfocus  # quat + arm-downweighted point cloud
+views:
+  teacher: [privileged]
+  student: [point_cloud]       # ee_pos + ee_quat + gripper + point_cloud (obs_dim 8)
+
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400
