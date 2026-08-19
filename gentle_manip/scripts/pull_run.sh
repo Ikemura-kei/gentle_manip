@@ -36,12 +36,26 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$RUN_ID" ] || { echo "usage: $0 <run_id> [--ckpt N,N] [--dest DIR] [--host HOST] [--all]" >&2; exit 1; }
 
-# Resolve run_id -> remote run dir
+# Resolve run_id -> remote run dir. IDs are minted globally-unique (new_id() checks the whole
+# table, not per-task), so this SHOULD be a single row -- but don't just take the first match
+# and guess: if the table ever ends up with more than one (e.g. an ID reused after its original
+# row was dropped by reconcile_experiments, or manual edits), fail loudly and list every
+# candidate rather than silently pulling the wrong run's checkpoint.
 if [[ "$RUN_ID" == */* ]]; then
     RUN_DIR="$RUN_ID"
 else
-    RUN_DIR=$(ssh "$REMOTE_HOST" "grep -m1 '^${RUN_ID},' '$REMOTE_REPO/experiments.csv' | cut -d, -f5")
-    [ -n "$RUN_DIR" ] || { echo "run '$RUN_ID' not found in experiments.csv on $REMOTE_HOST" >&2; exit 1; }
+    MATCHES=$(ssh "$REMOTE_HOST" "grep '^${RUN_ID},' '$REMOTE_REPO/experiments.csv'")
+    N_MATCHES=$(echo -n "$MATCHES" | grep -c '^' 2>/dev/null || echo 0)
+    if [ -z "$MATCHES" ]; then
+        echo "run '$RUN_ID' not found in experiments.csv on $REMOTE_HOST" >&2
+        exit 1
+    elif [ "$N_MATCHES" -gt 1 ]; then
+        echo "AMBIGUOUS: '$RUN_ID' matches $N_MATCHES rows in experiments.csv -- refusing to guess:" >&2
+        echo "$MATCHES" >&2
+        echo "Pass the full remote path instead of the bare ID to disambiguate." >&2
+        exit 1
+    fi
+    RUN_DIR=$(echo "$MATCHES" | cut -d, -f5)
 fi
 echo "[pull_run] $RUN_ID -> $REMOTE_HOST:$RUN_DIR"
 
