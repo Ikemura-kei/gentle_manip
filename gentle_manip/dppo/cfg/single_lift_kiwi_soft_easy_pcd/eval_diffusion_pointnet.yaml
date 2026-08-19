@@ -1,4 +1,4 @@
-# [dppo-eval] Canonical eval of the mushroom solo specialist (fragile-food 25-category campaign).
+# [dppo-eval] Canonical eval of the kiwi solo specialist (fragile-food 25-category campaign).
 defaults:
   - _self_
 hydra:
@@ -9,12 +9,12 @@ _target_: gentle_manip.dppo.eval_agent.EvalHarnessAgent
 name: ${env_name}_eval_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
 logdir: ${eval_base:${base_policy_path}}/eval/${now:%Y-%m-%d}_${now:%H-%M-%S}
 base_policy_path: ???
-normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_mushroom_soft_easy_pcd/normalization.npz
-experiment: single_lift_mushroom_soft_easy
+normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_kiwi_soft_easy_pcd/normalization.npz
+experiment: single_lift_kiwi_soft_easy
 
 seed: 42
 device: cuda:0
-env_name: single_lift_mushroom_soft_easy_pcd
+env_name: single_lift_kiwi_soft_easy_pcd
 obs_dim: 8
 action_dim: 7
 denoising_steps: 20

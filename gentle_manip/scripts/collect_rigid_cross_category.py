@@ -144,7 +144,7 @@ def collect_one(category: str, n_episodes: int, n_envs: int, maxfevals: int,
                 enable_regrasp_retry: bool = False,
                 max_regrasp_retries: int = 1,
                 experiment_template: str = "single_lift_{category}_rigid",
-                scene_dr_every: int = 1) -> dict:
+                scene_dr_every: int = 1, grasp_n_starts: Optional[int] = None) -> dict:
     exp = experiment_template.format(category=category)
     # collect_demos_synth_v2.py's own _make_run_dir() appends the experiment
     # config's TASK name (which can differ from the experiment name itself,
@@ -190,6 +190,8 @@ def collect_one(category: str, n_episodes: int, n_envs: int, maxfevals: int,
         "--scene-dr-every", str(scene_dr_every),
         "--grasp-gpu",   # runbook-recommended default: GPU FEM solve (~5-7x faster)
     ]
+    if grasp_n_starts is not None:
+        cmd += ["--grasp-n-starts", str(grasp_n_starts)]
     if disturbance_prob > 0:
         cmd += ["--disturbance-prob", str(disturbance_prob),
                "--disturbance-max-m", str(disturbance_max_m)]
@@ -306,6 +308,12 @@ def main() -> None:
                     help="passthrough to collect_demos_synth_v2.py (default 1, its own default). "
                          "MPM categories may want a higher value to amortize the slower "
                          "scene-rebuild+settle cost across more episodes per rebuild.")
+    ap.add_argument("--grasp-n-starts", type=int, default=None,
+                    help="v3 passthrough: CMA-ES multi-start count (v3's own default is 6). "
+                         "Diagnosed 2026-08-15: chicken_breast's default-6 search converged to "
+                         "over-gripping local minima ~98% of the time (grip 2-21N vs a physically-"
+                         "required ~0.9N minimum); --grasp-n-starts 12 fixed it to 100%% in an "
+                         "isolated test. None = don't pass, use v3's own default.")
     args = ap.parse_args()
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -338,7 +346,8 @@ def main() -> None:
                         enable_regrasp_retry=args.enable_regrasp_retry,
                         max_regrasp_retries=args.max_regrasp_retries,
                         experiment_template=args.experiment_template,
-                        scene_dr_every=args.scene_dr_every)
+                        scene_dr_every=args.scene_dr_every,
+                        grasp_n_starts=args.grasp_n_starts)
         results.append(r)
         print(f"[orchestrator] {cat}: ok={r['ok']} saved={r['saved']}/{r['attempted']} "
              f"success_rate={r['success_rate']} elapsed={r['elapsed_s']:.0f}s attempts={r['attempts']}",

@@ -47,7 +47,7 @@ env:
     obs_steps: ${cond_steps}
     act_steps: ${act_steps}
     normalization_path: ${normalization_path}
-    port: 5570
+    port: 5580
     obs_keys: [ee_pos, ee_quat, gripper_width]
     pointcloud_key: point_cloud
 

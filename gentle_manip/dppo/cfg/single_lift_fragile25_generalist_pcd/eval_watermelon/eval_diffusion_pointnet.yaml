@@ -12,7 +12,7 @@ base_policy_path: ???
 normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_fragile25_generalist_pcd/normalization.npz
 experiment: single_lift_watermelon_soft_easy
 
-seed: 42
+seed: 43
 device: cuda:0
 env_name: single_lift_watermelon_soft_easy_pcd
 obs_dim: 8
@@ -29,7 +29,7 @@ act_steps: 4
 use_ddim: False
 ddim_steps: ${ft_denoising_steps}
 
-n_episodes: 100
+n_episodes: 50
 scene_group_size: 4
 record_batches: null
 n_steps: 75
