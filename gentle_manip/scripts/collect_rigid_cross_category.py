@@ -81,12 +81,21 @@ def _find_resumable_run(cat_out: Path, target: int) -> Optional[Path]:
     target -- a fresh collect_one call will just report success from it).
     Picks the dir with the MOST episodes already saved, not the most recent by
     mtime -- an early smoke-test dir must not be preferred over a much further-
-    along real run just because it happens to sort later."""
+    along real run just because it happens to sort later. Excludes "-rollout-"
+    dirs (RLDG self-distilled rollout output from run_fragile25_specialist.py's
+    collect_rollouts(), a DIFFERENT collector than this one) -- this
+    orchestrator only ever produces plain "<date>-<3letters>" raw-synthesis
+    dirs, so a rollout dir (often with MORE episodes, e.g. 150 vs a raw run's
+    50) must never be mistaken for "this category is already collected."
+    Caught live 2026-08-19: augment_heldin_to_150.py silently no-op'd on all 9
+    held-in categories because every one's rollout dir (150+ episodes) beat
+    its raw dir (50) under the old "most episodes wins" rule with no filter,
+    so the RAW top-up to 150 never actually ran."""
     if not cat_out.exists():
         return None
     best_dir, best_n = None, -1
     for d in cat_out.iterdir():
-        if not d.is_dir():
+        if not d.is_dir() or "rollout" in d.name:
             continue
         n = _episode_count(d)
         if n > best_n:
