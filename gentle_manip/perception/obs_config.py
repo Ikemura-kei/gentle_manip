@@ -64,14 +64,11 @@ class TactileConfig:
     # GelSight Mini images are passed through as-is (no processing in pipeline)
 
 
-# Thresholds for the binary PrivilegedConfig.contact label (shared by PolicyEnv and the
-# grasp-synthesis collector so the two stay in sync).
-#   SOFT: max(finger-link -> nearest-particle distance) < this = pad touching the object.
-#   Calibrated from the finger-link geometry: the link origin sits ~0.042 m behind the pad
-#   face, so the grasp/hold distance plateaus at ~0.042 m while a free approach is >0.10 m;
-#   0.05 m = plateau + ~8 mm captures contact without leaking the descent.
-CONTACT_DIST_THRESH_M = 0.05
-#   RIGID: gripper-object contact-force magnitude (N) above which we call it contact.
+# Threshold for the binary PrivilegedConfig.contact label (shared by PolicyEnv and the
+# grasp-synthesis collector so the two stay in sync). The physics contact force is EXACTLY 0
+# with nothing touching, so this just needs to sit above numerical zero:
+#   RIGID: gripper-object contact-force magnitude (get_contacts, Newtons).
+#   SOFT:  MPM->finger coupling-force magnitude (measured ~0 on approach, ~5 during a grasp).
 CONTACT_FORCE_THRESH_N = 0.5
 
 
@@ -93,13 +90,13 @@ class PrivilegedConfig:
                                   # force magnitudes between the robot (gripper) and the object,
                                   # Newtons. Rigid bodies have no von Mises stress; this is the
                                   # analogous "how hard is the grip" scalar. Requires a rigid task.
-    contact: bool = False         # PROPER binary gripper-object contact (num_envs, 1) — an AUX
-                                  # objective LABEL (training-only). SOFT: both finger links within
-                                  # CONTACT_DIST_THRESH_M of the nearest object particle (geometric —
-                                  # MPM has no rigid contact pairs, and stress is NOT contact: the
-                                  # object stresses under gravity with nothing touching it). RIGID:
-                                  # contact_force > CONTACT_FORCE_THRESH_N. Distinct from stress /
-                                  # contact_force (which are magnitudes, not a clean touch/no-touch).
+    contact: bool = False         # ACTUAL binary gripper-object contact (num_envs, 1) — an AUX
+                                  # objective LABEL (training-only), thresholded from the physics
+                                  # contact force (contact_force > CONTACT_FORCE_THRESH_N). RIGID:
+                                  # get_contacts force. SOFT: MPM->finger coupling force (the real
+                                  # reaction Genesis applies to the finger links; exactly 0 with
+                                  # nothing touching). Distinct from stress (which a soft body has
+                                  # under gravity with nothing touching it).
 
 
 @dataclass

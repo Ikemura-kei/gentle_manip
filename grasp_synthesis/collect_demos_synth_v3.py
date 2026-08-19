@@ -60,10 +60,7 @@ from gentle_manip.tasks.single_lift import SingleLiftTask
 from gentle_manip.envs.genesis_worker import GenesisWorker
 from gentle_manip.envs.raw_obs import RawObs
 from gentle_manip.perception.pipeline import PerceptionPipeline
-from gentle_manip.perception.obs_config import (
-    CONTACT_DIST_THRESH_M,
-    CONTACT_FORCE_THRESH_N,
-)
+from gentle_manip.perception.obs_config import CONTACT_FORCE_THRESH_N
 from gentle_manip.domain_randomization.dr_config import DRConfig
 
 
@@ -272,16 +269,13 @@ def _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir):
 
 # ── Privileged obs (sim-only state-teacher fields) ────────────────────────────
 
-def _privileged_obs_batch(object_center, object_quat, dr_vec, priv_cfg, contact_force=None,
-                          gripper_object_dist=None) -> dict:
+def _privileged_obs_batch(object_center, object_quat, dr_vec, priv_cfg, contact_force=None) -> dict:
     """Sim-only privileged fields from raw worker state — mirrors
     PolicyEnv._privileged_obs exactly, but sourced from GenesisWorker state
-    (object_center + object_quat + contact_force + gripper_object_dist) since this
-    collector bypasses PolicyEnv.
+    (object_center + object_quat + contact_force) since this collector bypasses PolicyEnv.
 
     object_center: (N, 3); object_quat: (N, 4) wxyz; dr_vec: (2,) [scale, bend_deg];
-    contact_force: (N,) or None (rigid-only; state["contact_force"]);
-    gripper_object_dist: (N,) or None (soft-only; state["gripper_object_dist"], meters).
+    contact_force: (N,) — rigid: get_contacts Newtons; soft: MPM->finger coupling force.
     Returns a dict of (N, ...) arrays for whichever priv fields the config enables.
     """
     out = {}
@@ -304,12 +298,9 @@ def _privileged_obs_batch(object_center, object_quat, dr_vec, priv_cfg, contact_
     if getattr(priv_cfg, "contact_force", False):
         out["priv_contact_force"] = np.asarray(contact_force, np.float32)[:, None]  # (N, 1)
     if getattr(priv_cfg, "contact", False):
-        # PROPER binary gripper-object contact (aux label). Soft: finger-link<->particle
-        # distance below CONTACT_DIST_THRESH_M; rigid: contact_force above threshold.
-        if gripper_object_dist is not None:                                # soft
-            contact = (np.asarray(gripper_object_dist, np.float32) < CONTACT_DIST_THRESH_M)
-        else:                                                              # rigid
-            contact = (np.asarray(contact_force, np.float32) > CONTACT_FORCE_THRESH_N)
+        # ACTUAL binary gripper-object contact from the physics contact force (rigid: get_contacts
+        # Newtons; soft: MPM->finger coupling force) — exactly 0 with nothing touching.
+        contact = (np.asarray(contact_force, np.float32) > CONTACT_FORCE_THRESH_N)
         out["priv_contact"] = contact.astype(np.float32)[:, None]          # (N, 1)
     return out
 
@@ -582,8 +573,7 @@ def execute_and_collect(
                 oq = np.tile(np.array([1., 0, 0, 0], np.float32), (num_envs, 1))  # deployable student
             next_obs_batch.update(_privileged_obs_batch(           # uses point_cloud, not this)
                 state["object_center"], oq, dr_vec, priv_cfg,
-                contact_force=state.get("contact_force"),
-                gripper_object_dist=state.get("gripper_object_dist")))
+                contact_force=state.get("contact_force")))
         next_obs_list = [{k: next_obs_batch[k][i] for k in next_obs_batch}
                          for i in range(num_envs)]
 
@@ -1006,8 +996,7 @@ def main() -> None:
         if priv_cfg is not None:
             init_obs_batch.update(_privileged_obs_batch(
                 obj_pos_all, obj_quat_all, dr_vec, priv_cfg,
-                contact_force=init_state.get("contact_force"),
-                gripper_object_dist=init_state.get("gripper_object_dist")))
+                contact_force=init_state.get("contact_force")))
 
         # ── Per-env FEM gentleness grasp synthesis (v3) ──
         # Build the FEM ElasticObject ONCE for this batch's ACTUAL (DR shape+size) mesh — all envs share

@@ -9,11 +9,7 @@ from gymnasium.spaces import Box, Dict
 from gentle_manip.envs.raw_obs import RawObs
 from gentle_manip.envs.sim_feedback import SimFeedback
 from gentle_manip.perception.augmentation import AugmentationConfig, build_augmentor
-from gentle_manip.perception.obs_config import (
-    ObsConfig,
-    CONTACT_DIST_THRESH_M,
-    CONTACT_FORCE_THRESH_N,
-)
+from gentle_manip.perception.obs_config import ObsConfig, CONTACT_FORCE_THRESH_N
 from gentle_manip.perception.pipeline import PerceptionPipeline
 from gentle_manip.actions.action_config import ActionConfig
 from gentle_manip.actions.pipeline import ActionPipeline
@@ -345,16 +341,11 @@ class PolicyEnv:
             cf = np.asarray(sf.extra["contact_force"], dtype=np.float32)   # (N,)
             out["priv_contact_force"] = cf[:, None]                       # (N, 1)
         if self._priv.contact:
-            # PROPER binary gripper-object contact (aux label). Soft: both finger links
-            # within CONTACT_DIST_THRESH_M of the nearest particle (geometric — see
-            # obs_config). Rigid: contact_force above CONTACT_FORCE_THRESH_N.
-            if "gripper_object_dist" in sf.extra:                         # soft
-                d = np.asarray(sf.extra["gripper_object_dist"], dtype=np.float32)   # (N,)
-                contact = (d < CONTACT_DIST_THRESH_M).astype(np.float32)
-            else:                                                         # rigid
-                cf = np.asarray(sf.extra["contact_force"], dtype=np.float32)
-                contact = (cf > CONTACT_FORCE_THRESH_N).astype(np.float32)
-            out["priv_contact"] = contact[:, None]                       # (N, 1)
+            # ACTUAL binary gripper-object contact from the physics contact force (rigid:
+            # get_contacts Newtons; soft: MPM->finger coupling force). Both are exactly 0 with
+            # nothing touching, so a single threshold cleanly gives the touch/no-touch label.
+            cf = np.asarray(sf.extra["contact_force"], dtype=np.float32)   # (N,)
+            out["priv_contact"] = (cf > CONTACT_FORCE_THRESH_N).astype(np.float32)[:, None]  # (N, 1)
         return out
 
     def _require_sim_feedback(self) -> SimFeedback:

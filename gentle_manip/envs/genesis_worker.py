@@ -276,7 +276,10 @@ class GenesisWorker:
             particle_pos = _np(st.pos)                                   # (B, n_p, 3)
             state["object_center"] = particle_pos.mean(axis=1).astype(np.float32)   # (B, 3)
             state["von_mises_stress"] = _np(st.von_mises).astype(np.float32)        # (B, n_p)
-            state["contact_force"] = None   # rigid-only surrogate; soft bodies use von_mises_stress
+            # ACTUAL soft-body gripper-object contact: the MPM->finger coupling force Genesis
+            # applies to the finger links (0 when nothing touches them). Replaces the old geometric
+            # finger<->particle distance heuristic. The soft analogue of the rigid contact_force.
+            state["contact_force"] = self.robot.gripper_coupling_force()   # (B,)
             # Orientation of a DEFORMING body: the object was placed tilted (spawn euler) then FELL and
             # settled under gravity, so the spawn euler is NOT its orientation. Recover the actual pose
             # as the best-fit RIGID rotation from the nominal particles to the current ones (Kabsch —
@@ -284,18 +287,8 @@ class GenesisWorker:
             base = np.asarray(self.handle.object_base_particles[0],
                               np.float32).reshape(self.num_envs, -1, 3)
             state["object_quat"] = _kabsch_quat_wxyz(base, particle_pos).astype(np.float32)
-            # PROPER gripper-object contact for soft bodies (MPM has no rigid contact pairs,
-            # so get_contacts can't see it and stress alone is NOT contact — the object
-            # stresses under gravity/settling with no gripper touching). Geometric surrogate:
-            # distance from each finger link to the nearest object particle; both fingers must
-            # be close for a pinch grasp -> report the WORSE (max) of the two. (B,), meters.
-            lf, rf = self.robot.finger_positions()                       # (B,3) each
-            dL = np.linalg.norm(particle_pos - lf[:, None, :], axis=-1).min(axis=1)  # (B,)
-            dR = np.linalg.norm(particle_pos - rf[:, None, :], axis=-1).min(axis=1)  # (B,)
-            state["gripper_object_dist"] = np.maximum(dL, dR).astype(np.float32)     # (B,)
             if os.environ.get("GM_CONTACT_DEBUG"):
-                print(f"[contact] gripper_object_dist env0={state['gripper_object_dist'][0]:.4f} "
-                      f"dL={dL[0]:.4f} dR={dR[0]:.4f}", flush=True)
+                print(f"[contact] soft coupling force env0={state['contact_force'][0]:.6f}", flush=True)
 
         state["depth_images"] = depth_images
         state["camera_intrinsics"] = intrinsics

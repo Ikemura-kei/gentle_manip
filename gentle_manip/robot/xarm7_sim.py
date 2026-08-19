@@ -64,10 +64,13 @@ class XArm7Sim:
             self.robot.set_dofs_force_range(-flim, flim, self.grip_dofs)
 
         self.ee = robot_entity.get_link(cfg.EE_LINK)
-        # Gripper finger links — used for PROPER soft-body contact detection (geometric
-        # finger<->particle proximity, since MPM has no rigid contact pairs for get_contacts).
+        # Gripper finger links — used for ACTUAL soft-body contact: the MPM->rigid coupling force
+        # Genesis applies to these links (read via get_links_net_coupling_force). Local indices into
+        # the entity's link range (get_links_net_coupling_force returns [link_start:link_end]).
         self.left_finger = robot_entity.get_link("left_finger")
         self.right_finger = robot_entity.get_link("right_finger")
+        self._finger_local_idx = [self.left_finger.idx - robot_entity.link_start,
+                                  self.right_finger.idx - robot_entity.link_start]
 
         self.default_joint_angles = np.array(
             overrides.get("default_joint_angles", cfg.DEFAULT_JOINT_ANGLES), dtype=np.float32
@@ -196,12 +199,21 @@ class XArm7Sim:
         self.robot.control_dofs_position(grip, self.grip_dofs)
 
     def finger_positions(self) -> tuple:
-        """World positions of the two gripper finger links, (B,3) each. Used for
-        geometric gripper<->soft-object contact detection in the worker."""
+        """World positions of the two gripper finger links, (B,3) each."""
         return (
             _np(self.left_finger.get_pos()).astype(np.float32),
             _np(self.right_finger.get_pos()).astype(np.float32),
         )
+
+    def gripper_coupling_force(self) -> np.ndarray:
+        """(B,) sum of |MPM->finger coupling force| over the two gripper finger links — the ACTUAL
+        soft-body gripper-object contact signal (exactly 0 when nothing touches the fingers, positive
+        when a soft body is being squeezed). The soft analogue of the rigid get_contacts force."""
+        f = _np(self.robot.get_links_net_coupling_force())     # (B, n_links, 3) or (n_links, 3)
+        if f.ndim == 2:                                        # n_envs==0 -> add batch dim
+            f = f[None]
+        fl = f[:, self._finger_local_idx, :]                   # (B, 2, 3)
+        return np.linalg.norm(fl, axis=-1).sum(axis=1).astype(np.float32)   # (B,)
 
     # ── state read (numpy; matches RawObs robot fields) ──────────────────────────
     def read_state(self) -> dict:

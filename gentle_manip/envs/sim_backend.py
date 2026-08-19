@@ -318,9 +318,7 @@ class SimBackend:
         if s.get("object_quat") is not None:
             extra["object_quat"] = s["object_quat"]           # (N, 4) wxyz, rigid only
         if s.get("contact_force") is not None:
-            extra["contact_force"] = s["contact_force"]       # (N,) Newtons, rigid only
-        if s.get("gripper_object_dist") is not None:
-            extra["gripper_object_dist"] = s["gripper_object_dist"]  # (N,) meters, soft only
+            extra["contact_force"] = s["contact_force"]       # (N,) rigid: get_contacts N; soft: coupling force
         if hasattr(self, "_episode_dr_vec"):
             extra["object_dr_vec"] = self._episode_dr_vec     # (2,) [scale, bend_deg], episode const
         return SimFeedback(
