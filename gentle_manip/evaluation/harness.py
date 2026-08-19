@@ -18,6 +18,7 @@ import numpy as np
 
 from gentle_manip.evaluation.eval_spec import EvalSpec
 from gentle_manip.evaluation.metrics import aggregate, write_episodes_csv, write_summary
+from gentle_manip.utils.run_paths import _git_commit
 
 
 def eval_out_dir(checkpoint, base_logs: str = "logs/eval", name: str = "eval") -> Path:
@@ -212,6 +213,7 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
                         max_policy_steps=spec.max_policy_steps)
     if extra_meta:
         summary.update(extra_meta)
+    summary["git_commit"] = _git_commit()          # code version — for tracing back the implementation
     write_summary(summary, out_dir / "summary.json")
 
     if experiment_name:                               # env (experiment) config snapshot -> config/

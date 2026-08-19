@@ -66,12 +66,13 @@ class GraspSynthPolicy:
     """
 
     def __init__(self, num_envs, action_config, venv, *, synth, maxfevals, yield_pa,
-                 object_name, grasp_kw, table_z, seed):
+                 object_name, grasp_kw, table_z, seed, extra_close=0.0):
         self.num_envs = int(num_envs)
         self.action_config = action_config
         self.venv = venv
         self.synth = synth                       # "sdf" | "fem"
         self.maxfevals = int(maxfevals)
+        self.extra_close = float(extra_close)    # squeeze TIGHTER than synth width (m); mirrors v3 collector
         self.yield_pa = float(yield_pa)
         self.object_name = object_name
         self.grasp_kw = dict(grasp_kw)           # E, density, mu, accel, n_starts, voxel_div, target_tets, gpu
@@ -164,7 +165,7 @@ class GraspSynthPolicy:
         self.quat_b = np.concatenate([p[1] for p in poses], 0).astype(np.float32)
         self.lift_b = self.pos_b.copy(); self.lift_b[:, 2] += gsv3.LIFT_HEIGHT
         self.width_open = np.full(N, 0.08, np.float32)
-        self.width_cls = np.array([p[2] - 0.0025 for p in poses], np.float32)
+        self.width_cls = np.array([p[2] - 0.0025 - self.extra_close for p in poses], np.float32)
         self.grip_target = self.width_cls.copy()
         # per-env firm close: soft firms EVERY grasp by the base amount, weak grasps more (never skip)
         self.firm_close = np.full(N, gsv3.FIRM_EXTRA_CLOSE_M, np.float32)
@@ -272,6 +273,9 @@ def main() -> None:
     ap.add_argument("--grasp-target-tets", type=int, default=1500)
     ap.add_argument("--table-z", type=float, default=0.0)
     ap.add_argument("--grasp-cpu", action="store_true", help="FEM on CPU (default GPU)")
+    ap.add_argument("--grasp-extra-close", type=float, default=0.0,
+                    help="squeeze TIGHTER than the synthesized width by this many meters (e.g. 0.005 = "
+                         "5mm), for EVERY grasp — mirrors collect_demos_synth_v3.py. 0 = native synth width.")
     args = ap.parse_args()
 
     exp = Experiment.load(args.experiment)
@@ -289,7 +293,8 @@ def main() -> None:
                     target_tets=args.grasp_target_tets, gpu=not args.grasp_cpu)
     policy = GraspSynthPolicy(args.num_envs, exp.action_config, venv, synth=args.synth,
                               maxfevals=args.maxfevals, yield_pa=yield_pa, object_name=obj_name,
-                              grasp_kw=grasp_kw, table_z=args.table_z, seed=args.seed)
+                              grasp_kw=grasp_kw, table_z=args.table_z, seed=args.seed,
+                              extra_close=args.grasp_extra_close)
     spec = EvalSpec(n_episodes=args.n_episodes, num_envs=args.num_envs, seed=args.seed,
                     max_policy_steps=args.max_steps, scene_group_size=args.scene_group_size)
 
@@ -298,7 +303,7 @@ def main() -> None:
     run_eval(venv, policy, spec, out_dir, experiment_name=args.experiment, checkpoint=None,
              record_batches=args.record_batches,
              extra_meta={"algorithm": "scripted_policy", "algo_variant": f"grasp_synth_{args.synth}",
-                         "maxfevals": args.maxfevals})
+                         "maxfevals": args.maxfevals, "grasp_extra_close": args.grasp_extra_close})
     policy.close()
     venv.close()
     print(f"\n[eval_grasp_synth:{args.synth}] done -> {out_dir}", flush=True)
