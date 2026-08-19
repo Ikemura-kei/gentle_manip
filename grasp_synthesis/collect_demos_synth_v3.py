@@ -789,11 +789,26 @@ def _write_shard(run_dir: Path, episodes: List[dict],
 
 
 def _merge_shards(run_dir: Path) -> Optional[Path]:
+    """Merge shard_*.pkl into data.pkl. If a data.pkl ALREADY exists (resume of a
+    previously-completed/partial run being topped up further), its episodes are
+    folded in first so resuming never loses prior work, regardless of whether the
+    previous invocation crashed before or after its own merge. Ported from
+    collect_demos_synth_v2.py's identical fix (2026-08-19) -- v3 had regressed to
+    the pre-fix behavior (overwrite data.pkl with ONLY the current shards),
+    which silently dropped dumpling's collection from 49 episodes back to 10
+    across a resume, caught live during the fragile25 zero-shot specialist
+    campaign."""
     shards = sorted(run_dir.glob("shard_*.pkl"))
-    if not shards:
+    prior_path = run_dir / "data.pkl"
+    if not shards and not prior_path.exists():
         return None
     all_eps: List[dict] = []
     meta: Optional[dict] = None
+    if prior_path.exists():
+        with open(prior_path, "rb") as f:
+            d = pickle.load(f)
+        meta = dict(d["meta"])
+        all_eps.extend(d["episodes"])
     for p in shards:
         with open(p, "rb") as f:
             d = pickle.load(f)
