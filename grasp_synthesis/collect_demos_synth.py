@@ -370,9 +370,10 @@ def execute_and_collect(
     prev_pos  = home_pos.copy()
     prev_quat = home_quat.copy()
     prev_grip = width_open.copy()
+    state = None    # last sim state from _step -- needed outside it for the soft-MPM success-check fallback
 
     def _step(cur_pos, cur_quat, cur_grip):
-        nonlocal prev_pos, prev_quat, prev_grip
+        nonlocal prev_pos, prev_quat, prev_grip, state
 
         # Invert scripted target → normalized action (delta needs prev_*; absolute
         # is a stateless per-step transform of the current target alone).
@@ -439,8 +440,10 @@ def execute_and_collect(
     for _ in range(N_HOLD):
         cur_obs_list = _step(lift_b, quat_b, width_cls)
 
-    # Success check from final object position
-    obj_z   = _np(worker.handle.objects[0].get_pos())[:, 2]
+    # Success check from final object height. Rigid: get_pos; soft MPM: the particle-mean centre from
+    # the last step's state (MPMEntity has no get_pos).
+    _o = worker.handle.objects[0]
+    obj_z   = _np(_o.get_pos())[:, 2] if hasattr(_o, "get_pos") else np.asarray(state["object_center"])[:, 2]
     success = obj_z > (grasp_pos[:, 2] + LIFT_HEIGHT * 0.5)
     return obs_bufs, act_bufs, rew_bufs, success, frame_bufs
 
@@ -651,14 +654,19 @@ def main() -> None:
         home_offset  = dr_cfg.sample_home_offset(rng, n)   # per-env arm-home jitter (sim-only DR)
         worker.reset(object_dxy=object_dxy, object_euler=object_euler, home_offset=home_offset)
 
-        # Extra settling until object velocity is small
+        # Extra settling. Rigid objects roll → settle until velocity is small; soft MPM objects have no
+        # rigid get_vel/get_ang (and are placed resting, not dropped) → a brief fixed settle suffices.
+        # (Same fix as collect_demos_synth_v2/v3.py -- MPMEntity has no get_vel/get_ang in this Genesis
+        # fork version; v1 had never hit this path before since it was only ever run on rigid tasks.)
         obj = worker.handle.objects[0]
-        for _ in range(600):
-            worker.handle.scene.step()
-            lin = np.abs(_np(obj.get_vel())).max()
-            ang = np.abs(_np(obj.get_ang())).max()
-            if lin < 0.003 and ang < 0.01:
-                break
+        if hasattr(obj, "get_vel"):
+            for _ in range(600):
+                worker.handle.scene.step()
+                if np.abs(_np(obj.get_vel())).max() < 0.003 and np.abs(_np(obj.get_ang())).max() < 0.01:
+                    break
+        else:                                          # soft MPM
+            for _ in range(30):
+                worker.handle.scene.step()
 
         # Read initial state (depth rendered; this is obs_0 for every env)
         init_state     = worker.read_state()
@@ -673,8 +681,11 @@ def main() -> None:
                 init_state["object_center"], init_state["object_quat"], dr_vec, priv_cfg,
                 contact_force=init_state.get("contact_force")))
 
+        # Object pose (SETTLED), straight from read_state: rigid = get_quat, soft = Kabsch
+        # best-fit rotation of the settled particle cloud (worker.read_state handles both --
+        # MPMEntity itself has no get_quat, unlike the rigid case this was originally written for).
         obj_pos_all  = init_state["object_center"].astype(np.float64)  # (N, 3)
-        obj_quat_all = _np(obj.get_quat()).astype(np.float64)           # (N, 4) wxyz
+        obj_quat_all = np.asarray(init_state["object_quat"], np.float64)  # (N, 4) wxyz
 
         # ── Per-env CMA-ES grasp synthesis (parallel — one subprocess per env) ──
         payloads = []
