@@ -103,7 +103,7 @@ def _replay_succeeded(frames_pos, yield_stress: float, frames_stress,
     return rise >= min_rise_m and peak_stress <= yield_stress, rise, peak_stress
 
 
-def _replay_one(worker, ep, dr, n_frames_cap):
+def _replay_one(worker, ep, dr, n_frames_cap, capture_rgb: bool = False):
     object_dxy = np.array([[dr["obj_dx"], dr["obj_dy"]]], dtype=np.float32)
     object_euler = np.deg2rad(np.array(
         [[dr["roll_deg"], dr["pitch_deg"], dr["yaw_deg"]]], dtype=np.float32))
@@ -112,7 +112,7 @@ def _replay_one(worker, ep, dr, n_frames_cap):
 
     obs = ep["observations"]
     T = min(len(ep["actions"]), n_frames_cap)
-    frames_pos, frames_stress = [], []
+    frames_pos, frames_stress, frames_rgb = [], [], []
     for t in range(T):
         cur_pos  = obs["ee_pos"][t][None].astype(np.float32)
         cur_quat = obs["ee_quat"][t][None].astype(np.float32)
@@ -121,10 +121,17 @@ def _replay_one(worker, ep, dr, n_frames_cap):
         st = worker.handle.objects[0].get_state()
         frames_pos.append(_np(st.pos)[0].copy())        # (n_p, 3)
         frames_stress.append(_np(st.von_mises)[0].copy())  # (n_p,)
-    return frames_pos, frames_stress
+        if capture_rgb:
+            frames_rgb.append(worker.render_rgb())       # (H, W, 3) uint8, cam_ext
+    return frames_pos, frames_stress, frames_rgb
 
 
 def _replay_and_capture(category: str, n_frames_cap: int = 260, max_tries: int = 8):
+    """Search candidates WITHOUT rgb capture (cheaper), then re-replay the winner
+    ONCE MORE with capture_rgb=True -- avoids paying the render cost on every
+    rejected candidate. MPM replay is deterministic given the same actions/reset,
+    so the confirmation replay reproduces the same frames_pos/frames_stress
+    (only used for the printed peak-stress line, not re-validated)."""
     episodes, dr_csv, run_dir = _find_episodes_and_dr(category)
     dr_rows = _read_dr_rows(dr_csv)
     n_candidates = min(len(episodes), max_tries)
@@ -135,30 +142,38 @@ def _replay_and_capture(category: str, n_frames_cap: int = 260, max_tries: int =
 
     worker = GenesisWorker(spec, num_envs=1, show_viewer=False,
                            settle_steps=30, settle_max_steps=200,
-                           settle_vel_thresh=0.002, render_obs_cameras=False)
+                           settle_vel_thresh=0.002, render_obs_cameras=True)
     try:
         fallback = None
+        winner = None
         for i in range(n_candidates):
             ep = episodes[i]
             dr = dr_rows[min(i, len(dr_rows) - 1)]
             print(f"[{category}] trying episode {i}/{n_candidates-1} from {run_dir.name}, "
                  f"{len(ep['actions'])} steps", flush=True)
-            frames_pos, frames_stress = _replay_one(worker, ep, dr, n_frames_cap)
+            frames_pos, frames_stress, _ = _replay_one(worker, ep, dr, n_frames_cap)
             ok, rise, peak_stress = _replay_succeeded(
                 frames_pos, task.object_yield_stress, frames_stress)
             print(f"[{category}]   episode {i}: rise={rise*100:.1f}cm "
                  f"peak_stress={peak_stress/task.object_yield_stress*100:.0f}%yield "
                  f"-> {'OK' if ok else 'reject'}", flush=True)
             if fallback is None or rise > fallback[2]:
-                fallback = (frames_pos, frames_stress, rise)
+                fallback = (frames_pos, frames_stress, rise, ep, dr)
             if ok:
                 print(f"[{category}] episode {i} replayed as a successful lift -- using it",
                      flush=True)
-                return frames_pos, frames_stress, task.object_yield_stress
-        print(f"[{category}] WARNING: none of the first {n_candidates} episodes replayed as a "
-             f"clean successful lift -- using the best-rise candidate "
-             f"({fallback[2]*100:.1f}cm) instead", flush=True)
-        return fallback[0], fallback[1], task.object_yield_stress
+                winner = (ep, dr)
+                break
+        if winner is None:
+            print(f"[{category}] WARNING: none of the first {n_candidates} episodes replayed as "
+                 f"a clean successful lift -- using the best-rise candidate "
+                 f"({fallback[2]*100:.1f}cm) instead", flush=True)
+            winner = (fallback[3], fallback[4])
+
+        ep, dr = winner
+        frames_pos, frames_stress, frames_rgb = _replay_one(
+            worker, ep, dr, n_frames_cap, capture_rgb=True)
+        return frames_pos, frames_stress, frames_rgb, task.object_yield_stress
     finally:
         worker.close()
 
@@ -222,6 +237,20 @@ def _render_category_video(category: str, frames_pos, frames_stress, yield_stres
           f"{crush_frac*100:.1f}% of yield)")
 
 
+def _render_rgb_video(frames_rgb, out_path: Path, fps: int = 30):
+    """Companion RGB video from the scene's cam_ext (real color, same replay as
+    the stress closeup) -- added 2026-08-19 so viewers can see the actual robot
+    grasp next to the abstract stress-colored point cloud, for clarity of HOW
+    each object is actually being grasped. Not pixel-aligned with the stress
+    plot's custom zoomed/tracking matplotlib camera (that view doesn't exist as
+    a real Genesis camera) -- cam_ext is the scene's one calibrated external
+    camera, giving the same workspace vantage used everywhere else in this repo
+    (eval renders, demo collection, etc.)."""
+    import imageio
+    imageio.mimwrite(str(out_path), [f for f in frames_rgb], fps=fps, quality=8)
+    print(f"  -> {out_path}  ({len(frames_rgb)} rgb frames)")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--categories", nargs="+", default=["mushroom", "grape", "kiwi", "raspberry"])
@@ -233,12 +262,17 @@ def main():
     clip_paths = []
     for cat in args.categories:
         out_path = args.out_dir / f"{cat}_stress_closeup.mp4"
-        if out_path.exists():
+        rgb_path = args.out_dir / f"{cat}_rgb.mp4"
+        if out_path.exists() and rgb_path.exists():
             print(f"[{cat}] already rendered -- skipping", flush=True)
             clip_paths.append(out_path)
             continue
-        frames_pos, frames_stress, yield_stress = _replay_and_capture(cat, args.max_frames)
-        _render_category_video(cat, frames_pos, frames_stress, yield_stress, out_path)
+        frames_pos, frames_stress, frames_rgb, yield_stress = _replay_and_capture(
+            cat, args.max_frames)
+        if not out_path.exists():
+            _render_category_video(cat, frames_pos, frames_stress, yield_stress, out_path)
+        if not rgb_path.exists():
+            _render_rgb_video(frames_rgb, rgb_path)
         clip_paths.append(out_path)
 
     print("\nDone. Clips:")
