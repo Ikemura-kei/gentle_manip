@@ -1607,3 +1607,58 @@ category of fix as the mushroom "Config C" stability sweep documented earlier in
   undiscovered instability that just didn't happen to trigger this time. A lightweight,
   collection-free smoke test (build scene, step N times, check for nan) for all TEST
   categories would catch this class of bug before it costs an eval run.
+
+## Session PAUSED (2026-08-19 09:00, "13+9+4" campaign) — resume instructions
+
+User asked to stop for now; everything below was shut down cleanly (SIGTERM to both
+process groups, GPU confirmed reclaimed) rather than left running unattended.
+
+**Where things stand — 25/26 of the 13+9+4 campaign pairs done:**
+- 13 generalist evals: all done.
+- 9 held-in specialist re-evals: all done. Generalist beat its own specialist on 9/9.
+- 4 zero-shot specialists (blackberry/scallop/dumpling/gelatin — new this stretch, trained
+  from scratch to extend the spec-vs-gen comparison to all 13 categories):
+  - blackberry: SR=0.79, combined=0.616 — done.
+  - scallop: SR=0.58, combined=0.512 — done.
+  - dumpling: SR=0.43, combined=0.333 — done, but trained on only **30** episodes (not the
+    50 target) after a recurring `_merge_shards` data-loss bug repeatedly truncated its
+    collection (49→10, then a further 40→30 within this same stretch). See the fix below —
+    treat dumpling's specialist number as noisier than the others because of the smaller
+    training set; a top-up re-collection to 50 + retrain is a reasonable follow-up if this
+    number matters for the writeup.
+  - **gelatin: the one pair left.** Collection finished cleanly (50/50, mesh-fallback fix
+    confirmed working). BC-pretrain was mid-run when stopped — run `tdbfc` under
+    `single_lift_gelatin_soft_easy_pcd`, checkpointed every 100 steps, last checkpoint
+    `state_500.pt` (08:58). `experiments.csv` status set to `stopped-iter500` so the campaign
+    row stays honest.
+
+**To resume, just re-run the same orchestrator command it was already running:**
+```
+uv run --project envs/dppo python -m gentle_manip.scripts.run_zeroshot_specialists
+```
+Blackberry/scallop/dumpling are already-done (idempotent skip via their
+`logs/full_eval_campaign/specialist/<cat>.json`). Gelatin's collection is also
+already-done (idempotent skip via `logs/fragile25_specialist/gelatin.json`'s `demo_dir`);
+`train()` → `train_with_resume` will find run `tdbfc` via `experiments.csv` and resume BC
+-pretrain from `state_500.pt` via `+resume_from=`, not restart from scratch. It then runs
+gelatin's canonical 100-episode eval and writes
+`logs/full_eval_campaign/specialist/gelatin.json` — the 26th and final pair.
+
+**After gelatin lands, regenerate the report** (`/tmp/.../scratchpad/build_report_v3.py`,
+republish to the existing Artifact URL) — §09's 3×2 layout will then show all 13 categories
+with both specialist and generalist bars, 26/26 complete.
+
+**Bug fixed this stretch, not yet in a prior log entry:** `_merge_shards` (both
+`collect_demos_synth_v2.py` and `v3.py`) now REFUSES to write a merge smaller than what's
+already on `data.pkl` (a monotonicity guard — commit `2a1cdec`). Root cause of the repeated
+shrink is still unconfirmed (best guess: a race between an overlapping/late-finishing retry
+attempt's own end-of-run merge and a later one), but this makes the whole bug class inert
+regardless of mechanism — worth carrying this pattern into any other resumable/sharded
+collector added later.
+
+**Next after the 26/26 campaign wraps (not started yet, per the standing plan):**
+augment synth v3 data to ~150 episodes/category → train a generalist DIRECTLY from that
+(no RLDG distillation) → compare against the RLDG-distilled generalist on the same 6
+metrics → THEN propose an FSM for recovery/retry demo collection, smoketest small, and
+stop for user discussion before any large-scale re-collection (explicit standing
+instruction — do not scale that phase up autonomously).
