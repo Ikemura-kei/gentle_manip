@@ -152,8 +152,8 @@ def eval_one(category: str, checkpoint: str) -> dict:
     cfg_dir = DPPO_CFG_DIR / MERGE_NAME / f"eval_{category}"
     cfg_dir.mkdir(parents=True, exist_ok=True)
     (cfg_dir / "eval_diffusion_pointnet.yaml").write_text(
-        EVAL_TEMPLATE.format(obj=category, merge_name=MERGE_NAME, port=PORT,
-                             n_episodes=N_EPISODES))
+        EVAL_TEMPLATE.format(obj=category, role="direct-generalist", merge_name=MERGE_NAME,
+                             port=PORT, n_episodes=N_EPISODES))
 
     log_dir = RESULTS_DIR / "direct_generalist_eval_logs"
     log_dir.mkdir(parents=True, exist_ok=True)
