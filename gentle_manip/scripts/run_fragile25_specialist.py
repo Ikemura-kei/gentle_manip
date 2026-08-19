@@ -347,6 +347,13 @@ def _run(cmd, cwd=REPO, env=None):
 
 
 def find_latest_demo_dir(category: str) -> Optional[Path]:
+    """Latest run dir with a usable data.pkl for `category`. Auto-merges leftover
+    shard_*.pkl into data.pkl if a run was killed before its own final merge (e.g.
+    the collector's LAST retry attempt also hitting its wall-clock timeout) -- the
+    episodes are already durably saved per-shard, only the merge step was skipped,
+    and without this the collected data would be silently invisible to every
+    downstream consumer (caught via dumpling's zero-shot specialist training
+    crashing with "no demos found" despite 40/50 real saved episodes, 2026-08-19)."""
     task_dir = REPO / "dataset" / "demos" / f"single_lift_{category}_soft"
     if not task_dir.exists():
         return None
@@ -355,6 +362,13 @@ def find_latest_demo_dir(category: str) -> Optional[Path]:
         if not d.is_dir():
             continue
         dp = d / "data.pkl"
+        if not dp.exists() and list(d.glob("shard_*.pkl")):
+            import sys as _sys
+            _sys.path.insert(0, str(REPO / "grasp_synthesis"))
+            from collect_demos_synth_v3 import _merge_shards
+            dp_merged = _merge_shards(d)
+            if dp_merged is not None:
+                dp = dp_merged
         if not dp.exists():
             continue
         import pickle
