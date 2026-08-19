@@ -116,6 +116,40 @@ EVAL_EXP_OVR=(); [ -n "$EVAL_EXPERIMENT" ] && EVAL_EXP_OVR=(experiment="$EVAL_EX
 # DR-density diagnostic (denser rebuild = harder/more varied geometry per episode budget).
 SCENE_GROUP_SIZE=${SCENE_GROUP_SIZE:-}
 SGS_OVR=(); [ -n "$SCENE_GROUP_SIZE" ] && SGS_OVR=(scene_group_size="$SCENE_GROUP_SIZE")
+# ACT_STEPS: execution horizon override -- how many of the policy's predicted horizon_steps
+# actions actually get executed before replanning (the model itself is unchanged; this only
+# affects the eval-time receding-horizon loop). Unset = use the config's own default (4).
+ACT_STEPS=${ACT_STEPS:-}
+ACT_OVR=(); [ -n "$ACT_STEPS" ] && ACT_OVR=(act_steps="$ACT_STEPS")
+# N_STEPS: policy-level episode length (chunk-executions per episode) -- the config's own default
+# is calibrated for its default act_steps (n_steps * act_steps = max_episode_steps sim steps).
+# Overriding ACT_STEPS WITHOUT also correcting N_STEPS silently shortens/lengthens the episode's
+# physical time budget -- a confound, not a fair comparison. Set N_STEPS explicitly whenever
+# ACT_STEPS is overridden (e.g. max_episode_steps=400, act_steps=1 -> N_STEPS=400).
+N_STEPS=${N_STEPS:-}
+NSTEPS_OVR=(); [ -n "$N_STEPS" ] && NSTEPS_OVR=(n_steps="$N_STEPS")
+# USE_DDIM / DDIM_STEPS: switch the (already-trained, DDPM) checkpoint to DDIM sampling at eval
+# time -- fewer reverse-diffusion steps than the model's own trained denoising_steps, no
+# retraining needed. USE_DDIM=1 enables it; DDIM_STEPS sets the step count (config default: 0,
+# i.e. ft_denoising_steps -- set DDIM_STEPS explicitly for a BC-base DDIM eval).
+USE_DDIM=${USE_DDIM:-0}
+DDIM_STEPS=${DDIM_STEPS:-}
+DDIM_OVR=()
+if [ "$USE_DDIM" = "1" ]; then
+    DDIM_OVR=(use_ddim=true)
+    [ -n "$DDIM_STEPS" ] && DDIM_OVR+=(ddim_steps="$DDIM_STEPS")
+fi
+# HORIZON_STEPS / DENOISING_STEPS / COND_STEPS: architecture-level overrides needed to load a
+# checkpoint trained with a NON-DEFAULT value of these (horizon_steps/cond_steps change the
+# network's input/output dims -- a mismatch fails state_dict loading loudly; denoising_steps
+# changes the noise schedule length). Unset = use the config's own default (must match the
+# checkpoint's own training config or loading fails/produces garbage).
+HORIZON_STEPS=${HORIZON_STEPS:-}
+HORIZON_OVR=(); [ -n "$HORIZON_STEPS" ] && HORIZON_OVR=(horizon_steps="$HORIZON_STEPS")
+DENOISING_STEPS_OVR_VAL=${DENOISING_STEPS:-}
+DENOISING_OVR=(); [ -n "$DENOISING_STEPS_OVR_VAL" ] && DENOISING_OVR=(denoising_steps="$DENOISING_STEPS_OVR_VAL")
+COND_STEPS=${COND_STEPS:-}
+COND_OVR=(); [ -n "$COND_STEPS" ] && COND_OVR=(cond_steps="$COND_STEPS")
 # SMOOTH_ALPHA: EMA low-pass on the commanded pos+rot6d (jerk suppression), same mechanism as
 # deploy_real.py's --smooth-alpha (GenesisMultiStepVecEnv._smooth). Unset (default) = off; the
 # target eval config must declare env.specific.smooth_alpha (currently: the *_bignet/*_bignet2
@@ -142,12 +176,13 @@ if [ -n "${EVAL_SUBDIR:-}" ]; then
     LOGDIR_OVR=(logdir="$RUN_DIR/eval/$EVAL_SUBDIR")
     echo "[sbatch] unique eval logdir -> $RUN_DIR/eval/$EVAL_SUBDIR (EVAL_SUBDIR set)"
 fi
-echo "[sbatch] running eval of $CKPT (cfg=$CFG_NAME, n_episodes=${N_EPISODES:-<from cfg>}, ft_denoising=$FT_DENOISING, smooth_alpha=${SMOOTH_ALPHA:-off}, scene_group_size=${SCENE_GROUP_SIZE:-<from cfg>}, ${EVAL_EXP_OVR[*]:-exp=cfg-default})"
+echo "[sbatch] running eval of $CKPT (cfg=$CFG_NAME, n_episodes=${N_EPISODES:-<from cfg>}, ft_denoising=$FT_DENOISING, smooth_alpha=${SMOOTH_ALPHA:-off}, scene_group_size=${SCENE_GROUP_SIZE:-<from cfg>}, act_steps=${ACT_STEPS:-<from cfg>} n_steps=${N_STEPS:-<from cfg>}, use_ddim=$USE_DDIM ddim_steps=${DDIM_STEPS:-<from cfg>}, horizon_steps=${HORIZON_STEPS:-<from cfg>} denoising_steps=${DENOISING_STEPS_OVR_VAL:-<from cfg>} cond_steps=${COND_STEPS:-<from cfg>}, ${EVAL_EXP_OVR[*]:-exp=cfg-default})"
 uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.train \
     --config-path "$CFG_DIR" --config-name "$CFG_NAME" \
     base_policy_path="$CKPT" normalization_path="$NORM" \
     ft_denoising_steps="$FT_DENOISING" record_batches=null "${NEP_OVR[@]}" \
     env.specific.port="$PORT" \
-    "${EVAL_EXP_OVR[@]}" "${LOGDIR_OVR[@]}" "${SMOOTH_OVR[@]}" "${SGS_OVR[@]}"
+    "${EVAL_EXP_OVR[@]}" "${LOGDIR_OVR[@]}" "${SMOOTH_OVR[@]}" "${SGS_OVR[@]}" "${ACT_OVR[@]}" "${DDIM_OVR[@]}" "${NSTEPS_OVR[@]}" \
+    "${HORIZON_OVR[@]}" "${DENOISING_OVR[@]}" "${COND_OVR[@]}"
 
 echo "[sbatch] eval finished OK"
