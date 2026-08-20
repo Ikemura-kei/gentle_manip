@@ -57,12 +57,17 @@ def _scenario_columns(sc, n):
     return cols
 
 
-def _smoothness_columns(ee_buf, grip_buf, policy_dt, n):
+def _smoothness_columns(ee_buf, grip_buf, act_buf, policy_dt, n):
     """Per-env trajectory-smoothness columns, or blanks when they can't be computed honestly.
 
     Returns blanks unless the venv exposes `policy_dt` (see the call site) — jerk is a third
     derivative, so a trace sampled at a different rate is not comparable, and a wrong number here
     is worse than a missing one.
+
+    `ee_*` and `act_*` are BOTH reported because they answer different questions: the achieved EE
+    path is dominated by the position controller's tracking, while the action stream is precisely
+    what a cloned policy has to reproduce. A reference-trajectory improvement can move the second
+    by 5.6x while leaving the first unchanged, so reporting only `ee_*` would hide it.
     """
     cols = [{} for _ in range(n)]
     if not policy_dt:
@@ -74,6 +79,10 @@ def _smoothness_columns(ee_buf, grip_buf, policy_dt, n):
         if len(grip_buf[j]) >= 5:
             g = trajectory_metrics(np.asarray(grip_buf[j]).reshape(-1, 1), float(policy_dt))
             cols[j].update(grip_sparc=g["sparc"], grip_njerk=g["njerk"])
+        if len(act_buf[j]) >= 5:
+            a = trajectory_metrics(np.stack(act_buf[j]), float(policy_dt), prefix="act_")
+            cols[j].update(act_sparc=a["act_sparc"], act_njerk=a["act_njerk"],
+                           act_vpeaks=a["act_vpeaks"])
     return cols
 
 
@@ -172,6 +181,14 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
         # derivative. Only meaningful when the venv declares its step period (see policy_dt below).
         ee_buf = [[] for _ in range(n)]
         grip_buf = [[] for _ in range(n)]
+        # ACTION stream per step. Measured separately from the achieved EE path because they answer
+        # different questions, and conflating them hides the one that matters for imitation:
+        #   ee_*  = what the arm DID -> dominated by the position controller's tracking
+        #   act_* = what the policy COMMANDED -> exactly what a BC policy is trained to reproduce
+        # Measured on the v4 trajectory work: switching to a blended min-jerk reference improved the
+        # action stream 5.6x (njerk 1475 -> 264) while the achieved EE path was unchanged (~11150),
+        # so an ee_*-only gate would have scored a real improvement as no change at all.
+        act_buf = [[] for _ in range(n)]
 
         for t in range(spec.max_policy_steps):
             if dump_pcd and isinstance(obs, dict) and "point_cloud" in obs:   # capture the obs the policy ACTS on
@@ -190,6 +207,11 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
                     if gw is not None:
                         grip_buf[j].append(float(gw[j]))
             action = policy.act(obs)
+            _a = np.asarray(action, float)
+            if _a.ndim >= 2 and _a.shape[0] == n:
+                _a2 = _a.reshape(n, -1)                       # chunked actions flatten harmlessly
+                for j in range(n):
+                    act_buf[j].append(_a2[j].copy())
             obs, reward, _term, _trunc, info = venv.step(action)
             ep_reward += np.asarray(reward, float).reshape(n)
             succ = np.asarray(info.get("success", np.zeros(n, bool))).reshape(n).astype(bool)
@@ -241,7 +263,7 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
         # venv (DPPO, act_steps>1) observes the EE at 1/act_steps of the sim rate, so jerk/SPARC
         # from that aliased trace are not comparable to a 1-step trace; leaving policy_dt unset
         # yields blank columns rather than silently wrong numbers.
-        smooth_cols = _smoothness_columns(ee_buf, grip_buf,
+        smooth_cols = _smoothness_columns(ee_buf, grip_buf, act_buf,
                                           getattr(venv, "policy_dt", None), n)
         # Optional per-episode metrics contributed by the POLICY itself (e.g. the scripted grasp
         # synthesizer's chosen tilt / contact area / predicted occlusion, which nothing else can see).

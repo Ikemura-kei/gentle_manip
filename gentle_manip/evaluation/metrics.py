@@ -50,6 +50,12 @@ CSV_FIELDS = ["episode", "batch", "env", "scenario_seed", "success", "ever_succe
               # ~ -1.4..-1.6); njerk: dimensionless jerk (lower = smoother); vpeaks: submovement
               # count (a human point-to-point reach has exactly 1).
               "ee_sparc", "ee_njerk", "ee_vpeaks", "ee_path_len", "grip_sparc", "grip_njerk",
+              # act_* = smoothness of the COMMANDED action stream. Reported alongside ee_*
+              # because they measure different things: ee_* is dominated by the position
+              # controller's tracking, while act_* is exactly what a cloned policy must
+              # reproduce. A reference-trajectory change can move act_* 5.6x with no
+              # visible effect on ee_*, so an ee_*-only gate would miss it.
+              "act_sparc", "act_njerk", "act_vpeaks",
               # Grasp-quality audit, contributed by the POLICY via the optional episode_metrics()
               # hook. Blank for every learned policy; populated by the scripted grasp synthesizer,
               # which is the only thing that knows which grasp it chose and why.
@@ -104,6 +110,7 @@ STRESS_COLS = [
 AUX_COLS = [
     ("ee_sparc", False), ("ee_njerk", False), ("ee_vpeaks", False), ("ee_path_len", False),
     ("grip_sparc", False), ("grip_njerk", False),
+    ("act_sparc", False), ("act_njerk", False), ("act_vpeaks", False),
     ("grasp_tilt_deg", True), ("grasp_min_pad_mm2", True), ("grasp_com_lever_mm", True),
     ("grasp_width_mm", True), ("grasp_occ_pred", True), ("grasp_stress_pred_pa", True),
 ]
