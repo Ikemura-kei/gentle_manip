@@ -35,8 +35,32 @@ from scipy.spatial.transform import Rotation as Rot, Slerp
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "grasp_synthesis"))
 
-import collect_demos_synth_v3 as gsv3          # noqa: E402 — FSM + SDF/FEM synth helpers + constants
+import collect_demos_synth_v3 as gsv3          # noqa: E402 — SDF synth helpers + firm constants
+from grasp_traj import (GraspTrajectory, PhaseSchedule, SCHEDULE_V3,  # noqa: E402
+                        SCHEDULE_V4)
 from smgrasp import finger_grasp as fg          # noqa: E402
+
+
+# ── Grasp-objective PROFILES ──────────────────────────────────────────────────
+# THE bug this fixes: the benchmark used to build grasp_kw WITHOUT w_align / diversity / jitter /
+# pitch-seed, so `plan_finger_grasp` fell back to its strict defaults — while the v3 COLLECTOR
+# deliberately runs w_align=2000 (15x weaker) + tilt seeding to broaden the demo distribution. The
+# benchmark was therefore never measuring the configuration that actually generates the datasets,
+# which is why it reported 98-100% success on demos containing stem/pinch/side grasps.
+#
+# `strict` reproduces the historical benchmark EXACTLY (pass nothing -> metric defaults), so the
+# existing 200-episode runs stay comparable. `collector_v3` is the honest v3 baseline.
+GRASP_PROFILES = {
+    # historical benchmark: strict flush-alignment metric, no diversity, pitch seeds at 0
+    "strict": {},
+    # what collect_demos_synth_v3.py ACTUALLY runs (its argparse defaults, :770-791)
+    "collector_v3": dict(w_align=2000.0, diversity_tol=0.3, jitter_deg=20.0,
+                         jitter_pos=0.003, pitch_seed_deg=25.0),
+    # v4: keep the collector's diversity, but re-enable the anti-pinch peak term and add the
+    # geometry priors. Weights are tuned in Iteration 3; these are the starting points.
+    "v4": dict(w_align=2000.0, diversity_tol=0.3, jitter_deg=20.0, jitter_pos=0.003,
+               pitch_seed_deg=25.0, w_peak=None, w_com=0.0, w_tilt=0.0, w_occ=0.0, area_min=0.0),
+}
 from gentle_manip.envs.rpc import SimEnvClient   # noqa: E402
 from gentle_manip.evaluation import EvalSpec, run_eval  # noqa: E402
 from gentle_manip.evaluation.sim_eval_venv import SimEvalVenv  # noqa: E402
@@ -66,7 +90,9 @@ class GraspSynthPolicy:
     """
 
     def __init__(self, num_envs, action_config, venv, *, synth, maxfevals, yield_pa,
-                 object_name, grasp_kw, table_z, seed, extra_close=0.0):
+                 object_name, grasp_kw, table_z, seed, extra_close=0.0,
+                 objective=None, schedule=SCHEDULE_V3, lift_height=None,
+                 standoff=0.05, use_minjerk=False, preshape_factor=0.0):
         self.num_envs = int(num_envs)
         self.action_config = action_config
         self.venv = venv
@@ -76,6 +102,16 @@ class GraspSynthPolicy:
         self.yield_pa = float(yield_pa)
         self.object_name = object_name
         self.grasp_kw = dict(grasp_kw)           # E, density, mu, accel, n_starts, voxel_div, target_tets, gpu
+        # The RESOLVED grasp objective (profile + CLI overrides) forwarded to plan_finger_grasp.
+        # Recorded into summary.json so every run self-documents which objective produced it.
+        self.objective = dict(objective or {})
+        self.schedule = schedule
+        self.lift_height = float(gsv3.LIFT_HEIGHT if lift_height is None else lift_height)
+        self.standoff = float(standoff)
+        self.use_minjerk = bool(use_minjerk)
+        self.preshape_factor = float(preshape_factor)
+        self._audit = [{} for _ in range(self.num_envs)]      # per-env grasp-quality audit
+        self._obj_radius_m = 0.02                             # bbox radius; refined once the FEM builds
         self.table_z = float(table_z)
         self._seed_rng = np.random.default_rng(seed)
         self._synthed = False
@@ -122,6 +158,36 @@ class GraspSynthPolicy:
         """(N,) top10 von-Mises in Pa from priv_stress ([mean, top10] / yield)."""
         return np.asarray(obs["priv_stress"], np.float64)[:, 1] * self.yield_pa
 
+    # ── grasp-quality audit ─────────────────────────────────────────────────────
+    # The synthesizer already knows everything needed to COUNT the three reported defects; it was
+    # simply thrown away. `episode_metrics()` hands it to the harness so stem/pinch/side grasps
+    # become numbers in episodes.csv instead of something you have to eyeball in a video.
+    STEM_LEVER_FRAC = 0.25      # lever > this * object bbox radius => grasping away from the mass
+    PINCH_AREA_MM2 = 20.0       # worst-pad contact area below this => a pinch, not a grasp
+
+    def _audit_row(self, r, obj_pos) -> dict:
+        x = r.get("x")
+        area_mm2 = (float(r["min_pad_area"]) * 1e6) if r.get("min_pad_area") is not None else None
+        lever_mm = (float(r["com_lever"]) * 1e3) if r.get("com_lever") is not None else None
+        row = {
+            "grasp_tilt_deg": r.get("tilt_deg"),
+            "grasp_min_pad_mm2": area_mm2,
+            "grasp_com_lever_mm": lever_mm,
+            "grasp_width_mm": (float(x[6]) * 1e3) if x is not None else None,
+            "grasp_occ_pred": r.get("occ"),
+            "grasp_stress_pred_pa": r.get("stress_top10"),
+            "grasp_score": r.get("score"),
+            "grasp_status": r.get("status"),
+        }
+        thr = self.STEM_LEVER_FRAC * self._obj_radius_m * 1e3
+        row["stem_grasp"] = int(lever_mm is not None and lever_mm > thr)
+        row["pinch_grasp"] = int(area_mm2 is not None and area_mm2 < self.PINCH_AREA_MM2)
+        return row
+
+    def episode_metrics(self):
+        """Optional harness hook: per-env grasp-quality columns for this episode."""
+        return list(self._audit)
+
     # ── synthesis ───────────────────────────────────────────────────────────────
     def _synthesize(self, obs):
         N = self.num_envs
@@ -137,15 +203,20 @@ class GraspSynthPolicy:
                 self._fem_obj, self._fem_pad, meta = fg.build_grasp_fem(
                     mesh, voxel_div=gk["voxel_div"], target_tets=gk["target_tets"], use_gpu=gk["gpu"])
                 self._fem_mesh = mesh
+                # object bbox radius -> scales the stem-grasp lever threshold to THIS object/DR scale
+                ext = self._fem_obj.verts.max(0) - self._fem_obj.verts.min(0)
+                self._obj_radius_m = float(np.linalg.norm(ext[:2]) / 2.0)
                 print(f"  [{self.synth}] FEM {meta['tets']} tets ndof={meta['ndof']} gpu={meta['gpu']}"
-                      f"  mesh={Path(mesh).name}", flush=True)
+                      f"  mesh={Path(mesh).name}  r_xy={self._obj_radius_m*1e3:.1f}mm", flush=True)
             for i in range(N):
                 seed = int(self._seed_rng.integers(1, 2**31 - 1))
                 r = fg.synthesize_grasp(self._fem_obj, self._fem_pad, obj_pos[i], obj_quat[i],
                                         E=gk["E"], density=gk["density"], mu=gk["mu"],
                                         table_z=self.table_z, maxfevals=self.maxfevals,
-                                        n_starts=gk["n_starts"], seed=seed, accel=gk["accel"])
+                                        n_starts=gk["n_starts"], seed=seed, accel=gk["accel"],
+                                        **self.objective)
                 best_x.append(r["x"])
+                self._audit[i] = self._audit_row(r, obj_pos[i])
         else:  # sdf (v2 geometric grasp cost)
             payloads = []
             for i in range(N):
@@ -159,55 +230,18 @@ class GraspSynthPolicy:
         self._synthed = True
 
     def _setup_fsm(self, all_best_x, home_pos, home_quat):
+        """Build the shared trajectory engine. Replaces the hand-rolled copy of the collector's
+        `_env_target` that used to live here — the duplication (plus reading gsv3's mutable PHASES
+        globals) is exactly how the benchmark drifted away from the collector's real behaviour."""
+        self.traj = GraspTrajectory(
+            self.schedule, all_best_x, home_pos, home_quat,
+            lift_height=self.lift_height, extra_close=self.extra_close,
+            firm_close=gsv3.FIRM_EXTRA_CLOSE_M, standoff=self.standoff,
+            use_minjerk=self.use_minjerk, preshape_factor=self.preshape_factor)
         N = self.num_envs
-        poses = [gsv3._x_to_targets(x, 1) for x in all_best_x]
-        self.pos_b = np.concatenate([p[0] for p in poses], 0).astype(np.float32)
-        self.quat_b = np.concatenate([p[1] for p in poses], 0).astype(np.float32)
-        self.lift_b = self.pos_b.copy(); self.lift_b[:, 2] += gsv3.LIFT_HEIGHT
-        self.width_open = np.full(N, 0.08, np.float32)
-        self.width_cls = np.array([p[2] - 0.0025 - self.extra_close for p in poses], np.float32)
-        self.grip_target = self.width_cls.copy()
-        # per-env firm close: soft firms EVERY grasp by the base amount, weak grasps more (never skip)
-        self.firm_close = np.full(N, gsv3.FIRM_EXTRA_CLOSE_M, np.float32)
-        self.home_pos = home_pos.copy()
-        self.home_quat = home_quat.copy()
-
-        def _wxyz_to_rot(q):
-            return Rot.from_quat([q[1], q[2], q[3], q[0]])
-        self.slerps = [Slerp([0., 1.], Rot.concatenate([_wxyz_to_rot(home_quat[i]),
-                                                        _wxyz_to_rot(self.quat_b[i])]))
-                       for i in range(N)]
         self.phase_idx = np.zeros(N, np.int64)
         self.phase_step = np.zeros(N, np.int64)
         self.rest_stress = None
-
-    # ── FSM per-env target (mirrors collect_demos_synth_v3._env_target) ─────────
-    def _env_target(self, i, phase_idx, phase_step):
-        name, dur = gsv3.PHASES[phase_idx]
-        if name == "approach":
-            alpha = (phase_step + 1) / dur
-            pos = self.home_pos[i] + alpha * (self.pos_b[i] - self.home_pos[i])
-            xyzw = self.slerps[i](alpha).as_quat()
-            quat = np.array([xyzw[3], xyzw[0], xyzw[1], xyzw[2]], np.float32)
-            grip = self.width_open[i]
-        elif name == "settle":
-            pos, quat, grip = self.pos_b[i], self.quat_b[i], self.width_open[i]
-        elif name == "grasp":
-            alpha = (phase_step + 1) / dur
-            pos, quat = self.pos_b[i], self.quat_b[i]
-            grip = self.width_open[i] + alpha * (self.width_cls[i] - self.width_open[i])
-        elif name == "firm":
-            pos, quat = self.pos_b[i], self.quat_b[i]
-            alpha = (phase_step + 1) / dur
-            self.grip_target[i] = max(0.0, self.width_cls[i] - alpha * self.firm_close[i])
-            grip = self.grip_target[i]
-        elif name == "lift":
-            alpha = (phase_step + 1) / dur
-            pos = self.pos_b[i] + alpha * (self.lift_b[i] - self.pos_b[i])
-            quat, grip = self.quat_b[i], self.grip_target[i]
-        else:  # "hold"
-            pos, quat, grip = self.lift_b[i], self.quat_b[i], self.grip_target[i]
-        return pos, quat, grip
 
     def act(self, obs):
         if not self._synthed:
@@ -219,10 +253,10 @@ class GraspSynthPolicy:
         cur_quat = np.zeros((N, 4), np.float32)
         cur_grip = np.zeros(N, np.float32)
         for i in range(N):
-            if self.phase_idx[i] < gsv3.N_PHASES:
-                p, q, g = self._env_target(i, int(self.phase_idx[i]), int(self.phase_step[i]))
+            if self.phase_idx[i] < self.schedule.n_phases:
+                p, q, g = self.traj.target(i, int(self.phase_idx[i]), int(self.phase_step[i]))
             else:                                             # FSM done -> freeze at lift/hold target
-                p, q, g = self.lift_b[i], self.quat_b[i], self.grip_target[i]
+                p, q, g = self.traj.frozen_target(i)
             cur_pos[i], cur_quat[i], cur_grip[i] = p, q, g
         action = gsv3._invert_actions_absolute(cur_pos, cur_quat, cur_grip, self.action_config)
         self._advance(obs)
@@ -230,20 +264,22 @@ class GraspSynthPolicy:
 
     def _advance(self, obs):
         N = self.num_envs
-        active = self.phase_idx < gsv3.N_PHASES
+        n_phases = self.schedule.n_phases
+        active = self.phase_idx < n_phases
         self.phase_step[active] += 1
-        durations = np.array([gsv3.PHASES[min(int(p), gsv3.N_PHASES - 1)][1] for p in self.phase_idx])
+        durations = np.array([self.schedule.duration(min(int(p), n_phases - 1))
+                              for p in self.phase_idx])
         rolled = active & (self.phase_step >= durations)
-        advance = np.ones(N, np.int64)
-        leaving_grasp = rolled & (self.phase_idx == gsv3._GRASP_IDX)
+        grasp_idx = self.schedule.index("grasp")
+        leaving_grasp = rolled & (self.phase_idx == grasp_idx)
         if np.any(leaving_grasp):                            # soft: ALWAYS firm base, weak firms more
             cur = self._stress_pa(obs)
             for i in np.where(leaving_grasp)[0]:
                 rise = float(cur[i] - self.rest_stress[i])
                 if rise < gsv3.FIRM_STRESS_THRESH_PA:        # weak grasp -> extra close
-                    self.firm_close[i] = gsv3.FIRM_EXTRA_CLOSE_M + gsv3.FIRM_WEAK_EXTRA_CLOSE_M
+                    self.traj.set_firm_close(i, gsv3.FIRM_EXTRA_CLOSE_M + gsv3.FIRM_WEAK_EXTRA_CLOSE_M)
                 # else: base firm close (never skip)
-        self.phase_idx[rolled] += advance[rolled]
+        self.phase_idx[rolled] += 1
         self.phase_step[rolled] = 0
 
 
@@ -276,7 +312,52 @@ def main() -> None:
     ap.add_argument("--grasp-extra-close", type=float, default=0.0,
                     help="squeeze TIGHTER than the synthesized width by this many meters (e.g. 0.005 = "
                          "5mm), for EVERY grasp — mirrors collect_demos_synth_v3.py. 0 = native synth width.")
+    # ── grasp OBJECTIVE (the fix for the benchmark-vs-collector mismatch) ──────
+    ap.add_argument("--grasp-profile", choices=sorted(GRASP_PROFILES), default="strict",
+                    help="which grasp objective to evaluate. 'strict' (default) = the historical "
+                         "benchmark, bit-identical. 'collector_v3' = what collect_demos_synth_v3.py "
+                         "ACTUALLY runs (w_align 2000 + tilt seeding + diversity) — the honest v3 "
+                         "baseline. 'v4' = collector diversity + the re-enabled peak term and the new "
+                         "geometry priors. Individual --grasp-* flags below override the profile.")
+    ap.add_argument("--grasp-align", type=float, default=None, help="override w_align")
+    ap.add_argument("--grasp-peak", type=float, default=None, help="override w_peak (0.3 = metric default)")
+    ap.add_argument("--grasp-com", type=float, default=None, help="override w_com (COM lever arm)")
+    ap.add_argument("--grasp-tilt", type=float, default=None, help="override w_tilt (verticality prior)")
+    ap.add_argument("--grasp-occ", type=float, default=None, help="override w_occ (camera occlusion)")
+    ap.add_argument("--grasp-area-min", type=float, default=None,
+                    help="override area_min (m^2 floor on the worst pad's contact area)")
+    ap.add_argument("--grasp-roll-max-deg", type=float, default=None,
+                    help="half-width of the roll search band about top-down. 90 (default) admits a "
+                         "fully horizontal tool axis, i.e. pure side grasps; try 15-30 to exclude them.")
+    ap.add_argument("--grasp-diversity-tol", type=float, default=None)
+    ap.add_argument("--grasp-jitter-deg", type=float, default=None)
+    ap.add_argument("--grasp-jitter-pos", type=float, default=None)
+    ap.add_argument("--grasp-pitch-seed-deg", type=float, default=None)
+    # ── trajectory ────────────────────────────────────────────────────────────
+    ap.add_argument("--traj", choices=["v3", "v4"], default="v3",
+                    help="v3 = single lerp+slerp home->grasp (linear time). v4 = pre-grasp standoff "
+                         "(approach_xy -> align -> descend) with minimum-jerk time scaling.")
+    ap.add_argument("--standoff", type=float, default=0.05, help="v4 pre-grasp standoff distance (m)")
+    ap.add_argument("--preshape-factor", type=float, default=0.0,
+                    help="v4: preshape the gripper to this multiple of the grasp width during the "
+                         "approach instead of holding it fully open (1.4 ~ human reach). 0 = disabled.")
+    ap.add_argument("--no-minjerk", action="store_true",
+                    help="use linear time scaling even with --traj v4 (isolates the standoff change)")
     args = ap.parse_args()
+
+    # Resolve profile + explicit overrides into ONE objective dict, and record it in summary.json so
+    # every run self-documents the objective that produced it (the missing piece that let the
+    # benchmark silently diverge from the collector in the first place).
+    objective = dict(GRASP_PROFILES[args.grasp_profile])
+    for key, val in (("w_align", args.grasp_align), ("w_peak", args.grasp_peak),
+                     ("w_com", args.grasp_com), ("w_tilt", args.grasp_tilt),
+                     ("w_occ", args.grasp_occ), ("area_min", args.grasp_area_min),
+                     ("diversity_tol", args.grasp_diversity_tol), ("jitter_deg", args.grasp_jitter_deg),
+                     ("jitter_pos", args.grasp_jitter_pos), ("pitch_seed_deg", args.grasp_pitch_seed_deg)):
+        if val is not None:
+            objective[key] = val
+    if args.grasp_roll_max_deg is not None:
+        objective["roll_max"] = np.radians(args.grasp_roll_max_deg)
 
     exp = Experiment.load(args.experiment)
     # object von-Mises yield (priv_stress is normalized by it -> convert back to Pa for the firm check)
@@ -291,10 +372,20 @@ def main() -> None:
     grasp_kw = dict(E=args.grasp_E, density=args.grasp_density, mu=args.grasp_mu, accel=args.grasp_accel,
                     n_starts=args.grasp_n_starts, voxel_div=args.grasp_voxel_div,
                     target_tets=args.grasp_target_tets, gpu=not args.grasp_cpu)
+    # occlusion needs the camera the sim actually renders from (task cfg, or the calibrated default)
+    if objective.get("w_occ"):
+        from gentle_manip.tasks.single_lift import SingleLiftTask
+        objective.setdefault("cam_pos", tuple(SingleLiftTask(exp.task_cfg).scene_spec.cameras[0].pos))
+    schedule = SCHEDULE_V3 if args.traj == "v3" else SCHEDULE_V4
+    print(f"[eval_grasp_synth] objective profile={args.grasp_profile} traj={args.traj} -> "
+          f"{ {k: v for k, v in objective.items() if k != 'cam_pos'} }", flush=True)
     policy = GraspSynthPolicy(args.num_envs, exp.action_config, venv, synth=args.synth,
                               maxfevals=args.maxfevals, yield_pa=yield_pa, object_name=obj_name,
                               grasp_kw=grasp_kw, table_z=args.table_z, seed=args.seed,
-                              extra_close=args.grasp_extra_close)
+                              extra_close=args.grasp_extra_close,
+                              objective=objective, schedule=schedule,
+                              standoff=args.standoff, preshape_factor=args.preshape_factor,
+                              use_minjerk=(args.traj == "v4" and not args.no_minjerk))
     spec = EvalSpec(n_episodes=args.n_episodes, num_envs=args.num_envs, seed=args.seed,
                     max_policy_steps=args.max_steps, scene_group_size=args.scene_group_size)
 
@@ -303,7 +394,14 @@ def main() -> None:
     run_eval(venv, policy, spec, out_dir, experiment_name=args.experiment, checkpoint=None,
              record_batches=args.record_batches,
              extra_meta={"algorithm": "scripted_policy", "algo_variant": f"grasp_synth_{args.synth}",
-                         "maxfevals": args.maxfevals, "grasp_extra_close": args.grasp_extra_close})
+                         "maxfevals": args.maxfevals, "grasp_extra_close": args.grasp_extra_close,
+                         # the RESOLVED objective + trajectory, so a run is self-documenting
+                         "grasp_profile": args.grasp_profile,
+                         "grasp_objective": {k: (list(v) if isinstance(v, tuple) else v)
+                                             for k, v in objective.items()},
+                         "traj": args.traj, "standoff": args.standoff,
+                         "minjerk": bool(args.traj == "v4" and not args.no_minjerk),
+                         "preshape_factor": args.preshape_factor})
     policy.close()
     venv.close()
     print(f"\n[eval_grasp_synth:{args.synth}] done -> {out_dir}", flush=True)

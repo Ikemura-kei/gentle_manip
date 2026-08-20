@@ -147,8 +147,12 @@ class GraspTrajectory:
 
         self.home_pos = np.asarray(home_pos, np.float32).reshape(self.n, 3)
         self.home_quat = np.asarray(home_quat, np.float32).reshape(self.n, 4)
-        self._home_r = _wxyz_to_rot(self.home_quat[0])
-        self._slerps = [Slerp([0.0, 1.0], Rot.concatenate([self._home_r, _wxyz_to_rot(self.quat_b[i])]))
+        # Slerp from EACH env's own home orientation. The v3 collector used home_quat[0] for every
+        # env, which is equivalent there because all envs share the robot's home pose — but the
+        # benchmark seeds home_quat from the per-env MEASURED ee_quat at reset, where the rows can
+        # differ. Per-env is correct in both cases; [0] would have silently changed the eval.
+        self._slerps = [Slerp([0.0, 1.0], Rot.concatenate([_wxyz_to_rot(self.home_quat[i]),
+                                                           _wxyz_to_rot(self.quat_b[i])]))
                         for i in range(self.n)]
 
         # v4 only: pre-grasp standoff = grasp_pos - approach_dir * standoff, so descend is a pure

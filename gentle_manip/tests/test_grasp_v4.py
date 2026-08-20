@@ -273,6 +273,24 @@ def test_preshape_narrows_the_gripper_during_descent():
     assert g == pytest.approx(min(max(pre.width_cls[0] * 1.4, pre.width_cls[0] + 0.005), 0.08), abs=1e-6)
 
 
+def test_slerp_uses_each_envs_own_home_orientation():
+    """Regression: the v3 COLLECTOR slerped every env from home_quat[0] (valid there — all envs
+    share the robot home pose), but the BENCHMARK seeds home_quat from each env's MEASURED ee_quat
+    at reset, where rows differ. Using [0] for all envs would silently change eval behaviour."""
+    hq = np.stack([
+        np.array([0.0, 1.0, 0.0, 0.0], np.float32),                       # env 0
+        np.array([0.0, 0.9659258, 0.0, 0.2588190], np.float32),           # env 1: +30 deg
+        np.array([0.0, 0.9238795, 0.3826834, 0.0], np.float32),           # env 2: different axis
+    ])
+    traj = GraspTrajectory(SCHEDULE_V3, BEST_X, HOME_POS, hq, lift_height=0.2,
+                           firm_close=0.002, use_minjerk=False)
+    ai = SCHEDULE_V3.index("approach")
+    # at the very first step each env should still be near ITS OWN home orientation, not env 0's
+    for i in range(3):
+        q0 = traj.target(i, ai, 0)[1]
+        assert abs(float(np.dot(q0, hq[i]))) > abs(float(np.dot(q0, hq[0]))) or i == 0
+
+
 def test_schedule_index_reports_missing_phase():
     sched = PhaseSchedule((("approach", 5), ("grasp", 5)))        # e.g. --n-firm 0 drops "firm"
     assert sched.index("firm") == -1 and not sched.has("firm")
