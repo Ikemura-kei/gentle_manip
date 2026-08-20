@@ -1,4 +1,11 @@
-# Cluster experiment: arm-focus point cloud — SDF vs FEM(+2mm) on the cho rigid backbone
+# Cluster experiment: arm-focus point cloud — SDF vs FEM(+4mm) on the cho rigid backbone
+
+**UPDATE (2026-08-19):** the plan below specifies FEM+2mm. An 8-episode smoke test at 2mm on
+this rigid task hit only **34.8% collection success** (vs SDF's 57.1% at the same sample size) —
+too fragile to be worth the full 650-episode run. Re-smoked at **4mm: 100% (8/8)**. The actual run
+used **`--grasp-extra-close 0.004`** (4mm), not the 2mm below — the risk noted in the original plan
+(4mm/8mm made FEM harsher than SDF on the reference task) is a real tradeoff to watch for in the
+results, but 2mm was simply not robust enough to collect from on this task/DR combo.
 
 **Goal:** does the new **arm-focus point cloud** (object-dense sampling) + gentle **FEM** grasps get us
 gentle *and* reliable, vs the proven **SDF** (cho) recipe? Two datasets, identical except the grasp
