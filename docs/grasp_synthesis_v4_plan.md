@@ -77,6 +77,33 @@ env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/dppo python -m gentle_mani
 # 4. eval every checkpoint through the canonical harness (see docs/training_and_eval.md)
 ```
 
+### 🔴 BLOCKER found on the 100-episode strict baseline — read before Iteration 3
+
+**The objective scores a width the robot never executes.** The optimizer picks the gentlest
+holdable width; the executor then closes 4.5 mm tighter (2.5 mm base squeeze + 2 mm firm), neither
+of which the objective sees. Stress is steeply nonlinear in indentation, so on a representative
+grasp that offset takes predicted stress from **5 417 Pa to 54 821 Pa (10x)**.
+
+Confirmed against the benchmark (n=100, strict profile, success 1.000):
+
+| observation | value |
+|---|---|
+| peak stress vs mushroom yield (40 kPa) | **50 018 Pa = 1.25x yield on 100% of episodes** |
+| FEM predicted vs sim measured stress | 7 776 vs 37 345 Pa (4.8x) |
+| Spearman(predicted, measured) | +0.10 overall, +0.15 within scene group |
+| dominant correlate of measured stress | object scale, rho +0.80 |
+
+So the demonstrator succeeds every time *by bruising the object every time*, and the metric cannot
+see it. This is upstream of every objective weight, so **fix the operating point before running the
+Iteration-3 ablation** — otherwise the ablation tunes geometric priors around a mis-specified
+stress term.
+
+Fix: score at the width that will actually be commanded (base squeeze + firm are known constants at
+synthesis time). Do NOT remove the firm pass — dropping it previously cost ~15% success.
+
+This also supersedes my earlier recommendation to run the ablation before collecting: the operating
+-point fix is both more fundamental and cheaper, and plausibly changes what the ablation concludes.
+
 ### Open decision for the user
 
 Whether to collect the 500 demos with **only** the validated trajectory fix (ready, low risk) or to

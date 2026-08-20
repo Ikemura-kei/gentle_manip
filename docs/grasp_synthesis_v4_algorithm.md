@@ -187,6 +187,45 @@ Conclusions, after replication:
 *(Timings in the first table were taken under light machine load; the replications ran alongside a
 benchmark and are 3–10× slower in wall-clock. Compare ms/eval only within a single run.)*
 
+### 2.6 ⚠️ The objective is evaluated at a width the robot never executes
+
+**This is the most consequential defect found so far, and it is upstream of every weight in §2.3.**
+
+The optimizer selects the *gentlest holdable width* — deliberately the widest grip that still holds,
+since stress is monotone in indentation depth. The executor then closes **4.5 mm tighter** than
+that: a fixed 2.5 mm "base squeeze" plus a 2 mm "firm" pass. Neither is visible to the objective.
+Because stress is steeply nonlinear in indentation, that offset is not a small correction:
+
+| commanded width | provenance | FEM stress_top10 |
+|---|---|---|
+| 31.76 mm | what the objective **scores** | 5 417 Pa |
+| 29.26 mm | after the base squeeze (−2.5 mm) | 33 071 Pa |
+| **27.26 mm** | what the robot **executes** (−4.5 mm) | **54 821 Pa** |
+
+A **10× increase**, entirely after the point at which the grasp was judged.
+
+Three independent observations over the 100-episode canonical benchmark are explained by this, and
+by nothing else proposed so far:
+
+1. **Every episode exceeds yield.** Measured peak stress averages 50 018 Pa against the mushroom's
+   40 kPa yield — 1.25× yield on **100 % of episodes**. The demonstrator succeeds every time *by
+   bruising the object every time*. Note 54 821 Pa (predicted at the executed width) vs 50 018 Pa
+   (measured in sim) — close agreement.
+2. **Predicted stress is ~4.8× below measured** (7 776 vs 37 345 Pa top-10). The FEM is not
+   inaccurate; it is being read at the wrong operating point.
+3. **Predicted and measured stress barely correlate** (ρ = +0.10 overall; +0.15 within a scene
+   group, controlling for the object scale that dominates at ρ = +0.80). Ranking grasps at width
+   *W* does not rank them at *W* − 4.5 mm, because the stress–indentation curve is steeply
+   nonlinear and each grasp sits at a different point on it.
+
+**Implication.** The gentleness objective has been optimizing an operating point the robot never
+visits. Tuning `w_com` / `w_tilt` / `w_occ` on top of it would be tuning geometric priors around a
+mis-specified stress term. **Score the grasp at the width that will actually be commanded** — the
+base squeeze and firm amounts are known constants at synthesis time — before any weight tuning.
+
+*(The firm pass exists for a real reason: dropping it cost ~15 % success. The fix is to make the
+objective aware of the executed width, not to remove the squeeze.)*
+
 ## 3. Solver *(pending — Iteration 3b)*
 
 Currently multi-start CMA-ES over the 7-DOF variable, followed by a 1-D width refinement of the
