@@ -45,6 +45,16 @@ class SingleLiftTask(BaseTask):
         # MPM domain padding at coarse grid_density (see ObjectEntry.spawn_z).
         _sz = task_cfg.get("object_spawn_z")
         self.object_spawn_z: float | None = float(_sz) if _sz is not None else None
+        # MPM domain. The default is the mushroom-tuned box below and MUST stay exactly that, so
+        # existing tasks are untouched. It is configurable because domain volume and grid density
+        # trade off directly: cost ~ volume x density^3, so TIGHTENING the box is what buys the
+        # resolution a small object needs. A 1.5 cm raspberry spans only ~4 cells at the mushroom's
+        # 4 mm cells; shrinking the domain lets its density rise without a runaway cost.
+        # Genesis insets the usable region by 3 cells on every face (boundary_padding = 3*dx), so a
+        # coarser grid raises the effective floor — pair any change with object_spawn_z.
+        _mb = task_cfg.get("mpm_bounds")
+        self.mpm_bounds: tuple = (tuple(tuple(float(v) for v in side) for side in _mb) if _mb
+                                  else ((0.248, -0.152, -0.022), (0.752, 0.152, 0.322)))
 
         self._initial_z: np.ndarray | None = None
         self._success_counter: np.ndarray | None = None
@@ -89,7 +99,8 @@ class SingleLiftTask(BaseTask):
             # 2mm of margin on ALL SIX faces (not just z) as a general safety buffer -- cheap
             # (only extends the empty domain) and z is not provably the only direction that can
             # be violated by some DR combination we haven't hit yet.
-            mpm_bounds=((0.248, -0.152, -0.022), (0.752, 0.152, 0.322)),
+            # (the literal above is now self.mpm_bounds' default — overridable per task, see __init__)
+            mpm_bounds=self.mpm_bounds,
             mpm_grid_density=self.mpm_grid_density,
         )
 
