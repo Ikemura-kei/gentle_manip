@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import List, Tuple
 
@@ -54,10 +55,19 @@ class ActionConfig:
     gripper_min: float = 0.0
     gripper_max: float = DEFAULT_GRIPPER_WIDTH
 
+    # Absolute-mode rotation encoding: "rot6d" (default, 10-dim action: 3 pos + 6 rot6d + 1 grip;
+    # continuous, singularity-free) or "euler" (7-dim: 3 pos + 3 euler + 1 grip — the RPY convention
+    # most papers use; compact but has gimbal-lock/wraparound). Both process to the SAME 8-dim
+    # physical (pos+quat+gripper) command, so the backend dispatch (7=delta, 8=absolute) is unchanged.
+    rot_repr: str = "rot6d"
+    euler_min: Tuple[float, float, float] = (-math.pi, -math.pi, -math.pi)  # euler mode: raw [-1,1] -> [min,max] rad
+    euler_max: Tuple[float, float, float] = (math.pi, math.pi, math.pi)
+    euler_seq: str = "xyz"   # scipy Rotation from_euler/as_euler sequence (intrinsic xyz ~ RPY)
+
     @property
     def action_dim(self) -> int:
         if self.mode == "absolute":
-            return 10   # pos(3) + rot6d(6) + gripper(1)
+            return 7 if self.rot_repr == "euler" else 10   # 3 pos + (3 euler | 6 rot6d) + 1 gripper
         return len(self.scales)
 
     def validate(self) -> None:
@@ -77,6 +87,12 @@ class ActionConfig:
             if self.gripper_min >= self.gripper_max:
                 raise ValueError(f"gripper_min must be < gripper_max, got "
                                  f"{self.gripper_min} / {self.gripper_max}")
+            if self.rot_repr not in ("rot6d", "euler"):
+                raise ValueError(f"rot_repr must be 'rot6d' or 'euler', got {self.rot_repr!r}")
+            if self.rot_repr == "euler" and any(
+                lo >= hi for lo, hi in zip(self.euler_min, self.euler_max)):
+                raise ValueError(f"euler_min must be < euler_max elementwise, got "
+                                 f"{self.euler_min} / {self.euler_max}")
 
     @classmethod
     def from_dict(cls, d: dict) -> ActionConfig:
@@ -90,6 +106,10 @@ class ActionConfig:
             kwargs["pos_max"] = tuple(d.get("pos_max", cls.pos_max))
             kwargs["gripper_min"] = float(d.get("gripper_min", cls.gripper_min))
             kwargs["gripper_max"] = float(d.get("gripper_max", cls.gripper_max))
+            kwargs["rot_repr"] = d.get("rot_repr", "rot6d")
+            kwargs["euler_min"] = tuple(d.get("euler_min", cls.euler_min))
+            kwargs["euler_max"] = tuple(d.get("euler_max", cls.euler_max))
+            kwargs["euler_seq"] = d.get("euler_seq", cls.euler_seq)
         else:
             kwargs["scales"] = d.get("scales", cls.__dataclass_fields__["scales"].default_factory())
         cfg = cls(**kwargs)

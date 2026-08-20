@@ -30,6 +30,7 @@ for p in (str(_REPO), str(_DP3)):
         sys.path.insert(0, p)
 
 from gentle_manip.actions.action_config import ActionConfig          # noqa: E402
+from gentle_manip.actions.pipeline import ActionPipeline             # noqa: E402
 from gentle_manip.envs.policy_env import PolicyEnv                    # noqa: E402
 from gentle_manip.envs.real_backend import RealBackend               # noqa: E402
 from gentle_manip.perception.obs_config import ObsConfig             # noqa: E402
@@ -294,6 +295,11 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
 
     action_mode = action_config.mode if action_config is not None else "delta"
     _abs_filters_on = action_mode == "absolute" and action_config is not None
+    # For the commanded-vs-actual pose print: reuse ActionPipeline to map the sent raw action into
+    # the physical absolute pose (pos + quat + gripper) exactly as the backend does. Absolute only
+    # (in delta mode the action is a delta, not a pose, so a pose comparison is meaningless).
+    _cmd_pipe = (ActionPipeline(action_config)
+                 if action_config is not None and action_mode == "absolute" else None)
 
     # Raw<->physical position conversion constants (absolute mode only) — shared by both
     # filters below so each can be SEEDED from the robot's ACTUAL current pose right after a
@@ -427,6 +433,23 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
                         act_buf.append(np.asarray(action, dtype=np.float32).copy())
                     t0 = time.perf_counter()
                     obs = env.step(action[None, :].astype(np.float32))[0]
+                    # Commanded (the sent action -> physical pose) vs ACTUAL (this step's obs) EE pose
+                    # + gripper, so you can see whether the robot reaches the policy's commanded pose.
+                    _gw_act = float(np.asarray(obs["gripper_width"]).reshape(-1)[0])
+                    if _cmd_pipe is not None:                                   # absolute mode
+                        _cmd = _cmd_pipe.process(action[None, :].astype(np.float32))[0]  # pos3+quat4+grip1
+                        _p_cmd, _q_cmd, _g_cmd = _cmd[:3], _cmd[3:7], float(_cmd[7])
+                        _p_act = np.asarray(obs["ee_pos"]).reshape(-1)[:3]
+                        _dpos_mm = np.round((_p_cmd - _p_act) * 1000.0, 1)
+                        _line = (f"[pose] pos cmd={np.round(_p_cmd, 4)} act={np.round(_p_act, 4)} "
+                                 f"d_mm={_dpos_mm} | grip cmd={_g_cmd:.4f} act={_gw_act:.4f}")
+                        if "ee_quat" in obs:                                   # quat student (obs_dim 8)
+                            _q_act = np.asarray(obs["ee_quat"]).reshape(-1)[:4]
+                            _ang = np.degrees(2.0 * np.arccos(min(1.0, abs(float(np.dot(_q_cmd, _q_act))))))
+                            _line += f" | quat_err={_ang:.1f}deg"
+                        print(_line, flush=True)
+                    else:                                                      # delta mode: no abs pose
+                        print(f"[gripper] actual={_gw_act:.4f} m  (cmd raw={float(action[-1]):+.3f})", flush=True)
                     policy.push(obs)
                     steps += 1
                     if period > 0:

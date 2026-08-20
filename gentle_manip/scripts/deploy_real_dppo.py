@@ -161,7 +161,12 @@ class DPPOPolicyAdapter:
             traj = self.model(cond=cond, deterministic=True).trajectories.cpu().numpy()
         chunk = traj[0, : self.n_action_steps]        # (act_steps, action_dim) normalized [-1, 1]
         # un-normalize to the raw [-1, 1] action PolicyEnv.step expects (it applies ActionPipeline).
-        return ((chunk + 1.0) / 2.0 * self._act_range + self.action_min).astype(np.float32)
+        raw = ((chunk + 1.0) / 2.0 * self._act_range + self.action_min).astype(np.float32)
+        # RAW policy actions this chunk: net output (normalized [-1,1]) and the un-normalized raw
+        # action fed to the ActionPipeline. First action of the chunk (a0 = the one executed next).
+        with np.printoptions(precision=4, suppress=True):
+            print(f"[policy] a0 net(norm)={chunk[0]}  raw={raw[0]}", flush=True)
+        return raw
 
 
 def main() -> None:

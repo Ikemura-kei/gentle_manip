@@ -1,0 +1,33 @@
+# [obs] 1-cam point cloud, real-deploy for an ARM-FOCUS-trained checkpoint (e.g. vqgsn, armfocus).
+# Used by: deploy_real.py / deploy_real_dppo.py
+# Status: active
+#
+# Real-deploy obs for a policy trained with the arm-focus cloud (superset_rigid_armfocus /
+# superset_soft_armfocus). IDENTICAL to point_cloud_1cam_outlier.yaml (same cam, crop, max_points,
+# real-only outlier denoise) PLUS object_focus — because object_focus is SHARED sim+real geometry
+# (the arm is present in both), so a policy trained with the arm downweighted MUST be deployed the
+# same way, or the cloud distribution won't match. The object_focus params below are copied verbatim
+# from the training obs (superset_rigid_armfocus) so the real cloud is sampled identically.
+# quat proprio (obs_dim 8). No privileged block (sim-only; real deploy runs task=None).
+include_joint_pos: false
+include_joint_vel: false
+
+quat_noise_std: 0.003
+
+point_cloud:
+  cameras: ["cam_ext"]
+  crop_min: [0.2, -0.215, 0.004]
+  crop_max: [0.71,   0.215,  0.45]
+  max_points: 1024
+
+  # Real-only flying-pixel / edge denoiser (no-op on clean sim).
+  outlier_removal:
+    voxel_size: 0.01
+    min_neighbors: 23
+
+  # Arm-focus: downweight arm-body points so the 1024-pt budget concentrates on the object.
+  # SHARED sim+real — must match the training obs (superset_rigid_armfocus) exactly.
+  object_focus:
+    z_lo: 0.15          # keep points below this at full weight (table + resting object)
+    r_ee: 0.13          # finger-safe SPHERE radius around the EE (gripper + grasped/lifted object)
+    arm_weight: 0.15    # arm-body points sampled at 0.15x (budget goes to the object)

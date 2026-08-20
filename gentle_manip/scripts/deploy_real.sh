@@ -54,19 +54,6 @@
 # see that cfg's action_dim=10 / obs_dim=8). ft-denoising-steps 0 = pure BC checkpoint.
 # obs-config = point_cloud_1cam_outlier.yaml, same as the "sma" delta-mode entry above — the
 # real-only outlier denoise, no object_focus (matches superset_rigid's crop/1024, arm kept in).
-#
-# --pose-scale is a DELTA-mode-only knob and is a no-op here (absolute targets, not deltas).
-# --smooth-alpha is the absolute-mode equivalent for a jittery/shaky commanded pose (EMA
-# low-pass on pos+rotation, gripper dim untouched so grasp/release stays decisive) — start
-# around 0.3 and tune down further if motion still looks jerky, up if it feels sluggish/laggy
-# behind the policy's intent. NOTE: 0.0 freezes the commanded pose at whatever it was seeded
-# to (never tracks a new target) — that's likely not what you want; use a value in (0, 1].
-# --max-pos-step-m is a HARD per-tick safety cap (meters/axis) on top of/independent from
-# smooth_alpha — no single tick can move the target further than this, no matter what the
-# network outputs; both filters seed from the robot's ACTUAL current pose at reset/re-home,
-# so the very first commanded action is bounded too, not just steady-state jitter.
-# Sim eval of this checkpoint (band 0.175-0.275): success 0.76, ever_success 0.815 (see
-# logs/dppo/dppo-pretrain/single_lift_mushroom_rigid/cho/ahaxs/eval/).
 
 
 # ckpt=logs/dppo/dppo-pretrain/single_lift_mushroom_rigid/rpk/fjyis/checkpoint/state_3500.pt
@@ -101,19 +88,19 @@
 #   --shard-size 10
 
 # Working very nicely:
-# ckpt=logs/dppo/dppo-pretrain/single_lift_mushroom_rigid/cho/ahaxs/checkpoint/state_800.pt
-# normalization=dataset/dppo/single_lift_mushroom_rigid/cho/normalization.npz
-# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-#   --ckpt ${ckpt} \
-#   --ft-denoising-steps 0 \
-#   --normalization ${normalization} \
-#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_outlier.yaml \
-#   --action-config gentle_manip/configs/action/abs_pose_abs_gripper.yaml \
-#   --smooth-alpha 0.6 \
-#   --max-pos-step-m 0.0065 \
-#   --record dataset/real_deploy/tmp \
-#   --shard-size 10 \
-#   --max-steps 5000
+ckpt=logs/dppo/dppo-pretrain/single_lift_mushroom_rigid/cho/ahaxs/checkpoint/state_800.pt
+normalization=dataset/dppo/single_lift_mushroom_rigid/cho/normalization.npz
+uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+  --ckpt ${ckpt} \
+  --ft-denoising-steps 0 \
+  --normalization ${normalization} \
+  --obs-config gentle_manip/configs/obs/point_cloud_1cam_outlier.yaml \
+  --action-config gentle_manip/configs/action/abs_pose_abs_gripper.yaml \
+  --smooth-alpha 0.6 \
+  --max-pos-step-m 0.0065 \
+  --record dataset/real_deploy/tmp \
+  --shard-size 10 \
+  --max-steps 5000
 
 # ckpt=logs/dppo/dppo-pretrain/single_lift_mushroom_soft_abs_pcd_rot6d/bwvei/checkpoint/state_400.pt
 # normalization=dataset/dppo/single_lift_mushroom_soft_abs_pcd_rot6d/normalization.npz
@@ -185,16 +172,62 @@
 #   --shard-size 10 \
 #   --max-steps 5000
 
-ckpt=logs/dppo-pretrain/single_lift_mushroom_rigid/cak/lfjih/checkpoint/state_800.pt
-normalization=/home/kei/kei/gentle_manip/dataset/dppo/single_lift_mushroom_rigid/cak/normalization.npz
-uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-  --normalization ${normalization} \
-  --ckpt ${ckpt} \
-  --obs-config gentle_manip/configs/obs/point_cloud_1cam_outlier.yaml \
-  --action-config gentle_manip/configs/action/abs_pose_abs_gripper.yaml \
-  --ft-denoising-steps 0 \
-  --smooth-alpha 0.6 \
-  --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/tmp \
-  --shard-size 10 \
-  --max-steps 5000
+# ckpt=logs/dppo-pretrain/single_lift_mushroom_rigid/cak/lfjih/checkpoint/state_800.pt
+# normalization=/home/kei/kei/gentle_manip/dataset/dppo/single_lift_mushroom_rigid/cak/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --normalization ${normalization} \
+#   --ckpt ${ckpt} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_outlier.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_abs_gripper.yaml \
+#   --ft-denoising-steps 0 \
+#   --smooth-alpha 0.6 \
+#   --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/tmp \
+#   --shard-size 10 \
+#   --max-steps 5000
+  
+# ckpt=/home/kei/kei/gentle_manip/logs/dppo/dppo-pretrain/single_lift_mushroom_rigid/vqgsn/checkpoint/state_400.pt
+# normalization=/home/kei/kei/gentle_manip/dataset/dppo/single_lift_mushroom_rigid/26-08-19-ibx/normalization.npz
+# # vqgsn trained with the ARM-FOCUS cloud (superset_rigid_armfocus) -> deploy with the matching
+# # arm-focus obs (point_cloud_1cam_armfocus), NOT plain outlier, or the cloud distribution won't match.
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --normalization ${normalization} \
+#   --ckpt ${ckpt} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_abs_gripper.yaml \
+#   --ft-denoising-steps 0 \
+#   --smooth-alpha 0.6 \
+#   --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/tmp \
+#   --shard-size 10 \
+#   --max-steps 5000
+
+# ckpt=/home/kei/kei/gentle_manip/downloaded_runs/geozl/checkpoint/state_200.pt
+# # geozl trained on dataset single_lift_mushroom_soft_abs_pcd_hwo (per its EXPERIMENT.md) — use THAT
+# # normalization, not hwooo (a different dataset with different obs/action min-max).
+# normalization=/home/kei/kei/gentle_manip/dataset/dppo/single_lift_mushroom_soft_abs_pcd_hwo/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --normalization ${normalization} \
+#   --ckpt ${ckpt} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_outlier.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_abs_gripper.yaml \
+#   --ft-denoising-steps 0 \
+#   --smooth-alpha 0.6 \
+#   --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/tmp \
+#   --shard-size 10 \
+#   --max-steps 5000
+
+# ckpt=/home/kei/kei/gentle_manip/downloaded_runs/jfhlu/checkpoint/state_400.pt
+# normalization=/home/kei/kei/gentle_manip/dataset/dppo/single_lift_mushroom_soft_abs_pcd_hwo/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --normalization ${normalization} \
+#   --ckpt ${ckpt} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_outlier.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_abs_gripper.yaml \
+#   --ft-denoising-steps 0 \
+#   --smooth-alpha 0.6 \
+#   --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/tmp \
+#   --shard-size 10 \
+#   --max-steps 5000

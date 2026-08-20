@@ -1,0 +1,23 @@
+# [action] ABSOLUTE pose (EULER rotation) + absolute gripper — the 7-DIM variant.
+# Used by: training/deploy for a 7-dim absolute-action policy (3 pos + 3 euler + 1 gripper)
+# Status: active (action-space ablation: 7d-euler-absolute vs delta vs 10d-rot6d-absolute)
+#
+# Same as abs_pose_abs_gripper.yaml EXCEPT the rotation is encoded as 3 EULER angles (RPY,
+# the convention most papers use) instead of the 6D rotation, so the raw action is 7-dim
+# (pos3 + euler3 + gripper1) instead of 10-dim. Both process to the SAME 8-dim physical
+# pose (pos + quat + gripper), so the backend dispatch is unchanged. Euler is compact but has
+# gimbal-lock / ±pi wraparound — fine for a mostly top-down grasp with bounded yaw; prefer
+# rot6d (abs_pose_abs_gripper.yaml) if the teleop yaw spans across ±180deg.
+mode: absolute
+rot_repr: euler
+clip: [-1.0, 1.0]
+pos_min: [0.26, -0.225, 0.003]
+pos_max: [0.59,  0.225, 0.50]
+# Euler mapping: raw [-1,1] -> [euler_min, euler_max] radians, sequence `euler_seq` (intrinsic
+# xyz ~ roll,pitch,yaw). Full +/-pi covers all orientations; convert_demos re-normalizes to the
+# dataset's actual range, so no need to tighten unless you want finer resolution.
+euler_seq: xyz
+euler_min: [-3.14159265, -3.14159265, -3.14159265]
+euler_max: [ 3.14159265,  3.14159265,  3.14159265]
+gripper_min: 0.0
+gripper_max: 0.088

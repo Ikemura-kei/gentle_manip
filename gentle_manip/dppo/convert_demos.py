@@ -56,10 +56,15 @@ def _episode_state(ep: dict, obs_keys: Sequence[str]) -> np.ndarray:
 
 
 def convert(demo_paths: Sequence[Path], out_dir: Path, obs_keys: Sequence[str] = STATE_VIEW,
-            pointcloud_key: str = None, val_split: float = 0.1, seed: int = 0) -> dict:
+            pointcloud_key: str = None, val_split: float = 0.1, seed: int = 0,
+            derive_action_config=None) -> dict:
     episodes = _load_episodes(demo_paths)
     states = [_episode_state(ep, obs_keys) for ep in episodes]
-    actions = [np.asarray(ep["actions"], np.float32) for ep in episodes]
+    if derive_action_config is not None:                  # derive delta/absolute from the pose traj
+        from gentle_manip.actions.derive import derive_action_set
+        actions = [derive_action_set(ep, derive_action_config) for ep in episodes]
+    else:
+        actions = [np.asarray(ep["actions"], np.float32) for ep in episodes]
     rewards = [np.asarray(ep["rewards"], np.float32).reshape(-1) for ep in episodes]
     obs_dim, act_dim = states[0].shape[1], actions[0].shape[1]
     # point-cloud modality (raw xyz, NOT normalized — the PointNet consumes metric coords)
@@ -163,7 +168,24 @@ def main() -> None:
                          "Takes precedence over --obs-keys.")
     ap.add_argument("--view", default="teacher",
                     help="which experiment view to use with --experiment (default: teacher)")
+    ap.add_argument("--derive-action", type=Path, default=None,
+                    help="DERIVE the action from the recorded EE-pose trajectory using this action "
+                         "config (delta / abs_pose_abs_gripper / abs_pose_euler_abs_gripper), instead "
+                         "of using the demo's stored actions. Lets ONE collection produce both a delta "
+                         "and an absolute dataset (run convert twice with different --derive-action).")
     args = ap.parse_args()
+
+    derive_cfg = None
+    if args.derive_action is not None:
+        import yaml
+        import gentle_manip
+        from gentle_manip.actions.action_config import ActionConfig
+        _root = Path(gentle_manip.__file__).resolve().parents[1]   # repo root
+        p = args.derive_action if args.derive_action.is_file() else (_root / args.derive_action)
+        derive_cfg = ActionConfig.from_dict(yaml.safe_load(open(p)))
+        print(f"  deriving actions from pose trajectory via {p.name} "
+              f"(mode={derive_cfg.mode}, rot_repr={getattr(derive_cfg,'rot_repr','-')}, "
+              f"action_dim={derive_cfg.action_dim})")
 
     if args.experiment:
         from gentle_manip.experiment import Experiment
@@ -182,7 +204,7 @@ def main() -> None:
     paths = _find_demo_pkls(args.demos)
     print(f"converting {len(paths)} demo file(s): {[str(p) for p in paths]}")
     meta = convert(paths, args.out, obs_keys=obs_keys, pointcloud_key=args.pc_key,
-                   val_split=args.val_split)
+                   val_split=args.val_split, derive_action_config=derive_cfg)
     for k, v in meta.items():
         print(f"  {k}: {v}")
 

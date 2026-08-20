@@ -92,3 +92,4 @@ misc_scripts/
 
 # local arm-focus demo viz (not tracked)
 dataset/demos_armfocus/
+downloaded_runs/

@@ -3,10 +3,17 @@ from __future__ import annotations
 import argparse
 import pickle
 import shutil
+import sys
 from pathlib import Path
 from typing import Iterable, Sequence
 
 import numpy as np
+
+# gentle_manip isn't a package in envs/dp3 — put the repo root on the path so `--derive-action`
+# can import gentle_manip.actions (this script otherwise has no gentle_manip dependency).
+_REPO = Path(__file__).resolve().parents[2]
+if str(_REPO) not in sys.path:
+    sys.path.insert(0, str(_REPO))
 
 
 DEFAULT_AGENT_POS_KEYS = ("ee_pos", "ee_quat", "gripper_width")
@@ -67,14 +74,23 @@ def episode_to_dp3_arrays(
     agent_pos_keys: Sequence[str] = DEFAULT_AGENT_POS_KEYS,
     point_cloud_key: str = "point_cloud",
     image_key_map: dict[str, str] | None = None,
+    derive_action_config=None,
 ) -> dict[str, np.ndarray]:
     """Convert one gentle_manip episode to DP3 zarr arrays.
 
     DP3 dataset classes in this checkout expect proprioception under the zarr
     key ``state`` and expose it to the policy as ``obs.agent_pos``.
+
+    derive_action_config: if set, DERIVE the action (delta / absolute) from the recorded EE-pose
+    trajectory instead of using episode["actions"] — so one delta-teleop collection yields both a
+    delta and an absolute DP3 dataset (identical derivation as the DPPO convert_demos path).
     """
     observations = episode["observations"]
-    actions = np.asarray(episode["actions"], dtype=np.float32)
+    if derive_action_config is not None:
+        from gentle_manip.actions.derive import derive_action_set
+        actions = derive_action_set(episode, derive_action_config).astype(np.float32)
+    else:
+        actions = np.asarray(episode["actions"], dtype=np.float32)
     if actions.ndim != 2:
         raise ValueError(f"actions must be rank-2 (T, Da), got {actions.shape}")
     T = actions.shape[0]
@@ -190,6 +206,7 @@ def convert_pickles_to_dp3(
     image_key_map: dict[str, str] | None = None,
     overwrite: bool = False,
     chunk_length: int = 100,
+    derive_action_config=None,
 ) -> dict[str, tuple[tuple[int, ...], str]]:
     paths = _iter_pickles(inputs)
     episodes, source_meta = _load_episodes(paths)
@@ -200,6 +217,7 @@ def convert_pickles_to_dp3(
             agent_pos_keys=agent_pos_keys,
             point_cloud_key=point_cloud_key,
             image_key_map=image_key_map,
+            derive_action_config=derive_action_config,
         )
         for ep in episodes
     ]
@@ -254,7 +272,21 @@ def main() -> None:
     )
     parser.add_argument("--chunk-length", type=int, default=100)
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--derive-action", type=Path, default=None,
+                        help="DERIVE the action from the recorded EE-pose trajectory using this "
+                             "action config (delta / abs_pose_abs_gripper / abs_pose_euler_abs_gripper) "
+                             "instead of the stored actions — one delta collection -> both a delta and "
+                             "an absolute DP3 dataset (same derivation as the DPPO convert_demos path).")
     args = parser.parse_args()
+
+    derive_cfg = None
+    if args.derive_action is not None:
+        import yaml
+        from gentle_manip.actions.action_config import ActionConfig
+        p = args.derive_action if args.derive_action.is_file() else (_REPO / args.derive_action)
+        derive_cfg = ActionConfig.from_dict(yaml.safe_load(open(p)))
+        print(f"  deriving actions via {p.name} (mode={derive_cfg.mode}, "
+              f"rot_repr={getattr(derive_cfg,'rot_repr','-')}, action_dim={derive_cfg.action_dim})")
 
     summary = convert_pickles_to_dp3(
         args.inputs,
@@ -264,6 +296,7 @@ def main() -> None:
         image_key_map=_parse_key_mapping(args.image_key),
         overwrite=args.overwrite,
         chunk_length=args.chunk_length,
+        derive_action_config=derive_cfg,
     )
     print(f"wrote {args.output}")
     for key, (shape, dtype) in summary.items():

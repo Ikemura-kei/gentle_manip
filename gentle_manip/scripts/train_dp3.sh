@@ -42,4 +42,5 @@ uv run --project "$REPO/envs/dp3" python train.py \
     training.device="cuda:0" \
     exp_name=${exp_name} \
     logging.mode=${wandb_mode} \
-    checkpoint.save_ckpt=${save_ckpt}
+    checkpoint.save_ckpt=${save_ckpt} \
+    "${@:6}"                       # forward any extra hydra overrides (e.g. training.num_epochs=6000)

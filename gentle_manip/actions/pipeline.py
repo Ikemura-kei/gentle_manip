@@ -32,9 +32,11 @@ def _rot6d_to_quat(rot6d: np.ndarray) -> np.ndarray:
 def invert_absolute_action(pos: np.ndarray, quat: np.ndarray, gripper: np.ndarray,
                            action_config: ActionConfig) -> np.ndarray:
     """Inverse of ActionPipeline._process_absolute: given a physical (pos, quat_wxyz,
-    gripper) command, compute the (N, 10) raw [-1,1] action that an absolute-mode
-    ActionPipeline built from `action_config` would map back to it. No history needed
-    (absolute mode has no accumulation, each step is an independent forward transform).
+    gripper) command, compute the raw [-1,1] action (N,10 for rot_repr='rot6d', N,7 for
+    'euler') that an absolute-mode ActionPipeline built from `action_config` would map back
+    to it. No history needed (absolute mode has no accumulation — each step is an independent
+    forward transform), so one recorded EE-pose trajectory can be inverted into EITHER an
+    absolute action set (this) or a delta action set, deriving both from the same demos.
 
     Use this to record an equivalent ABSOLUTE action for a trajectory that was actually
     driven via DELTA control (e.g. teleop, which is smoother/easier to operate) — invert
@@ -62,13 +64,46 @@ def invert_absolute_action(pos: np.ndarray, quat: np.ndarray, gripper: np.ndarra
     t_grip = (gripper - action_config.gripper_min) / (action_config.gripper_max - action_config.gripper_min)
     a_grip = np.clip(lo + t_grip * span, lo, hi).reshape(n, 1)
 
-    a_rot6d = np.zeros((n, 6), dtype=np.float64)
-    for i in range(n):
-        xyzw = [quat[i, 1], quat[i, 2], quat[i, 3], quat[i, 0]]
-        mat = Rotation.from_quat(xyzw).as_matrix()
-        a_rot6d[i] = np.concatenate([mat[:, 0], mat[:, 1]])
+    xyzw = quat[:, [1, 2, 3, 0]]                                # wxyz -> xyzw
+    if getattr(action_config, "rot_repr", "rot6d") == "euler":  # -> 3 euler angles, un-mapped to [-1,1]
+        emin = np.asarray(action_config.euler_min, dtype=np.float64)
+        emax = np.asarray(action_config.euler_max, dtype=np.float64)
+        angles = Rotation.from_quat(xyzw).as_euler(action_config.euler_seq, degrees=False)  # (n,3)
+        a_rot = np.clip(lo + (angles - emin) / (emax - emin) * span, lo, hi)                 # (n,3)
+    else:                                                       # -> 6D rotation (first two R columns)
+        a_rot = np.zeros((n, 6), dtype=np.float64)
+        for i in range(n):
+            mat = Rotation.from_quat(xyzw[i]).as_matrix()
+            a_rot[i] = np.concatenate([mat[:, 0], mat[:, 1]])
 
-    return np.concatenate([a_pos, a_rot6d, a_grip], axis=1).astype(np.float32)
+    return np.concatenate([a_pos, a_rot, a_grip], axis=1).astype(np.float32)
+
+
+def invert_delta_action(prev_pos: np.ndarray, prev_quat: np.ndarray, prev_grip: np.ndarray,
+                        cur_pos: np.ndarray, cur_quat: np.ndarray, cur_grip: np.ndarray,
+                        action_config: ActionConfig) -> np.ndarray:
+    """Delta action (N,7) that DELTA-mode ActionPipeline + backend accumulation maps from `prev`
+    pose to `cur` pose — the inverse of the backend's world-frame update R_new = from_rotvec(drot)*
+    R_prev (and pos/grip += delta). Lets a recorded EE-pose trajectory be turned into a DELTA action
+    set, so the delta twin of an absolute dataset is derived from the SAME demos. wxyz quats in.
+
+    Mirrors the grasp-synth collector's _invert_actions exactly (world-frame rotvec delta), just
+    shared + batched so real-teleop and sim-synth convert use one code path.
+    """
+    prev_pos = np.asarray(prev_pos, np.float64).reshape(-1, 3)
+    cur_pos = np.asarray(cur_pos, np.float64).reshape(-1, 3)
+    prev_grip = np.asarray(prev_grip, np.float64).reshape(-1)
+    cur_grip = np.asarray(cur_grip, np.float64).reshape(-1)
+    scales = np.asarray(action_config.scales, np.float64)
+    lo, hi = action_config.clip
+
+    a_pos = np.clip((cur_pos - prev_pos) / scales[:3], lo, hi)
+    a_grip = np.clip((cur_grip - prev_grip).reshape(-1, 1) / scales[6], lo, hi)
+    pq = np.asarray(prev_quat, np.float64).reshape(-1, 4)[:, [1, 2, 3, 0]]   # wxyz -> xyzw
+    cq = np.asarray(cur_quat, np.float64).reshape(-1, 4)[:, [1, 2, 3, 0]]
+    rotvec = (Rotation.from_quat(cq) * Rotation.from_quat(pq).inv()).as_rotvec()  # world-frame (N,3)
+    a_rot = np.clip(rotvec / scales[3:6], lo, hi)
+    return np.concatenate([a_pos, a_rot, a_grip], axis=1).astype(np.float32)
 
 
 class ActionPipeline:
@@ -122,16 +157,23 @@ class ActionPipeline:
     def _process_absolute(self, clipped: np.ndarray) -> np.ndarray:
         lo, hi = self.cfg.clip
         span = float(hi - lo)
-        pos_raw, rot6d_raw, grip_raw = clipped[:, 0:3], clipped[:, 3:9], clipped[:, 9]
-
+        pos_raw = clipped[:, 0:3]
         t_pos = (pos_raw - lo) / span
         pos = self._pos_min + t_pos * (self._pos_max - self._pos_min)
 
+        if self.cfg.rot_repr == "euler":                       # 7-dim: pos3 + euler3 + grip1
+            euler_raw, grip_raw = clipped[:, 3:6], clipped[:, 6]
+            emin = np.asarray(self.cfg.euler_min, np.float32)
+            emax = np.asarray(self.cfg.euler_max, np.float32)
+            angles = emin + (euler_raw - lo) / span * (emax - emin)          # (num_envs, 3) rad
+            xyzw = Rotation.from_euler(self.cfg.euler_seq, angles, degrees=False).as_quat()
+            quat = np.concatenate([xyzw[:, 3:4], xyzw[:, :3]], axis=1)        # -> wxyz
+        else:                                                  # 10-dim: pos3 + rot6d6 + grip1
+            grip_raw = clipped[:, 9]
+            quat = _rot6d_to_quat(clipped[:, 3:9])                            # (num_envs, 4) wxyz
+
         t_grip = (grip_raw - lo) / span
         grip = self._gripper_min + t_grip * (self._gripper_max - self._gripper_min)
-
-        quat = _rot6d_to_quat(rot6d_raw)   # (num_envs, 4) wxyz
-
         return np.concatenate([pos, quat, grip[:, None]], axis=1).astype(np.float32)
 
     def build_action_space(self) -> Box:
