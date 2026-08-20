@@ -179,6 +179,14 @@ class GraspTrajectory:
         self.preshape = (np.clip(self.width_cls * float(preshape_factor),
                                  self.width_cls + 0.005, width_open).astype(np.float32)
                          if preshape_factor and preshape_factor > 0.0 else self.width_open.copy())
+        # The width the APPROACH actually ends at — what `settle` holds and `grasp` closes FROM.
+        # Derived from which approach phase this schedule uses, rather than probing for one
+        # specific phase name: gating on has("descend") silently missed the blended schedule (whose
+        # approach phase is "reach"), so the gripper preshaped during the reach and then snapped
+        # back OPEN for settle — a 36.7mm discontinuity in the commanded gripper channel that both
+        # discarded the preshape and polluted the action stream this design exists to smooth.
+        self._approach_end_width = (self.width_open.copy() if schedule.has("approach")
+                                    else self.preshape.copy())
 
     # ── per-env command ───────────────────────────────────────────────────────
     def target(self, i: int, phase_idx: int, phase_step: int):
@@ -228,10 +236,10 @@ class GraspTrajectory:
             grip = self.preshape[i]
         elif name == "settle":
             pos, quat = self.pos_b[i], self.quat_b[i]
-            grip = self.width_open[i] if not self.sched.has("descend") else self.preshape[i]
+            grip = self._approach_end_width[i]
         elif name == "grasp":
             pos, quat = self.pos_b[i], self.quat_b[i]
-            start = self.width_open[i] if not self.sched.has("descend") else self.preshape[i]
+            start = self._approach_end_width[i]
             grip = start + s * (self.width_cls[i] - start)
         elif name == "firm":
             pos, quat = self.pos_b[i], self.quat_b[i]

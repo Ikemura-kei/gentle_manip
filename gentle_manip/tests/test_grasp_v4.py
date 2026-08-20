@@ -365,6 +365,55 @@ def test_slerp_uses_each_envs_own_home_orientation():
         assert abs(float(np.dot(q0, hq[i]))) > abs(float(np.dot(q0, hq[0]))) or i == 0
 
 
+@pytest.mark.parametrize("sched", [SCHEDULE_V4, SCHEDULE_V4_BLEND],
+                         ids=["v4split", "v4blend"])
+def test_gripper_width_is_continuous_across_every_phase_boundary(sched):
+    """Regression: the commanded gripper width must never jump.
+
+    `settle`/`grasp` originally decided their starting width by probing for the "descend" phase,
+    which silently missed the BLENDED schedule (whose approach phase is "reach"). The gripper
+    preshaped to 43mm during the reach and then snapped back to 80mm for settle — a 37mm
+    discontinuity that both threw away the preshape and polluted the action stream the whole
+    min-jerk design exists to smooth (the gripper is a channel of the action vector).
+    """
+    traj = GraspTrajectory(sched, BEST_X, HOME_POS, HOME_QUAT, lift_height=0.2,
+                           firm_close=0.002, use_minjerk=True, standoff=0.05,
+                           preshape_factor=1.4)
+    widths = [traj.target(0, pi, s)[2]
+              for pi in range(sched.n_phases) for s in range(sched.duration(pi))]
+    jumps = np.abs(np.diff(np.asarray(widths, float)))
+    # the largest single-step change should be a smooth interpolation step, not a snap
+    assert jumps.max() < 2e-3, f"gripper jumps {jumps.max()*1e3:.1f}mm at step {int(jumps.argmax())}"
+
+
+@pytest.mark.parametrize("sched", [SCHEDULE_V4, SCHEDULE_V4_BLEND],
+                         ids=["v4split", "v4blend"])
+def test_preshape_survives_into_the_grasp(sched):
+    """The approach must hand its aperture to the grasp, otherwise preshaping bought nothing."""
+    traj = GraspTrajectory(sched, BEST_X, HOME_POS, HOME_QUAT, lift_height=0.2,
+                           firm_close=0.002, use_minjerk=True, standoff=0.05,
+                           preshape_factor=1.4)
+    gi = sched.index("grasp")
+    assert traj.target(0, gi, 0)[2] < 0.06                    # closing from the preshape, not 0.08
+    assert traj.target(0, gi, 0)[2] == pytest.approx(float(traj.preshape[0]), abs=2e-3)
+
+
+def test_v3_schedule_still_approaches_fully_open():
+    """v3 has no preshape concept: its approach ends fully open and grasp closes from there.
+
+    Checked one interpolation step in, not at 0.08 exactly: v3's convention is alpha=(step+1)/dur,
+    so step 0 is ALREADY 1/dur of the way closed. That off-by-one is part of the bit-identity-
+    verified v3 arithmetic, so the test must match it rather than the other way round.
+    """
+    traj = GraspTrajectory(SCHEDULE_V3, BEST_X, HOME_POS, HOME_QUAT, lift_height=0.2,
+                           firm_close=0.002, use_minjerk=False)
+    gi = SCHEDULE_V3.index("grasp")
+    dur = SCHEDULE_V3.duration(gi)
+    w0, wc = float(traj.width_open[0]), float(traj.width_cls[0])
+    assert traj.target(0, gi, 0)[2] == pytest.approx(w0 + (wc - w0) / dur, abs=1e-6)
+    assert traj.target(0, gi, 0)[2] > 0.078                    # i.e. still essentially wide open
+
+
 def test_schedule_index_reports_missing_phase():
     sched = PhaseSchedule((("approach", 5), ("grasp", 5)))        # e.g. --n-firm 0 drops "firm"
     assert sched.index("firm") == -1 and not sched.has("firm")
