@@ -102,6 +102,11 @@ identical top-down grasp moves occlusion from 0.06 (finger pair across y, clear 
 0.94 (pair across x, straddling it). `w_occ` and `w_tilt` are therefore complementary — tightening
 the tilt bound alone does not fix occlusion.
 
+Confirmed independently on real synthesized grasps: of two collected episodes, the one with the
+*smaller* tilt (16.2°) occludes the object **completely** (1.00) while the one with more tilt
+(22.0°) occludes only 0.21. A near-vertical grasp is not a visible grasp, and the two properties
+have to be optimized separately.
+
 ### 2.4 Constraint ladder
 
 Cheap geometric filters run first so the FEM is only paid for plausible candidates:
