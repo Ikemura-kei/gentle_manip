@@ -34,10 +34,18 @@ SEED=${SEED:-42}
 GPU_ID=${GPU_ID:-0}
 
 EXP_NAME=${TASK}-${ALG}-${INFO}
-RUN_DIR="data/outputs/${EXP_NAME}_seed${SEED}"
+# ABSOLUTE run dir: Hydra chdir's into hydra.run.dir by default (hydra.job.chdir), which then
+# makes the task config's own RELATIVE zarr_path (e.g. "data/<task>.zarr", resolved relative to
+# whatever the cwd was at compose time) resolve against the WRONG directory once the chdir has
+# happened -- observed as ReplayBuffer.copy_from_path getting an effectively-empty/wrong path.
+# An absolute run dir doesn't fix the zarr_path resolution itself (see ZARR_PATH_OVR below), but
+# keeps the run's OWN outputs from landing somewhere unexpected too.
+RUN_DIR="$DP3_DIR/data/outputs/${EXP_NAME}_seed${SEED}"
+ZARR_PATH="$DP3_DIR/data/${TASK}.zarr"
 
 echo "[sbatch] host=$(hostname) arch=$(uname -m) job=${SLURM_JOB_ID:-NA}"
-echo "[sbatch] alg=$ALG task=$TASK info=$INFO seed=$SEED exp_name=$EXP_NAME extra_overrides=$*"
+echo "[sbatch] alg=$ALG task=$TASK info=$INFO seed=$SEED exp_name=$EXP_NAME zarr_path=$ZARR_PATH extra_overrides=$*"
+[ -e "$ZARR_PATH" ] || { echo "[sbatch] MISSING zarr: $ZARR_PATH"; exit 1; }
 
 cd "$DP3_DIR"
 export HYDRA_FULL_ERROR=1
@@ -48,6 +56,7 @@ uv run --project "$REPO/envs/dp3_arrhenius" --no-sync python train.py \
     --config-name="${ALG}.yaml" \
     task="$TASK" \
     hydra.run.dir="$RUN_DIR" \
+    task.dataset.zarr_path="$ZARR_PATH" \
     training.debug=False \
     training.seed="$SEED" \
     training.device="cuda:0" \
