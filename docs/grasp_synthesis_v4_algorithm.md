@@ -161,9 +161,28 @@ Conclusions, after replication:
 3. **Convergence is not monotone in resolution** (vd 12 ranks worse than 11 and 14 on set A), so a
    resolution cannot be inferred from its tet count — it has to be measured, per object.
 4. **Spearman over a stratified set is a harsher measure than the decision actually needs.** CMA
-   only requires the *top* of the ranking to be right. The decision-relevant quantity is the
-   **regret**: re-score the grasp chosen at a coarse resolution on a fine mesh, and compare it with
-   the fine-mesh optimum. That is the measurement to make before revisiting this trade-off.
+   only requires the *top* of the ranking to be right, so the decision-relevant quantity looked
+   like **regret**: re-score the coarsely-chosen grasp on a fine mesh and compare with the
+   fine-mesh optimum.
+
+   **That measurement was attempted and is confounded — do not trust its numbers.** Measured
+   regret was 2.7e4 at voxel_div 9 but ~1e8 (i.e. scored *infeasible*) at both 11 and 14. A
+   resolution nearly equal to the reference cannot genuinely be far worse than one three times
+   coarser, so the effect is not coarseness. The cause is that `prepare_mesh` voxel-remeshes at
+   each resolution, producing a slightly **different surface** each time: a grasp optimized against
+   one surface is then judged by the penetration filter against another, and where the two differ
+   by more than `pen_tol` it is rejected outright. Regret as constructed therefore measures
+   "these are different meshes" far more than "coarse planning is worse".
+
+5. **The whole framing was wrong, and this is the useful conclusion.** Neither FEM mesh is ground
+   truth — the sim samples its MPM particles from the *original* mesh, so every FEM resolution is
+   an approximation of something else again. "Which resolution ranks like the finest FEM" is not
+   the question worth answering. The question is **which resolution produces grasps that succeed
+   in the sim with low stress**, and that is exactly what the benchmark already measures. The
+   resolution trade-off should be settled by an A/B benchmark run (plan at voxel_div 9 vs 14,
+   compare success rate and stress over the canonical 100 scenarios), not by FEM self-consistency.
+
+   Until that A/B is run, the planning resolution stays where it is.
 
 *(Timings in the first table were taken under light machine load; the replications ran alongside a
 benchmark and are 3–10× slower in wall-clock. Compare ms/eval only within a single run.)*

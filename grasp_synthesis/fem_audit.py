@@ -110,6 +110,19 @@ def measure_regret(mesh: str, obj_com, obj_quat, settings, ref, *, n_poses: int 
     A coarse resolution with poor rank correlation but near-zero regret is perfectly usable — it
     means the near-optimal set is broad and it does not matter which member you land on. Only
     non-trivial regret actually costs anything.
+
+    ⚠️ CONFOUNDED IN PRACTICE — read before using this. `prepare_mesh` voxel-remeshes at each
+    resolution, so the coarse and fine objects have slightly DIFFERENT SURFACES. A grasp optimized
+    against one surface is then judged by the penetration filter against another, and wherever the
+    two differ by more than `pen_tol` it is rejected outright. Measured on the mushroom, that
+    dominates: regret came out 2.7e4 at voxel_div 9 but ~1e8 (infeasible) at 11 and 14 — a
+    resolution nearly equal to the reference cannot truly be worse than one three times coarser.
+    The numbers reflect mesh DIFFERENCE, not coarseness.
+
+    Neither mesh is ground truth anyway: the sim samples MPM particles from the ORIGINAL mesh. The
+    resolution trade-off is best settled by an A/B benchmark run (success + stress over the
+    canonical scenarios), not by FEM self-consistency. This function is kept for the diagnostic
+    (it is how the confound was found), not as a decision procedure.
     """
     from smgrasp import width_grasp as wg  # noqa: F401  (ensures the module is importable)
 
