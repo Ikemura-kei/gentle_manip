@@ -62,7 +62,12 @@ CSV_FIELDS = ["episode", "batch", "env", "scenario_seed", "success", "ever_succe
               # stem_grasp / pinch_grasp are 0/1 indicators of the two defects v4 targets.
               "grasp_tilt_deg", "grasp_min_pad_mm2", "grasp_com_lever_mm", "grasp_width_mm",
               "grasp_occ_pred", "grasp_stress_pred_pa", "grasp_score", "grasp_status",
-              "stem_grasp", "pinch_grasp"]
+              "stem_grasp", "pinch_grasp",
+              # GROUND-TRUTH occlusion from the rendered cloud (the *_grasp_eval_pcd
+              # experiment only). occ_pcd_* = fraction of the object points visible at
+              # rest that are gone by that phase. Validates grasp_occ_pred, which is
+              # only a geometric prediction.
+              "occ_pcd_baseline_pts", "occ_pcd_grasp", "occ_pcd_lift"]
 
 
 def _nan(x) -> float:
@@ -113,9 +118,15 @@ AUX_COLS = [
     ("act_sparc", False), ("act_njerk", False), ("act_vpeaks", False),
     ("grasp_tilt_deg", True), ("grasp_min_pad_mm2", True), ("grasp_com_lever_mm", True),
     ("grasp_width_mm", True), ("grasp_occ_pred", True), ("grasp_stress_pred_pa", True),
+    ("occ_pcd_grasp", True), ("occ_pcd_lift", True),
 ]
 # 0/1 defect indicators -> reported as RATES over ALL episodes (counting failures is the point).
-AUX_RATE_COLS = ["stem_grasp", "pinch_grasp"]
+AUX_RATE_COLS = ["stem_grasp", "pinch_grasp",
+              # GROUND-TRUTH occlusion from the rendered cloud (the *_grasp_eval_pcd
+              # experiment only). occ_pcd_* = fraction of the object points visible at
+              # rest that are gone by that phase. Validates grasp_occ_pred, which is
+              # only a geometric prediction.
+              "occ_pcd_baseline_pts", "occ_pcd_grasp", "occ_pcd_lift"]
 
 
 def aggregate(records: List[Dict[str, Any]], **meta) -> Dict[str, Any]:

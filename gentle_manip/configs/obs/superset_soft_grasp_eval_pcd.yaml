@@ -1,0 +1,37 @@
+# [obs] Grasp-eval teacher view + a point cloud, for GROUND-TRUTH occlusion measurement.
+# Used by: gentle_manip/scripts/eval_grasp_synth.py via experiments/*_grasp_eval_pcd.yaml
+# Status: experimental (v4 Iteration 1b — validates grasp_occ_pred against a rendered cloud)
+#
+# Identical to superset_soft_grasp_eval.yaml plus a point cloud. Kept as a SEPARATE config, and
+# used from a separate experiment on its own port, because depth rendering + a 4096-point cloud
+# over 5 envs is a real per-step cost that every routine grasp benchmark should not pay.
+#
+# Two deliberate differences from the deployment cloud configs:
+#
+#  * max_points 4096, not 1024. The subsample draws uniformly over the WHOLE cropped scene, so at
+#    1024 the object's share falls simply because the arm ENTERS the crop — with zero occlusion.
+#    That bias would masquerade as occlusion and quietly corrupt the very measurement this config
+#    exists for. At 4096 with the tight crop below, subsample_pointcloud zero-pads instead of
+#    subsampling, so counts are honest. Raw totals are logged alongside so the assumption stays
+#    auditable rather than assumed.
+#  * a TIGHT crop around the workspace, so the cloud is dominated by object + gripper rather than
+#    by table. This is a measurement config, not a policy input — it is not trying to look like a
+#    deployment cloud.
+#
+# NOTE no outlier_removal: that filter is a REAL-camera denoise step (sim depth is already clean),
+# and dropping points here would confound the count this config is measuring.
+
+include_joint_pos: false
+include_joint_vel: false
+quat_noise_std: 0.003
+
+point_cloud:
+  cameras: ["cam_ext"]
+  crop_min: [0.35, -0.12, 0.004]
+  crop_max: [0.60,  0.12,  0.35]
+  max_points: 4096
+
+privileged:
+  object_pos: true      # priv_object_pos  (N,3) — also the centre the object-point radius test uses
+  object_rot6d: true    # priv_object_rot6d (N,6) — settled orientation -> grasp frame
+  stress: true          # priv_stress (N,2) [mean, top10]/yield — the soft "firm" grip signal

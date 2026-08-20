@@ -112,6 +112,9 @@ class GraspSynthPolicy:
         self.preshape_factor = float(preshape_factor)
         self._audit = [{} for _ in range(self.num_envs)]      # per-env grasp-quality audit
         self._obj_radius_m = 0.02                             # bbox radius; refined once the FEM builds
+        self._r_obj = 0.03                                    # object-point radius (bbox + 5mm)
+        self._occ_gt = [{} for _ in range(self.num_envs)]     # rendered-cloud occlusion
+        self.traj = None
         self.table_z = float(table_z)
         self._seed_rng = np.random.default_rng(seed)
         self._synthed = False
@@ -134,6 +137,7 @@ class GraspSynthPolicy:
         # whose synthesis failed (or the SDF arm, which never fills it) would report the PREVIOUS
         # episode's grasp as if it were this one's.
         self._audit = [{} for _ in range(self.num_envs)]
+        self._occ_gt = [{} for _ in range(self.num_envs)]
 
     def close(self):
         if self._pool is not None:
@@ -193,9 +197,49 @@ class GraspSynthPolicy:
         row["pinch_grasp"] = int(area_mm2 is not None and area_mm2 < self.PINCH_AREA_MM2)
         return row
 
+    # ── ground-truth occlusion from the RENDERED cloud ──────────────────────────
+    # `grasp_occ_pred` is a geometric prediction; this is what the camera actually lost. Only
+    # active when the eval obs carries a point cloud (the *_grasp_eval_pcd experiment).
+    def _count_object_points(self, obs, j: int, tcp_pos, tcp_quat, grip) -> int:
+        """Object points visible to the camera for env j, this step.
+
+        No segmentation exists in the pipeline, so object-ness is recovered in two steps:
+          1. keep points within `r_obj` of the TRUE object centre (priv_object_pos), extending the
+             precedent in examples/fov_check_always_fail.py — privileged, so it tracks the object
+             through the lift rather than assuming it stays put;
+          2. SUBTRACT the gripper analytically: reject points within ~5mm of the finger surface at
+             the COMMANDED TCP pose. The policy knows that pose exactly, so this costs nothing and
+             removes the one confounder the radius test cannot (fingers closing INSIDE the radius
+             would otherwise read as extra "object" points and mask the very occlusion we measure).
+        """
+        pc = np.asarray(obs["point_cloud"][j], np.float64)
+        pc = pc[np.any(pc != 0.0, axis=1)]                 # drop the zero padding
+        if pc.size == 0:
+            return 0
+        oc = np.asarray(obs["priv_object_pos"][j], np.float64)
+        near = pc[np.linalg.norm(pc - oc, axis=1) < self._r_obj]
+        if near.size == 0 or self._fem_pad is None:
+            return int(len(near))
+        q = np.asarray(tcp_quat, float)
+        x = np.concatenate([np.asarray(tcp_pos, float),
+                            Rot.from_quat(q[[1, 2, 3, 0]]).as_euler("xyz"),
+                            [float(grip)]])
+        Lw, Rw = fg.finger_world_pts(x, self._fem_pad)
+        fingers = np.vstack([Lw, Rw])[::4]
+        d = np.linalg.norm(near[:, None, :] - fingers[None, :, :], axis=2).min(axis=1)
+        return int((d > 0.005).sum())
+
     def episode_metrics(self):
         """Optional harness hook: per-env grasp-quality columns for this episode."""
-        return list(self._audit)
+        rows = [dict(a) for a in self._audit]
+        for j, r in enumerate(rows):
+            b = self._occ_gt[j]
+            if b.get("baseline"):
+                r["occ_pcd_baseline_pts"] = b["baseline"]
+                for k in ("grasp", "lift"):
+                    if b.get(k) is not None:
+                        r[f"occ_pcd_{k}"] = max(0.0, 1.0 - b[k] / max(b["baseline"], 1))
+        return rows
 
     # ── synthesis ───────────────────────────────────────────────────────────────
     def _synthesize(self, obs):
@@ -215,6 +259,7 @@ class GraspSynthPolicy:
                 # object bbox radius -> scales the stem-grasp lever threshold to THIS object/DR scale
                 ext = self._fem_obj.verts.max(0) - self._fem_obj.verts.min(0)
                 self._obj_radius_m = float(np.linalg.norm(ext[:2]) / 2.0)
+                self._r_obj = float(np.linalg.norm(ext) / 2.0) + 0.005
                 print(f"  [{self.synth}] FEM {meta['tets']} tets ndof={meta['ndof']} gpu={meta['gpu']}"
                       f"  mesh={Path(mesh).name}  r_xy={self._obj_radius_m*1e3:.1f}mm", flush=True)
             for i in range(N):
@@ -267,6 +312,22 @@ class GraspSynthPolicy:
             else:                                             # FSM done -> freeze at lift/hold target
                 p, q, g = self.traj.frozen_target(i)
             cur_pos[i], cur_quat[i], cur_grip[i] = p, q, g
+        # Ground-truth occlusion, sampled AFTER the targets so the finger geometry subtracted is the
+        # pose actually commanded THIS step. Using the grasp pose throughout would be wrong during
+        # the lift, when the gripper has moved away from it.
+        if isinstance(obs, dict) and "point_cloud" in obs and "priv_object_pos" in obs:
+            gi, li = self.schedule.index("grasp"), self.schedule.index("lift")
+            for j in range(N):
+                ph, b = int(self.phase_idx[j]), self._occ_gt[j]
+                if not b.get("baseline"):                 # step 0: arm at home, nothing occluded
+                    b["baseline"] = self._count_object_points(obs, j, cur_pos[j], cur_quat[j],
+                                                             cur_grip[j])
+                elif gi >= 0 and ph == gi and b.get("grasp") is None:
+                    b["grasp"] = self._count_object_points(obs, j, cur_pos[j], cur_quat[j],
+                                                           cur_grip[j])
+                elif li >= 0 and ph == li and b.get("lift") is None:
+                    b["lift"] = self._count_object_points(obs, j, cur_pos[j], cur_quat[j],
+                                                          cur_grip[j])
         action = gsv3._invert_actions_absolute(cur_pos, cur_quat, cur_grip, self.action_config)
         self._advance(obs)
         return action.astype(np.float32)
