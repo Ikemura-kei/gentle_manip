@@ -1,0 +1,19 @@
+# [experiment] RASPBERRY soft lift — grasp-synthesis BENCHMARK variant.
+# Used by: gentle_manip/scripts/eval_grasp_synth.py (+ serl_sim_server --view teacher)
+# Status: experimental (v4 grasp-synthesis 4-object benchmark)
+#
+# Mirrors single_lift_mushroom_soft_grasp_eval.yaml exactly except for the task, so a benchmark
+# difference between objects is attributable to the OBJECT and not to a config difference.
+task: single_lift_raspberry_soft
+action: abs_pose_abs_gripper
+dr: soft_orientation
+obs: superset_soft_grasp_eval   # privileged: object_pos + object_rot6d + stress (no point cloud)
+views:
+  teacher: [privileged]
+
+rl:                             # unused during scripted eval; mirrors the collection experiment
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400

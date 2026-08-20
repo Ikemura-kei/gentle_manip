@@ -132,24 +132,49 @@ contribution here is the objective rather than the optimizer.
 
 ## 4. Execution
 
-### 4.1 Pre-grasp standoff decomposition
+### 4.1 A blended reach that arrives along the approach axis
 
-The executed trajectory is **not** a direct interpolation from home to the grasp pose. It is:
+Two properties are wanted at once, and they pull against each other:
+
+1. **Collision safety.** The fingers should arrive along the direction they point, so the final
+   approach cannot sweep sideways through the object. The obvious way to get this is a *pre-grasp
+   standoff*: travel to `standoff = grasp_pos − approach_dir · d` (d ≈ 5 cm), then descend in a
+   straight line.
+2. **Smoothness.** The demonstration should be a single continuous motion, because the recorded
+   actions are what a cloned policy learns to emit (§4.2).
+
+Decomposing the approach into `travel → rotate → descend` gets (1) but **destroys** (2): with each
+phase independently time-scaled to minimum jerk, the arm decelerates to a full stop at every phase
+boundary, so the reach becomes three submovements instead of one. Measured on the target
+trajectory, that costs ~5.7× in dimensionless jerk.
+
+The resolution is to keep the standoff as a **via-point rather than a stopping point**. A quadratic
+Bézier from home to the grasp with the standoff as its control point,
 
 ```
-approach_xy : home → standoff, holding the HOME (top-down) orientation
-align       : rotate in place at the standoff (no translation ⇒ nothing can collide)
-descend     : straight line standoff → grasp, along the grasp's own approach axis
-grasp / firm / lift / hold
+B(u) = (1−u)² · home + 2(1−u)u · standoff + u² · grasp
 ```
-with `standoff = grasp_pos − approach_dir · d`, `d ≈ 5 cm`. The descent is collision-free by
-construction: the fingers translate exactly along the direction they point. The straight-line
-segment is additionally swept-checked against the object SDF, and the standoff escalated (4→6→8 cm)
-if it would clip.
 
-The prior formulation interpolated position and orientation *simultaneously* from home all the way
-to the grasp, so the wrist was still rotating as the fingers arrived, and the diagonal sweep could
-clip the object.
+has end tangent `B′(1) = 2 (grasp − standoff)` — *exactly* the approach axis. So the fingers still
+arrive along the direction they point, with no interior deceleration. The wrist rotation is
+completed early in the reach (by ~70 % of the way) so the final approach is a pure translation.
+
+Measured on the target trajectory (the mushroom grasp; identical protocol for each row):
+
+| approach | SPARC | dimensionless jerk | velocity peaks | arrives along approach axis |
+|---|---|---|---|---|
+| linear, single segment (prior) | −3.07 | 11935 | 10 | no |
+| min-jerk, single segment | −3.10 | 277 | 2 | no |
+| min-jerk, standoff decomposition | −3.58 … −4.29 | ~1580 | 3 | yes |
+| **min-jerk, blended Bézier** | −3.39 | **287** | 2 | **yes** |
+
+The blended form recovers essentially all of the smoothness of an unconstrained min-jerk reach
+(287 vs 277) while satisfying the geometric constraint. SPARC is slightly worse than the straight
+reach because a curved path genuinely carries more spectral content — an acceptable price for
+collision safety.
+
+The straight final segment is additionally swept-checked against the object SDF, and the standoff
+escalated (5 → 6 → 8 cm) per object if the fingers would still clip.
 
 ### 4.2 Minimum-jerk time scaling
 
@@ -168,6 +193,21 @@ phase junction — unbounded acceleration and jerk.
 **Why this matters beyond aesthetics:** the recorded action at each step is derived from consecutive
 *targets*, so smoothing the targets smooths the action sequence the policy is trained on. A policy
 cloned from min-jerk demonstrations reproduces min-jerk motion at deployment.
+
+**Measure the commanded actions, not the achieved path.** These come apart, and only one of them is
+what imitation learning consumes:
+
+| trajectory | action-stream jerk | achieved-EE jerk |
+|---|---|---|
+| standoff decomposition | 1475 | 11122 |
+| blended Bézier | **264** | 11166 |
+
+The blended reference is 5.6× smoother in the *commanded* stream while the *achieved* end-effector
+path is unchanged — because the achieved path is dominated by the position controller's tracking
+behaviour, not by the reference it is tracking. An evaluation that reported only the achieved path
+would score this improvement as no change at all. Both are therefore reported; the achieved path
+measures controller quality, and the action stream measures what a cloned policy must reproduce.
+(Improving the achieved path is a separate lever: controller tuning, not trajectory design.)
 
 We additionally **preshape** the gripper to ≈1.4× the grasp width during the approach rather than
 holding it fully open, mirroring human reach-to-grasp aperture profiles; this also reduces both
