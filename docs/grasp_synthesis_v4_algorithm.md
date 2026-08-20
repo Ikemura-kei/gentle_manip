@@ -120,6 +120,35 @@ holdability penalty eases as grip rises; the area penalty eases as the pad gets 
 are deliberately non-zero (~1–3 mm): the object deforms and the controller has error at that scale,
 so only *gross* violations are rejected — the pad's own ~1 mm working indent must not be flagged.
 
+### 2.5 Mesh resolution — rank on a coarse mesh, report on a fine one
+
+The objective is only ever used to *compare* candidates, so what must be converged is the **ranking**,
+not the absolute stress. Measured on the mushroom, scoring a fixed set of 30 grasps sampled across
+the score range from a real CMA-ES run (`grasp_synthesis/fem_audit.py`):
+
+| voxel_div | tets | ms / eval | Spearman vs finest | top-5 agreement | median stress ratio |
+|---|---|---|---|---|---|
+| 7 | 1357 | 6.3 | 0.920 | 0.80 | 0.73 |
+| **9** | **2199** | **7.7** | **0.9991** | **1.00** | 0.76 |
+| 11 | 3643 | 14.8 | 0.9987 | 1.00 | 0.85 |
+| 12 | 4121 | 17.2 | 0.915 | 0.80 | 1.20 |
+| 14 | 6097 | 29.6 | 1.0000 | 1.00 | 1.06 |
+| 16 (reference) | 8505 | 47.7 | — | — | 1.00 |
+
+Three conclusions:
+
+1. **The ranking converges much earlier than the stress magnitude.** At 2199 tets the ordering is
+   already essentially exact (ρ = 0.999, identical top-5), while the absolute stress is still 24 %
+   low. Planning at that resolution is therefore ~4× cheaper than the 6097-tet setting used to
+   date, with no change to which grasp is selected — but any *reported* stress in Pa must be
+   re-scored on a fine mesh, since the ratio ranges 0.73–1.20 across this sweep.
+2. **Convergence is not monotone in resolution.** voxel_div = 12 ranks *worse* (ρ = 0.915) than both
+   11 and 14. Tet-mesh *quality* — element conditioning at a particular voxelization — matters
+   independently of element count, so a resolution should be validated rather than assumed from
+   its tet count.
+3. Per-object presets are therefore justified, and each new object should be swept rather than
+   inheriting the mushroom's numbers.
+
 ## 3. Solver *(pending — Iteration 3b)*
 
 Currently multi-start CMA-ES over the 7-DOF variable, followed by a 1-D width refinement of the
