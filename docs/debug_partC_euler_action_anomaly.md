@@ -14,10 +14,16 @@
 > relaunched: partA_dppo_abs_fix 1464686, partA_dp3_abs_fix 1464660, partB_abs_s42/43_fix
 > 1464658/1464659, partC_7d_fix 1464677. Broken runs marked in experiments.csv
 > (oppsu/bpczv invalid, ppomw/aurlv stopped). Delta arms were untouched — but note their
-> own caveat: DERIVED delta (Part B) saturates droll/dpitch (scale 0.008 rad/step vs up to
-> ~0.15 rad/step of demo rotation, ~40% of steps at the ±1 rails); the doc's B2 sanity
-> check only covered position. If the delta arms eval poorly, that saturation is the
-> prime suspect (fix would be a bigger-rot-scale delta config for derivation).
+> own caveat: DERIVED delta saturates droll/dpitch at the ±1 rails (35-38% of steps; rot
+> scale 0.008 rad/step vs up to ~0.15 rad/step of demo rotation — the doc's B2 sanity
+> check only covered position). MEASURED impact (replaying the derived deltas through the
+> backend accumulation rule vs the true trajectory): Part B armfocus final orientation
+> drift mean 4.6° / p90 8.4° / max 14.2°, position ≤2.7mm; Part A real final drift mean
+> 3.5° (mid-episode up to ~20° during one fast wrist motion), position lossless. So the
+> delta datasets are USABLE but carry a ~5-8° orientation reconstruction error that the
+> (exact) abs encoding does not — a small systematic asymmetry in the abs-vs-delta
+> comparison, in the ABS arm's favor. If delta evals come out clearly worse than abs,
+> re-derive delta with a larger rot scale before concluding "delta is worse".
 
 **TL;DR — root cause found (see "ROOT CAUSE CONFIRMED" section below):** the recorded grasp's
 roll angle sits essentially AT the euler ±π wraparound seam for ~99.5% of all timesteps, so
