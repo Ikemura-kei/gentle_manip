@@ -176,13 +176,21 @@ if [ -n "${EVAL_SUBDIR:-}" ]; then
     LOGDIR_OVR=(logdir="$RUN_DIR/eval/$EVAL_SUBDIR")
     echo "[sbatch] unique eval logdir -> $RUN_DIR/eval/$EVAL_SUBDIR (EVAL_SUBDIR set)"
 fi
-echo "[sbatch] running eval of $CKPT (cfg=$CFG_NAME, n_episodes=${N_EPISODES:-<from cfg>}, ft_denoising=$FT_DENOISING, smooth_alpha=${SMOOTH_ALPHA:-off}, scene_group_size=${SCENE_GROUP_SIZE:-<from cfg>}, act_steps=${ACT_STEPS:-<from cfg>} n_steps=${N_STEPS:-<from cfg>}, use_ddim=$USE_DDIM ddim_steps=${DDIM_STEPS:-<from cfg>}, horizon_steps=${HORIZON_STEPS:-<from cfg>} denoising_steps=${DENOISING_STEPS_OVR_VAL:-<from cfg>} cond_steps=${COND_STEPS:-<from cfg>}, ${EVAL_EXP_OVR[*]:-exp=cfg-default})"
+# GM_EXTRA_OVERRIDES: arbitrary extra hydra overrides (space-separated key=val), for anything not
+# covered by a named knob above (e.g. action_dim=7, env_name=..., for an action-space-ablation
+# arm whose eval config needs values the default cfg doesn't have). Appended LAST so it wins.
+EXTRA_OVR=()
+if [ -n "${GM_EXTRA_OVERRIDES:-}" ]; then
+    # shellcheck disable=SC2206  (intentional word-split into array elements)
+    EXTRA_OVR=($GM_EXTRA_OVERRIDES)
+fi
+echo "[sbatch] running eval of $CKPT (cfg=$CFG_NAME, n_episodes=${N_EPISODES:-<from cfg>}, ft_denoising=$FT_DENOISING, smooth_alpha=${SMOOTH_ALPHA:-off}, scene_group_size=${SCENE_GROUP_SIZE:-<from cfg>}, act_steps=${ACT_STEPS:-<from cfg>} n_steps=${N_STEPS:-<from cfg>}, use_ddim=$USE_DDIM ddim_steps=${DDIM_STEPS:-<from cfg>}, horizon_steps=${HORIZON_STEPS:-<from cfg>} denoising_steps=${DENOISING_STEPS_OVR_VAL:-<from cfg>} cond_steps=${COND_STEPS:-<from cfg>}, ${EVAL_EXP_OVR[*]:-exp=cfg-default}, extra=${GM_EXTRA_OVERRIDES:-<none>})"
 uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.train \
     --config-path "$CFG_DIR" --config-name "$CFG_NAME" \
     base_policy_path="$CKPT" normalization_path="$NORM" \
     ft_denoising_steps="$FT_DENOISING" record_batches=null "${NEP_OVR[@]}" \
     env.specific.port="$PORT" \
     "${EVAL_EXP_OVR[@]}" "${LOGDIR_OVR[@]}" "${SMOOTH_OVR[@]}" "${SGS_OVR[@]}" "${ACT_OVR[@]}" "${DDIM_OVR[@]}" "${NSTEPS_OVR[@]}" \
-    "${HORIZON_OVR[@]}" "${DENOISING_OVR[@]}" "${COND_OVR[@]}"
+    "${HORIZON_OVR[@]}" "${DENOISING_OVR[@]}" "${COND_OVR[@]}" "${EXTRA_OVR[@]}"
 
 echo "[sbatch] eval finished OK"
