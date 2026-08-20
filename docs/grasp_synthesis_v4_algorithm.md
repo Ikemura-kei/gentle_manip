@@ -135,19 +135,33 @@ the score range from a real CMA-ES run (`grasp_synthesis/fem_audit.py`):
 | 14 | 6097 | 29.6 | 1.0000 | 1.00 | 1.06 |
 | 16 (reference) | 8505 | 47.7 | — | — | 1.00 |
 
-Three conclusions:
+⚠️ **The table above is a single grasp set, and replicating it overturns the obvious reading.**
+Repeating the sweep on two further independent grasp sets (same object, different CMA seeds):
 
-1. **The ranking converges much earlier than the stress magnitude.** At 2199 tets the ordering is
-   already essentially exact (ρ = 0.999, identical top-5), while the absolute stress is still 24 %
-   low. Planning at that resolution is therefore ~4× cheaper than the 6097-tet setting used to
-   date, with no change to which grasp is selected — but any *reported* stress in Pa must be
-   re-scored on a fine mesh, since the ratio ranges 0.73–1.20 across this sweep.
-2. **Convergence is not monotone in resolution.** voxel_div = 12 ranks *worse* (ρ = 0.915) than both
-   11 and 14. Tet-mesh *quality* — element conditioning at a particular voxelization — matters
-   independently of element count, so a resolution should be validated rather than assumed from
-   its tet count.
-3. Per-object presets are therefore justified, and each new object should be swept rather than
-   inheriting the mushroom's numbers.
+| grasp set | ρ @ vd 11 | top-5 @ 11 | ρ @ vd 14 | top-5 @ 14 |
+|---|---|---|---|---|
+| A | 0.999 | 1.00 | 1.000 | 1.00 |
+| **B** | **0.434** | **0.60** | 0.818 | 0.80 |
+| C | 0.958 | 0.80 | 0.9996 | 1.00 |
+
+Conclusions, after replication:
+
+1. **Coarse-mesh ranking agreement is a property of the grasp set, not of the resolution.** On set A
+   a 2199-tet mesh reproduces the fine ordering exactly; on set B an 3643-tet mesh scores ρ = 0.43
+   and gets only 3 of the top 5 right. The tempting conclusion from set A alone — "plan ~4× cheaper
+   at no cost" — is not supported, and acting on it would have silently degraded every subsequent
+   collection. **The planning resolution is therefore left unchanged.**
+2. **The absolute stress magnitude is definitely not converged** (median ratio 0.68–1.44 across the
+   three sets). Any stress reported in Pa must be re-scored on a fine mesh; this part is robust.
+3. **Convergence is not monotone in resolution** (vd 12 ranks worse than 11 and 14 on set A), so a
+   resolution cannot be inferred from its tet count — it has to be measured, per object.
+4. **Spearman over a stratified set is a harsher measure than the decision actually needs.** CMA
+   only requires the *top* of the ranking to be right. The decision-relevant quantity is the
+   **regret**: re-score the grasp chosen at a coarse resolution on a fine mesh, and compare it with
+   the fine-mesh optimum. That is the measurement to make before revisiting this trade-off.
+
+*(Timings in the first table were taken under light machine load; the replications ran alongside a
+benchmark and are 3–10× slower in wall-clock. Compare ms/eval only within a single run.)*
 
 ## 3. Solver *(pending — Iteration 3b)*
 
