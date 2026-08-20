@@ -1,0 +1,25 @@
+# [experiment] SOFT mushroom lift, 7d EULER abs action — jfhlu twin with a 7d action space.
+# Used by: DPPO 7d-vs-10d action test (Part C of docs/cluster_experiment_action_space_ablation.md)
+# Status: experimental (does 7d euler abs vs 10d rot6d abs change in-sim / real-deploy success?)
+#
+# IDENTICAL to single_lift_mushroom_soft_abs_action (jfhlu's experiment) EXCEPT the action config is
+# abs_pose_euler_abs_gripper (7d: 3 pos + 3 euler + 1 grip) instead of abs_pose_abs_gripper (10d rot6d).
+# SAME obs (superset_soft, NON-arm-focus) and SAME abs pos/gripper bounds, so the ONLY change vs jfhlu
+# is the rotation encoding. The eval sim server derives its ActionPipeline from this action, so a 7d
+# policy must be evaluated with THIS experiment (not the 10d one, which would crash on the 7-wide output).
+task: single_lift_mushroom_soft
+action: abs_pose_euler_abs_gripper
+dr: soft_orientation
+augmentation: l515_noise
+
+obs: superset_soft
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400
