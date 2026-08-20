@@ -25,6 +25,9 @@ version = "0.1.0"
 requires-python = ">=3.10,<3.11"
 dependencies = [
     "dppo",   # editable, third_party/dppo (pulls hydra-core 1.3, omegaconf, gym 0.22, einops, wandb, imageio, av, tqdm)
+    "scipy",  # gentle_manip.actions.pipeline (rotation math, imported via sys.path -- see header
+              # note: this env has no gentle-manip dependency, so its own deps aren't installed
+              # here transitively; add explicitly whenever a gentle_manip.* import needs one)
 ]
 
 [tool.uv.sources]
