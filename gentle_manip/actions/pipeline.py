@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import numpy as np
-import gymnasium
-from gymnasium.spaces import Box
 from scipy.spatial.transform import Rotation
 
 from gentle_manip.actions.action_config import ActionConfig
+
+# gymnasium is imported lazily (only build_action_space needs it) so the pure-numpy inverters
+# invert_absolute_action / invert_delta_action (used by convert_demos/convert_demo_to_dp3 via
+# actions.derive) work in envs that don't ship gymnasium (e.g. envs/dppo).
 
 
 def _rot6d_to_quat(rot6d: np.ndarray) -> np.ndarray:
@@ -176,11 +178,12 @@ class ActionPipeline:
         grip = self._gripper_min + t_grip * (self._gripper_max - self._gripper_min)
         return np.concatenate([pos, quat, grip[:, None]], axis=1).astype(np.float32)
 
-    def build_action_space(self) -> Box:
+    def build_action_space(self) -> "gymnasium.spaces.Box":
         """
         Returns a Box with shape (action_dim,) in the clip range.
         Follows the gymnasium single-env convention (no num_envs dim).
         """
+        from gymnasium.spaces import Box                 # lazy: only this method needs gymnasium
         n = self.cfg.action_dim
         return Box(
             low=np.full(n, self.cfg.clip[0], dtype=np.float32),
