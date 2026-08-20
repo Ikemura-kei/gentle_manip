@@ -87,8 +87,14 @@ class PhaseSchedule:
 SCHEDULE_V3 = PhaseSchedule((("approach", 98), ("settle", 1), ("grasp", 37),
                              ("firm", 8), ("lift", 66), ("hold", 12)))
 
-SCHEDULE_V4 = PhaseSchedule((("approach_xy", 55), ("align", 25), ("descend", 30), ("settle", 1),
+SCHEDULE_V4 = PhaseSchedule((("approach_xy", 55), ("align", 25), ("descend", 18), ("settle", 1),
                              ("grasp", 37), ("firm", 8), ("lift", 66), ("hold", 12)))
+
+# BLENDED v4: one continuous Bezier reach (home -> grasp, standoff as control point) instead of
+# travel/rotate/descend. Arrives along the approach axis without ever stopping mid-reach, which
+# is what the stop-and-go split costs (~5.7x dimensionless jerk).
+SCHEDULE_V4_BLEND = PhaseSchedule((("reach", 98), ("settle", 1), ("grasp", 37),
+                                   ("firm", 8), ("lift", 66), ("hold", 12)))
 
 # Phases during which the gripper is still opening/holding open (used by the collectors' firm check)
 _PRE_GRASP = ("approach", "approach_xy", "align", "descend", "settle")
@@ -128,7 +134,8 @@ class GraspTrajectory:
                  lift_height: float, base_squeeze: float = BASE_SQUEEZE, extra_close: float = 0.0,
                  firm_close: float = 0.002, standoff=0.05,          # scalar OR per-env sequence
                  use_minjerk: bool = False, preshape_factor: float = 0.0,
-                 width_open: float = WIDTH_OPEN):
+                 width_open: float = WIDTH_OPEN, rotate_during_travel: bool = True,
+                 rot_frac: float = 0.7):
         self.sched = schedule
         self.n = len(best_x)
         self._s = minjerk if use_minjerk else _identity
@@ -158,10 +165,12 @@ class GraspTrajectory:
         # v4 only: pre-grasp standoff = grasp_pos - approach_dir * standoff, so descend is a pure
         # translation along the fingers' own approach axis. PER-ENV, because the collector escalates
         # an individual env's standoff when the straight descent would clip that object.
+        self.rotate_during_travel = bool(rotate_during_travel)
+        self.rot_frac = float(rot_frac)          # fraction of the reach used to rotate
         self.standoff = np.broadcast_to(np.asarray(standoff, np.float64).ravel(),
                                         (self.n,)).astype(np.float64).copy()
         self.standoff_pos = self.pos_b.copy()
-        if schedule.has("descend"):
+        if schedule.has("descend") or schedule.has("reach"):
             for i, x in enumerate(best_x):
                 d = Rot.from_euler("xyz", np.asarray(x, float)[3:6]).apply([0.0, 0.0, 1.0])
                 self.standoff_pos[i] = self.pos_b[i] - (d * self.standoff[i]).astype(np.float32)
@@ -183,14 +192,36 @@ class GraspTrajectory:
             pos = self.home_pos[i] + s * (self.pos_b[i] - self.home_pos[i])
             quat = _rot_to_wxyz(self._slerps[i](s))
             grip = self.width_open[i]
-        elif name == "approach_xy":                      # v4: travel to standoff at HOME orientation
+        elif name == "approach_xy":                      # v4: travel to the standoff
             pos = self.home_pos[i] + s * (self.standoff_pos[i] - self.home_pos[i])
-            quat = self.home_quat[i]
+            # rotate_during_travel: turn the wrist WHILE travelling, finishing on arrival at the
+            # standoff, so `align` becomes a no-op hold and the reach is ONE motion. Measured: with
+            # a separate align phase, per-phase min-jerk brings the EE to a full stop at each
+            # junction, giving 4 velocity peaks and WORSE smoothness than v3's single lerp
+            # (SPARC -4.35 vs -2.93). Rotation still completes before the descent, so the straight
+            # collision-free descent is preserved.
+            quat = _rot_to_wxyz(self._slerps[i](s)) if self.rotate_during_travel else self.home_quat[i]
             grip = self.width_open[i] + s * (self.preshape[i] - self.width_open[i])
         elif name == "align":                            # v4: rotate in place (no translation)
             pos = self.standoff_pos[i]
-            quat = _rot_to_wxyz(self._slerps[i](s))
+            quat = self.quat_b[i] if self.rotate_during_travel else _rot_to_wxyz(self._slerps[i](s))
             grip = self.preshape[i]
+        elif name == "reach":
+            # v4 BLENDED approach: one continuous motion home -> grasp, as a quadratic Bezier with
+            # the standoff as its control point.
+            #   B(u) = (1-u)^2*home + 2(1-u)u*standoff + u^2*grasp
+            # Its end tangent is B'(1) = 2*(grasp - standoff), i.e. EXACTLY the approach axis — so
+            # the fingers still arrive along the direction they point (the property that makes the
+            # descent collision-safe), but WITHOUT stopping at the standoff.
+            # Measured on the target trajectory: the stop-and-go standoff split costs ~5.7x in
+            # dimensionless jerk (277 -> ~1580) purely from decelerating to zero mid-reach.
+            u = s
+            pos = ((1 - u) ** 2 * self.home_pos[i] + 2 * (1 - u) * u * self.standoff_pos[i]
+                   + u ** 2 * self.pos_b[i])
+            # finish the wrist rotation EARLY (by `rot_frac` of the reach) so the final approach is
+            # a pure translation, as in v3's descend
+            quat = _rot_to_wxyz(self._slerps[i](min(1.0, u / self.rot_frac)))
+            grip = self.width_open[i] + s * (self.preshape[i] - self.width_open[i])
         elif name == "descend":                          # v4: straight line along the approach axis
             pos = self.standoff_pos[i] + s * (self.pos_b[i] - self.standoff_pos[i])
             quat = self.quat_b[i]

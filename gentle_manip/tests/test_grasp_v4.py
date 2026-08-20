@@ -27,7 +27,7 @@ _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "grasp_synthesis"))
 
 from grasp_traj import (GraspTrajectory, PhaseSchedule, SCHEDULE_V3, SCHEDULE_V4,  # noqa: E402
-                        minjerk, x_to_pose)
+                        SCHEDULE_V4_BLEND, minjerk, x_to_pose)
 
 
 # ── reference: v3's _env_target, verbatim (collect_demos_synth_v3.py:483-517) ─────────────────────
@@ -236,9 +236,9 @@ def test_v4_descend_is_straight_along_the_approach_axis():
         assert np.allclose(pts[-1], traj.pos_b[i], atol=1e-6)     # ends exactly at the grasp
 
 
-def test_v4_align_does_not_translate():
-    """Rotating in place at the standoff is what makes the align phase collision-free."""
-    traj = _traj_v4()
+def test_v4split_align_does_not_translate():
+    """In the SPLIT schedule, rotating in place at the standoff is what makes align collision-free."""
+    traj = _traj_v4(rotate_during_travel=False)
     ai = SCHEDULE_V4.index("align")
     pts = np.stack([traj.target(0, ai, s)[0] for s in range(SCHEDULE_V4.duration(ai))])
     assert np.allclose(pts, pts[0], atol=1e-9)
@@ -246,12 +246,86 @@ def test_v4_align_does_not_translate():
     assert not np.allclose(q[0], q[-1])                           # ...but it does rotate
 
 
-def test_v4_approach_holds_home_orientation():
-    """The long travel phase stays top-down; the wrist only turns later, at the standoff."""
-    traj = _traj_v4()
+def test_v4split_approach_holds_home_orientation():
+    """With rotate_during_travel=False the travel phase stays top-down and turns only at the standoff."""
+    traj = _traj_v4(rotate_during_travel=False)
     ai = SCHEDULE_V4.index("approach_xy")
     for s in range(SCHEDULE_V4.duration(ai)):
         assert np.array_equal(traj.target(0, ai, s)[1], traj.home_quat[0])
+
+
+def test_v4_rotate_during_travel_finishes_before_the_descent():
+    """Default mode: the wrist turns WHILE travelling, so `align` is a hold and the descent is a
+    pure translation. Splitting travel and rotation into separate min-jerk phases forces a full
+    stop at each junction — measured as ~5.7x worse dimensionless jerk."""
+    traj = _traj_v4(rotate_during_travel=True)
+    ai, al = SCHEDULE_V4.index("approach_xy"), SCHEDULE_V4.index("align")
+    last_travel = traj.target(0, ai, SCHEDULE_V4.duration(ai) - 1)[1]
+    assert np.allclose(np.abs(np.dot(last_travel, traj.quat_b[0])), 1.0, atol=1e-6)
+    q = np.stack([traj.target(0, al, s)[1] for s in range(SCHEDULE_V4.duration(al))])
+    assert np.allclose(q, q[0])                                   # align is now a hold
+
+
+# ── the blended Bezier reach (the default v4 trajectory) ─────────────────────
+
+def _traj_blend(**kw):
+    return GraspTrajectory(SCHEDULE_V4_BLEND, BEST_X, HOME_POS, HOME_QUAT, lift_height=0.2,
+                           firm_close=0.002, use_minjerk=True, standoff=0.05, **kw)
+
+
+def test_blended_reach_arrives_along_the_approach_axis():
+    """THE property that keeps the blended reach collision-safe: a quadratic Bezier's end tangent is
+    2*(grasp - standoff), i.e. exactly the approach axis — so the fingers still arrive along the
+    direction they point, without the mid-reach stop a separate descend phase forces."""
+    traj = _traj_blend()
+    ri = SCHEDULE_V4_BLEND.index("reach")
+    dur = SCHEDULE_V4_BLEND.duration(ri)
+    for i, x in enumerate(BEST_X):
+        want = Rot.from_euler("xyz", np.asarray(x, float)[3:6]).apply([0.0, 0.0, 1.0])
+        pts = np.stack([traj.target(i, ri, s)[0] for s in range(dur)])
+        d = pts[-1] - pts[-3]
+        d /= np.linalg.norm(d)
+        assert np.dot(d, want) == pytest.approx(1.0, abs=1e-3)
+        assert np.allclose(pts[-1], traj.pos_b[i], atol=1e-6)      # ends exactly at the grasp
+
+
+def test_blended_reach_is_one_continuous_motion():
+    """The reach must be a SINGLE submovement — one speed peak, no interior stop.
+
+    Note min-jerk deliberately has zero speed at both ENDPOINTS (that is the whole point), so the
+    property to assert is unimodality, not "speed stays high": the split schedule's cost is an
+    interior deceleration to rest at the standoff, which shows up as an extra peak.
+    """
+    from gentle_manip.evaluation.smoothness import n_velocity_peaks, speed_profile
+    traj = _traj_blend()
+    ri = SCHEDULE_V4_BLEND.index("reach")
+    pts = np.stack([traj.target(0, ri, s)[0] for s in range(SCHEDULE_V4_BLEND.duration(ri))])
+    speed = speed_profile(pts, 1 / 30.0)
+    assert n_velocity_peaks(speed) == 1                            # one submovement
+    # and no interior trough: the profile rises then falls monotonically about its single peak
+    k = int(np.argmax(speed))
+    assert np.all(np.diff(speed[:k + 1]) >= -1e-9)
+    assert np.all(np.diff(speed[k:]) <= 1e-9)
+
+
+def test_blended_reach_is_smoother_than_the_split_schedule():
+    """Pins the measured trajectory-quality ordering the v4 default was chosen on."""
+    from gentle_manip.evaluation.smoothness import trajectory_metrics
+
+    def roll(sched, **kw):
+        t = GraspTrajectory(sched, BEST_X, HOME_POS, HOME_QUAT, lift_height=0.2,
+                            firm_close=0.002, standoff=0.05, **kw)
+        pts = [t.target(0, pi, s)[0]
+               for pi in range(sched.n_phases) for s in range(sched.duration(pi))]
+        return trajectory_metrics(np.stack(pts), 1 / 30.0, prefix="")
+
+    linear = roll(SCHEDULE_V3, use_minjerk=False)
+    blend = roll(SCHEDULE_V4_BLEND, use_minjerk=True)
+    split = roll(SCHEDULE_V4, use_minjerk=True)
+    assert blend["njerk"] < 0.1 * linear["njerk"]        # min-jerk is the big win (~43x measured)
+    assert blend["njerk"] < 0.5 * split["njerk"]         # blending beats stopping at the standoff
+    assert blend["vpeaks"] <= split["vpeaks"]
+    assert blend["vpeaks"] < linear["vpeaks"]
 
 
 def test_v4_standoff_is_offset_back_along_approach():

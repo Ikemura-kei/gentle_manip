@@ -67,7 +67,7 @@ from synth_utils import (  # noqa: E402
 from smgrasp import finger_grasp as fg  # noqa: E402  (FEM gentleness synthesis)
 from smgrasp import finger_viz          # noqa: E402  (grasp-pose viz paired with each execution video)
 from grasp_traj import (GraspTrajectory, PhaseSchedule,  # noqa: E402  (shared with the benchmark)
-                        SCHEDULE_V3, SCHEDULE_V4)
+                        SCHEDULE_V3, SCHEDULE_V4, SCHEDULE_V4_BLEND)
 from gentle_manip.actions.action_config import ActionConfig
 from gentle_manip.experiment import Experiment
 from gentle_manip.tasks.single_lift import SingleLiftTask
@@ -359,10 +359,12 @@ def build_schedule(args) -> PhaseSchedule:
     """Phase list for this run: the v4 standoff decomposition, or v3's single approach."""
     if args.traj == "v3":
         phases = [("approach", args.n_home_to_pre)]
-    else:
+    elif args.traj == "v4split":
         phases = [("approach_xy", args.n_approach_xy),
                   ("align", args.n_align),
                   ("descend", args.n_descend)]
+    else:                                   # "v4" (default): ONE blended Bezier reach
+        phases = [("reach", args.n_home_to_pre)]
     phases += [("settle", args.n_settle), ("grasp", args.n_grasp)]
     if args.n_firm > 0:
         phases.append(("firm", args.n_firm))
@@ -521,7 +523,7 @@ def execute_and_collect(
     # Commanded targets (initialised to home; updated each step for action inversion)
     prev_pos  = home_pos.copy()
     prev_quat = home_quat.copy()
-    prev_grip = width_open.copy()
+    prev_grip = traj.width_open.copy()   # delta-mode action inversion starts from the open width
 
     # Per-env FSM state
     phase_idx  = np.zeros(num_envs, dtype=np.int64)
@@ -818,11 +820,14 @@ def main() -> None:
     p.add_argument("--n-hold", type=int, default=N_HOLD,
                    help=f"steps held at lift height (the success window); default {N_HOLD}.")
     # ── v4 trajectory ─────────────────────────────────────────────────────────
-    p.add_argument("--traj", choices=["v3", "v4"], default="v4",
-                   help="v4 (default) = pre-grasp standoff: approach_xy (travel at the HOME top-down "
-                        "orientation) -> align (rotate in place) -> descend (straight line along the "
-                        "grasp's own approach axis, collision-free by construction). v3 = the single "
-                        "simultaneous lerp+slerp from home to the grasp pose.")
+    p.add_argument("--traj", choices=["v3", "v4", "v4split"], default="v4",
+                   help="v4 (DEFAULT) = one BLENDED reach: a quadratic Bezier home -> grasp with the "
+                        "pre-grasp standoff as its control point, so the fingers arrive exactly along "
+                        "their own approach axis WITHOUT stopping mid-reach. v4split = the explicit "
+                        "approach_xy -> align -> descend decomposition (measured ~5.7x worse "
+                        "dimensionless jerk: stopping at the standoff is what costs it). v3 = the "
+                        "original single lerp+slerp. Target-trajectory metrics (njerk / vpeaks): "
+                        "v3 linear 11935/10, v3+minjerk 277/2, v4split ~1580/3, v4 blend 287/2.")
     p.add_argument("--n-approach-xy", type=int, default=N_APPROACH_XY,
                    help=f"v4 travel-phase steps; default {N_APPROACH_XY}. The three v4 approach "
                         f"phases sum to {N_APPROACH_XY + N_ALIGN + N_DESCEND} so total episode "
