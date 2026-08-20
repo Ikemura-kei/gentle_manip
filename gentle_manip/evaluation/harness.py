@@ -297,10 +297,19 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
         except Exception as e:
             print(f"[eval] env cfg snapshot skipped: {e}", flush=True)
 
+    # Format each stress figure independently: `sp` being present does NOT imply the top20 metric
+    # is (a venv can surface some spatial reductions and not others), and formatting a None with
+    # :.0f would raise HERE — after the entire eval has been computed and written.
     sp = summary.get("stress_max_tmax_mean") if summary.get("is_soft_task") else None
-    print(f"[eval] DONE — success {summary['success_rate']:.3f}"
-          + (f", peak(succ) {sp:.0f} / top20-ttop20 {summary.get('stress_top20_ttop20_mean'):.0f}"
-             f" over {summary['stress_n_success']} succ eps"
-             if sp is not None else (", no successful eps for stress" if summary["is_soft_task"] else ""))
-          + f" | {summary['n_episodes']} episodes -> {out_dir}", flush=True)
+    t20 = summary.get("stress_top20_ttop20_mean")
+    if sp is not None:
+        stress_msg = (f", peak(succ) {sp:.0f}"
+                      + (f" / top20-ttop20 {t20:.0f}" if t20 is not None else "")
+                      + f" over {summary['stress_n_success']} succ eps")
+    elif summary.get("is_soft_task"):
+        stress_msg = ", no successful eps for stress"
+    else:
+        stress_msg = ""
+    print(f"[eval] DONE — success {summary['success_rate']:.3f}{stress_msg}"
+          f" | {summary['n_episodes']} episodes -> {out_dir}", flush=True)
     return summary

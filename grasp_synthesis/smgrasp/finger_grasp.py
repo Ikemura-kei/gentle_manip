@@ -432,16 +432,19 @@ def score_finger_grasp(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, densit
     # Multiplying by a 0.0 weight below is float-exact, so v3 bit-identity is preserved either way.
     lever = _com_lever(x_tcp, pad_geo, obj_com)
     cos_t = _tilt_cos(x_tcp)
-    occ = _occ_frac(x_tcp, pad_geo, occ_ctx) if (w_occ and occ_ctx is not None) else 0.0
+    # Computed whenever the ray context exists, NOT only when w_occ > 0 — otherwise the audit
+    # column reports a placeholder 0.0 that reads as "no occlusion" when it means "not measured".
+    # It costs ~0.05 ms and is inert in the score while w_occ == 0.
+    occ = _occ_frac(x_tcp, pad_geo, occ_ctx) if occ_ctx is not None else None
     score = (-r["stress_top10"] - w_align * (1.0 - align) - w_peak * E * prim["hi_1"]
              - w_press * pressure + w_area * carea
-             - w_com * lever - w_tilt * (1.0 - cos_t) - w_occ * occ)
+             - w_com * lever - w_tilt * (1.0 - cos_t) - w_occ * (occ or 0.0))
     return {"score": float(score), "status": "ok", "holdable": True,
             "stress_top10": float(r["stress_top10"]), "grip": float(r["grip"]), "align": float(align),
             "pressure": float(pressure), "min_pad_area": float(min_pad), "contact_area": float(carea),
             "width_face": wface, "center": center, "axis": axis, "delta_left": dl, "delta_right": dr,
             "com_lever": float(lever), "tilt_deg": float(np.degrees(np.arccos(np.clip(cos_t, -1.0, 1.0)))),
-            "occ": float(occ)}
+            "occ": (None if occ is None else float(occ))}
 
 
 def _closing_axis_world(x_tcp) -> np.ndarray:
@@ -511,8 +514,10 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
     if obj_sdf is None:                                          # build the penetration SDF once (reused)
         obj_sdf = build_object_sdf(obj)
     # Occlusion rays are fixed for the whole search (only the fingers move), so build them once.
+    # Built whenever a camera is given, even with w_occ == 0: the term stays inert in the score but
+    # the AUDIT then reports a real occlusion figure instead of a misleading placeholder.
     # Deterministic — must not touch `_drng` below (see build_occlusion_ctx).
-    if w_occ and cam_pos is not None:
+    if cam_pos is not None:
         aln["occ_ctx"] = build_occlusion_ctx(obj, com, obj_quat_wxyz, cam_pos, pad_geo, k=occ_k)
     _div_on = (diversity_tol > 0.0 or jitter_deg > 0.0 or jitter_pos > 0.0 or pitch_seed_deg > 0.0)
     _drng = np.random.default_rng(seed) if _div_on else None    # one stream: seed smear + sampling/jitter

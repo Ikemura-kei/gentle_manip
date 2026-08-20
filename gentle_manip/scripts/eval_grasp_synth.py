@@ -130,6 +130,10 @@ class GraspSynthPolicy:
     # ── plumbing ──────────────────────────────────────────────────────────────
     def reset(self):
         self._synthed = False
+        # Clear the audit too: it is overwritten per env during synthesis, so without this an env
+        # whose synthesis failed (or the SDF arm, which never fills it) would report the PREVIOUS
+        # episode's grasp as if it were this one's.
+        self._audit = [{} for _ in range(self.num_envs)]
 
     def close(self):
         if self._pool is not None:
@@ -162,6 +166,11 @@ class GraspSynthPolicy:
     # The synthesizer already knows everything needed to COUNT the three reported defects; it was
     # simply thrown away. `episode_metrics()` hands it to the harness so stem/pinch/side grasps
     # become numbers in episodes.csv instead of something you have to eyeball in a video.
+    # PROVISIONAL thresholds — calibrate against the Iteration-1 distribution before drawing
+    # conclusions from the RATES (the underlying grasp_min_pad_mm2 / grasp_com_lever_mm columns are
+    # the ground truth and are always reported raw). First measurement on 10 collector_v3 episodes:
+    # worst-pad areas spanned ~8-40 mm2 (mean 25), so 20 mm2 sits mid-distribution and flags ~half
+    # — informative as a relative signal, but not yet a calibrated "this is a pinch" boundary.
     STEM_LEVER_FRAC = 0.25      # lever > this * object bbox radius => grasping away from the mass
     PINCH_AREA_MM2 = 20.0       # worst-pad contact area below this => a pinch, not a grasp
 
@@ -343,6 +352,12 @@ def main() -> None:
                          "approach instead of holding it fully open (1.4 ~ human reach). 0 = disabled.")
     ap.add_argument("--no-minjerk", action="store_true",
                     help="use linear time scaling even with --traj v4 (isolates the standoff change)")
+    ap.add_argument("--pinch-area-mm2", type=float, default=None,
+                    help="worst-pad contact area below which a grasp is flagged pinch_grasp "
+                         "(provisional default 20; the raw grasp_min_pad_mm2 column is the truth)")
+    ap.add_argument("--stem-lever-frac", type=float, default=None,
+                    help="COM lever arm, as a fraction of the object's bbox radius, above which a "
+                         "grasp is flagged stem_grasp (provisional default 0.25)")
     args = ap.parse_args()
 
     # Resolve profile + explicit overrides into ONE objective dict, and record it in summary.json so
@@ -376,10 +391,11 @@ def main() -> None:
     grasp_kw = dict(E=args.grasp_E, density=args.grasp_density, mu=args.grasp_mu, accel=args.grasp_accel,
                     n_starts=args.grasp_n_starts, voxel_div=args.grasp_voxel_div,
                     target_tets=args.grasp_target_tets, gpu=not args.grasp_cpu)
-    # occlusion needs the camera the sim actually renders from (task cfg, or the calibrated default)
-    if objective.get("w_occ"):
-        from gentle_manip.tasks.single_lift import SingleLiftTask
-        objective.setdefault("cam_pos", tuple(SingleLiftTask(exp.task_cfg).scene_spec.cameras[0].pos))
+    # Always pass the camera the sim actually renders from, even when w_occ == 0: the term stays
+    # inert in the objective, but the grasp AUDIT then reports real occlusion instead of a
+    # placeholder zero. Costs ~0.05 ms/candidate.
+    from gentle_manip.tasks.single_lift import SingleLiftTask
+    objective.setdefault("cam_pos", tuple(SingleLiftTask(exp.task_cfg).scene_spec.cameras[0].pos))
     schedule = SCHEDULE_V3 if args.traj == "v3" else SCHEDULE_V4
     print(f"[eval_grasp_synth] objective profile={args.grasp_profile} traj={args.traj} -> "
           f"{ {k: v for k, v in objective.items() if k != 'cam_pos'} }", flush=True)
@@ -390,6 +406,10 @@ def main() -> None:
                               objective=objective, schedule=schedule,
                               standoff=args.standoff, preshape_factor=args.preshape_factor,
                               use_minjerk=(args.traj == "v4" and not args.no_minjerk))
+    if args.pinch_area_mm2 is not None:
+        policy.PINCH_AREA_MM2 = float(args.pinch_area_mm2)
+    if args.stem_lever_frac is not None:
+        policy.STEM_LEVER_FRAC = float(args.stem_lever_frac)
     spec = EvalSpec(n_episodes=args.n_episodes, num_envs=args.num_envs, seed=args.seed,
                     max_policy_steps=args.max_steps, scene_group_size=args.scene_group_size)
 
