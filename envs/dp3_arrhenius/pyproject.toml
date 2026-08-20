@@ -1,0 +1,79 @@
+# DP3 training / dataset-conversion environment — ARRHENIUS variant (aarch64 GH200). Isolated
+# copy of envs/dp3 so the original x86 lab-box env stays byte-for-byte as tested. Drops the
+# real-hardware SDKs (pyrealsense2, xArm-Python-SDK) since this env is TRAINING/CONVERSION only
+# on the cluster (no real robot attached here); torchaudio also dropped (never imported anywhere
+# in DP3 or gentle_manip — grepped, zero hits); everything else mirrors envs/dp3.
+#
+# Setup:  uv sync --project envs/dp3_arrhenius   (installs the cu130 torch below)
+# PyTorch3D still needs the manual --no-build-isolation step after sync (see envs/dp3's header
+# for the exact command, same here with --python envs/dp3_arrhenius/.venv/bin/python) -- AND
+# needs `module load GPU/buildenv-gcccuda/2026.03-cu13.0` loaded first for a working nvcc (see
+# below: PyTorch's cpp_extension build strictly requires nvcc's version == torch.version.cuda).
+#
+# >>> TARGET: NAISS Arrhenius GH200 GPU nodes — aarch64 (Grace) + Hopper sm_90. Build/run on a
+#     GPU compute node, NOT the x86_64 login node. DP3's own package (diffusion-policy-3d) has
+#     NO pinned torch requirement (bare setup.py), so no override-dependencies trick is needed
+#     here (unlike envs/dppo_arrhenius, which has to override the dppo fork's torch==2.4.0 pin).
+#
+#     torch 2.9.1/cu130, NOT cu126: this cluster's ONLY provided CUDA toolkit module is 13.0
+#     (`module avail` has no 12.x at all) -- PyTorch's own cpp_extension.py build step HARD FAILS
+#     if nvcc's CUDA version != torch.version.cuda (exact match, not just >=), so a cu126 torch
+#     cannot compile PyTorch3D here even though cu126 itself installs and runs fine (this bit
+#     dppo_arrhenius's original cu126 choice too, but that env never builds a CUDA extension of
+#     its own, so it never hit the mismatch). cu130 aarch64 wheels only became available from
+#     torch 2.9.0 onward. DIFFERENT HARDWARE: check `module avail | grep -i cuda` for the
+#     available toolkit version and match torch's +cuXXX tag to it exactly. <<<
+#
+# Run:  uv run --project envs/dp3_arrhenius python <script>
+
+[project]
+name = "gentle-manip-dp3-arrhenius"
+version = "0.1.0"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+    # Torch — cu130 aarch64 (GH200, matching this cluster's only CUDA module, 13.0). See header
+    # note: PyTorch3D's build requires nvcc version == torch.version.cuda EXACTLY.
+    "torch==2.10.0",
+    "torchvision==0.25.0",
+    # torchaudio deliberately OMITTED -- never imported anywhere in DP3 or gentle_manip.
+    # The DP3 package itself (editable, from the submodule) — replaces the
+    # `cd 3D-Diffusion-Policy && pip install -e .` step in DP3's INSTALL.md.
+    "diffusion-policy-3d",
+    # gentle_manip runtime deps (editable source below, but list its deps directly too --
+    # matches envs/dp3's own pattern).
+    "scipy",
+    "gymnasium",
+    "pyyaml",
+    # DP3 stack (versions per DP3 INSTALL.md, matching envs/dp3)
+    "zarr==2.12.0",
+    "numcodecs",
+    "hydra-core==1.2.0",
+    "omegaconf",
+    "diffusers==0.11.1",
+    "huggingface-hub<0.14",   # diffusers 0.11.1 needs cached_download (removed in 0.14+)
+    "dill==0.3.5.1",
+    "einops==0.4.1",
+    "numba==0.56.4",          # caps numpy<1.24 — matches the tested 3.8-era stack
+    "wandb",
+    "termcolor",
+    "tqdm",
+    "matplotlib",
+    "imageio",
+    "moviepy",
+    "av",
+    "gpustat",
+    "ipdb",
+    # NOTE: pyrealsense2 / xArm-Python-SDK deliberately OMITTED (real-hardware only, and likely
+    # have no aarch64 wheels anyway) -- this env is training/conversion-only on the cluster.
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true   # only the torch* packages below resolve from here, not all deps
+
+[tool.uv.sources]
+gentle-manip = { path = "../..", editable = true }
+diffusion-policy-3d = { path = "../../third_party/DP3/3D-Diffusion-Policy", editable = true }
+torch = { index = "pytorch-cu130" }
+torchvision = { index = "pytorch-cu130" }
