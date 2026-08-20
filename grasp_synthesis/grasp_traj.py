@@ -126,7 +126,7 @@ class GraspTrajectory:
 
     def __init__(self, schedule: PhaseSchedule, best_x: Sequence, home_pos, home_quat, *,
                  lift_height: float, base_squeeze: float = BASE_SQUEEZE, extra_close: float = 0.0,
-                 firm_close: float = 0.002, standoff: float = 0.05,
+                 firm_close: float = 0.002, standoff=0.05,          # scalar OR per-env sequence
                  use_minjerk: bool = False, preshape_factor: float = 0.0,
                  width_open: float = WIDTH_OPEN):
         self.sched = schedule
@@ -156,13 +156,15 @@ class GraspTrajectory:
                         for i in range(self.n)]
 
         # v4 only: pre-grasp standoff = grasp_pos - approach_dir * standoff, so descend is a pure
-        # translation along the fingers' own approach axis.
-        self.standoff = float(standoff)
+        # translation along the fingers' own approach axis. PER-ENV, because the collector escalates
+        # an individual env's standoff when the straight descent would clip that object.
+        self.standoff = np.broadcast_to(np.asarray(standoff, np.float64).ravel(),
+                                        (self.n,)).astype(np.float64).copy()
         self.standoff_pos = self.pos_b.copy()
         if schedule.has("descend"):
             for i, x in enumerate(best_x):
                 d = Rot.from_euler("xyz", np.asarray(x, float)[3:6]).apply([0.0, 0.0, 1.0])
-                self.standoff_pos[i] = self.pos_b[i] - (d * self.standoff).astype(np.float32)
+                self.standoff_pos[i] = self.pos_b[i] - (d * self.standoff[i]).astype(np.float32)
         # Human reach preshapes the hand to ~1.3-1.5x object size rather than opening fully; a
         # narrower gripper during descent also cuts collision risk and camera occlusion.
         self.preshape = (np.clip(self.width_cls * float(preshape_factor),
