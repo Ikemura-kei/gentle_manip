@@ -16,6 +16,14 @@ loss (total = diffusion + λc·BCE(contact) + λp·MSE(object_pos)). **Training-
 policy samples via `forward()` only, so aux adds ZERO inference/deploy cost, and ONE eval config
 evaluates all four variants (checkpoint load is `strict=False`; extra head weights are ignored).
 
+> **UPDATE (2026-08-20):** the `strict=False` claim above was true for `DiffusionModel`'s own
+> loader (training) but NOT for eval — `DiffusionEval` (`third_party/dppo/model/diffusion/
+> diffusion_eval.py`) still used `strict=True` and crashed on every +contact/+objpos/+both
+> checkpoint (`Unexpected key(s) in state_dict: "pos_head.0.weight", ...`). Fixed (submodule
+> commit `f390f2f`, bumped in the main repo) with a relaxed loader that ignores extra keys but
+> still raises on any genuinely MISSING key. Verified against a real crashed eval (ufwhv/state_200)
+> before resubmitting the 3 affected checkpoints (contact/objpos/both @ state_200).
+
 ## Baseline & what's held constant
 - Backbone = **bwvei** (`single_lift_mushroom_soft_abs_pcd_rot6d`, 0.81 @ ep400): soft MPM, abs action
   (action_dim 10), PointNet diffusion, horizon 4 / cond 2 / pc_cond 1, batch 128, lr 1e-4, cosine
