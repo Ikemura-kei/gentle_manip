@@ -1,5 +1,57 @@
 # Grasp synthesis v4 — findings, infrastructure audit, and development plan
 
+---
+
+## STATUS (2026-08-21) — read this first
+
+Implementation is underway; the sections below are the original analysis and plan, still accurate
+except where this block supersedes them. **Nothing is pushed** (the cluster action-space ablation is
+mid-flight and shares `gentle_manip/evaluation/`).
+
+| iteration | state | outcome |
+|---|---|---|
+| 0 — honest benchmark | **done** | `--grasp-profile {strict, collector_v3, v4}`; `strict` verified bit-identical to the historical benchmark |
+| 0b — FEM audit | **partly done** | see "coarse planning" below; regret measurement in progress |
+| 1 — quality metrics | **done, gate PASSED** | defects countable: pinch 0.50, stem 0.10, `ee_vpeaks` 2, `ee_sparc` −2.93 |
+| 1b — occlusion ground truth | **done** (not yet run) | `*_grasp_eval_pcd` experiment + analytic gripper subtraction |
+| 2 — trajectory | **done, gate PASSED** | blended Bézier reach: action jerk 1475 → **264** |
+| 3 — objective terms | staged | `run_iter3_ablation.sh`, one term at a time |
+| 3b — optimizer study | not started | |
+| 4 — new objects | groundwork done | meshes + registry + materials + `mpm_bounds` knob; per-object configs written |
+| 5 — freeze + doc | in progress | `docs/grasp_synthesis_v4_algorithm.md` written incrementally |
+| 6 — 500 demos + BC | not started | the payoff run; needs the sim exclusively |
+
+### Findings that change the plan
+
+1. **`w_peak` had never been active.** Fixed behind a three-way `_UNSET` sentinel rather than by
+   flipping the default, so v3 stays bit-identical (verified: score repr unchanged).
+2. **Min-jerk per PHASE is worse than linear when the schedule has many phases** — it stops the arm
+   at every boundary. The standoff decomposition made smoothness *worse*, not better. Resolved with
+   a quadratic Bézier through the standoff, whose end tangent is exactly the approach axis: keeps
+   the collision-safe arrival direction with no mid-reach stop.
+3. **Measure the ACTION stream, not the achieved EE path.** The achieved path is dominated by
+   controller tracking: the trajectory redesign moved it 11122 → 11166 (nothing) while moving the
+   commanded action stream 1475 → 264. An `ee_*`-only gate scores a real improvement as a null
+   result. Both are now recorded.
+4. **Coarse-mesh planning is NOT validated.** A first sweep suggested a ~4× speedup at unchanged
+   ranking; it did not replicate (ρ = 0.999 / 0.434 / 0.958 across three grasp sets). Resolution is
+   unchanged. Rank correlation is also the wrong test — CMA reports a winner, not a ranking — so a
+   **regret** measurement was added and is the thing to read before revisiting this.
+5. **Occlusion is driven by the closing-axis YAW, not by tilt** (0.06 → 0.94 across a yaw sweep of
+   an otherwise identical top-down grasp). `w_occ` and `w_tilt` are complementary; tightening
+   `roll_max` alone will not fix occlusion.
+6. `grasp_synthesis/CLAUDE.md` §11.6's cost table is **stale** (777 ms/eval at voxel_div 14; measured
+   29.6 ms) — it predates the `target_tets` cap.
+
+### Open decision for the user
+
+Whether to collect the 500 demos with **only** the validated trajectory fix (ready, low risk) or to
+wait for **tuned objective weights** from Iteration 3. Recommendation: run the ablation first —
+untuned `w_com`/`w_tilt` could plausibly make grasps worse, and a bad 500-episode set costs more
+than the wait.
+
+---
+
 **Status:** planning (no v4 code written yet). **Owner:** grasp-synthesis workstream.
 **Purpose:** single reference for the v4 effort so nothing depends on chat memory — how the existing
 code works, what is actually wrong with it (measured, not guessed), the v4 design, the benchmark, and
