@@ -24,6 +24,18 @@
 > (exact) abs encoding does not — a small systematic asymmetry in the abs-vs-delta
 > comparison, in the ABS arm's favor. If delta evals come out clearly worse than abs,
 > re-derive delta with a larger rot scale before concluding "delta is worse".
+>
+> Interpretation note for the abs-vs-delta comparison (2026-08-21): delta has a SECOND,
+> runtime-side drift source on top of the dataset-side error above — within each action
+> chunk the steps execute open-loop, so execution error compounds until the next re-plan,
+> and the backend accumulates deltas onto its internal running target rather than the
+> measured pose. Absolute mode re-anchors to a full pose every step, so neither error
+> accumulates. A delta-arm success deficit vs abs is therefore expected to have (at least)
+> three stacked causes: (1) derivation clipping (~5-8° dataset error, measurable above),
+> (2) open-loop within-chunk drift, (3) target-vs-actual accumulation drift. Only (1) is
+> fixable by a bigger derivation rot scale; (2)/(3) are inherent to the delta
+> representation as deployed here and are part of what the ablation is legitimately
+> measuring.
 
 **TL;DR — root cause found (see "ROOT CAUSE CONFIRMED" section below):** the recorded grasp's
 roll angle sits essentially AT the euler ±π wraparound seam for ~99.5% of all timesteps, so
