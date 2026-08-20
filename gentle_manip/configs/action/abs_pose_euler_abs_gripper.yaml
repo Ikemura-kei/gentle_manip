@@ -5,19 +5,31 @@
 # Same as abs_pose_abs_gripper.yaml EXCEPT the rotation is encoded as 3 EULER angles (RPY,
 # the convention most papers use) instead of the 6D rotation, so the raw action is 7-dim
 # (pos3 + euler3 + gripper1) instead of 10-dim. Both process to the SAME 8-dim physical
-# pose (pos + quat + gripper), so the backend dispatch is unchanged. Euler is compact but has
-# gimbal-lock / ±pi wraparound — fine for a mostly top-down grasp with bounded yaw; prefer
-# rot6d (abs_pose_abs_gripper.yaml) if the teleop yaw spans across ±180deg.
+# pose (pos + quat + gripper), so the backend dispatch is unchanged.
+#
+# euler_frame_offset_deg — REQUIRED for a top-down grasp (added 2026-08-20, see
+# docs/debug_partC_euler_action_anomaly.md): the euler angles encode the orientation
+# RELATIVE to this fixed frame (R_rel = R_cmd * R_off^-1). Without it, a top-down grasp's
+# roll sits exactly AT the +/-pi seam of as_euler, so the encoded roll sign-flips between
+# ~+pi and ~-pi on consecutive frames (measured 18-27% of transitions in every derived abs
+# dataset — real, sim-hwo, sim-armfocus alike), which trains fine (bimodal target, low loss)
+# but decodes to a ~180deg-wrong wrist roll whenever sampling lands between the modes →
+# ~0% eval success (run oppsu). With [180, 0, 0] the nominal top-down pose maps to
+# euler ~(0,0,yaw), far from any seam. Encode (actions/derive.py at convert time) and
+# decode (ActionPipeline at rollout) both apply it, so datasets derived with this config
+# are only valid with a pipeline built from this same config.
 mode: absolute
 rot_repr: euler
 clip: [-1.0, 1.0]
 pos_min: [0.26, -0.225, 0.003]
 pos_max: [0.59,  0.225, 0.50]
 # Euler mapping: raw [-1,1] -> [euler_min, euler_max] radians, sequence `euler_seq` (intrinsic
-# xyz ~ roll,pitch,yaw). Full +/-pi covers all orientations; convert_demos re-normalizes to the
-# dataset's actual range, so no need to tighten unless you want finer resolution.
+# xyz ~ roll,pitch,yaw). Full +/-pi is fine resolution-wise: BOTH converters normalize actions
+# to the dataset's actual per-dim range at train time (DPPO convert_demos norm_a; DP3's
+# normalizer), so a narrow used-range costs nothing.
 euler_seq: xyz
 euler_min: [-3.14159265, -3.14159265, -3.14159265]
 euler_max: [ 3.14159265,  3.14159265,  3.14159265]
+euler_frame_offset_deg: [180.0, 0.0, 0.0]
 gripper_min: 0.0
 gripper_max: 0.088

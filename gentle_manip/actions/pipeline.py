@@ -10,6 +10,17 @@ from gentle_manip.actions.action_config import ActionConfig
 # actions.derive) work in envs that don't ship gymnasium (e.g. envs/dppo).
 
 
+def _euler_frame_offset(action_config: ActionConfig):
+    """Fixed reference-frame Rotation for euler encoding, or None. See ActionConfig — the
+    euler angles encode R_rel = R_cmd * R_off^-1 (decode: R_cmd = R_rel * R_off), moving a
+    top-down grasp's roll off the +/-pi wraparound seam. MUST be applied identically in
+    invert_absolute_action (encode) and ActionPipeline._process_absolute (decode)."""
+    off = getattr(action_config, "euler_frame_offset_deg", None)
+    if off is None:
+        return None
+    return Rotation.from_euler(action_config.euler_seq, off, degrees=True)
+
+
 def _rot6d_to_quat(rot6d: np.ndarray) -> np.ndarray:
     """Gram-Schmidt orthonormalization (Zhou et al. 2019): (N, 6) -> (N, 4) wxyz quat.
 
@@ -70,7 +81,11 @@ def invert_absolute_action(pos: np.ndarray, quat: np.ndarray, gripper: np.ndarra
     if getattr(action_config, "rot_repr", "rot6d") == "euler":  # -> 3 euler angles, un-mapped to [-1,1]
         emin = np.asarray(action_config.euler_min, dtype=np.float64)
         emax = np.asarray(action_config.euler_max, dtype=np.float64)
-        angles = Rotation.from_quat(xyzw).as_euler(action_config.euler_seq, degrees=False)  # (n,3)
+        rot = Rotation.from_quat(xyzw)
+        off = _euler_frame_offset(action_config)
+        if off is not None:                                     # encode RELATIVE to the offset frame
+            rot = rot * off.inv()
+        angles = rot.as_euler(action_config.euler_seq, degrees=False)                        # (n,3)
         a_rot = np.clip(lo + (angles - emin) / (emax - emin) * span, lo, hi)                 # (n,3)
     else:                                                       # -> 6D rotation (first two R columns)
         a_rot = np.zeros((n, 6), dtype=np.float64)
@@ -168,7 +183,11 @@ class ActionPipeline:
             emin = np.asarray(self.cfg.euler_min, np.float32)
             emax = np.asarray(self.cfg.euler_max, np.float32)
             angles = emin + (euler_raw - lo) / span * (emax - emin)          # (num_envs, 3) rad
-            xyzw = Rotation.from_euler(self.cfg.euler_seq, angles, degrees=False).as_quat()
+            rot = Rotation.from_euler(self.cfg.euler_seq, angles, degrees=False)
+            off = _euler_frame_offset(self.cfg)
+            if off is not None:                                # angles were RELATIVE to the offset frame
+                rot = rot * off
+            xyzw = rot.as_quat()
             quat = np.concatenate([xyzw[:, 3:4], xyzw[:, :3]], axis=1)        # -> wxyz
         else:                                                  # 10-dim: pos3 + rot6d6 + grip1
             grip_raw = clipped[:, 9]

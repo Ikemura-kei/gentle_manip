@@ -63,6 +63,16 @@ class ActionConfig:
     euler_min: Tuple[float, float, float] = (-math.pi, -math.pi, -math.pi)  # euler mode: raw [-1,1] -> [min,max] rad
     euler_max: Tuple[float, float, float] = (math.pi, math.pi, math.pi)
     euler_seq: str = "xyz"   # scipy Rotation from_euler/as_euler sequence (intrinsic xyz ~ RPY)
+    # euler mode only: fixed reference-frame offset (euler degrees, same `euler_seq` convention).
+    # The euler angles encode R_rel = R_cmd @ R_off^-1 (and decode R_cmd = R_rel @ R_off), i.e. the
+    # orientation RELATIVE to this offset frame. Purpose: a top-down grasp pose is a ~180deg flip
+    # from identity, which puts extracted roll exactly AT the +/-pi wraparound seam of as_euler —
+    # tiny physical noise then flips the encoded roll between ~+pi and ~-pi on consecutive frames
+    # (observed: 18-27% of frame-to-frame transitions sign-flipping in every derived abs dataset),
+    # an untrainable discontinuous target. Setting the offset to the grasp's nominal orientation
+    # (e.g. [180, 0, 0] for top-down) recenters the encoding so roll/pitch sit near 0, far from
+    # the seam. None (default) = no offset — backward compatible with rot6d and delta configs.
+    euler_frame_offset_deg: Tuple[float, float, float] = None
 
     @property
     def action_dim(self) -> int:
@@ -93,6 +103,9 @@ class ActionConfig:
                 lo >= hi for lo, hi in zip(self.euler_min, self.euler_max)):
                 raise ValueError(f"euler_min must be < euler_max elementwise, got "
                                  f"{self.euler_min} / {self.euler_max}")
+            if self.euler_frame_offset_deg is not None and len(self.euler_frame_offset_deg) != 3:
+                raise ValueError(f"euler_frame_offset_deg must be length 3, got "
+                                 f"{self.euler_frame_offset_deg}")
 
     @classmethod
     def from_dict(cls, d: dict) -> ActionConfig:
@@ -110,6 +123,8 @@ class ActionConfig:
             kwargs["euler_min"] = tuple(d.get("euler_min", cls.euler_min))
             kwargs["euler_max"] = tuple(d.get("euler_max", cls.euler_max))
             kwargs["euler_seq"] = d.get("euler_seq", cls.euler_seq)
+            off = d.get("euler_frame_offset_deg")
+            kwargs["euler_frame_offset_deg"] = None if off is None else tuple(off)
         else:
             kwargs["scales"] = d.get("scales", cls.__dataclass_fields__["scales"].default_factory())
         cfg = cls(**kwargs)
