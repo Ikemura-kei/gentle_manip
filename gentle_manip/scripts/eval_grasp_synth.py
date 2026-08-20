@@ -368,7 +368,11 @@ def main() -> None:
                      or (_mat.get("von_mises_yield_stress") if isinstance(_mat, dict) else None) or 4e4)
 
     client = SimEnvClient(port=args.port)
-    venv = SimEvalVenv(client, args.num_envs, args.max_steps)
+    # policy_dt = the scene's sim_dt: this venv steps the sim exactly once per policy step, so the
+    # EE trace is sampled at the true sim rate and the smoothness metrics are meaningful.
+    from gentle_manip.tasks.single_lift import SingleLiftTask as _SLT
+    venv = SimEvalVenv(client, args.num_envs, args.max_steps,
+                       policy_dt=float(_SLT(exp.task_cfg).scene_spec.sim_dt))
     grasp_kw = dict(E=args.grasp_E, density=args.grasp_density, mu=args.grasp_mu, accel=args.grasp_accel,
                     n_starts=args.grasp_n_starts, voxel_div=args.grasp_voxel_div,
                     target_tets=args.grasp_target_tets, gpu=not args.grasp_cpu)

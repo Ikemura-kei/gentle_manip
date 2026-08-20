@@ -57,6 +57,53 @@ def _scenario_columns(sc, n):
     return cols
 
 
+def _smoothness_columns(ee_buf, grip_buf, policy_dt, n):
+    """Per-env trajectory-smoothness columns, or blanks when they can't be computed honestly.
+
+    Returns blanks unless the venv exposes `policy_dt` (see the call site) — jerk is a third
+    derivative, so a trace sampled at a different rate is not comparable, and a wrong number here
+    is worse than a missing one.
+    """
+    cols = [{} for _ in range(n)]
+    if not policy_dt:
+        return cols
+    from .smoothness import trajectory_metrics
+    for j in range(n):
+        if len(ee_buf[j]) >= 5:
+            cols[j].update(trajectory_metrics(np.stack(ee_buf[j]), float(policy_dt), prefix="ee_"))
+        if len(grip_buf[j]) >= 5:
+            g = trajectory_metrics(np.asarray(grip_buf[j]).reshape(-1, 1), float(policy_dt))
+            cols[j].update(grip_sparc=g["sparc"], grip_njerk=g["njerk"])
+    return cols
+
+
+def _policy_columns(policy, n):
+    """OPTIONAL per-episode metrics contributed by the policy: `policy.episode_metrics()` returning
+    a length-n list of dicts. Duck-typed and best-effort — a policy without the method (every
+    learned policy today) simply yields blanks, and a policy that raises must not abort an eval
+    that is otherwise fine.
+
+    This exists because some metrics are only knowable INSIDE the policy: the scripted grasp
+    synthesizer picks a tilt / contact area / predicted occlusion that no env observation exposes.
+    """
+    fn = getattr(policy, "episode_metrics", None)
+    if fn is None:
+        return [{} for _ in range(n)]
+    try:
+        cols = fn()
+        if cols is None:
+            return [{} for _ in range(n)]
+        cols = list(cols)
+        if len(cols) != n:
+            print(f"[eval] policy episode_metrics returned {len(cols)} rows, expected {n}; ignoring",
+                  flush=True)
+            return [{} for _ in range(n)]
+        return [dict(c) for c in cols]
+    except Exception as exc:                       # never let an optional metric kill a real eval
+        print(f"[eval] policy episode_metrics failed ({exc}); columns left blank", flush=True)
+        return [{} for _ in range(n)]
+
+
 def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional[str] = None,
              checkpoint=None, record_batches: Optional[int] = None,
              extra_meta: Optional[dict] = None) -> Dict[str, Any]:
@@ -119,6 +166,12 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
         SKEYS = ["stress_mean", "stress_max", "stress_top10", "stress_top20"]
         buf = {k: [[] for _ in range(n)] for k in SKEYS}
         z_buf = [[] for _ in range(n)]     # object height per step (diagnostic; any task)
+        # EE path per step, for the trajectory-smoothness metrics. Captured from the obs the policy
+        # ACTS on, so it is the measured pose (what a learned policy would also see). ee_pos only —
+        # ee_quat carries the pipeline's deliberate quat_noise_std jitter, which would swamp a third
+        # derivative. Only meaningful when the venv declares its step period (see policy_dt below).
+        ee_buf = [[] for _ in range(n)]
+        grip_buf = [[] for _ in range(n)]
 
         for t in range(spec.max_policy_steps):
             if dump_pcd and isinstance(obs, dict) and "point_cloud" in obs:   # capture the obs the policy ACTS on
@@ -128,6 +181,14 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
                     pcd_buf[j].append(pc[j])
                     if st is not None:
                         state_buf[j].append(st[j])
+            if isinstance(obs, dict) and "ee_pos" in obs:      # pre-step: the pose the policy acts on
+                ep = np.asarray(obs["ee_pos"], float).reshape(n, -1)
+                gw = obs.get("gripper_width")
+                gw = np.asarray(gw, float).reshape(n) if gw is not None else None
+                for j in range(n):
+                    ee_buf[j].append(ep[j].copy())
+                    if gw is not None:
+                        grip_buf[j].append(float(gw[j]))
             action = policy.act(obs)
             obs, reward, _term, _trunc, info = venv.step(action)
             ep_reward += np.asarray(reward, float).reshape(n)
@@ -176,6 +237,16 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
         else:
             ever_in_band = [None] * n
 
+        # Trajectory smoothness — ONLY when the venv declares its per-policy-step period. A chunked
+        # venv (DPPO, act_steps>1) observes the EE at 1/act_steps of the sim rate, so jerk/SPARC
+        # from that aliased trace are not comparable to a 1-step trace; leaving policy_dt unset
+        # yields blank columns rather than silently wrong numbers.
+        smooth_cols = _smoothness_columns(ee_buf, grip_buf,
+                                          getattr(venv, "policy_dt", None), n)
+        # Optional per-episode metrics contributed by the POLICY itself (e.g. the scripted grasp
+        # synthesizer's chosen tilt / contact area / predicted occlusion, which nothing else can see).
+        pol_cols = _policy_columns(policy, n)
+
         for j in range(n):
             b = {k: buf[k][j] for k in SKEYS}
             records.append({
@@ -202,6 +273,8 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
                 "obj_z_max": _tmax(z_buf[j]),
                 "obj_z_final": (z_buf[j][-1] if z_buf[j] else None),
                 **dr_cols[j],
+                **smooth_cols[j],
+                **pol_cols[j],
             })
         band_msg = f" in_band={np.mean([v for v in ever_in_band if v is not None] or [0]):.2f}" if z_min is not None else ""
         print(f"[eval] batch {i + 1}/{spec.n_batches} seed={seed_i} "
