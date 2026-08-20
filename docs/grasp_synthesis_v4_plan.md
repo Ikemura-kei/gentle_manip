@@ -43,6 +43,40 @@ mid-flight and shares `gentle_manip/evaluation/`).
 6. `grasp_synthesis/CLAUDE.md` §11.6's cost table is **stale** (777 ms/eval at voxel_div 14; measured
    29.6 ms) — it predates the `target_tets` cap.
 
+### Iteration 6 recipe (the 500-demo BC payoff run) — exact commands
+
+The collector records whatever action the experiment specifies, and
+`single_lift_mushroom_soft_abs_action` specifies `abs_pose_abs_gripper`, i.e. **10-dim rot6d**.
+The 7-dim euler action wanted here is obtained at CONVERT time via `--derive-action`, not by
+collecting differently — that is exactly the "one collection, both action spaces" path built for the
+action-space ablation, and it is already validated. Do **not** add a second collection.
+
+```bash
+# 1. collect (v4 defaults: blended Bezier reach, min-jerk, preshape 1.4x, descend check on)
+env -u PYTHONPATH -u ROS_DISTRO MUJOCO_GL=egl uv run --project envs/sim python \
+  grasp_synthesis/collect_demos_synth_v4.py \
+  --experiment single_lift_mushroom_soft_abs_action \
+  --n-episodes 500 --n-envs 8 --scene-dr-every 1 --record-video 20
+
+# 2. convert to 7d EULER absolute (the euler_frame_offset_deg seam fix is in the config;
+#    without it the abs target is bimodal and trains to ~0% success)
+env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/dppo python -m gentle_manip.dppo.convert_demos \
+  dataset/demos/single_lift_mushroom_soft/<run>/data.pkl \
+  --out dataset/dppo/single_lift_mushroom_soft_v4_7d \
+  --obs-keys ee_pos ee_quat gripper_width --point-cloud \
+  --derive-action gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml   # -> obs_dim 8, action_dim 7
+
+# 3. train with bwvei's setup but 7d action
+#    bwvei = n_epochs 800, save_model_freq 200, batch 128, lr 1e-4, denoising 20,
+#            horizon 4, cond 2, pc_cond 1, visual_feature_dim 256   (obs_dim 10 / action_dim 10 there)
+CFG="--config-path $PWD/gentle_manip/dppo/cfg/single_lift_mushroom_soft_abs_pcd_rot6d --config-name pre_diffusion_pointnet"
+env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/dppo python -m gentle_manip.dppo.train $CFG \
+  env=single_lift_mushroom_soft_v4_7d obs_dim=8 action_dim=7 \
+  experiment=single_lift_mushroom_soft_abs_action wandb.project=$WANDB_PROJ
+
+# 4. eval every checkpoint through the canonical harness (see docs/training_and_eval.md)
+```
+
 ### Open decision for the user
 
 Whether to collect the 500 demos with **only** the validated trajectory fix (ready, low risk) or to

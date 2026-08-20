@@ -1089,6 +1089,8 @@ def main() -> None:
         all_best_x = []
         all_grasp  = []                                          # per-env synthesis dict (for the grasp-pose viz)
         all_standoff = []                                        # per-env descent standoff (may escalate)
+        home_pos_probe = worker.robot.home_pos[None].astype(np.float32)
+        home_quat_probe = worker.robot.home_quat[None].astype(np.float32)
         for i in range(n):
             cma_seed = int(cma_seed_rng.integers(1, 2**31 - 1))
             r = fg.synthesize_grasp(fem_obj, fem_pad_geo, obj_pos_all[i], obj_quat_all[i],
@@ -1125,8 +1127,28 @@ def main() -> None:
                 if fem_sdf is None:
                     fem_sdf = fg.build_object_sdf(fem_obj)
                 for cand in (args.standoff, args.standoff * 1.2, args.standoff * 1.6):
-                    ok, pen = fg.descend_clearance(best_x, fem_pad_geo, fem_sdf,
-                                                   obj_pos_all[i], obj_quat_all[i], d=cand)
+                    # Check the path we will ACTUALLY command, not a straight standoff->grasp
+                    # chord: with the blended (Bezier) reach the two differ, and the chord
+                    # under-reports how close the executed path gets (measured 0.8mm vs 2.0mm of
+                    # finger/object overlap on the same grasp).
+                    probe = GraspTrajectory(schedule, [best_x],
+                                            home_pos_probe, home_quat_probe,
+                                            lift_height=args.lift_height, standoff=cand,
+                                            use_minjerk=not args.no_minjerk,
+                                            preshape_factor=args.preshape_factor)
+                    ai = next((k for k in ("reach", "descend", "approach_xy", "approach")
+                               if schedule.has(k)), None)
+                    poses = []
+                    if ai is not None:
+                        pi_ = schedule.index(ai)
+                        for st in range(0, schedule.duration(pi_), 4):
+                            pp, qq, gg = probe.target(0, pi_, st)
+                            rr = Rot.from_quat(np.asarray(qq, float)[[1, 2, 3, 0]]).as_euler("xyz")
+                            poses.append(np.concatenate([pp, rr, [gg]]))
+                    ok, pen = (fg.path_clearance(poses, fem_pad_geo, fem_sdf, obj_pos_all[i],
+                                                 obj_quat_all[i]) if poses else
+                               fg.descend_clearance(best_x, fem_pad_geo, fem_sdf,
+                                                    obj_pos_all[i], obj_quat_all[i], d=cand))
                     descend_standoff, descend_pen = cand, pen
                     if ok:
                         break

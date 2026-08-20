@@ -273,6 +273,30 @@ def standoff_pose(x_tcp, d: float) -> np.ndarray:
     return x
 
 
+def path_clearance(poses, pad_geo, obj_sdf, obj_com, obj_quat_wxyz, *, pen_tol: float = 0.003,
+                   stride: int = 3) -> tuple:
+    """Is an ARBITRARY commanded finger path free of gross object penetration?
+
+    `poses` is an iterable of 7-DOF `[tx,ty,tz,roll,pitch,yaw,width]` — i.e. exactly what the
+    trajectory will command, orientation and gripper width included. Returns `(ok, max_pen_m)`.
+
+    Prefer this over `descend_clearance` whenever the executed approach is not the straight
+    standoff->grasp chord. Measured on a blended (Bezier) reach: the chord bottoms out at 0.8mm of
+    finger/object overlap while the path actually executed reaches 2.0mm — so checking the chord
+    UNDER-reports the real clearance rather than bounding it. Checking the executed path removes
+    that gap entirely.
+    """
+    q = np.asarray(obj_quat_wxyz, float)
+    Rinv = Rot.from_quat([q[1], q[2], q[3], q[0]]).inv()
+    com = np.asarray(obj_com, float)
+    worst = 0.0
+    for x in poses:
+        Lw, Rw = finger_world_pts(np.asarray(x, float), pad_geo)
+        sd = obj_sdf(Rinv.apply(np.vstack([Lw, Rw])[::stride] - com))
+        worst = max(worst, float(np.maximum(-sd - pen_tol, 0.0).max()))
+    return worst <= 0.0, worst
+
+
 def descend_clearance(x_tcp, pad_geo, obj_sdf, obj_com, obj_quat_wxyz, *, d: float,
                       n: int = 8, pen_tol: float = 0.003) -> tuple:
     """Is the straight standoff->grasp descent free of gross finger/object penetration?
