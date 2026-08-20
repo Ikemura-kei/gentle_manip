@@ -84,9 +84,21 @@ def test_presets():
     assert aggressive().object_nu is not None
 
 
-@pytest.mark.parametrize("name", ["mild", "aggressive"])
-def test_yaml_configs_load(name):
-    cfg = DRConfig.from_dict(yaml.safe_load((_DR_CFG / f"{name}.yaml").read_text()))
+# The LIVE dr configs — mild/aggressive were archived to configs/archive/dr/ in 55c2073, so testing
+# them here validated files nothing loads any more. Parametrizing over the directory instead means a
+# newly added dr config is covered automatically and a deleted one can't leave a stale test behind.
+@pytest.mark.parametrize("path", sorted(_DR_CFG.glob("*.yaml")), ids=lambda p: p.stem)
+def test_yaml_configs_load(path):
+    cfg = DRConfig.from_dict(yaml.safe_load(path.read_text()))
     assert not cfg.is_noop()
-    # yaml floats like 3.0e3 parse and land in range form
-    assert cfg.object_E[0] < cfg.object_E[1]
+    if cfg.object_E is not None:            # yaml floats like 3.0e3 parse and land in range form
+        assert cfg.object_E[0] < cfg.object_E[1]
+
+
+def test_archived_presets_still_load():
+    """mild/aggressive remain importable as PYTHON presets (DR_PRESETS) even though their YAML was
+    archived — keep that contract, since presets.py is what `--dr <name>` resolves against."""
+    for name in ("mild", "aggressive"):
+        p = _DR_CFG.parent / "archive" / "dr" / f"{name}.yaml"
+        if p.exists():
+            assert not DRConfig.from_dict(yaml.safe_load(p.read_text())).is_noop()

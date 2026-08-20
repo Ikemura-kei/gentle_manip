@@ -51,14 +51,25 @@ def test_convert_writes_contract_and_normalizes(tmp_path):
     assert meta["n_episodes"] == 4 and meta["n_train_traj"] + meta["n_val_traj"] == 4
 
     tr = np.load(out / "train.npz")
-    assert set(tr.files) == {"states", "actions", "rewards", "terminals", "traj_lengths"}
+    # The five core arrays are the DPPO contract and must always be present. `convert` ALSO emits
+    # auxiliary-objective labels when the demo recorded them (aux_object_pos from priv_object_pos,
+    # aux_contact from priv_contact), so assert a superset rather than exact equality — otherwise
+    # this test fails purely because the fixture happens to carry a privileged key.
+    _CORE = {"states", "actions", "rewards", "terminals", "traj_lengths"}
+    _AUX = {"aux_object_pos", "aux_contact", "point_cloud"}
+    assert _CORE <= set(tr.files), f"missing DPPO contract arrays: {_CORE - set(tr.files)}"
+    assert set(tr.files) <= _CORE | _AUX, f"unexpected arrays: {set(tr.files) - _CORE - _AUX}"
     assert tr["states"].shape[1] == OBS_DIM and tr["actions"].shape[1] == ACT_DIM
     assert tr["states"].shape[0] == int(tr["traj_lengths"].sum())
     # normalized data lands in [-1, 1] (stats computed over ALL data ⊇ train)
     assert tr["states"].min() >= -1 - 1e-5 and tr["states"].max() <= 1 + 1e-5
 
     nz = np.load(out / "normalization.npz")
-    assert set(nz.files) == {"obs_min", "obs_max", "action_min", "action_max"}
+    # Same superset rule as train.npz: the four core stats are the contract; aux_object_pos_{min,max}
+    # ride along whenever the demo carried the aux label (they normalize the aux regression target).
+    _NCORE = {"obs_min", "obs_max", "action_min", "action_max"}
+    assert _NCORE <= set(nz.files), f"missing normalization stats: {_NCORE - set(nz.files)}"
+    assert set(nz.files) <= _NCORE | {"aux_object_pos_min", "aux_object_pos_max"}
     assert nz["obs_min"].shape == (OBS_DIM,) and nz["action_min"].shape == (ACT_DIM,)
 
 

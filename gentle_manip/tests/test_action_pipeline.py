@@ -168,7 +168,10 @@ def _topdown_quats_near_seam(n=200, seed=0):
     yaw = rng.uniform(-2.0, 2.0, n)
     jr = rng.normal(0.0, 0.05, n)     # roll jitter AROUND pi -> crosses the seam
     jp = rng.normal(0.0, 0.05, n)
-    rot = R.from_euler("z", yaw) * R.from_euler("xyz", np.stack([np.pi + jr, jp, np.zeros(n)], 1))
+    # yaw[:, None], not yaw: for a SINGLE-axis sequence scipy >= 1.17 requires the last dimension to
+    # match the number of axes, so a bare (n,) array raises. The (n,1) form works on both 1.15
+    # (envs/dppo) and 1.17 (envs/sim) — this suite must pass in every env that ships scipy.
+    rot = R.from_euler("z", yaw[:, None]) * R.from_euler("xyz", np.stack([np.pi + jr, jp, np.zeros(n)], 1))
     xyzw = rot.as_quat()
     return np.column_stack([xyzw[:, 3], xyzw[:, 0], xyzw[:, 1], xyzw[:, 2]])
 
