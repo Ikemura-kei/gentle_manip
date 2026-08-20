@@ -1,5 +1,24 @@
 # Debug report: Part C (7d-euler-absolute) DPPO policy scores ~0% success
 
+> **RESOLVED 2026-08-20 (commit `76f5efa`).** The wraparound diagnosis below was verified
+> against ALL THREE abs datasets (Part A real 24.0%, Part B armfocus 18.1%, Part C hwo
+> 26.5% of consecutive-frame labels sign-flipping, while the physical orientation from the
+> state quats is smooth) and fixed via "Fix direction 1": a new
+> `ActionConfig.euler_frame_offset_deg` ([180,0,0] in `abs_pose_euler_abs_gripper.yaml`)
+> makes the euler angles encode the orientation RELATIVE to the nominal top-down frame
+> (encode R_rel = R_cmd·R_off⁻¹ in `invert_absolute_action`, decode R_cmd = R_rel·R_off in
+> `ActionPipeline._process_absolute`), moving roll off the ±π seam. Post-fix: 0.00% flips
+> on all three datasets, round-trip quat error ≤0.05°; 3 regression tests added to
+> `test_action_pipeline.py`. All abs datasets re-derived (Part C in place from its own npz
+> states, since the raw hwo-quat pkl lives only on the lab box) and all abs arms
+> relaunched: partA_dppo_abs_fix 1464686, partA_dp3_abs_fix 1464660, partB_abs_s42/43_fix
+> 1464658/1464659, partC_7d_fix 1464677. Broken runs marked in experiments.csv
+> (oppsu/bpczv invalid, ppomw/aurlv stopped). Delta arms were untouched — but note their
+> own caveat: DERIVED delta (Part B) saturates droll/dpitch (scale 0.008 rad/step vs up to
+> ~0.15 rad/step of demo rotation, ~40% of steps at the ±1 rails); the doc's B2 sanity
+> check only covered position. If the delta arms eval poorly, that saturation is the
+> prime suspect (fix would be a bigger-rot-scale delta config for derivation).
+
 **TL;DR — root cause found (see "ROOT CAUSE CONFIRMED" section below):** the recorded grasp's
 roll angle sits essentially AT the euler ±π wraparound seam for ~99.5% of all timesteps, so
 26.5% of consecutive-step action labels flip between ≈−1.0 and ≈+1.0 (same physical
