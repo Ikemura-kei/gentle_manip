@@ -61,8 +61,19 @@ optimum reproduced numerically), 5-episode sim smoke passed at 5/5 success, 2x2 
 **Retry is deliberately INDEPENDENT of the shelf** and is the fallback: if the late wrist rotation
 turns out too hard for BC to clone, `v4 + retry` is still a better dataset at no cost in trajectory
 difficulty. Validated in sim by forcing the slip check to fire (a genuine slip is a few %, so an
-unforced run would never enter the branch and a green result would prove nothing): the rewind
-executes, the caps hold, and the run terminates cleanly.
+unforced run would never enter the branch and a green result would prove nothing).
+
+Two forced variants, because the first one could not answer the question:
+
+| forced check | drop height | result |
+|---|---|---|
+| at 45 % of the lift | ~9 cm | rewind + caps work, but recovery **fails** (0/3) — the object bounces and rolls out from under the planned pose, so an in-place regrasp cannot find it |
+| at 5 % of the lift | ~1 cm | **5/5 recovered**, 100 % success, 370 steps |
+
+The 1 cm case is what a real early slip looks like, and the in-place regrasp handles it. The 9 cm
+case is the documented limit of "regrasp in place": once the object has genuinely moved, only a CMA
+replan would help. The real check fires at 45 % but with a 10 mm rise threshold, so it only triggers
+when the object never left the table — i.e. the low-drop regime the recovery is good at.
 
 
 ### Findings that change the plan
