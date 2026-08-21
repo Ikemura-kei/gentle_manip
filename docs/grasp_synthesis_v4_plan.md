@@ -10,7 +10,7 @@ mid-flight and shares `gentle_manip/evaluation/`).
 
 | iteration | state | outcome |
 |---|---|---|
-| 0 — honest benchmark | **done** | `--grasp-profile {strict, collector_v3, v4}`; `strict` verified bit-identical to the historical benchmark |
+| 0 — honest benchmark | **done, gate RUN** | see the result table below — my hypothesis was wrong on success, right on the defects |
 | 0b — FEM audit | **done, inconclusive** | 3 attempts failed to justify a cheaper mesh; resolution unchanged, defer to a sim A/B |
 | 1 — quality metrics | **done, gate PASSED** | defects countable: pinch 0.50, stem 0.10, `ee_vpeaks` 2, `ee_sparc` −2.93 |
 | 1b — occlusion ground truth | **done** (not yet run) | `*_grasp_eval_pcd` experiment + analytic gripper subtraction |
@@ -76,6 +76,31 @@ env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/dppo python -m gentle_mani
 
 # 4. eval every checkpoint through the canonical harness (see docs/training_and_eval.md)
 ```
+
+### Iteration-0 gate RESULT (2x100 episodes, identical scenarios)
+
+I predicted the honest `collector_v3` baseline would come in materially below the reported
+0.98–1.00. **It did not** — 0.990, one failure in 100, indistinguishable from `strict`'s 1.000.
+The benchmark/collector config mismatch was NOT hiding a success-rate problem.
+
+| | strict (historically measured) | collector_v3 (generates demos) |
+|---|---|---|
+| success | 1.000 | 0.990 |
+| peak stress | 50 018 Pa | 50 660 Pa |
+| **% episodes over 40 kPa yield** | **100 %** | **100 %** |
+| **stem_grasp rate** | 0.06 | **0.21** (3.5x) |
+| **approach tilt, mean** | 1.7° | **10.2°** (6x) |
+| pinch_grasp rate | 0.64 | 0.57 |
+| occlusion mean / fully occluding | 0.43 / 14 % | 0.48 / 11 % |
+
+What the mismatch *did* hide is the defect profile: the collector's weakened `w_align` produces
+**3.5x more stem grasps** and its pitch seeding **6x more tilt**, exactly as the mechanism predicted.
+Those were invisible to the old benchmark, which had no such columns and evaluated the wrong config.
+
+The more important reading is what is the SAME in both: 100 % of episodes over yield, ~60 % pinch
+rate, ~45 % mean occlusion. **The dominant defects are properties of the objective and the
+execution, not of the diversity settings** — so tuning diversity was never going to fix them, and
+the operating-point defect below is correctly the first thing to address.
 
 ### 🔴 BLOCKER found on the 100-episode strict baseline — read before Iteration 3
 
