@@ -11,7 +11,7 @@ mid-flight and shares `gentle_manip/evaluation/`).
 | iteration | state | outcome |
 |---|---|---|
 | 0 — honest benchmark | **done** | `--grasp-profile {strict, collector_v3, v4}`; `strict` verified bit-identical to the historical benchmark |
-| 0b — FEM audit | **partly done** | see "coarse planning" below; regret measurement in progress |
+| 0b — FEM audit | **done, inconclusive** | 3 attempts failed to justify a cheaper mesh; resolution unchanged, defer to a sim A/B |
 | 1 — quality metrics | **done, gate PASSED** | defects countable: pinch 0.50, stem 0.10, `ee_vpeaks` 2, `ee_sparc` −2.93 |
 | 1b — occlusion ground truth | **done** (not yet run) | `*_grasp_eval_pcd` experiment + analytic gripper subtraction |
 | 2 — trajectory | **done, gate PASSED** | blended Bézier reach: action jerk 1475 → **264** |
@@ -98,18 +98,46 @@ see it. This is upstream of every objective weight, so **fix the operating point
 Iteration-3 ablation** — otherwise the ablation tunes geometric priors around a mis-specified
 stress term.
 
-Fix: score at the width that will actually be commanded (base squeeze + firm are known constants at
-synthesis time). Do NOT remove the firm pass — dropping it previously cost ~15% success.
+**Fix (tested offline, needs benchmark confirmation).** Score at the width that will actually be
+commanded — `execute_offset` in `score_finger_grasp` / `plan_finger_grasp`, default 0.0 so nothing
+changes unless asked. Do NOT remove the firm pass; dropping it previously cost ~15% success.
+
+Critically, the offset fix **alone makes things worse**, and the anti-pinch terms alone do not fix
+the operating point. All three are needed:
+
+| config | width | stress AS EXECUTED | worst pad | align |
+|---|---|---|---|---|
+| historical | 31.8 mm | **54 821 Pa** (1.37x yield) | 66 mm² | 0.976 |
+| `execute_offset` only | 10.9 mm | 4 469 | 11.6 mm² | 0.188 ← pinch |
+| `+ w_peak` | 11.3 mm | 4 281 | 10.5 mm² | 0.199 ← still pinch |
+| **`+ w_peak + area_min`** | 36.2 mm | **21 009 Pa** (0.53x yield) | 41 mm² | **0.903** |
+
+Given that a 4.5 mm squeeze is coming regardless, the cheapest way to keep stress low is to grasp
+something so thin the pads barely engage — so correcting the operating point without an anti-pinch
+floor just relocates the pathology. With `area_min` the optimizer instead starts **wider** (36.2 vs
+31.8 mm), anticipating the squeeze, and lands flush with real contact area.
+
+`area_min` (a hard floor) does the work; `w_peak` (a soft penalty) does not prevent the pinch on
+its own — worth knowing before tuning weights.
+
+⚠️ This is ONE grasp on the nominal mesh. It needs the 100-episode benchmark to confirm, above all
+that success does not regress: a wider grip could slip.
 
 This also supersedes my earlier recommendation to run the ablation before collecting: the operating
 -point fix is both more fundamental and cheaper, and plausibly changes what the ablation concludes.
 
-### Open decision for the user
+### Open decision for the user — UPDATED
 
-Whether to collect the 500 demos with **only** the validated trajectory fix (ready, low risk) or to
-wait for **tuned objective weights** from Iteration 3. Recommendation: run the ablation first —
-untuned `w_com`/`w_tilt` could plausibly make grasps worse, and a bad 500-episode set costs more
-than the wait.
+My earlier framing (trajectory-only vs tuned geometric priors) is superseded. The real choice is:
+
+**Recommended:** benchmark `execute_offset + w_peak + area_min` first (one 100-episode run, ~2.5 h),
+confirm stress drops below yield without losing success, and only then collect the 500. The offline
+result above is a 2.6x stress reduction — far larger than anything the geometric priors were going
+to buy, and it addresses the actual stated goal (gentleness) rather than grasp aesthetics.
+
+The geometric priors (`w_com`, `w_tilt`, `w_occ`) can be ablated afterwards on top of a stress term
+that finally tracks reality. Occlusion is still worth fixing — 14% of strict-profile grasps fully
+block the camera — but it is a perception problem, not a gentleness one.
 
 ---
 

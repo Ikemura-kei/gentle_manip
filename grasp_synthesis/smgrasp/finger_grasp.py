@@ -372,7 +372,8 @@ def score_finger_grasp(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, densit
                        w_align: float = W_ALIGN, w_peak: float = W_PEAK, w_area: float = 0.0,
                        w_press: float = W_PRESS,
                        w_com: float = 0.0, w_tilt: float = 0.0, w_occ: float = 0.0,
-                       area_min: float = 0.0, occ_ctx=None) -> dict:
+                       area_min: float = 0.0, occ_ctx=None,
+                       execute_offset: float = 0.0) -> dict:
     """Score one 7-DOF TCP grasp candidate (higher = gentler; MAXIMIZED). Ladder mirrors
     `width_grasp.score_candidate` but in TCP space with the real finger pad, plus two TOLERANCE-based
     geometric pre-filters (cheap, no FEM): gross table scratch >> gross finger-body penetration >>
@@ -380,6 +381,15 @@ def score_finger_grasp(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, densit
     (~1-3 mm) table scratch / finger-into-object penetration — the object deforms and the controller has
     error at that scale, so only GROSS violations are rejected (the pad's own ~1 mm indent is under
     pen_tol, so intended contact is never flagged). Returns dict(score, status, holdable, ...)."""
+    # OPERATING POINT. The executor does not command the synthesized width: it closes an extra
+    # `execute_offset` (the collector's base squeeze + firm pass). Stress is steeply nonlinear in
+    # indentation, so scoring the un-squeezed width evaluates a grasp the robot never performs —
+    # measured 5.4 kPa at the scored width vs 54.8 kPa at the executed one, a 10x gap that made the
+    # metric uncorrelated with the stress the simulator actually produces. Scoring at the executed
+    # width closes that gap. Default 0.0 reproduces the historical behaviour exactly.
+    if execute_offset:
+        x_tcp = np.asarray(x_tcp, float).copy()
+        x_tcp[6] = max(0.0, float(x_tcp[6]) - float(execute_offset))
     half_uv = (pad_geo["half_u1"], pad_geo["half_u2"])
     ph = max(half_uv)                                             # nominal pad_half (overridden by half_uv)
     q = np.asarray(obj_quat_wxyz, float)
@@ -504,6 +514,7 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                       w_align=None, w_peak=_UNSET, w_area=_UNSET, w_press=None,
                       w_com: float = 0.0, w_tilt: float = 0.0, w_occ: float = 0.0,
                       area_min: float = 0.0, cam_pos=None, occ_k: int = 96,
+                      execute_offset: float = 0.0,
                       roll_max: float = np.pi / 2,
                       refine: bool = True, refine_scan: int = 25, seed: int = 0, verbose: bool = False,
                       record_history: bool = False,
@@ -524,6 +535,13 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                               axis (a pure side grasp); tighten it to structurally exclude those.
       w_peak / w_area         now three-way sentinels (see `_UNSET`) — omitting them keeps the
                               long-standing 0.0 behaviour; pass None to get the module defaults.
+      execute_offset          extra metres the EXECUTOR closes beyond the returned width (the
+                              collector's base squeeze + firm). Every candidate is scored at
+                              `width - execute_offset`, i.e. at the grip the robot will actually
+                              apply. Leaving this at 0 optimizes an operating point that is never
+                              executed and, because stress is steeply nonlinear in indentation,
+                              yields a metric uncorrelated with the simulator's measured stress
+                              (rho +0.10 over 100 canonical episodes). 0.0 = historical behaviour.
     """
     import cma
 
@@ -533,7 +551,8 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
     for _name, _val, _legacy in (("w_peak", w_peak, 0.0), ("w_area", w_area, 0.0)):
         _fwd, _v = _resolve_w(_val, _legacy)
         if _fwd: aln[_name] = _v
-    aln.update(w_com=w_com, w_tilt=w_tilt, w_occ=w_occ, area_min=area_min)
+    aln.update(w_com=w_com, w_tilt=w_tilt, w_occ=w_occ, area_min=area_min,
+               execute_offset=execute_offset)
     com = np.asarray(obj_com, float)
     if obj_sdf is None:                                          # build the penetration SDF once (reused)
         obj_sdf = build_object_sdf(obj)
