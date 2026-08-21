@@ -1,5 +1,27 @@
 # Debug report: Part C (7d-euler-absolute) DPPO policy scores ~0% success
 
+> **FINAL RESOLUTION 2026-08-21 — derive from RECORDED COMMANDED targets
+> (`--derive-source-action`), optionally composed with `--derive-lookahead`.**
+> The K=4 achieved-lookahead broke the stall but plateaued low (Part B 4.5-6%, Part C 16%
+> at ckpt100, declining with epochs — the same epoch-degradation every *derived*-action
+> arm shows, incl. the delta arms which collapse 0.63-0.75@100 → 0.0@400, while jfhlu's
+> recorded-commanded supervision stayed stable 0.75-0.88 across all checkpoints).
+> `commanded_pose_trajectory()` removes the last confound: decode the demo's recorded raw
+> actions through the collection-time action config (absolute: per-step; delta: physical
+> accumulation with per-step EE-bounds/gripper clamping, matching RealBackend exactly) and
+> re-encode as the target space. **Validated:** Part B abs s42 commanded-derived (igjmd)
+> scored **0.39 success / 0.72 ever_success / 0.75 ever_in_band at ckpt100** vs 0.0 (K=1) /
+> 0.05 (K=4) — grasping fully restored to delta/jfhlu territory; the residual gap to
+> delta's 0.63-0.75 is hold-phase completion. Rolled out to every abs arm:
+> - Part B s43 cmd (1467808) + Part C cmd (1467809; lead −5.6/+10.3 mm — byte-comparable
+>   to jfhlu's supervision, so any remaining gap IS the euler-vs-rot6d encoding cost)
+> - Part A: commanded (delta-accumulated) alone leads only ±2.6 mm (slow teleop), below
+>   the stall threshold — derived with `--derive-source-action <delta cfg>
+>   --derive-lookahead 4` (mechanisms compose; conversions 1467810/11 → DPPO + DP3 arms)
+> Open question tracked separately: why every derived/absolute arm still degrades with
+> epochs (best checkpoint ≈ 100) — early-stopping at ckpt100 is the operational answer
+> for this round.
+
 > **SECOND ROOT CAUSE FOUND AND FIXED 2026-08-21 — closed-loop fixed-point stall from
 > K=1 achieved-pose derivation.** The seam fix below was necessary but NOT sufficient: the
 > seam-fixed retrains (zwiex/qvwdj on armfocus) still scored ~0%. Full forensic chain:
