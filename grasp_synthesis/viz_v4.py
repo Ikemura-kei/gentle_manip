@@ -207,10 +207,99 @@ def figure_benchmark(runs: list[Path], out: Path) -> Path:
     return out
 
 
+# ── cross-version stress table ────────────────────────────────────────────────
+#
+# Every row is RECOMPUTED from episodes.csv rather than read out of summary.json, so runs collected
+# before a metric existed are still comparable and every row uses the same success-gating
+# convention. Reading summary.json instead would silently mix conventions across versions — which
+# is the class of error that made v4's benchmark disagree with its own collector.
+
+# (column, label, success-gated). Stress is success-gated for the reason in metrics.aggregate: a
+# failed episode never touched the object, so its near-zero stress would read as "gentle".
+_TABLE_STRESS = [
+    ("stress_top20_ttop20", "sustained (top20/ttop20)"),   # the headline: sustained interaction load
+    ("stress_max_tmax",     "peak (max/tmax)"),            # the instantaneous worst case
+    ("stress_top10_tmax",   "top10 @ peak instant"),
+    ("stress_mean_tmean",   "bulk mean"),
+]
+
+
+def _stats(v: np.ndarray) -> dict:
+    if v.size == 0:
+        return {}
+    return {"mean": float(v.mean()), "std": float(v.std()),
+            "p90": float(np.percentile(v, 90)), "p95": float(np.percentile(v, 95))}
+
+
+def _row(run: Path) -> dict:
+    rows = _load_csv(run)
+    succ = _col(rows, "success")
+    ok = [r for r in rows if r.get("success") in ("1", "1.0", "True", "true")]
+    out = {"label": _label(run), "run": run.name, "n": len(rows),
+           "success": float(succ.mean()) if succ.size else float("nan")}
+    for key, _ in _TABLE_STRESS:
+        out[key] = _stats(_col(ok, key))          # success-gated
+    for key in ("grasp_min_pad_mm2", "grasp_width_mm"):
+        v = _col(ok, key)
+        out[key] = float(v.mean()) if v.size else float("nan")
+    for key in ("pinch_grasp", "stem_grasp"):     # defect rates over ALL episodes
+        v = _col(rows, key)
+        out[key] = float(v.mean()) if v.size else float("nan")
+    for key in ("ee_vpeaks", "act_njerk", "obj_z_max"):
+        v = _col(rows, key)
+        out[key] = float(v.mean()) if v.size else float("nan")
+    ph = [r["peak_stress_phase"] for r in rows if r.get("peak_stress_phase")]
+    out["phase"] = ({p: ph.count(p) / len(ph) for p in sorted(set(ph))} if ph else {})
+    try:
+        s = json.loads((run / "summary.json").read_text())
+        if s.get("shelf_deg"):
+            out["label"] += f"  shelf {s['shelf_deg']:.0f}°/{s.get('shelf_open', 0) * 1e3:.1f}mm"
+    except Exception:
+        pass
+    return out
+
+
+def table_markdown(runs: list[Path], yield_pa: float = 4e4) -> str:
+    rows = [_row(r) for r in runs]
+    L = [f"# Cross-version grasp-synthesis comparison  (yield = {yield_pa / 1e3:.0f} kPa)", ""]
+
+    L += ["## Success and grasp geometry", "",
+          "| config | n | success | pinch | stem | worst-pad mm² | width mm | ee_vpeaks | act_njerk |",
+          "|---|---|---|---|---|---|---|---|---|"]
+    for r in rows:
+        L.append(f"| {r['label']} | {r['n']} | {r['success']:.3f} | {r['pinch_grasp']:.2f} | "
+                 f"{r['stem_grasp']:.2f} | {r['grasp_min_pad_mm2']:.1f} | {r['grasp_width_mm']:.1f} | "
+                 f"{r['ee_vpeaks']:.2f} | {r['act_njerk']:.0f} |")
+
+    # Std matters as much as the mean here: at n=25 per arm, a mean difference smaller than the
+    # spread is not a result. p90/p95 are the bruising tail — a config can have a good mean and
+    # still damage a fraction of the objects, which for fragile food is the failure that counts.
+    for key, label in _TABLE_STRESS:
+        L += ["", f"## {label}  [Pa]", "",
+              "| config | mean ± std | p90 | p95 | % over yield (mean) |", "|---|---|---|---|---|"]
+        for r in rows:
+            s = r.get(key) or {}
+            if not s:
+                L.append(f"| {r['label']} | — | — | — | — |")
+                continue
+            L.append(f"| {r['label']} | {s['mean']:.0f} ± {s['std']:.0f} | {s['p90']:.0f} | "
+                     f"{s['p95']:.0f} | {100 * s['mean'] / yield_pa:.0f}% |")
+
+    L += ["", "## Where the peak stress happens", "",
+          "A gentleness objective that models the SQUEEZE cannot help if the peak lands in `lift`.",
+          "A shelf that moves the peak from `lift` to `hold` has relocated the damage, not removed it.",
+          "", "| config | " + " | ".join(sorted({p for r in rows for p in r["phase"]})) + " |"]
+    phases = sorted({p for r in rows for p in r["phase"]})
+    L.append("|---" * (len(phases) + 1) + "|")
+    for r in rows:
+        L.append(f"| {r['label']} | " + " | ".join(f"{r['phase'].get(p, 0.0):.2f}" for p in phases) + " |")
+    return "\n".join(L) + "\n"
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("what", choices=["trajectory", "benchmark"])
+    ap.add_argument("what", choices=["trajectory", "benchmark", "table"])
     ap.add_argument("runs", nargs="*", type=Path, help="eval run dirs (benchmark only)")
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
@@ -218,6 +307,14 @@ def main() -> None:
     outdir = ROOT / "logs" / "figures"
     if args.what == "trajectory":
         p = figure_trajectory(args.out or outdir / "v4_trajectory.png")
+    elif args.what == "table":
+        if not args.runs:
+            ap.error("table needs at least one eval run dir")
+        md = table_markdown(args.runs)
+        print(md)
+        p = args.out or outdir / "v4_stress_table.md"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(md)
     else:
         if not args.runs:
             ap.error("benchmark needs at least one eval run dir")

@@ -139,17 +139,18 @@ AUX_COLS = [
     ("grasp_tilt_deg", True), ("grasp_min_pad_mm2", True), ("grasp_com_lever_mm", True),
     ("grasp_width_mm", True), ("grasp_occ_pred", True), ("grasp_stress_pred_pa", True),
     ("occ_pcd_grasp", True), ("occ_pcd_lift", True),
+    ("peak_stress_pa", True),
 ]
 # 0/1 defect indicators -> reported as RATES over ALL episodes (counting failures is the point).
-AUX_RATE_COLS = ["stem_grasp", "pinch_grasp",
-              # GROUND-TRUTH occlusion from the rendered cloud (the *_grasp_eval_pcd
-              # experiment only). occ_pcd_* = fraction of the object points visible at
-              # rest that are gone by that phase. Validates grasp_occ_pred, which is
-              # only a geometric prediction.
-              "occ_pcd_baseline_pts", "occ_pcd_grasp", "occ_pcd_lift",
-              # WHICH PHASE the peak stress occurred in. The gentleness objective models the
-              # SQUEEZE; if the peak lands in `lift`, it is aimed at the wrong phase.
-              "peak_stress_phase", "peak_stress_pa"]
+# ONLY genuine indicators belong here: a "rate" of a point count or a pressure is a mislabelled
+# mean (an earlier copy-paste put occ_pcd_baseline_pts and peak_stress_pa here and reported
+# `peak_stress_pa_rate: 50187`, which reads as a fraction and is not one).
+AUX_RATE_COLS = ["stem_grasp", "pinch_grasp"]
+
+# Categorical columns -> reported as a {value: fraction} distribution. peak_stress_phase is the
+# one that matters: the gentleness objective models the SQUEEZE, so a distribution concentrated on
+# `lift` means the objective is aimed at the wrong phase entirely.
+AUX_DIST_COLS = ["peak_stress_phase"]
 
 
 def aggregate(records: List[Dict[str, Any]], **meta) -> Dict[str, Any]:
@@ -210,6 +211,10 @@ def aggregate(records: List[Dict[str, Any]], **meta) -> Dict[str, Any]:
         vals = _clean([r.get(col) for r in records])
         if vals.size:
             out[col + "_rate"] = float(vals.mean())
+    for col in AUX_DIST_COLS:                       # categorical -> {value: fraction}
+        vals = [str(r[col]) for r in records if r.get(col) not in (None, "")]
+        if vals:
+            out[col + "_dist"] = {v: vals.count(v) / len(vals) for v in sorted(set(vals))}
     return out
 
 
