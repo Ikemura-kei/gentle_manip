@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 from pathlib import Path
 
@@ -133,6 +134,21 @@ def _load_csv(run: Path) -> list[dict]:
         return list(csv.DictReader(f))
 
 
+def _label(run: Path) -> str:
+    """Name a run by the OBJECTIVE it used, not by its timestamp — the whole point of these
+    comparisons is which configuration produced the numbers, and a truncated datetime says nothing.
+    Falls back to the directory name when summary.json predates the profile field."""
+    try:
+        s = json.loads((run / "summary.json").read_text())
+        prof = s.get("grasp_profile")
+        if prof:
+            traj = s.get("traj")
+            return f"{prof}" + (f" ({traj})" if traj and traj != "v3" else "")
+    except Exception:
+        pass
+    return run.name[-18:]
+
+
 def _col(rows, key) -> np.ndarray:
     out = []
     for r in rows:
@@ -148,7 +164,7 @@ def _col(rows, key) -> np.ndarray:
 def figure_benchmark(runs: list[Path], out: Path) -> Path:
     """Per-run success / stress / grasp-quality distributions, side by side."""
     plt = _mpl()
-    data = [(r.name, _load_csv(r)) for r in runs]
+    data = [(_label(r), _load_csv(r)) for r in runs]
     panels = [("success", "success rate", None),
               ("stress_max_tmax", "peak stress [Pa]", "hist"),
               ("grasp_tilt_deg", "approach tilt [deg]", "hist"),
@@ -164,9 +180,9 @@ def figure_benchmark(runs: list[Path], out: Path) -> Path:
                 continue
             any_data = True
             if kind is None:
-                ax.bar(name[-18:], float(v.mean()), alpha=0.75)
+                ax.bar(name, float(v.mean()), alpha=0.75)
             else:
-                ax.hist(v, bins=20, alpha=0.5, label=name[-18:])
+                ax.hist(v, bins=20, alpha=0.5, label=name)
         ax.set_title(label, fontsize=10)
         ax.grid(alpha=0.3)
         if kind and any_data:
@@ -179,8 +195,8 @@ def figure_benchmark(runs: list[Path], out: Path) -> Path:
     for name, rows in data:
         stem, pinch = _col(rows, "stem_grasp"), _col(rows, "pinch_grasp")
         if stem.size or pinch.size:
-            txt.append(f"{name[-24:]}: stem {stem.mean():.2f}  pinch {pinch.mean():.2f}"
-                       if stem.size and pinch.size else name[-24:])
+            txt.append(f"{name}: stem {stem.mean():.2f}  pinch {pinch.mean():.2f}"
+                       if stem.size and pinch.size else name)
     if txt:
         fig.text(0.5, 0.01, "   |   ".join(txt), ha="center", fontsize=9)
     fig.suptitle("Grasp benchmark summary", fontsize=13)
