@@ -196,12 +196,20 @@ class GraspTrajectory:
                                     else self.preshape.copy())
 
         # ── SHELF geometry, precomputed per env ───────────────────────────────
-        # shelf_deg = 0 -> _shelf_on False -> every shelf branch is skipped and the returned
-        # commands are float-exact identical to before (pinned by test_grasp_v4).
+        # BOTH knobs default off -> _shelf_on False -> every shelf branch is skipped and the
+        # returned commands are float-exact identical to before (pinned by test_grasp_v4).
+        #
+        # The rotation and the width release are INDEPENDENT knobs and the gate must test both.
+        # Gating on shelf_deg alone silently disabled the release whenever the rotation was off,
+        # which made the "release without rotation" control arm of the 2x2 execute the baseline
+        # trajectory instead — it came back numerically identical to the baseline (51476 vs 51472
+        # Pa, i.e. MPM noise), which reads as "no effect" rather than "not measured". At
+        # shelf_deg = 0 the rotation is a no-op anyway (f = 0 -> ang = 0 -> identity), so turning
+        # the machinery on costs nothing but makes the release reachable.
         self.shelf_frac = (float(shelf_frac[0]), float(shelf_frac[1]))
         self.shelf_open_frac = (float(shelf_open_frac[0]), float(shelf_open_frac[1]))
         self.shelf_open = float(shelf_open)
-        self._shelf_on = bool(shelf_deg) and float(shelf_deg) > 0.0
+        self._shelf_on = float(shelf_deg) > 0.0 or float(shelf_open) != 0.0
         self._shelf_axis = np.zeros((self.n, 3))
         self._shelf_ang = np.zeros(self.n)
         self._shelf_v = np.zeros((self.n, 3), np.float32)

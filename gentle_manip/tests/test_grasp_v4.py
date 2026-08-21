@@ -748,3 +748,24 @@ def test_begin_retry_unwinds_the_shelf_rotation():
     ang2 = Rot.from_quat([q_last[1], q_last[2], q_last[3], q_last[0]]).inv() * \
         Rot.from_quat([t.quat_b[0][1], t.quat_b[0][2], t.quat_b[0][3], t.quat_b[0][0]])
     assert np.degrees(ang2.magnitude()) < 1.0, "re-approach must finish at the grasp orientation"
+
+
+def test_width_release_works_without_any_rotation():
+    """The rotation and the release are independent knobs.
+
+    Gating the whole shelf on shelf_deg made `shelf_open` unreachable at theta=0, so the 2x2's
+    release-only control arm silently ran the baseline trajectory and came back identical to it.
+    """
+    x = [0.47, 0.0, 0.0042, np.pi, 0.0, 0.0, 0.033]
+    li = SCHEDULE_V3.index("lift")
+    last = SCHEDULE_V3.duration(li) - 1
+    base = _shelf_traj([x], 0.0)
+    rel = _shelf_traj([x], 0.0, shelf_open=0.0025)
+    p_b, q_b, g_b = base.target(0, li, last)
+    p_r, q_r, g_r = rel.target(0, li, last)
+    assert float(g_r) - float(g_b) == pytest.approx(0.0025, abs=1e-6), "width was not released"
+    # ...and the POSE must be untouched: at theta=0 the rotation is the identity.
+    assert np.allclose(p_r, p_b, atol=1e-7)
+    assert np.allclose(np.abs(np.asarray(q_r)), np.abs(np.asarray(q_b)), atol=1e-6)
+    # the release must still be ramped, not a step at the start of the lift
+    assert float(rel.target(0, li, 0)[2]) == pytest.approx(float(base.target(0, li, 0)[2]), abs=1e-7)
