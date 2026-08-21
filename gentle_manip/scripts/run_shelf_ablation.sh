@@ -54,6 +54,15 @@ case "$STAGE" in
         i=$((i+1))
     done
     ;;
-  *) echo "unknown stage: $STAGE (want 2x2 | sweep)"; exit 2 ;;
+  occ)
+    # GROUND-TRUTH occlusion, baseline vs the winning shelf, on the point-cloud experiment.
+    # `grasp_occ_pred` is computed at the GRASP pose and therefore goes stale the moment the wrist
+    # starts rotating, so a shelf run's occlusion can only be read from the rendered cloud
+    # (occ_pcd_grasp / occ_pcd_lift). DEG must be passed in.
+    export GM_BENCH_EXPERIMENT=single_lift_mushroom_soft_grasp_eval_pcd
+    run occ_t0            $((PORT0+20)) 0              0
+    run "occ_t${DEG:?DEG}" $((PORT0+21)) "${DEG}" "$OPEN"
+    ;;
+  *) echo "unknown stage: $STAGE (want 2x2 | sweep | occ)"; exit 2 ;;
 esac
 echo "=== [$(date +%H:%M:%S)] $STAGE done ==="
