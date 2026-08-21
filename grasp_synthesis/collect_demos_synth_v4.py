@@ -66,6 +66,7 @@ from synth_utils import (  # noqa: E402
 )
 from smgrasp import finger_grasp as fg  # noqa: E402  (FEM gentleness synthesis)
 from smgrasp import finger_viz          # noqa: E402  (grasp-pose viz paired with each execution video)
+from grasp_profiles import GRASP_PROFILES  # noqa: E402  (shared with the benchmark)
 from grasp_traj import (bound_scaled_schedule,
                         GraspTrajectory, PhaseSchedule,  # noqa: E402  (shared with the benchmark)
                         SCHEDULE_V3, SCHEDULE_V4, SCHEDULE_V4_BLEND)
@@ -1029,6 +1030,16 @@ def main() -> None:
                         "fallback if the shelf trajectory turns out too hard to clone. The failed "
                         "attempt STAYS in the recorded demo on purpose -- a policy trained only on "
                         "clean successes has never seen what to do after a slip.")
+    p.add_argument("--grasp-profile", choices=sorted(GRASP_PROFILES), default=None,
+                   help="named objective from grasp_profiles.py — the SAME resolution the benchmark "
+                        "uses, so a collection and its benchmark cannot disagree about what a "
+                        "profile means. None (default) keeps the legacy flag-driven behaviour; "
+                        "individual --grasp-* flags still override on top of a profile.")
+    p.add_argument("--grasp-execute-offset", type=float, default=None,
+                   help="score each candidate at the width the executor ACTUALLY commands "
+                        "(synthesized width minus this; the collector closes base 2.5mm + firm "
+                        "2mm = 4.5mm tighter than the scored width). v4's operating-point fix — "
+                        "0.0045 in the v4fix/v5 profiles. None = profile value or historical 0.")
     p.add_argument("--grasp-cam-azimuth-max", type=float, default=None,
                    help="v5 occlusion bound: cap the closing-axis azimuth to the camera ray (deg). "
                         "0 = axis perpendicular to the ray (no occlusion), 90 = along it (a finger "
@@ -1079,6 +1090,25 @@ def main() -> None:
     obj_kw = dict(w_com=args.grasp_com, w_tilt=args.grasp_tilt, w_occ=args.grasp_occ,
                   area_min=args.grasp_area_min,
                   cam_azimuth_max_deg=args.grasp_cam_azimuth_max)  # cam_pos added below, once the task is loaded
+    if args.grasp_profile is not None:
+        # Profile first, explicit CLI flags override. The profile also carries the DIVERSITY
+        # settings (diversity_tol/jitter/pitch seeds), which for profiles are part of the named
+        # objective — but those are separate argparse args here, so apply them explicitly.
+        prof = dict(GRASP_PROFILES[args.grasp_profile])
+        for k in ("diversity_tol", "jitter_deg", "jitter_pos", "pitch_seed_deg", "w_align"):
+            if k in prof:
+                setattr(args, {"diversity_tol": "grasp_diversity_tol", "jitter_deg": "grasp_jitter_deg",
+                               "jitter_pos": "grasp_jitter_pos", "pitch_seed_deg": "grasp_pitch_seed_deg",
+                               "w_align": "grasp_align"}[k], prof.pop(k))
+        merged = dict(prof)
+        for k, v in obj_kw.items():                       # explicit CLI values win over the profile
+            if v not in (None, 0.0):
+                merged[k] = v
+        obj_kw = merged
+        print(f"[v4] objective profile '{args.grasp_profile}' -> "
+              f"{ {k: v for k, v in obj_kw.items() if k != 'cam_pos'} }")
+    if args.grasp_execute_offset is not None:
+        obj_kw["execute_offset"] = args.grasp_execute_offset
     if args.grasp_peak is not None:
         obj_kw["w_peak"] = args.grasp_peak
     if args.grasp_roll_max_deg is not None:
@@ -1155,6 +1185,8 @@ def main() -> None:
                         "area_min": args.grasp_area_min,
                         "roll_max_deg": args.grasp_roll_max_deg,
                         "cam_azimuth_max_deg": args.grasp_cam_azimuth_max,
+                        "grasp_profile": args.grasp_profile,
+                        "execute_offset": obj_kw.get("execute_offset"),
                         # v4.1 shelf lift
                         "shelf_deg": args.shelf_deg, "shelf_open": args.shelf_open,
                         "shelf_sign": args.shelf_sign,
