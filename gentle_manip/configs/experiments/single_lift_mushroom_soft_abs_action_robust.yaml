@@ -1,0 +1,32 @@
+# [experiment] SOFT mushroom lift, abs action, ROBUST-start DR — the v5 payoff-collection experiment.
+# Used by: collect_demos_synth_v4 (500-episode v5 collection -> single_lift_mushroom_soft_v5_7d BC run)
+# Status: active
+#
+# Twin of single_lift_mushroom_soft_abs_action with ONE difference: dr swaps soft_orientation for
+# soft_orientation_robust (arm-home jitter 0.02 -> 0.09m per axis; everything else byte-identical),
+# so the collected demos start from a much wider EE pose distribution — a BC policy only knows how
+# to start from poses it has seen. COLLECTION ONLY: the benchmark/eval experiments keep
+# soft_orientation, or every cross-version comparison recorded to date silently breaks.
+# A separate experiment (rather than a CLI --dr override) because Experiment is the single source
+# of truth — every script derives task/obs/DR/action from Experiment.load, and the config snapshot
+# records exp.dr; an override flag would let the snapshot disagree with what actually ran.
+#
+# The action config (abs_pose_abs_gripper) now carries rate_limit, so this collection is
+# rate-bounded end to end: bound_scaled_schedule lengthens phases to fit, the per-step clamp
+# guarantees, and the audit warns if the clamp ever engages >2% of steps.
+task: single_lift_mushroom_soft      # canonical soft MPM mushroom (substep 220, Config C material)
+action: abs_pose_abs_gripper
+dr: soft_orientation_robust          # THE difference: ±9cm arm-home jitter (was ±2cm)
+augmentation: l515_noise
+
+obs: superset_soft                   # soft superset (privileged incl. von Mises stress) + point_cloud
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+
+rl:                                  # mirrors the base experiment (unused during scripted collection)
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400

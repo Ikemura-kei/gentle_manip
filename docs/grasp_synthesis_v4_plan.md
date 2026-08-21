@@ -141,6 +141,26 @@ It also SIZES the shelf: within one 66-step lift the bound admits **30 deg** wit
 **16 deg** with min-jerk easing (peak = 1.875x mean). theta=30 was already the most jerk-efficient
 arm in the sweep, so the rate limit independently selects roughly the same operating point.
 
+### v5 GATE RESULTS (2026-08-21/22)
+
+**A-gate (rate bound) PASSED, n=100 paired vs blend_t0:** success 0.960 = 0.960, peak −0.2%~,
+sustained −0.0%~, bulk −4.6% (the 66→70 lift is slightly gentler), act_njerk −13%, vpeaks
+unchanged, clamp never engaged. The bound costs nothing.
+
+**B-sweep (occlusion) DECIDED: az45.** Ground truth on the pcd experiment, n=25 each:
+
+| profile | occ_pcd_grasp | >0.5 | >0.8 (fully hidden) | success | sustained |
+|---|---|---|---|---|---|
+| v4fix (no bound) | 0.679 | 0.92 | 0.24 | 1.000 | 25956 |
+| **v5 az45** | **0.523** | 0.60 | **0.04** | 1.000 | 24008 |
+| v5 az60 | 0.579 | 0.72 | 0.08 | 1.000 | 25970 |
+
+The offline FEM predicted +25% stress for az45; measured, sustained stress came out LOWER than
+baseline — consistent with the known ρ≈0.10 predicted-vs-measured correlation. The ~0.52
+ground-truth floor is inherent (a gripper holding an object blocks part of it from one fixed
+camera); the tail was the defect and it collapsed. Residual: n=100 success confirmation of v5
+(n=25 is known to hide success regressions).
+
 ### Findings that change the plan
 
 1. **`w_peak` had never been active.** Fixed behind a three-way `_UNSET` sentinel rather than by
