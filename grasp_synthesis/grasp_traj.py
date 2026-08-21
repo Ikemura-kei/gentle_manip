@@ -249,7 +249,7 @@ class GraspTrajectory:
         # Human reach preshapes the hand to ~1.3-1.5x object size rather than opening fully; a
         # narrower gripper during descent also cuts collision risk and camera occlusion.
         self.preshape = (np.clip(self.width_cls * float(preshape_factor),
-                                 self.width_cls + 0.005, width_open).astype(np.float32)
+                                 self.width_cls + 0.005, self.width_open).astype(np.float32)
                          if preshape_factor and preshape_factor > 0.0 else self.width_open.copy())
         # The width the APPROACH actually ends at — what `settle` holds and `grasp` closes FROM.
         # Derived from which approach phase this schedule uses, rather than probing for one
