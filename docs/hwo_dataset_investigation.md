@@ -1,5 +1,20 @@
 # Investigation: is the hwo dataset "special"? (collection-recipe confound)
 
+> **VERDICT (2026-08-22) — it's the RECIPE, not the cloud, and not luck.**
+> R2 (fresh collection `26-08-21-fyj`: arm-focus obs + hwo's v3 grasp recipe) reproduced
+> hwo's collection success almost exactly (94.2% vs 94.75%; xhk had 84.86%), and the
+> policy trained on it (`vdmtb`, commanded-euler 7d abs) scored **0.715 success /
+> 0.87 ever_success / 0.88 ever_in_band at state_100** — versus 0.39-0.70 peak (ever
+> ≤0.72) for the xhk-based abs arms. Grasping with the arm-focus cloud now matches the
+> hwo-obs arms; the residual ~0.1 gap to eibno's 0.84 is either later-checkpoint headroom
+> (sweep in flight) or a small true cloud cost. Practical consequences:
+> - **`vdmtb` is the current best sim2real candidate**: real-matched arm-focus cloud +
+>   firm-grasp behavior + 7d euler abs.
+> - All future soft-body collections must use the v3 launcher with
+>   `N_HOME_TO_PRE=77 N_GRASP=30 GRASP_EXTRA_CLOSE=0.005` (see memory + this doc).
+> - R1 (hwo reproduction, collection `26-08-21-sxx`) still running as the final
+>   luck-control; expected ≈ eibno.
+
 **Question (2026-08-21):** every policy trained on the hwo demos (jfhlu 0.88, eibno 0.84)
 beats every policy trained on the fresh armfocus collection xhk (0.62-0.75, both action
 spaces). Is the arm-focus cloud the cause, or is hwo just a "friendly" dataset — some
