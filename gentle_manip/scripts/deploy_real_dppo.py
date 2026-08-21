@@ -124,6 +124,25 @@ class DPPOPolicyAdapter:
         self.obs_max = stats["obs_max"].astype(np.float32)
         self.action_min = stats["action_min"].astype(np.float32)
         self.action_max = stats["action_max"].astype(np.float32)
+        # Fail loudly on a normalization file from a DIFFERENT dataset than the ckpt trained
+        # on. Without this the width mismatch surfaces as an opaque broadcast error deep in
+        # predict() (or, if the widths happen to agree, does not surface at all — it silently
+        # de-normalizes to the wrong physical targets and the robot moves somewhere plausible
+        # but wrong). Widths are the only automatic check available; the VALUES still have to
+        # come from the right dataset (see --normalization help).
+        if self.action_min.shape[0] != action_dim:
+            raise ValueError(
+                f"--normalization action stats are {self.action_min.shape[0]}-dim but the "
+                f"checkpoint's action_dim is {action_dim} — this normalization.npz is from a "
+                f"different dataset (e.g. a 10-dim rot6d one paired with a 7-dim euler ckpt). "
+                f"Use the normalization.npz written by the SAME converted dataset the ckpt "
+                f"trained on.\n  file: {normalization_path}")
+        if self.obs_min.shape[0] != obs_dim:
+            raise ValueError(
+                f"--normalization obs stats are {self.obs_min.shape[0]}-dim but the proprio "
+                f"obs_dim is {obs_dim} — check --obs-config (quat student -> 8, rot6d -> 10) "
+                f"and that this normalization.npz matches the ckpt's dataset.\n"
+                f"  file: {normalization_path}")
         # +1e-6 denom: IDENTICAL to the demo converter + the sim bridge, so a channel maps the
         # same way live as in the pretrain data.
         self._obs_range = (self.obs_max - self.obs_min) + 1e-6
@@ -184,7 +203,12 @@ def main() -> None:
                    help="must match the student's training obs (orientation encoding + point-cloud "
                         "crop/1024/outlier). rot6d default; use point_cloud_1cam_outlier.yaml for a quat student")
     p.add_argument("--action-config", type=Path,
-                   default=_PKG / "configs/action/abs_pose_abs_gripper.yaml")
+                   default=_PKG / "configs/action/abs_pose_abs_gripper.yaml",
+                   help="must match the ckpt's training action config — its action_dim has to "
+                        "equal the ckpt's (checked at startup). Default is the 10-dim rot6d "
+                        "absolute config; pass abs_pose_euler_abs_gripper.yaml for a 7-dim "
+                        "euler-absolute policy (its euler_frame_offset_deg is part of the "
+                        "encoding, so the deploy config must be the one it trained with)")
     p.add_argument("--cond-steps", type=int, default=2)
     p.add_argument("--act-steps", type=int, default=4)
     p.add_argument("--max-steps", type=int, default=20000)
@@ -231,6 +255,16 @@ def main() -> None:
         print(f"  net arch from ckpt config: visual_feature_dim={arch.get('visual_feature_dim')} "
               f"mlp_dims={arch.get('mlp_dims')} obs_dim={arch.get('obs_dim')} "
               f"action_dim={arch.get('action_dim')}", flush=True)
+    # The ActionPipeline decodes the policy's raw action, so its width MUST equal the ckpt's.
+    # A mismatch is unrecoverable (10-dim rot6d vs 7-dim euler are different encodings, not just
+    # different widths), so fail here rather than let the backend act on a mis-decoded pose.
+    if arch.get("action_dim") and arch["action_dim"] != action_config.action_dim:
+        raise SystemExit(
+            f"action_dim mismatch: ckpt={arch['action_dim']} but --action-config "
+            f"{args.action_config.name} is {action_config.action_dim}-dim "
+            f"(mode={action_config.mode}, rot_repr={getattr(action_config, 'rot_repr', 'n/a')}). "
+            f"Pass the action config the ckpt trained with — 10-dim rot6d = "
+            f"abs_pose_abs_gripper.yaml, 7-dim euler = abs_pose_euler_abs_gripper.yaml.")
     policy = DPPOPolicyAdapter(
         args.ckpt, args.normalization,
         obs_dim=arch.get("obs_dim", obs_dim),

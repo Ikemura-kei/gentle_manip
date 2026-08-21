@@ -330,15 +330,26 @@ class GraspSynthPolicy:
         """Fill in shelf_pivot_z from the actual pad geometry (TCP -> pad-centre along tool z,
         ~25mm). Rotating about the TCP instead would swing the object on a 25mm arc, which is
         enough to push obj_z out of the eval success band -- a silent success regression that
-        would look like the shelf failing."""
-        if not self.shelf_kw.get("shelf_deg"):
+        would look like the shelf failing.
+
+        The early-out must test BOTH knobs. Testing shelf_deg alone meant `--shelf-deg 0
+        --shelf-open X` forwarded NOTHING, so the release-only arms of the 2x2 silently ran the
+        plain baseline -- twice, at 2.5mm and at 6mm, both of which came back changing stress by
+        <0.15% per episode. That is the same bug as the `_shelf_on` gate in grasp_traj.py, one
+        layer up: fixing the engine did not fix the caller that decides whether to configure it.
+        """
+        deg = float(self.shelf_kw.get("shelf_deg") or 0.0)
+        open_m = float(self.shelf_kw.get("shelf_open") or 0.0)
+        if deg <= 0.0 and open_m == 0.0:
             return {}
-        if self._fem_pad is None:
-            raise SystemExit("--shelf-deg requires --synth fem (the pad geometry that defines the "
-                             "rotation pivot is only built on the FEM path)")
-        w = float(np.mean([float(np.asarray(x, float)[6]) for x in all_best_x]))
-        return dict(self.shelf_kw,
-                    shelf_pivot_z=float(self._fem_pad["z_center"] + fg._z_off(w)),
+        pivot = 0.0
+        if deg > 0.0:                     # the pivot only matters when there IS a rotation
+            if self._fem_pad is None:
+                raise SystemExit("--shelf-deg requires --synth fem (the pad geometry that defines "
+                                 "the rotation pivot is only built on the FEM path)")
+            w = float(np.mean([float(np.asarray(x, float)[6]) for x in all_best_x]))
+            pivot = float(self._fem_pad["z_center"] + fg._z_off(w))
+        return dict(self.shelf_kw, shelf_pivot_z=pivot,
                     cam_pos=self.objective.get("cam_pos"))
 
     def act(self, obs):

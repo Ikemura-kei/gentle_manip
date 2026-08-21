@@ -6,9 +6,16 @@ Each `run_grasp_bench.sh <tag>` writes `logs/grasp_bench/<tag>_eval.log`, whose 
 eval run directory. This resolves tag -> run dir -> summary.json so the arms can be compared by the
 name they were launched under rather than by timestamp.
 
-WHY THE STANDARD ERROR IS PRINTED. At 25 episodes per arm the sustained-stress spread is ~9 kPa on a
-~27 kPa mean, so the smallest difference two arms can distinguish is ~13 %. A mean difference below
-that is not a result, and reading these tables without the SE column invites exactly that mistake.
+WHY THE COMPARISON IS PAIRED. The harness fixes the scenario seeds, so arm A's episode k and arm B's
+episode k face the SAME object pose, shape, scale and material — the arms are matched samples, not
+independent ones. Treating them as independent (SE = sd/sqrt(n)) puts the resolution floor at ~13 %
+of the sustained-stress mean, which is wildly pessimistic: two independent 25-episode runs of the
+IDENTICAL configuration were measured at 23762 and 23761 Pa, i.e. a run-to-run floor near 1 Pa.
+
+So this reports the mean PER-EPISODE difference and its own standard error. The episode-to-episode
+spread (~9 kPa) is real variation across scenarios and is deliberately differenced out; what
+survives is the effect of the configuration change, which is what the arms are being compared on.
+The unpaired spread is still shown, in parentheses, as a description of the scenario distribution.
 """
 from __future__ import annotations
 
@@ -41,30 +48,54 @@ def resolve(tag: str) -> Path | None:
     return None
 
 
-def stats(run: Path) -> dict:
-    """Per-metric (mean, std) recomputed from episodes.csv, SUCCESS-GATED.
+def _num(v):
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(x) else x
 
-    Read from the CSV rather than summary.json because only the two headline metrics carry a `_std`
-    there (`metrics.STRESS_COLS` want_pct flag), and a mean with no spread beside it is precisely
-    what makes a noise-level difference look like a finding.
+
+def by_seed(run: Path) -> dict:
+    """{scenario_seed -> {metric: value}} for SUCCESSFUL episodes.
+
+    Keyed by scenario seed so two arms can be matched episode-for-episode; an episode that failed in
+    either arm is dropped from that pairing, which keeps the stress comparison success-gated on both
+    sides (the same convention metrics.aggregate uses).
     """
     with open(run / "episodes.csv", newline="") as f:
-        rows = [r for r in csv.DictReader(f)
-                if r.get("success") in ("1", "1.0", "True", "true")]
+        out = {}
+        for r in csv.DictReader(f):
+            if r.get("success") not in ("1", "1.0", "True", "true"):
+                continue
+            key = (r.get("scenario_seed"), r.get("env"))
+            out[key] = {k: _num(r.get(k)) for k, _ in METRICS}
+        return out
+
+
+def stats(run: Path) -> dict:
+    """Per-metric (mean, std, n) over successful episodes — the unpaired description."""
+    d = by_seed(run)
     out = {}
     for key, _ in METRICS:
-        v = []
-        for r in rows:
-            try:
-                x = float(r.get(key, ""))
-            except (TypeError, ValueError):
-                continue
-            if not math.isnan(x):
-                v.append(x)
+        v = [e[key] for e in d.values() if e.get(key) is not None]
         if v:
-            a = np.asarray(v)
+            a = np.asarray(v, float)
             out[key] = (float(a.mean()), float(a.std(ddof=1)) if a.size > 1 else 0.0, a.size)
     return out
+
+
+def paired(base: dict, arm: dict, key: str):
+    """(mean % difference, its SE, n_pairs) over scenarios present and successful in BOTH arms."""
+    d = [arm[k][key] - base[k][key] for k in base.keys() & arm.keys()
+         if base[k].get(key) is not None and arm[k].get(key) is not None]
+    b = [base[k][key] for k in base.keys() & arm.keys()
+         if base[k].get(key) is not None and arm[k].get(key) is not None]
+    if len(d) < 2:
+        return None
+    d, b = np.asarray(d, float), np.asarray(b, float)
+    rel = 100.0 * d / np.mean(b)
+    return float(rel.mean()), float(rel.std(ddof=1) / math.sqrt(rel.size)), rel.size
 
 
 def main() -> None:
@@ -75,42 +106,42 @@ def main() -> None:
         if run is None:
             print(f"  {t:16s} (no completed run yet)")
             continue
-        rows.append((t, json.loads((run / "summary.json").read_text()), run, stats(run)))
+        rows.append((t, json.loads((run / "summary.json").read_text()), run, stats(run),
+                     by_seed(run)))
     if not rows:
         return
 
-    base = {k: v[0] for k, v in rows[0][3].items()}
-    base_se = {k: v[1] / math.sqrt(max(v[2], 1)) for k, v in rows[0][3].items()}
+    base_pairs = rows[0][4]
 
     print(f"\n{'arm':16s} {'theta':>6s} {'open':>6s} {'n':>4s} {'succ':>6s}  "
-          + "  ".join(f"{lab:>22s}" for _, lab in METRICS))
-    print("-" * (42 + 24 * len(METRICS)))
-    for tag, s, _, st in rows:
+          + "  ".join(f"{lab:>24s}" for _, lab in METRICS))
+    print("-" * (42 + 26 * len(METRICS)))
+    for tag, s, _, st, pairs in rows:
         cells = []
         for key, _ in METRICS:
             if key not in st:
-                cells.append(f"{'-':>22s}")
+                cells.append(f"{'-':>24s}")
                 continue
-            m, sd, n = st[key]
-            se = sd / math.sqrt(max(n, 1))
-            b = base.get(key)
-            delta = f"{100 * (m - b) / b:+5.1f}%" if b else "     "
-            # A delta is only meaningful against the spread: flag the ones inside the noise.
-            # Two independent arms -> the difference's SE is sqrt(se_a^2 + se_b^2); with comparable
-            # spreads that is ~sqrt(2)*se, so use that rather than the single-arm SE.
-            se_d = math.sqrt(se ** 2 + (base_se.get(key, se)) ** 2)
-            sig = "" if (b is not None and abs(m - b) > 2 * se_d) else "~"
-            cells.append(f"{m:8.0f}{'+-' + format(sd, '.0f'):>7s} {delta}{sig:1s}")
+            m, sd, _n = st[key]
+            pr = paired(base_pairs, pairs, key)
+            if pr is None:
+                cells.append(f"{m:8.0f} ({sd:5.0f}){'':>10s}")
+                continue
+            rel, se, npair = pr
+            # PAIRED: the scenarios are matched by seed, so the between-scenario spread cancels.
+            sig = "" if abs(rel) > 2 * se else "~"
+            cells.append(f"{m:8.0f} ({sd:5.0f}) {rel:+6.1f}+-{se:4.1f}{sig:1s}")
         print(f"{tag:16s} {s.get('shelf_deg', 0):6.0f} {s.get('shelf_open', 0) * 1e3:6.1f} "
               f"{s['n_episodes']:4d} {s['success_rate']:6.3f}  " + "  ".join(cells))
 
-    print("\n  '~' = the difference from the first arm is inside 2 standard errors, i.e. not a result.")
+    print("\n  cells: mean (unpaired sd)  PAIRED %diff vs the first arm +- its SE")
+    print("  '~' = the paired difference is inside 2 SE, i.e. not a result.")
     print("  peak-stress phase (a shelf that moves damage from `lift` to `hold` relocated it):")
-    for tag, s, _, _st in rows:
+    for tag, s, _, _st, _p in rows:
         d = s.get("peak_stress_phase_dist") or {}
         print(f"    {tag:16s} " + "  ".join(f"{k} {v:.2f}" for k, v in sorted(d.items())))
     print("\n  runs:")
-    for tag, _, run, _st in rows:
+    for tag, _, run, _st, _p in rows:
         print(f"    {tag:16s} {run.relative_to(_REPO)}")
 
 

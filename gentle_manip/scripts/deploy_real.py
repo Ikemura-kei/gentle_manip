@@ -30,7 +30,8 @@ for p in (str(_REPO), str(_DP3)):
         sys.path.insert(0, p)
 
 from gentle_manip.actions.action_config import ActionConfig          # noqa: E402
-from gentle_manip.actions.pipeline import ActionPipeline             # noqa: E402
+from gentle_manip.actions.pipeline import (                          # noqa: E402
+    ActionPipeline, invert_absolute_action)
 from gentle_manip.envs.policy_env import PolicyEnv                    # noqa: E402
 from gentle_manip.envs.real_backend import RealBackend               # noqa: E402
 from gentle_manip.perception.obs_config import ObsConfig             # noqa: E402
@@ -200,10 +201,13 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
     the raw action chunk — smoothed = alpha*raw + (1-alpha)*prev_smoothed, applied per
     step (not per chunk) and PERSISTED across re-plans (only reset at env reset/re-home),
     so it actually attenuates step-to-step jitter in the commanded absolute pose instead
-    of just resampling it. Only pos(3)+rot6d(6) [dims 0:9] are smoothed — the gripper dim
-    is passed through raw so grasp/release stays decisive. Lower alpha = smoother/slower
-    to track a new target; start around 0.3 and tune from there. This is the "shakiness"
-    knob for absolute-pose policies — the delta-mode equivalent of pose_scale.
+    of just resampling it. Only the POSE dims are smoothed — everything except the
+    trailing gripper dim, so grasp/release stays decisive. The pose width is derived from
+    the action config, NOT hardcoded, since absolute mode has two layouts:
+    pos(3)+rot6d(6)+grip(1) = 10-dim (`rot_repr: rot6d`) and pos(3)+euler(3)+grip(1) =
+    7-dim (`rot_repr: euler`). Lower alpha = smoother/slower to track a new target; start
+    around 0.3 and tune from there. This is the "shakiness" knob for absolute-pose
+    policies — the delta-mode equivalent of pose_scale.
 
     max_pos_step_m (ABSOLUTE MODE ONLY, None = off): HARD per-tick slew-rate cap on the
     commanded position, in meters PER AXIS (not Euclidean norm) — unlike smooth_alpha
@@ -294,7 +298,11 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
             print(f"  saved {len(episodes)} real episode(s) → {record_path}")
 
     action_mode = action_config.mode if action_config is not None else "delta"
-    _abs_filters_on = action_mode == "absolute" and action_config is not None
+    # Bound (non-None) config for the absolute-only paths below — one narrowed alias so the
+    # filter helpers don't each have to re-assert it. None in delta mode / when no config
+    # was passed, which is exactly when those paths are skipped.
+    _abs_cfg: "ActionConfig | None" = action_config if action_mode == "absolute" else None
+    _abs_filters_on = _abs_cfg is not None
     # For the commanded-vs-actual pose print: reuse ActionPipeline to map the sent raw action into
     # the physical absolute pose (pos + quat + gripper) exactly as the backend does. Absolute only
     # (in delta mode the action is a delta, not a pose, so a pose comparison is meaningless).
@@ -307,39 +315,52 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
     # command" to blend/clamp against and would be sent raw/uncapped — exactly the "first
     # action is abrupt compared to the initial position" gap.
     _pos_min = _pos_max = _clip_lo = _clip_hi = _raw_pos_cap = None
-    if _abs_filters_on:
-        _pos_min = np.asarray(action_config.pos_min, np.float32)
-        _pos_max = np.asarray(action_config.pos_max, np.float32)
-        _clip_lo, _clip_hi = action_config.clip
+    # Width of the POSE part of a raw absolute action = everything but the trailing gripper
+    # dim. Layout-derived, NOT hardcoded: rot6d -> 10-1 = 9 (pos3+rot6d6), euler -> 7-1 = 6
+    # (pos3+euler3). Hardcoding 9 (the old behaviour) crashes a 7-dim euler policy on the
+    # warm-up pose-hold and the EMA seed, and would silently smooth its gripper dim.
+    _n_pose_dims = 9
+    if _abs_cfg is not None:
+        _n_pose_dims = _abs_cfg.action_dim - 1
+        _pos_min = np.asarray(_abs_cfg.pos_min, np.float32)
+        _pos_max = np.asarray(_abs_cfg.pos_max, np.float32)
+        _clip_lo, _clip_hi = _abs_cfg.clip
         if max_pos_step_m is not None:
             _raw_pos_cap = float(max_pos_step_m) / (_pos_max - _pos_min) * (_clip_hi - _clip_lo)  # (3,)
 
     def _current_raw_pose(obs: dict) -> np.ndarray:
-        """9-dim raw-space pose built from the robot's ACTUAL current state: dims 0:3 =
-        position, inverse-mapped through the same affine pos_min/pos_max transform
-        ActionPipeline uses; dims 3:9 = a valid 6D rotation rep of the current EE orientation
-        (first two columns of its rotation matrix — the priv_object_rot6d convention;
-        already orthonormal, so a Gram-Schmidt pass reproduces this exact rotation).
+        """The raw-space POSE dims (`_n_pose_dims` wide, gripper excluded) of the robot's
+        ACTUAL current state — i.e. the raw action that would command the pose it is already
+        in, so seeding a filter with it is a true "no motion" anchor.
 
-        Orientation source depends on the obs config: a rot6d student's obs already carries
-        `ee_rot6d` (same [col0(3), col1(3)] convention — use directly), while a quat student's
-        obs carries `ee_quat` (build the 6D from it). The rot6d config DELETES `ee_quat`, so we
-        must read `ee_rot6d` when present."""
+        Delegates to `invert_absolute_action`, the exact inverse of the ActionPipeline decode
+        the backend applies, so the encoding can never drift from it. That matters most for
+        `rot_repr: euler`, where the angles are encoded RELATIVE to `euler_frame_offset_deg`
+        (a hand-rolled as_euler here would omit the offset and seed a ~180deg-wrong roll);
+        for rot6d it reproduces the previous behaviour exactly (that branch is just the first
+        two columns of the rotation matrix).
+
+        Orientation source depends on the obs config: a rot6d student's obs carries
+        `ee_rot6d` ([col0(3), col1(3)]) and DELETES `ee_quat`, so rebuild a quat from it;
+        a quat student's obs carries `ee_quat` directly."""
         phys_pos = np.asarray(obs["ee_pos"], np.float32)[0]         # (3,), num_envs=1 squeeze
-        t = (phys_pos - _pos_min) / (_pos_max - _pos_min)
-        pos_raw = _clip_lo + t * (_clip_hi - _clip_lo)
         if "ee_rot6d" in obs:
-            rot6d = np.asarray(obs["ee_rot6d"], np.float32)[0]      # already [col0(3), col1(3)]
+            rot6d = np.asarray(obs["ee_rot6d"], np.float32)[0]      # [col0(3), col1(3)]
+            col0, col1 = rot6d[:3], rot6d[3:6]
+            R = np.stack([col0, col1, np.cross(col0, col1)], axis=1)  # columns -> valid rotation
+            xyzw = Rotation.from_matrix(R).as_quat()
+            quat_wxyz = np.array([xyzw[3], xyzw[0], xyzw[1], xyzw[2]], np.float32)
         else:
             quat_wxyz = np.asarray(obs["ee_quat"], np.float32)[0]
-            R = Rotation.from_quat(quat_wxyz[[1, 2, 3, 0]]).as_matrix()  # wxyz -> scipy's xyzw
-            rot6d = R[:, :2].reshape(-1, order="F")                 # [col0(3), col1(3)]
-        return np.concatenate([pos_raw, rot6d]).astype(np.float32)
+        assert _abs_cfg is not None                                 # absolute-mode-only path
+        raw = invert_absolute_action(phys_pos, quat_wxyz, np.zeros(1, np.float32),
+                                     _abs_cfg)[0]                   # (action_dim,) incl. gripper
+        return raw[:_n_pose_dims].astype(np.float32)                # drop the gripper dim
 
     # EMA low-pass filter state for absolute-mode smoothing (see run_deploy_loop docstring).
-    # Only pos(3)+rot6d(6) [dims 0:9] are smoothed — persists across chunk re-plans, reset
-    # (re-seeded from the actual pose) on env reset / re-home.
-    _SMOOTH_DIMS = slice(0, 9)
+    # Only the POSE dims are smoothed (gripper excluded — see _n_pose_dims); persists across
+    # chunk re-plans, reset (re-seeded from the actual pose) on env reset / re-home.
+    _SMOOTH_DIMS = slice(0, _n_pose_dims)
     prev_smoothed = [None]                                          # boxed for closure mutation
 
     def _smooth(action: np.ndarray) -> np.ndarray:
@@ -415,7 +436,9 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
                         action[-1] = 1.0                            # gripper wide open (last dim; +1 = open)
                         if steps < 2:
                             if action_mode == "absolute":
-                                action[:9] = _current_raw_pose(obs)  # pos(3) + rot6d(6); no motion
+                                # pose dims only (gripper handled above); width depends on
+                                # rot_repr — 9 for rot6d, 6 for euler. No motion.
+                                action[:_n_pose_dims] = _current_raw_pose(obs)
                             else:
                                 action[:6] = 0.0                     # zero pose delta
                     action = _cap_pos(_smooth(action))
