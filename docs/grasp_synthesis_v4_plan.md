@@ -161,8 +161,42 @@ not being bought with grip. 4e-5 dominates 3e-5 (more area at slightly lower str
 start of a plateau, so that is the profile default. Caveat: one object, nominal mesh, 4 poses; the
 discrete plateaus suggest CMA is landing in a few distinct basins rather than varying smoothly.
 
-⚠️ This is ONE grasp on the nominal mesh. It needs the 100-episode benchmark to confirm, above all
-that success does not regress: a wider grip could slip.
+#### BENCHMARK RESULT (100 episodes, identical scenarios) — the prediction MISSED
+
+| | collector_v3 | v4fix | change |
+|---|---|---|---|
+| success | 0.990 | 0.970 | −2.0 pp |
+| **peak stress** | 50 660 Pa | 49 165 Pa | **−3 %** |
+| sustained (top20-ttop20) | 29 953 Pa | 23 131 Pa | −23 % |
+| top10 tmax | 36 144 Pa | 30 192 Pa | −16 % |
+| grasp width | 34.5 mm | 37.4 mm | +8 % |
+| worst-pad contact area | 21.1 mm² | 60.7 mm² | **+188 %** |
+| **pinch rate** | 0.57 | **0.00** | **−100 %** |
+| **% episodes over yield** | 100 % | **99 %** | ~unchanged |
+
+**I predicted a 2.6x peak-stress reduction from the offline analysis. The measured reduction is
+1.03x.** The gentleness goal — not exceeding yield — is essentially untouched.
+
+What DID work, unambiguously:
+* **pinching eliminated**, 0.57 → 0.00, with contact area up 188 %. The `area_min` floor does
+  exactly what it was designed to do.
+* sustained stress down 23 %, top10 down 16 % — real, if modest.
+* the optimizer does start wider (+8 %) as predicted, and the FEM's own predicted stress rose
+  8 903 → 19 021 Pa, i.e. **the metric became honest about what it was asking for**.
+
+**Why the miss, and what it points at.** The FEM's prediction is now accurate about the squeeze, yet
+the simulator's PEAK is unmoved. So the peak is not set by squeeze depth at all — it is dominated by
+something the quasi-static FEM does not model. The leading candidate is the **lift**: object scale
+correlates with measured peak stress at ρ = +0.80, and mass goes as scale³. That would also explain
+why the firm pass is needed for success (it buys grip margin against a load the holdability check
+underestimates) and why the two are entangled.
+
+**Next experiment, and it is cheap:** log WHICH PHASE the peak stress occurs in. If the peak lands
+in `lift` rather than `grasp`/`firm`, the gentleness objective is modelling the wrong phase
+entirely, and no amount of squeeze-side tuning will fix it.
+
+The operating-point fix is still correct and should be kept — it eliminated pinching and made the
+metric honest — but it is **necessary, not sufficient**.
 
 This also supersedes my earlier recommendation to run the ablation before collecting: the operating
 -point fix is both more fundamental and cheaper, and plausibly changes what the ablation concludes.
