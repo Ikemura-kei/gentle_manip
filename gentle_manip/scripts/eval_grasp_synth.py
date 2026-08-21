@@ -108,7 +108,7 @@ class GraspSynthPolicy:
     def __init__(self, num_envs, action_config, venv, *, synth, maxfevals, yield_pa,
                  object_name, grasp_kw, table_z, seed, extra_close=0.0,
                  objective=None, schedule=SCHEDULE_V3, lift_height=None,
-                 standoff=0.05, use_minjerk=False, preshape_factor=0.0):
+                 standoff=0.05, use_minjerk=False, preshape_factor=0.0, shelf_kw=None):
         self.num_envs = int(num_envs)
         self.action_config = action_config
         self.venv = venv
@@ -126,6 +126,10 @@ class GraspSynthPolicy:
         self.standoff = float(standoff)
         self.use_minjerk = bool(use_minjerk)
         self.preshape_factor = float(preshape_factor)
+        # v4.1 shelf lift — forwarded verbatim to GraspTrajectory. MUST stay identical to the
+        # collector's kwargs or the benchmark measures a trajectory nobody collects (v4's headline
+        # bug). shelf_pivot_z is filled in at _setup_fsm time, once the pad geometry exists.
+        self.shelf_kw = dict(shelf_kw or {})
         self._audit = [{} for _ in range(self.num_envs)]      # per-env grasp-quality audit
         self._obj_radius_m = 0.02                             # bbox radius; refined once the FEM builds
         self._r_obj = 0.03                                    # object-point radius (bbox + 5mm)
@@ -315,11 +319,27 @@ class GraspSynthPolicy:
             self.schedule, all_best_x, home_pos, home_quat,
             lift_height=self.lift_height, extra_close=self.extra_close,
             firm_close=gsv3.FIRM_EXTRA_CLOSE_M, standoff=self.standoff,
-            use_minjerk=self.use_minjerk, preshape_factor=self.preshape_factor)
+            use_minjerk=self.use_minjerk, preshape_factor=self.preshape_factor,
+            **self._resolve_shelf(all_best_x))
         N = self.num_envs
         self.phase_idx = np.zeros(N, np.int64)
         self.phase_step = np.zeros(N, np.int64)
         self.rest_stress = None
+
+    def _resolve_shelf(self, all_best_x):
+        """Fill in shelf_pivot_z from the actual pad geometry (TCP -> pad-centre along tool z,
+        ~25mm). Rotating about the TCP instead would swing the object on a 25mm arc, which is
+        enough to push obj_z out of the eval success band -- a silent success regression that
+        would look like the shelf failing."""
+        if not self.shelf_kw.get("shelf_deg"):
+            return {}
+        if self._fem_pad is None:
+            raise SystemExit("--shelf-deg requires --synth fem (the pad geometry that defines the "
+                             "rotation pivot is only built on the FEM path)")
+        w = float(np.mean([float(np.asarray(x, float)[6]) for x in all_best_x]))
+        return dict(self.shelf_kw,
+                    shelf_pivot_z=float(self._fem_pad["z_center"] + fg._z_off(w)),
+                    cam_pos=self.objective.get("cam_pos"))
 
     def act(self, obs):
         if not self._synthed:
@@ -450,6 +470,17 @@ def main() -> None:
                          "approach instead of holding it fully open (1.4 ~ human reach). 0 = disabled.")
     ap.add_argument("--no-minjerk", action="store_true",
                     help="use linear time scaling even with --traj v4 (isolates the standoff change)")
+    # ── v4.1 shelf lift (see docs/grasp_synthesis_v4_algorithm.md) ───────────
+    ap.add_argument("--shelf-deg", type=float, default=0.0,
+                    help="rotate the gripper DURING the lift so one finger becomes a floor under "
+                         "the object. 0 = off (bit-identical to v4). Theory optimum is "
+                         "arctan(1/mu) = 55deg for mu=0.7; 90deg is WORSE.")
+    ap.add_argument("--shelf-open", type=float, default=0.0,
+                    help="metres of width released after the rotation completes -- where the stress "
+                         "reduction actually comes from (rotation alone can be a regression)")
+    ap.add_argument("--shelf-sign", default="auto", help="+1 / -1 / auto (swing away from camera)")
+    ap.add_argument("--shelf-frac", type=float, nargs=2, default=(0.10, 0.60))
+    ap.add_argument("--shelf-open-frac", type=float, nargs=2, default=(0.60, 1.00))
     ap.add_argument("--pinch-area-mm2", type=float, default=None,
                     help="worst-pad contact area below which a grasp is flagged pinch_grasp "
                          "(provisional default 20; the raw grasp_min_pad_mm2 column is the truth)")
@@ -496,6 +527,17 @@ def main() -> None:
     from gentle_manip.tasks.single_lift import SingleLiftTask
     objective.setdefault("cam_pos", tuple(SingleLiftTask(exp.task_cfg).scene_spec.cameras[0].pos))
     schedule = SCHEDULE_V3 if args.traj == "v3" else SCHEDULE_V4
+    shelf_kw = dict(shelf_deg=args.shelf_deg, shelf_open=args.shelf_open,
+                    shelf_sign=(args.shelf_sign if args.shelf_sign == "auto"
+                                else float(args.shelf_sign)),
+                    shelf_frac=tuple(args.shelf_frac),
+                    shelf_open_frac=tuple(args.shelf_open_frac))
+    if args.shelf_deg > 0:
+        if exp.action_config.mode != "absolute":
+            raise SystemExit(f"--shelf-deg needs an absolute action config, got "
+                             f"{exp.action_config.mode!r}")
+        print(f"[eval_grasp_synth] SHELF LIFT {args.shelf_deg:.0f}deg, "
+              f"release {args.shelf_open * 1e3:.1f}mm, sign={args.shelf_sign}", flush=True)
     print(f"[eval_grasp_synth] objective profile={args.grasp_profile} traj={args.traj} -> "
           f"{ {k: v for k, v in objective.items() if k != 'cam_pos'} }", flush=True)
     policy = GraspSynthPolicy(args.num_envs, exp.action_config, venv, synth=args.synth,
@@ -504,7 +546,8 @@ def main() -> None:
                               extra_close=args.grasp_extra_close,
                               objective=objective, schedule=schedule,
                               standoff=args.standoff, preshape_factor=args.preshape_factor,
-                              use_minjerk=(args.traj == "v4" and not args.no_minjerk))
+                              use_minjerk=(args.traj == "v4" and not args.no_minjerk),
+                              shelf_kw=shelf_kw)
     if args.pinch_area_mm2 is not None:
         policy.PINCH_AREA_MM2 = float(args.pinch_area_mm2)
     if args.stem_lever_frac is not None:
@@ -524,7 +567,12 @@ def main() -> None:
                                              for k, v in objective.items()},
                          "traj": args.traj, "standoff": args.standoff,
                          "minjerk": bool(args.traj == "v4" and not args.no_minjerk),
-                         "preshape_factor": args.preshape_factor})
+                         "preshape_factor": args.preshape_factor,
+                         # v4.1 — a shelf run must be distinguishable from a v4 run in summary.json
+                         "shelf_deg": args.shelf_deg, "shelf_open": args.shelf_open,
+                         "shelf_sign": args.shelf_sign,
+                         "shelf_frac": list(args.shelf_frac),
+                         "shelf_open_frac": list(args.shelf_open_frac)})
     policy.close()
     venv.close()
     print(f"\n[eval_grasp_synth:{args.synth}] done -> {out_dir}", flush=True)

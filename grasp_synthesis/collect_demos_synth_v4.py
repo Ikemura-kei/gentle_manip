@@ -461,6 +461,7 @@ def execute_and_collect(
     standoff: float = STANDOFF_M,            # v4: pre-grasp offset along the approach axis
     use_minjerk: bool = True,                # v4: min-jerk time scaling in every phase
     preshape_factor: float = PRESHAPE_FACT,  # v4: approach aperture multiple (0 = fully open)
+    shelf_kw: dict = None,                   # v4.1: shelf-lift geometry (empty/None = off)
 ) -> Tuple[List[List[dict]], List[List[np.ndarray]], List[List[float]], np.ndarray, List[List]]:
     """Execute the scripted grasp trajectory with DECOUPLED per-env phase control;
     record (obs, action, reward) per env.
@@ -502,7 +503,8 @@ def execute_and_collect(
     traj = GraspTrajectory(schedule, all_best_x, home_pos, home_quat,
                            lift_height=lift_height, extra_close=extra_close,
                            firm_close=FIRM_EXTRA_CLOSE_M, standoff=standoff,
-                           use_minjerk=use_minjerk, preshape_factor=preshape_factor)
+                           use_minjerk=use_minjerk, preshape_factor=preshape_factor,
+                           **(shelf_kw or {}))
     pos_b, quat_b = traj.pos_b, traj.quat_b
     grasp_pos = pos_b.copy()
     _has_firm = schedule.has("firm")       # --n-firm 0 drops the phase: skip the check too
@@ -850,6 +852,27 @@ def main() -> None:
                         "smooths the action stream the policy is trained on.")
     p.add_argument("--lift-height", type=float, default=LIFT_HEIGHT,
                    help=f"metres to lift above the grasp point; default {LIFT_HEIGHT}.")
+    # ── v4.1 shelf lift ───────────────────────────────────────────────────────
+    p.add_argument("--shelf-deg", type=float, default=0.0,
+                   help="rotate the gripper by this much DURING the lift so one finger ends up "
+                        "beneath the other and acts as a floor, carrying the object's weight as a "
+                        "normal force instead of by friction. 0 (default) = off. Required grip "
+                        "follows (mg/2)*max(cos/mu, sin), minimised at arctan(1/mu) = 55deg for "
+                        "mu=0.7 (0.57x); 90deg is WORSE (0.70x). ABSOLUTE ACTION ONLY.")
+    p.add_argument("--shelf-open", type=float, default=0.0,
+                   help="metres of gripper width to release once the shelf exists (after the "
+                        "rotation completes). This is where the stress reduction actually comes "
+                        "from -- at a fixed width the rotation ADDS normal load (first order in von "
+                        "Mises) while removing shear (second order), so rotation ALONE can be a "
+                        "regression. ~0.0025 recommended.")
+    p.add_argument("--shelf-sign", default="auto",
+                   help="which finger becomes the floor: +1 / -1 / auto. Both make a shelf; the "
+                        "sign picks which way the gripper BODY swings (~146mm at full rotation). "
+                        "'auto' swings it away from the camera.")
+    p.add_argument("--shelf-frac", type=float, nargs=2, default=(0.10, 0.60),
+                   help="lift-progress window over which the rotation ramps")
+    p.add_argument("--shelf-open-frac", type=float, nargs=2, default=(0.60, 1.00),
+                   help="lift-progress window for the width release (must FOLLOW --shelf-frac)")
     p.add_argument("--no-descend-check", action="store_true",
                    help="skip the swept collision check on the straight descent (which escalates the "
                         "standoff, then falls back to a top-down grasp, if the fingers would clip)")
@@ -901,6 +924,28 @@ def main() -> None:
             or args.grasp_peak is not None or args.grasp_roll_max_deg is not None:
         print(f"[v4] objective priors ACTIVE: { {k: v for k, v in obj_kw.items() if v} }")
 
+    # ── v4.1 shelf lift ───────────────────────────────────────────────────────
+    # ABSOLUTE ACTION ONLY. The rotation is ~39x the delta rotation scale (0.001 rad/step), so a
+    # DERIVED delta action would silently clip: the sim executes the trajectory correctly while the
+    # recorded dataset no longer reproduces it. That is the same class of silent corruption as the
+    # euler-seam bug, so it is a hard error rather than a warning.
+    shelf_sign = args.shelf_sign if args.shelf_sign == "auto" else float(args.shelf_sign)
+    shelf_kw = dict(shelf_deg=args.shelf_deg, shelf_open=args.shelf_open, shelf_sign=shelf_sign,
+                    shelf_frac=tuple(args.shelf_frac), shelf_open_frac=tuple(args.shelf_open_frac))
+    if args.shelf_deg > 0:
+        if exp.action_config.mode != "absolute":
+            raise SystemExit(
+                f"--shelf-deg {args.shelf_deg} requires an ABSOLUTE action config; this experiment "
+                f"uses mode={exp.action_config.mode!r}. The shelf rotation exceeds the delta "
+                f"rotation scale by ~39x, so the recorded delta actions would clip and NOT "
+                f"reproduce the trajectory. Use an abs_pose_* action, or --shelf-deg 0.")
+        if args.shelf_open_frac[0] < args.shelf_frac[1]:
+            print(f"  *** WARNING: width release starts at s={args.shelf_open_frac[0]} but the "
+                  f"rotation only finishes at s={args.shelf_frac[1]} — releasing before the shelf "
+                  f"exists drops the object ***")
+        print(f"[v4.1] SHELF LIFT: {args.shelf_deg:.0f}deg, release {args.shelf_open*1e3:.1f}mm, "
+              f"sign={args.shelf_sign}, rot s{tuple(args.shelf_frac)} open s{tuple(args.shelf_open_frac)}")
+
     # ── Load everything from the experiment config (same as training / eval) ──
     exp        = Experiment.load(args.experiment)
     task       = SingleLiftTask(exp.task_cfg)
@@ -945,7 +990,12 @@ def main() -> None:
                         "w_com": args.grasp_com, "w_tilt": args.grasp_tilt,
                         "w_occ": args.grasp_occ, "w_peak": args.grasp_peak,
                         "area_min": args.grasp_area_min,
-                        "roll_max_deg": args.grasp_roll_max_deg},
+                        "roll_max_deg": args.grasp_roll_max_deg,
+                        # v4.1 shelf lift
+                        "shelf_deg": args.shelf_deg, "shelf_open": args.shelf_open,
+                        "shelf_sign": args.shelf_sign,
+                        "shelf_frac": list(args.shelf_frac),
+                        "shelf_open_frac": list(args.shelf_open_frac)},
         "dr": exp.dr,
     }
 
@@ -1192,6 +1242,13 @@ def main() -> None:
             extra_close=args.grasp_extra_close,
             schedule=schedule, lift_height=args.lift_height, standoff=all_standoff,
             use_minjerk=not args.no_minjerk, preshape_factor=args.preshape_factor,
+            shelf_kw=dict(shelf_kw, cam_pos=obj_kw.get("cam_pos"),
+                          # TCP -> pad-centre offset along tool z (~25mm). The shelf pivots about
+                          # the PAD CENTRE, not the TCP: rotating about the TCP swings the object
+                          # on a 25mm arc, enough to drop obj_z out of the success band.
+                          shelf_pivot_z=float(fem_pad_geo["z_center"] + fg._z_off(float(np.mean(
+                              [float(np.asarray(x, float)[6]) for x in all_best_x]))))
+                          if (args.shelf_deg > 0 and fem_pad_geo is not None) else 0.0),
         )
         print(f"  Success: {success.tolist()}")
 
