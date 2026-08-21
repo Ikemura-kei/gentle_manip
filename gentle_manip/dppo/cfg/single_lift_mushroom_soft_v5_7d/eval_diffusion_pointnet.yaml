@@ -25,7 +25,7 @@ name: ${env_name}_eval_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps
 logdir: ${eval_base:${base_policy_path}}/eval/${now:%Y-%m-%d}_${now:%H-%M-%S}
 base_policy_path: ???        # set on CLI: the pre_diffusion_pointnet (BC) checkpoint (state_700.pt)
 normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_mushroom_soft_abs_pcd_rot6d/normalization.npz
-experiment: single_lift_mushroom_soft_abs_action_rot6d   # env (experiment) config snapshotted into eval dir
+experiment: single_lift_mushroom_soft_abs_action  # EVAL stays on the canonical soft_orientation DR (robust DR is a COLLECTION knob; eval on it would break cross-version comparability)
 
 seed: 42
 device: cuda:0
