@@ -135,7 +135,10 @@ class GraspTrajectory:
                  firm_close: float = 0.002, standoff=0.05,          # scalar OR per-env sequence
                  use_minjerk: bool = False, preshape_factor: float = 0.0,
                  width_open: float = WIDTH_OPEN, rotate_during_travel: bool = True,
-                 rot_frac: float = 0.7):
+                 rot_frac: float = 0.7,
+                 shelf_deg: float = 0.0, shelf_frac=(0.10, 0.60), shelf_open_frac=(0.60, 1.00),
+                 shelf_open: float = 0.0, shelf_pivot_z: float = 0.0, shelf_sign=1,
+                 cam_pos=None):
         self.sched = schedule
         self.n = len(best_x)
         self._s = minjerk if use_minjerk else _identity
@@ -187,6 +190,51 @@ class GraspTrajectory:
         # discarded the preshape and polluted the action stream this design exists to smooth.
         self._approach_end_width = (self.width_open.copy() if schedule.has("approach")
                                     else self.preshape.copy())
+
+        # ── SHELF geometry, precomputed per env ───────────────────────────────
+        # shelf_deg = 0 -> _shelf_on False -> every shelf branch is skipped and the returned
+        # commands are float-exact identical to before (pinned by test_grasp_v4).
+        self.shelf_frac = (float(shelf_frac[0]), float(shelf_frac[1]))
+        self.shelf_open_frac = (float(shelf_open_frac[0]), float(shelf_open_frac[1]))
+        self.shelf_open = float(shelf_open)
+        self._shelf_on = bool(shelf_deg) and float(shelf_deg) > 0.0
+        self._shelf_axis = np.zeros((self.n, 3))
+        self._shelf_ang = np.zeros(self.n)
+        self._shelf_v = np.zeros((self.n, 3), np.float32)
+        if self._shelf_on:
+            f = float(np.clip(shelf_deg / 90.0, 0.0, 1.0))   # fraction of the FULL rotation-to-vertical
+            for i in range(self.n):
+                R_b = _wxyz_to_rot(self.quat_b[i])
+                a_w = R_b.apply([0.0, 1.0, 0.0])             # closing axis (tool y) in WORLD
+                sgn = self._shelf_sign(a_w, self.pos_b[i], shelf_sign, cam_pos)
+                t = sgn * np.array([0.0, 0.0, -1.0])         # target: closing axis points down
+                cross = np.cross(a_w, t)
+                ncross = np.linalg.norm(cross)
+                if ncross < 1e-8:                            # already vertical (a side grasp): no-op
+                    continue
+                # Axis derived FROM THE POSE, then LEFT-multiplied. Equivalent to a tool-x rotation
+                # for a top-down grasp, but stays correct for the tilted grasps the search produces
+                # (measured 0-27 deg), where a fixed tool-x axis would leave the closing axis short
+                # of vertical. The trap this avoids: Rot.from_euler("x", th) * R_b uses WORLD x —
+                # identical at yaw=0, but at yaw=90 world x IS the closing axis, so it does nothing.
+                self._shelf_axis[i] = cross / ncross
+                self._shelf_ang[i] = f * float(np.arccos(np.clip(float(a_w @ t), -1.0, 1.0)))
+                # TCP -> pad centre offset, in world. Rotating about the pad centre keeps the object
+                # on the nominal lift path; rotating about the TCP would swing it on a ~25mm arc.
+                self._shelf_v[i] = R_b.apply([0.0, 0.0, float(shelf_pivot_z)]).astype(np.float32)
+
+    @staticmethod
+    def _shelf_sign(a_w, grip_point, shelf_sign, cam_pos) -> float:
+        """Which finger becomes the shelf. BOTH signs produce a shelf — this only selects which
+        finger, and hence which way the wrist body swings. 'auto' swings it AWAY from the camera,
+        since the gripper base travels ~146mm laterally at full rotation and would otherwise move
+        between the camera and the object."""
+        if shelf_sign == "auto":
+            if cam_pos is None:
+                return 1.0
+            return -float(np.sign(np.dot(a_w, np.asarray(cam_pos, float)
+                                         - np.asarray(grip_point, float))) or 1.0)
+        return 1.0 if float(shelf_sign) >= 0 else -1.0
 
     # ── per-env command ───────────────────────────────────────────────────────
     def target(self, i: int, phase_idx: int, phase_step: int):
@@ -247,17 +295,63 @@ class GraspTrajectory:
             grip = self.grip_target[i]
         elif name == "lift":
             pos = self.pos_b[i] + s * (self.lift_b[i] - self.pos_b[i])
-            quat, grip = self.quat_b[i], self.grip_target[i]
+            # SHELF: `s` already IS the achieved lift fraction, so the rotation and the width
+            # release are ramped against it directly rather than getting their own phase (a
+            # separate phase would force a full stop at the junction — the regression documented
+            # above). Both sub-ramps are pure functions of s; nothing here is stateful.
+            pos, quat, grip = self._shelf(i, pos, self._u_rot(s), self._u_open(s))
         elif name == "hold":
-            pos, quat, grip = self.lift_b[i], self.quat_b[i], self.grip_target[i]
+            pos, quat, grip = self._shelf(i, self.lift_b[i], 1.0, 1.0)
         else:
             raise KeyError(f"unknown phase {name!r}")
         return pos, quat, grip
 
+    # ── shelf lift ────────────────────────────────────────────────────────────
+    def _u_rot(self, s: float) -> float:
+        """Rotation progress from lift progress. Starts after `shelf_frac[0]` of the lift so the
+        object has cleared the table — at 90 deg the lowest finger point sits ~48mm below the grip
+        point vs ~25mm of clearance at the grasp, so rotating any earlier drives it through."""
+        lo, hi = self.shelf_frac
+        return float(minjerk((s - lo) / max(hi - lo, 1e-9)))
+
+    def _u_open(self, s: float) -> float:
+        """Width-release progress. Strictly AFTER the rotation: releasing before the shelf exists
+        just drops the object."""
+        lo, hi = self.shelf_open_frac
+        return float(minjerk((s - lo) / max(hi - lo, 1e-9)))
+
+    def _shelf(self, i: int, pos_nom, u_rot: float, u_open: float):
+        """Apply the shelf rotation + width release to a nominal lift command.
+
+        Rotating the closing axis toward vertical puts one finger BENEATH the other, so the
+        object's weight is carried by a normal force instead of by friction. The required squeeze
+        then follows P_min(θ) = (mg/2)·max(cosθ/μ, sinθ), minimised at θ = arctan(1/μ) — 55 deg for
+        μ=0.7, a 43% reduction. Note the freed margin only becomes LESS STRESS if it is actually
+        spent via `shelf_open`: at a fixed width the rotation ADDS normal load (first order in von
+        Mises) while removing shear (second order), so rotation alone can be a regression.
+
+        Pivots about the PAD CENTRE, not the TCP: those are ~25mm apart, and rotating about the TCP
+        would swing the object on a 25mm arc — enough to push obj_z out of the eval success band.
+        """
+        if not self._shelf_on:
+            return pos_nom, self.quat_b[i], self.grip_target[i]
+        ang = float(self._shelf_ang[i]) * float(np.clip(u_rot, 0.0, 1.0))
+        dR = Rot.from_rotvec(self._shelf_axis[i] * ang)
+        v = self._shelf_v[i]
+        pos = np.asarray(pos_nom, np.float32) + (v - dR.apply(v)).astype(np.float32)
+        quat = _rot_to_wxyz(dR * _wxyz_to_rot(self.quat_b[i]))
+        grip = self.grip_target[i] + float(np.clip(u_open, 0.0, 1.0)) * self.shelf_open
+        return pos, quat, np.float32(grip)
+
     def frozen_target(self, i: int):
         """Command for an env that has finished every phase — hold its final pose so it doesn't
-        disturb the shared sim step while other envs are still progressing."""
-        return self.lift_b[i], self.quat_b[i], self.grip_target[i]
+        disturb the shared sim step while other envs are still progressing.
+
+        MUST apply the shelf too. A finished env is still commanded every step while others run, so
+        returning the un-rotated pose here would snap the wrist back through the full shelf angle in
+        a single step and fling the object.
+        """
+        return self._shelf(i, self.lift_b[i], 1.0, 1.0)
 
     def set_firm_close(self, i: int, metres: float) -> None:
         """Set env `i`'s extra close for the "firm" phase (called once, at the grasp->firm edge)."""

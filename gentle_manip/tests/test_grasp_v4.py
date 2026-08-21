@@ -414,6 +414,153 @@ def test_v3_schedule_still_approaches_fully_open():
     assert traj.target(0, gi, 0)[2] > 0.078                    # i.e. still essentially wide open
 
 
+# ── shelf lift (v4.1) ────────────────────────────────────────────────────────
+
+def _finger_heights(quat_wxyz, width=0.033):
+    """World z of the two finger origins for a given TCP orientation. The fingers sit at
+    +-(w/2 + GRIP_OFF) along tool y, so their height difference is what makes a shelf."""
+    r = Rot.from_quat([quat_wxyz[1], quat_wxyz[2], quat_wxyz[3], quat_wxyz[0]])
+    off = width / 2.0 + 0.0261                       # FINGER_GRIP_OFF
+    return float(r.apply([0, +off, 0])[2]), float(r.apply([0, -off, 0])[2])
+
+
+def _shelf_traj(best_x, deg, **kw):
+    n = len(best_x)
+    return GraspTrajectory(SCHEDULE_V3, best_x,
+                           np.tile(np.array([0.40, 0.0, 0.21], np.float32), (n, 1)),
+                           np.tile(np.array([0.0, 1.0, 0.0, 0.0], np.float32), (n, 1)),
+                           lift_height=0.2, firm_close=0.002, use_minjerk=False,
+                           shelf_deg=deg, shelf_pivot_z=-0.0251, **kw)
+
+
+@pytest.mark.parametrize("yaw_deg", [0.0, 45.0, 90.0, 135.0])
+def test_shelf_puts_one_finger_below_the_other_at_every_yaw(yaw_deg):
+    """THE geometry test. The rotation axis must come from the POSE (equivalently, be a body-frame
+    tool-x rotation) — a fixed WORLD-x axis is identical at yaw=0 and does NOTHING at yaw=90,
+    because there world x IS the closing axis. Testing only yaw=0 would miss that entirely.
+    """
+    x = [0.47, 0.0, 0.0042, np.pi, 0.0, np.radians(yaw_deg), 0.033]
+    traj = _shelf_traj([x], 90.0)
+    li = SCHEDULE_V3.index("lift")
+    dur = SCHEDULE_V3.duration(li)
+    q0 = traj.target(0, li, 0)[1]
+    q1 = traj.target(0, li, dur - 1)[1]
+    l0, r0 = _finger_heights(q0)
+    l1, r1 = _finger_heights(q1)
+    assert abs(l0 - r0) < 1e-3, "fingers should start level (horizontal closing axis)"
+    # after the rotation they must be separated in z by ~the full jaw offset
+    assert abs(l1 - r1) > 0.9 * 2 * (0.033 / 2 + 0.0261), \
+        f"yaw={yaw_deg}: fingers not stacked after rotation (dz={abs(l1 - r1):.4f})"
+
+
+def test_shelf_angle_scales_the_finger_separation():
+    """Partial rotations must give partial shelves — separation ~ sin(theta)."""
+    x = [0.47, 0.0, 0.0042, np.pi, 0.0, 0.0, 0.033]
+    li = SCHEDULE_V3.index("lift")
+    last = SCHEDULE_V3.duration(li) - 1
+    seps = []
+    for deg in (0.0, 30.0, 55.0, 90.0):
+        t = _shelf_traj([x], deg)
+        l, r = _finger_heights(t.target(0, li, last)[1])
+        seps.append(abs(l - r))
+    assert seps[0] < 1e-6                                   # shelf off -> level
+    assert seps[1] < seps[2] < seps[3]                      # monotone in theta
+    full = 2 * (0.033 / 2 + 0.0261)
+    assert seps[2] == pytest.approx(full * np.sin(np.radians(55)), rel=0.05)
+
+
+def test_shelf_pivots_about_the_pad_centre_not_the_tcp():
+    """Rotating about the TCP would swing the object on a ~25mm arc, enough to push obj_z out of
+    the eval success band. The compensation keeps the PAD CENTRE on the nominal lift path."""
+    x = [0.47, 0.0, 0.0042, np.pi, 0.0, 0.0, 0.033]
+    piv = -0.0251
+    traj = _shelf_traj([x], 90.0)
+    li = SCHEDULE_V3.index("lift")
+    dur = SCHEDULE_V3.duration(li)
+    nominal = _shelf_traj([x], 0.0)
+    for st in (0, dur // 2, dur - 1):
+        pos, quat, _ = traj.target(0, li, st)
+        pad = pos + Rot.from_quat([quat[1], quat[2], quat[3], quat[0]]).apply([0, 0, piv])
+        pos_n, quat_n, _ = nominal.target(0, li, st)
+        pad_n = pos_n + Rot.from_quat([quat_n[1], quat_n[2], quat_n[3], quat_n[0]]).apply([0, 0, piv])
+        assert np.allclose(pad, pad_n, atol=1e-5), f"pad centre moved at step {st}"
+
+
+def test_shelf_off_is_bit_identical():
+    """shelf_deg=0 must not perturb a single command."""
+    x = [0.47, 0.0, 0.0042, np.pi, 0.05, 0.7, 0.033]
+    a = _shelf_traj([x], 0.0)
+    b = GraspTrajectory(SCHEDULE_V3, [x], np.array([[0.40, 0.0, 0.21]], np.float32),
+                        np.array([[0.0, 1.0, 0.0, 0.0]], np.float32),
+                        lift_height=0.2, firm_close=0.002, use_minjerk=False)
+    for pi in range(SCHEDULE_V3.n_phases):
+        for st in range(SCHEDULE_V3.duration(pi)):
+            pa, qa, ga = a.target(0, pi, st)
+            pb, qb, gb = b.target(0, pi, st)
+            assert np.array_equal(np.asarray(pa, np.float32), np.asarray(pb, np.float32))
+            assert np.array_equal(np.asarray(qa, np.float32), np.asarray(qb, np.float32))
+            assert float(ga) == float(gb)
+    assert np.array_equal(np.asarray(a.frozen_target(0)[0], np.float32),
+                          np.asarray(b.frozen_target(0)[0], np.float32))
+
+
+def test_frozen_target_keeps_the_shelf_rotation():
+    """A finished env is still COMMANDED while others run. Returning the un-rotated pose here would
+    snap the wrist back through the whole shelf angle in one step and fling the object."""
+    x = [0.47, 0.0, 0.0042, np.pi, 0.0, 0.0, 0.033]
+    traj = _shelf_traj([x], 90.0)
+    hi = SCHEDULE_V3.index("hold")
+    hold_q = traj.target(0, hi, SCHEDULE_V3.duration(hi) - 1)[1]
+    frozen = traj.frozen_target(0)
+    assert np.allclose(np.abs(np.dot(frozen[1], hold_q)), 1.0, atol=1e-6)
+    l, r = _finger_heights(frozen[1])
+    assert abs(l - r) > 0.9 * 2 * (0.033 / 2 + 0.0261)
+
+
+def test_width_release_follows_the_rotation_and_never_precedes_it():
+    """Releasing width before the shelf exists just drops the object."""
+    x = [0.47, 0.0, 0.0042, np.pi, 0.0, 0.0, 0.033]
+    traj = _shelf_traj([x], 55.0, shelf_open=0.0025)
+    li = SCHEDULE_V3.index("lift")
+    dur = SCHEDULE_V3.duration(li)
+    grips = np.array([traj.target(0, li, s)[2] for s in range(dur)], float)
+    rot = np.array([traj._u_rot((s + 1) / dur) for s in range(dur)])
+    first_open = int(np.argmax(grips > grips[0] + 1e-6))
+    assert rot[first_open] > 0.99, "width opened before the rotation completed"
+    assert grips[-1] == pytest.approx(grips[0] + 0.0025, abs=1e-6)
+    assert np.all(np.diff(grips) >= -1e-9)                  # monotone, no snap
+
+
+def _gripper_base_x(pos, quat_wxyz, tcp_off=0.171):
+    """World x of the gripper BASE. SIM_TCP_OFFSET puts xarm_gripper_base_link at TCP - 0.171*tool_z.
+
+    The base is what occludes, and it moves OPPOSITE to the TCP: the pivot compensation holds the
+    pad centre fixed, so as the body swings one way the TCP shifts the other. Checking the TCP
+    instead would read the sign exactly backwards.
+    """
+    tz = Rot.from_quat([quat_wxyz[1], quat_wxyz[2], quat_wxyz[3], quat_wxyz[0]]).apply([0, 0, 1])
+    return float(np.asarray(pos)[0] - tcp_off * tz[0])
+
+
+def test_shelf_sign_auto_swings_the_wrist_away_from_the_camera():
+    """Both signs make a shelf; the sign picks which way the gripper BODY swings (~146mm at full
+    rotation), so it should move away from the camera rather than between it and the object."""
+    cam = (0.98910661, -0.00034108, 0.09825304)
+    x = [0.47, 0.0, 0.0042, np.pi, 0.0, np.pi / 2, 0.033]   # closing axis along world x -> at camera
+    li = SCHEDULE_V3.index("lift")
+    last = SCHEDULE_V3.duration(li) - 1
+
+    def base_x(sign):
+        t = _shelf_traj([x], 90.0, shelf_sign=sign, cam_pos=cam)
+        p, q, _ = t.target(0, li, last)
+        return _gripper_base_x(p, q)
+
+    toward, away, auto = base_x(1), base_x(-1), base_x("auto")
+    assert toward > x[0] and away < x[0], "the two signs should straddle the grasp point"
+    assert auto == pytest.approx(away), "auto picked the branch that swings toward the camera"
+    assert abs(auto - cam[0]) > abs(toward - cam[0]), "auto is not the farther-from-camera branch"
+
+
 def test_schedule_index_reports_missing_phase():
     sched = PhaseSchedule((("approach", 5), ("grasp", 5)))        # e.g. --n-firm 0 drops "firm"
     assert sched.index("firm") == -1 and not sched.has("firm")
