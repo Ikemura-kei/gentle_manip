@@ -20,6 +20,50 @@ mid-flight and shares `gentle_manip/evaluation/`).
 | 4 — new objects | groundwork done | meshes + registry + materials + `mpm_bounds` knob; per-object configs written |
 | 5 — freeze + doc | in progress | `docs/grasp_synthesis_v4_algorithm.md` written incrementally |
 | 6 — 500 demos + BC | not started | the payoff run; needs the sim exclusively |
+| **4.1 — shelf lift** | **implemented, 2x2 RUNNING** | rotate during the lift so one finger is a floor; see below |
+| **4.1 — retry on slip** | **implemented + validated in sim** | `--retry-max`, independent of the shelf |
+| **4.1 — robustness knobs** | **implemented** | `soft_orientation_robust` DR + `--init-width-range`; collection only |
+
+### v4.1 — attacking the LIFT instead of the squeeze
+
+The v4 benchmark's phase-of-peak logging produced the finding that redirects the work: **96 % of
+peak stress happens during the LIFT, 0 % during the squeeze** (24/25 in `lift`, 1 in `firm`). Every
+version to date — v2 SDF, v3 FEM, v4 — optimizes the squeeze, and every one lands at ~50 kPa peak
+against a 40 kPa yield. It is why v4's operating-point fix eliminated pinching (0.57 -> 0.00) and
+raised contact area 188 % yet moved peak stress 3 %.
+
+Mechanism: a top-down grasp has a HORIZONTAL closing axis, so **friction alone** carries the weight
+(`2 mu P >= mg`). That required grip *is* the squeeze — a static equilibrium requirement, not a
+modelling artefact.
+
+**The shelf** rotates the gripper during the lift so the closing axis tilts toward vertical and one
+finger sits beneath the other. Weight is then carried by a normal force instead of by friction:
+
+```
+P_min(theta) = (mg/2) * max( cos(theta)/mu , sin(theta) )
+theta* = arctan(1/mu) = 55 deg for mu=0.7  ->  0.57x the grip (43 % less)
+```
+
+**90 deg is WORSE than 55** (0.70x) — past theta* the binding constraint flips from friction to
+keeping the upper pad in contact. Locating the empirical minimum therefore *measures the sim's
+effective mu*. Full derivation + the three implementation traps (pose-derived rotation axis,
+pad-centre pivot, ramp-don't-add-a-phase) are in `docs/grasp_synthesis_v4_algorithm.md` §4.3-4.4.
+
+**Why a 2x2 and not a sweep.** At a FIXED width the rotation ADDS normal load (`mg sin(theta)/2`,
+first order in von Mises) while only removing shear (second order). The demonstrator is deep in the
+over-squeezed regime, so the gain must come from spending the freed margin on a width release —
+rotation alone is a plausible regression. `run_shelf_ablation.sh 2x2` separates them; the theta
+sweep only runs afterwards, at whichever release won.
+
+Status: geometry verified offline (pad centre held to 1.8e-8 m; fingers stack at every yaw; 55 deg
+optimum reproduced numerically), 5-episode sim smoke passed at 5/5 success, 2x2 in flight.
+
+**Retry is deliberately INDEPENDENT of the shelf** and is the fallback: if the late wrist rotation
+turns out too hard for BC to clone, `v4 + retry` is still a better dataset at no cost in trajectory
+difficulty. Validated in sim by forcing the slip check to fire (a genuine slip is a few %, so an
+unforced run would never enter the branch and a green result would prove nothing): the rewind
+executes, the caps hold, and the run terminates cleanly.
+
 
 ### Findings that change the plan
 
