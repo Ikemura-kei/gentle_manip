@@ -96,8 +96,12 @@ def derive_action_set(ep: dict, action_config, lookahead: int = 1,
     grip = np.asarray(o["gripper_width"], np.float64).reshape(T, -1)[:, 0]
     if action_config.mode == "absolute":
         if source_config is not None:               # COMMANDED targets: re-encode the recorded
-            cp, cq, cg = commanded_pose_trajectory(ep, source_config)   # commands 1:1, no lookahead
-            return invert_absolute_action(cp, cq, cg, action_config)
+            cp, cq, cg = commanded_pose_trajectory(ep, source_config)   # commands (per-step clamped)
+            # lookahead composes: sim-synth commands already lead the pose by the controller lag
+            # (use K=1 there); slow REAL teleop's accumulated target hugs the achieved pose
+            # (~±2.6 mm), so K>1 on the commanded trajectory restores a stall-safe lead.
+            nxt = np.minimum(np.arange(T) + int(lookahead), T - 1)
+            return invert_absolute_action(cp[nxt], cq[nxt], cg[nxt], action_config)
         nxt = np.minimum(np.arange(T) + int(lookahead), T - 1)
         tp, tq, tg = pos[nxt], quat[nxt], grip[nxt]
         return invert_absolute_action(tp, tq, tg, action_config)            # (T, 10 rot6d | 7 euler)
