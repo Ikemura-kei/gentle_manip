@@ -143,7 +143,19 @@ def _label(run: Path) -> str:
         prof = s.get("grasp_profile")
         if prof:
             traj = s.get("traj")
-            return f"{prof}" + (f" ({traj})" if traj and traj != "v3" else "")
+            name = f"{prof}" + (f" ({traj})" if traj and traj != "v3" else "")
+            # The shelf config MUST be in the label. Without it every v4.1 arm reads "v4fix (v4)"
+            # and a four-arm comparison legend says nothing -- the same failure as labelling by
+            # timestamp, just with a more plausible-looking string.
+            deg, opn = s.get("shelf_deg") or 0.0, s.get("shelf_open") or 0.0
+            if deg or opn:
+                name += f" shelf {deg:.0f}deg"
+                if opn:
+                    name += f"/{opn * 1e3:.1f}mm"
+                fr = s.get("shelf_frac")
+                if fr and tuple(fr) != (0.10, 0.60):
+                    name += f" [{fr[0]:.2f}-{fr[1]:.2f}]"
+            return name
     except Exception:
         pass
     return run.name[-18:]
@@ -250,12 +262,6 @@ def _row(run: Path) -> dict:
         out[key] = float(v.mean()) if v.size else float("nan")
     ph = [r["peak_stress_phase"] for r in rows if r.get("peak_stress_phase")]
     out["phase"] = ({p: ph.count(p) / len(ph) for p in sorted(set(ph))} if ph else {})
-    try:
-        s = json.loads((run / "summary.json").read_text())
-        if s.get("shelf_deg"):
-            out["label"] += f"  shelf {s['shelf_deg']:.0f}°/{s.get('shelf_open', 0) * 1e3:.1f}mm"
-    except Exception:
-        pass
     return out
 
 

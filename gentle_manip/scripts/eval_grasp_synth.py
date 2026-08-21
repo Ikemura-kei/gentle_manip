@@ -37,7 +37,7 @@ sys.path.insert(0, str(_REPO / "grasp_synthesis"))
 
 import collect_demos_synth_v3 as gsv3          # noqa: E402 — SDF synth helpers + firm constants
 from grasp_traj import (GraspTrajectory, PhaseSchedule, SCHEDULE_V3,  # noqa: E402
-                        SCHEDULE_V4)
+                        SCHEDULE_V4, SCHEDULE_V4_BLEND)
 from smgrasp import finger_grasp as fg          # noqa: E402
 
 
@@ -472,7 +472,7 @@ def main() -> None:
     ap.add_argument("--grasp-jitter-pos", type=float, default=None)
     ap.add_argument("--grasp-pitch-seed-deg", type=float, default=None)
     # ── trajectory ────────────────────────────────────────────────────────────
-    ap.add_argument("--traj", choices=["v3", "v4"], default="v3",
+    ap.add_argument("--traj", choices=["v3", "v4", "v4split"], default="v3",
                     help="v3 = single lerp+slerp home->grasp (linear time). v4 = pre-grasp standoff "
                          "(approach_xy -> align -> descend) with minimum-jerk time scaling.")
     ap.add_argument("--standoff", type=float, default=0.05, help="v4 pre-grasp standoff distance (m)")
@@ -537,7 +537,15 @@ def main() -> None:
     # placeholder zero. Costs ~0.05 ms/candidate.
     from gentle_manip.tasks.single_lift import SingleLiftTask
     objective.setdefault("cam_pos", tuple(SingleLiftTask(exp.task_cfg).scene_spec.cameras[0].pos))
-    schedule = SCHEDULE_V3 if args.traj == "v3" else SCHEDULE_V4
+    # `--traj v4` MUST mean what it means in the collector: the BLENDED Bezier reach. It used to map
+    # to SCHEDULE_V4, the split travel->align->descend decomposition -- the trajectory the
+    # Iteration-2 gate REJECTED for costing ~5.7x in jerk by stopping mid-reach. With
+    # rotate_during_travel on (the default) `align` translates nowhere and rotates nothing, so it is
+    # 25 frames of pure dwell: the benchmark spent 38% of every episode commanding zero motion
+    # against the collector's 27%, and reported 3 velocity peaks where the collector produces 2.
+    # Every benchmark number recorded before this fix describes a trajectory the collector does not
+    # generate. `v4split` keeps the old behaviour reachable for reproduction.
+    schedule = {"v3": SCHEDULE_V3, "v4": SCHEDULE_V4_BLEND, "v4split": SCHEDULE_V4}[args.traj]
     shelf_kw = dict(shelf_deg=args.shelf_deg, shelf_open=args.shelf_open,
                     shelf_sign=(args.shelf_sign if args.shelf_sign == "auto"
                                 else float(args.shelf_sign)),
