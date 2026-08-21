@@ -60,6 +60,17 @@ GRASP_PROFILES = {
     # geometry priors. Weights are tuned in Iteration 3; these are the starting points.
     "v4": dict(w_align=2000.0, diversity_tol=0.3, jitter_deg=20.0, jitter_pos=0.003,
                pitch_seed_deg=25.0, w_peak=None, w_com=0.0, w_tilt=0.0, w_occ=0.0, area_min=0.0),
+    # v4fix: the OPERATING-POINT correction. The executor closes 4.5mm tighter than the width the
+    # objective scores (2.5mm base squeeze + 2mm firm), which is ~10x more stress — measured 54.8kPa
+    # executed vs 5.4kPa scored, i.e. 1.37x the mushroom's yield on 100% of episodes.
+    # execute_offset scores each candidate at the width actually commanded.
+    # area_min is NOT optional here: correcting the operating point alone makes the optimizer grasp
+    # something too thin to compress (contact area 66 -> 12 mm2, align 0.98 -> 0.19), and w_peak
+    # alone does not stop it. Offline, all three together give 21.0kPa executed (0.53x yield) with
+    # 41mm2 of flush contact — a 2.6x reduction. THIS PROFILE IS THE ONE TO BENCHMARK NEXT.
+    "v4fix": dict(w_align=2000.0, diversity_tol=0.3, jitter_deg=20.0, jitter_pos=0.003,
+                  pitch_seed_deg=25.0, w_peak=0.3, area_min=3e-5,
+                  execute_offset=0.0045),
 }
 from gentle_manip.envs.rpc import SimEnvClient   # noqa: E402
 from gentle_manip.evaluation import EvalSpec, run_eval  # noqa: E402
@@ -396,6 +407,10 @@ def main() -> None:
     ap.add_argument("--grasp-occ", type=float, default=None, help="override w_occ (camera occlusion)")
     ap.add_argument("--grasp-area-min", type=float, default=None,
                     help="override area_min (m^2 floor on the worst pad's contact area)")
+    ap.add_argument("--grasp-execute-offset", type=float, default=None,
+                    help="score each candidate at width MINUS this (metres) — the extra squeeze the "
+                         "executor applies (base 2.5mm + firm 2mm = 0.0045). 0 scores an operating "
+                         "point the robot never visits; see the v4fix profile.")
     ap.add_argument("--grasp-roll-max-deg", type=float, default=None,
                     help="half-width of the roll search band about top-down. 90 (default) admits a "
                          "fully horizontal tool axis, i.e. pure side grasps; try 15-30 to exclude them.")
@@ -428,6 +443,7 @@ def main() -> None:
     for key, val in (("w_align", args.grasp_align), ("w_peak", args.grasp_peak),
                      ("w_com", args.grasp_com), ("w_tilt", args.grasp_tilt),
                      ("w_occ", args.grasp_occ), ("area_min", args.grasp_area_min),
+                     ("execute_offset", args.grasp_execute_offset),
                      ("diversity_tol", args.grasp_diversity_tol), ("jitter_deg", args.grasp_jitter_deg),
                      ("jitter_pos", args.grasp_jitter_pos), ("pitch_seed_deg", args.grasp_pitch_seed_deg)):
         if val is not None:
