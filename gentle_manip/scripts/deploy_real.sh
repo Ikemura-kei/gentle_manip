@@ -240,8 +240,8 @@ uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.p
   --obs-config gentle_manip/configs/obs/point_cloud_1cam_outlier.yaml \
   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
   --ft-denoising-steps 0 \
-  --smooth-alpha 0.6 \
-  --max-pos-step-m 0.01 \
+  --smooth-alpha 1.0 \
+  --max-pos-step-m 0.015 \
   --record dataset/real_deploy/tmp \
   --shard-size 10 \
   --max-steps 5000

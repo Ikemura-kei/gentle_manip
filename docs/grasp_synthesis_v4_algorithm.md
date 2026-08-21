@@ -355,9 +355,26 @@ P_min(θ) = (m g / 2) · max( cos θ / μ , sin θ )
 θ* = arctan(1/μ)          μ = 0.7  ⇒  θ* = 55°,  P_min/P(0) = 0.57   (43 % less grip)
 ```
 
-**θ = 90° is worse than 55°** (0.70×): past θ* the binding constraint flips from friction to upper-pad
-contact, and a fully vertical closing axis needs enough grip to hold the top pad against the object.
-Locating the empirical minimum therefore also *measures the simulator's effective μ*.
+**θ = 90° should be worse than 55°** (0.70×): past θ* the binding constraint flips from friction to
+upper-pad contact, and a fully vertical closing axis needs enough grip to hold the top pad against
+the object.
+
+**⚠️ Measured: it is not.** A sweep over θ ∈ {0, 30, 45, 55, 70, 90} shows both bulk and sustained
+stress falling **monotonically to 90°**, with no minimum at 55° and no upturn afterwards
+(bulk 100 → 83 → 76 → 71 → 68 → 65 % of the θ=0 value). The reason is that the second constraint
+above **does not apply to a position-controlled gripper**. The `P ≥ mg sin θ / 2` branch exists to
+keep the upper pad *in contact*, which is a requirement only under force control; our pads are
+commanded to a WIDTH, so the upper pad stays engaged by geometry at every angle and that branch
+never binds. The applicable model is therefore the friction branch alone,
+
+```
+P_min(θ) ∝ cos θ / μ        (position control) — monotone, minimised at θ = 90°
+```
+
+so θ* = arctan(1/μ) is not a prediction for this setup, and the sweep does **not** measure the
+simulator's effective μ. What does bound the angle in practice is *success*: 0.960 at every angle up
+to 70° and 0.840 at 90° (n=25), consistent with a fully vertical closing axis leaving the object
+with no horizontal capture, so any disturbance rolls it off the lower pad.
 
 **Rotation alone is not expected to help.** At a fixed commanded width, tilting adds `m g sin θ / 2`
 of normal load — first order in von Mises — while removing shear, which enters only second order
