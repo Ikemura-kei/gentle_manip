@@ -29,6 +29,9 @@
 > stacked (seam + stall), and the doc's original "achieved vs commanded are near-identical
 > for absolute mode" fairness claim is FALSE in closed loop — only the lookahead/commanded
 > form is closed-loop stable for BC'd absolute actions.
+> **Prediction confirmed:** fvfnx (seam-fixed, K=1, hwo demos — the non-armfocus control)
+> evaluated at 0.0% success / 0.0 ever_success at state_100, exactly as the stall theory
+> predicted — ruling out the armfocus cloud/collection as the cause of the abs failures.
 >
 > Open separate issue (armfocus delta arms): success degrades over checkpoints
 > (uzgjm 0.625@100 → 0.01@300) via hold-phase drops while ever_success only drifts to

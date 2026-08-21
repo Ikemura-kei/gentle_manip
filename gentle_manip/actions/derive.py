@@ -24,7 +24,49 @@ def obs_quat(o: dict, T: int) -> np.ndarray:
     return R.from_matrix(M).as_quat()[:, [3, 0, 1, 2]]
 
 
-def derive_action_set(ep: dict, action_config, lookahead: int = 1) -> np.ndarray:
+def commanded_pose_trajectory(ep: dict, source_config) -> tuple:
+    """(pos (T,3), quat_wxyz (T,4), grip (T,)) COMMANDED target trajectory reconstructed from
+    the demo's RECORDED raw actions, decoded through the action config the demo was collected
+    with (`source_config`).
+
+    Why: deriving actions from the ACHIEVED next pose (the obs trajectory) gives targets with
+    ~zero lead over the current pose — a BC'd absolute policy then stalls at a closed-loop
+    fixed point (see derive_action_set's lookahead note). The COMMANDED targets the collector
+    actually sent lead the achieved pose by the controller lag (5-10 mm on this rig) and are
+    the closed-loop-stable supervision (jfhlu, 0.9 sim success, trained on exactly these).
+
+    source_config.mode == "absolute": each recorded action decodes independently through
+    ActionPipeline (pos + quat + width per step).
+    source_config.mode == "delta": the recorded actions are per-step physical deltas; the
+    running commanded target is their accumulation from the INITIAL achieved pose (the same
+    world-frame update rule the backends apply: pos/grip += delta, R_new = R(drot)·R_prev).
+    """
+    from scipy.spatial.transform import Rotation as R
+    from gentle_manip.actions.pipeline import ActionPipeline
+    a = np.asarray(ep["actions"], np.float64)
+    T = len(a)
+    pipe = ActionPipeline(source_config)
+    out = pipe.process(a.astype(np.float32)).astype(np.float64)
+    if source_config.mode == "absolute":            # (T, 8): pos + quat_wxyz + width
+        return out[:, 0:3], out[:, 3:7], out[:, 7]
+    # delta: accumulate physical deltas from the initial achieved pose
+    o = ep["observations"]
+    pos = np.empty((T, 3)); quat = np.empty((T, 4)); grip = np.empty(T)
+    p = np.asarray(o["ee_pos"], np.float64).reshape(T, 3)[0].copy()
+    q = R.from_quat(obs_quat(o, T)[0][[1, 2, 3, 0]])
+    g = float(np.asarray(o["gripper_width"], np.float64).reshape(T, -1)[0, 0])
+    for t in range(T):
+        p = p + out[t, 0:3]
+        q = R.from_rotvec(out[t, 3:6]) * q
+        g = g + out[t, 6]
+        xyzw = q.as_quat()
+        pos[t], grip[t] = p, g
+        quat[t] = xyzw[[3, 0, 1, 2]]
+    return pos, quat, np.clip(grip, 0.0, None)
+
+
+def derive_action_set(ep: dict, action_config, lookahead: int = 1,
+                      source_config=None) -> np.ndarray:
     """Action set (T, action_dim) for `action_config`, derived from the demo's EE-pose trajectory
     (target for step t = the observed pose `lookahead` steps ahead, held on the last step). Delta
     vs absolute (+ rot_repr) is selected by action_config. Matches what an ActionPipeline maps
@@ -47,9 +89,16 @@ def derive_action_set(ep: dict, action_config, lookahead: int = 1) -> np.ndarray
     quat = obs_quat(o, T)
     grip = np.asarray(o["gripper_width"], np.float64).reshape(T, -1)[:, 0]
     if action_config.mode == "absolute":
+        if source_config is not None:               # COMMANDED targets: re-encode the recorded
+            cp, cq, cg = commanded_pose_trajectory(ep, source_config)   # commands 1:1, no lookahead
+            return invert_absolute_action(cp, cq, cg, action_config)
         nxt = np.minimum(np.arange(T) + int(lookahead), T - 1)
         tp, tq, tg = pos[nxt], quat[nxt], grip[nxt]
         return invert_absolute_action(tp, tq, tg, action_config)            # (T, 10 rot6d | 7 euler)
+    if source_config is not None:
+        raise ValueError("source_config (commanded-target derivation) is only supported for "
+                         "an absolute target action_config; the delta arms train fine on the "
+                         "achieved per-step differences")
     if int(lookahead) != 1:
         raise ValueError(f"lookahead={lookahead} is only valid for absolute mode; "
                          "delta derivation is defined per-step (K=1)")
