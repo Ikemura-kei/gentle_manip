@@ -67,7 +67,10 @@ CSV_FIELDS = ["episode", "batch", "env", "scenario_seed", "success", "ever_succe
               # experiment only). occ_pcd_* = fraction of the object points visible at
               # rest that are gone by that phase. Validates grasp_occ_pred, which is
               # only a geometric prediction.
-              "occ_pcd_baseline_pts", "occ_pcd_grasp", "occ_pcd_lift"]
+              "occ_pcd_baseline_pts", "occ_pcd_grasp", "occ_pcd_lift",
+              # WHICH PHASE the peak stress occurred in. The gentleness objective models the
+              # SQUEEZE; if the peak lands in `lift`, it is aimed at the wrong phase.
+              "peak_stress_phase", "peak_stress_pa"]
 
 
 def _nan(x) -> float:
@@ -84,7 +87,24 @@ def write_episodes_csv(records: List[Dict[str, Any]], path: Path) -> None:
 
 
 def _clean(vals: List[float]) -> np.ndarray:
-    return np.asarray([v for v in vals if v is not None and not math.isnan(v)], dtype=float)
+    """Finite numeric entries only, skipping anything that is not a number.
+
+    Deliberately tolerant: `math.isnan` raises TypeError on a str, so a single non-numeric value in
+    an aggregated column used to abort the ENTIRE eval inside aggregate() — after every episode had
+    already been simulated and written. Categorical columns (grasp_status, peak_stress_phase) live
+    in the same record dicts as numeric ones, so this must not be a fatal combination.
+    """
+    out = []
+    for v in vals:
+        if v is None or isinstance(v, str):
+            continue
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if not math.isnan(f):
+            out.append(f)
+    return np.asarray(out, dtype=float)
 
 
 def _mean_std(vals: List[float]):
@@ -126,7 +146,10 @@ AUX_RATE_COLS = ["stem_grasp", "pinch_grasp",
               # experiment only). occ_pcd_* = fraction of the object points visible at
               # rest that are gone by that phase. Validates grasp_occ_pred, which is
               # only a geometric prediction.
-              "occ_pcd_baseline_pts", "occ_pcd_grasp", "occ_pcd_lift"]
+              "occ_pcd_baseline_pts", "occ_pcd_grasp", "occ_pcd_lift",
+              # WHICH PHASE the peak stress occurred in. The gentleness objective models the
+              # SQUEEZE; if the peak lands in `lift`, it is aimed at the wrong phase.
+              "peak_stress_phase", "peak_stress_pa"]
 
 
 def aggregate(records: List[Dict[str, Any]], **meta) -> Dict[str, Any]:

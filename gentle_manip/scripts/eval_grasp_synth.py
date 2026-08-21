@@ -130,6 +130,10 @@ class GraspSynthPolicy:
         self._obj_radius_m = 0.02                             # bbox radius; refined once the FEM builds
         self._r_obj = 0.03                                    # object-point radius (bbox + 5mm)
         self._occ_gt = [{} for _ in range(self.num_envs)]     # rendered-cloud occlusion
+        # WHERE the peak stress happens. The objective models the SQUEEZE; if the peak lands in
+        # `lift` instead, the gentleness term is aimed at the wrong phase entirely and no amount
+        # of squeeze-side tuning can fix it. Tracked per env: running max and the phase at it.
+        self._peak = [{'stress': -1.0, 'phase': ''} for _ in range(self.num_envs)]
         self.traj = None
         self.table_z = float(table_z)
         self._seed_rng = np.random.default_rng(seed)
@@ -154,6 +158,7 @@ class GraspSynthPolicy:
         # episode's grasp as if it were this one's.
         self._audit = [{} for _ in range(self.num_envs)]
         self._occ_gt = [{} for _ in range(self.num_envs)]
+        self._peak = [{'stress': -1.0, 'phase': ''} for _ in range(self.num_envs)]
 
     def close(self):
         if self._pool is not None:
@@ -249,6 +254,9 @@ class GraspSynthPolicy:
         """Optional harness hook: per-env grasp-quality columns for this episode."""
         rows = [dict(a) for a in self._audit]
         for j, r in enumerate(rows):
+            if self._peak[j]["phase"]:
+                r["peak_stress_phase"] = self._peak[j]["phase"]
+                r["peak_stress_pa"] = self._peak[j]["stress"]
             b = self._occ_gt[j]
             if b.get("baseline"):
                 r["occ_pcd_baseline_pts"] = b["baseline"]
@@ -318,6 +326,15 @@ class GraspSynthPolicy:
             self._synthesize(obs)
         if self.rest_stress is None:
             self.rest_stress = self._stress_pa(obs)          # settled-rest baseline (top10 Pa)
+        try:                                                  # phase-of-peak-stress (diagnostic)
+            _st = self._stress_pa(obs)
+            for _j in range(self.num_envs):
+                if float(_st[_j]) > self._peak[_j]["stress"]:
+                    _pi = int(self.phase_idx[_j])
+                    self._peak[_j] = {"stress": float(_st[_j]),
+                                      "phase": self.schedule.name(min(_pi, self.schedule.n_phases - 1))}
+        except Exception:
+            pass
         N = self.num_envs
         cur_pos = np.zeros((N, 3), np.float32)
         cur_quat = np.zeros((N, 4), np.float32)
