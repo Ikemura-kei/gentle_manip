@@ -387,6 +387,15 @@ def score_finger_grasp(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, densit
     # measured 5.4 kPa at the scored width vs 54.8 kPa at the executed one, a 10x gap that made the
     # metric uncorrelated with the stress the simulator actually produces. Scoring at the executed
     # width closes that gap. Default 0.0 reproduces the historical behaviour exactly.
+    #
+    # KNOWN APPROXIMATION: the offset is not a single constant in the collector. A soft grasp closes
+    # base 2.5mm + firm 2.0mm = 4.5mm normally, but a grasp the firm check judges WEAK closes a
+    # further 2.5mm, i.e. 7.0mm total. 0.0045 therefore describes the normal path only, and a weak
+    # grasp still executes 2.5mm tighter than it was scored. Two mitigations, neither complete:
+    # scoring at the executed width makes the chosen grasp firmer at the point the check reads, so
+    # the weak branch should fire less often; and the residual 2.5mm is much smaller than the 4.5mm
+    # this fixes. The exact fix would feed the per-env firm decision back into synthesis, which is
+    # not possible — the check runs on measured contact AFTER the grasp closes.
     if execute_offset:
         x_tcp = np.asarray(x_tcp, float).copy()
         x_tcp[6] = max(0.0, float(x_tcp[6]) - float(execute_offset))
