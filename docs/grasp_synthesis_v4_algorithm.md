@@ -319,6 +319,96 @@ We additionally **preshape** the gripper to ≈1.4× the grasp width during the 
 holding it fully open, mirroring human reach-to-grasp aperture profiles; this also reduces both
 swept volume and camera occlusion during the descent.
 
+### 4.3 The shelf lift — carrying weight by normal force instead of friction
+
+Phase-of-peak logging (§5) shows that **96 % of the peak stress occurs during the LIFT, not during
+the squeeze** (24/25 episodes; 1 in `firm`, 0 in `grasp`). Every objective in §2 models the squeeze.
+This explains an otherwise puzzling result: the operating-point correction of §2.6 eliminated
+pinching entirely and increased contact area by 188 %, yet moved peak stress by 3 %.
+
+The mechanism is the grasp geometry itself. A top-down grasp has a **horizontal** closing axis, so
+gravity is perpendicular to it and **friction alone** carries the object:
+
+```
+2 μ P ≥ m g        ⇒        P ≥ m g / (2 μ)
+```
+
+That required normal force *is* the squeeze. No amount of squeeze-side optimization removes it,
+because it is a static equilibrium requirement, not a modelling artefact.
+
+**The shelf.** Rotate the gripper by θ during the lift so the closing axis tilts toward vertical.
+One finger then sits *beneath* the other and the object rests on it: gravity resolves into a
+component along the closing axis, carried by the normal-force *differential* with no friction
+needed, and a perpendicular component still carried by friction. Two constraints bound the required
+grip:
+
+```
+friction (object must not slide):        P ≥ m g cos θ / (2 μ)
+contact  (upper pad must stay engaged):  P ≥ m g sin θ / 2
+
+P_min(θ) = (m g / 2) · max( cos θ / μ , sin θ )
+```
+
+`cos θ/μ` decreases and `sin θ` increases, so the minimum is where they cross:
+
+```
+θ* = arctan(1/μ)          μ = 0.7  ⇒  θ* = 55°,  P_min/P(0) = 0.57   (43 % less grip)
+```
+
+**θ = 90° is worse than 55°** (0.70×): past θ* the binding constraint flips from friction to upper-pad
+contact, and a fully vertical closing axis needs enough grip to hold the top pad against the object.
+Locating the empirical minimum therefore also *measures the simulator's effective μ*.
+
+**Rotation alone is not expected to help.** At a fixed commanded width, tilting adds `m g sin θ / 2`
+of normal load — first order in von Mises — while removing shear, which enters only second order
+through `√(p² + 3τ²)`. The demonstrator operates deep in the over-squeezed regime, so the gain must
+come from *spending the freed grip margin*: a width release `Δw` applied after the rotation
+completes. This is why the experiment is a 2×2 (θ ∈ {0, 55°} × Δw ∈ {0, 2.5 mm}) rather than a sweep
+— a sweep alone would confound the two effects.
+
+**Three implementation details that are silently wrong if done naively.**
+
+1. **The rotation axis must come from the pose.** The minimal rotation carrying the closing axis
+   `a_w` toward world-down is about `a_w × σ(−ẑ)`, applied by *right*-multiplication (a body-frame
+   tool-x rotation). Using a fixed **world**-x axis is identical at yaw 0 — and does *nothing* at
+   yaw 90°, where world x *is* the closing axis. A test at yaw 0 alone cannot see this.
+2. **Pivot about the pad centre, not the TCP.** They are ≈25 mm apart, so rotating about the TCP
+   swings the object on a 25 mm arc — enough to push its height out of the evaluation's success
+   band. Compensating with `pos ← pos_nominal + (v − dR·v)`, `v = R_b·c`, holds the pad centre on the
+   nominal lift path (verified to 1.8·10⁻⁸ m).
+3. **Ramp on lift progress; do not add a phase.** Both ramps are functions of the achieved lift
+   fraction `s` — rotation over `s ∈ [0.10, 0.60]` (after ~2 cm of table clearance, since at 90° the
+   lowest finger point sits 47.8 mm below the grip point against ~25 mm of available clearance), and
+   the width release over `s ∈ [0.60, 1.00]`, strictly *after* the shelf exists. A separate
+   rotate-in-place phase would force the end-effector to a full stop at the junction — the identical
+   regression that cost 5.7× in jerk in §4.1.
+
+The sign σ selects *which* finger becomes the floor. Both choices produce a shelf; σ only decides
+which way the wrist body swings (≈146 mm at full rotation), so it is chosen to swing away from the
+camera.
+
+### 4.4 Failure detection and regrasp
+
+A slip is detectable without any privileged success signal: partway into the lift the end-effector's
+rise is guaranteed by construction (its target is a deterministic function of the phase step), so if
+the **object** has not risen with it, the grasp failed. Recovery re-seeds the approach from the
+current pose and rewinds the phase index, producing an in-place regrasp against the same synthesized
+pose — no re-planning, on the assumption the object has not moved far.
+
+**The failed attempt is deliberately kept in the recorded demonstration.** A policy cloned only from
+clean successes has never observed what to do after a slip, so it cannot recover from one at
+deployment even when the demonstrator could.
+
+Four pieces of per-env state must be reset on rewind, each of which is a silent bug if missed: the
+firm-phase extra close (it re-fires and would *compound* the squeeze on every attempt), the stateful
+grip target, the width the grasp closes from, and — for soft bodies — the rest-stress baseline the
+firm check measures its rise against, which describes a settled state that no longer exists. The
+loop also needs both a per-env attempt cap and a global step cap, since the phase FSM's termination
+condition is "all envs finished" and an unbounded rewind never satisfies it.
+
+This knob is **independent of the shelf** and is the designated fallback: if the late wrist rotation
+proves too hard to clone, retry alone still improves the dataset at no cost in trajectory difficulty.
+
 ## 5. Evaluation protocol
 
 All sim evaluation goes through one shared harness with a fixed protocol, so numbers are comparable

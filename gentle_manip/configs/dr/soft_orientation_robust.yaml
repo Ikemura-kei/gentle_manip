@@ -1,0 +1,33 @@
+# [dr] soft_orientation + a much wider ARM-HOME start distribution — COLLECTION ONLY.
+# Used by: grasp_synthesis/collect_demos_synth_v4.py (--dr soft_orientation_robust)
+# Status: active
+#
+# NOT A BENCHMARK CONFIG. Every cross-version comparison (v2 SDF / v3 FEM / v4 / v4.1) is measured
+# under `soft_orientation`; swapping the eval to this one would change the scenario distribution and
+# silently invalidate every number recorded before it. This exists purely to widen the DATASET: a
+# BC policy only knows how to start from poses it has seen, and the collected demos all started from
+# a ±2cm neighbourhood of one home pose.
+#
+# ONLY `robot_init_pos_xyz` differs from soft_orientation (0.02 -> 0.09, i.e. ±9cm per axis, so the
+# EE can begin roughly 8-10cm above/beside the object rather than always at the same reach-in
+# height). Object pose, shape, size and material DR are byte-identical, so a dataset collected with
+# this config differs from the baseline in the START POSE distribution and nothing else.
+object_pos_xy: 0.045
+robot_init_pos_xyz: 0.09      # ±9cm per-axis arm-home jitter (soft_orientation: 0.02) — THE knob
+object_yaw_deg: 180
+object_pitch_roll_deg: 45
+object_flip_prob: 0.25
+object_flip_deg: [160, 180]
+
+# ── per-scene SIZE + SHAPE (identical to soft_orientation) ───────────────────
+object_scale:      [1.0, 1.5]
+object_bend_deg:   [-25, 25]
+object_twist_deg:  [-20, 20]
+object_taper:      [-0.15, 0.15]
+object_axis_scale: [0.95, 1.15]
+
+# ── per-scene material (identical to soft_orientation) ───────────────────────
+object_E: [2.0e5, 3.0e5]
+object_nu: [0.32, 0.38]
+object_rho: [900, 1100]
+coup_friction: [3.5, 4.5]

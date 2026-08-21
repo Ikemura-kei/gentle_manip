@@ -381,6 +381,19 @@ def build_schedule(args) -> PhaseSchedule:
 #   SOFT:  von-Mises stress top-10% RISE over the settled-rest baseline (Pa) — a
 #          missed/grazing grasp barely perturbs the body, so its stress stays near
 #          rest. Weak ⟺ rise < FIRM_STRESS_THRESH_PA. (Force is None for MPM.)
+# ── Robustness idea #2: lift-failure detection + regrasp (--retry-max) ────────
+# Checked ONCE per attempt per env, partway into the lift: the EE has provably risen (its target is
+# a deterministic function of the phase step), so if the OBJECT has not risen with it, the grasp
+# slipped. Recovery re-seeds the approach from the current pose (traj.begin_retry) and rewinds the
+# env's phase index to 0 — an in-place regrasp against the SAME synthesized pose, on the assumption
+# the object has not moved far. No CMA replan: that costs real wall-clock per env and the object is
+# usually still where it was.
+#
+# INDEPENDENT of the shelf. This is the fallback path: if the shelf trajectory turns out too hard
+# for BC to clone, v4 + retry is still a better dataset than v4 alone, at no cost in trajectory
+# difficulty.
+RETRY_CHECK_FRAC   = 0.45      # fraction into `lift` at which the slip check fires
+RETRY_MIN_RISE_M   = 0.010     # object must have risen at least this much by then, else it slipped
 FIRM_FORCE_THRESH_N  = 1.0     # rigid: below this measured contact force -> needs firming
 FIRM_STRESS_THRESH_PA = 2000.0 # soft: below this top10 von-Mises rise (Pa) -> grasp came out WEAK
 FIRM_EXTRA_CLOSE_M   = 0.002   # BASE firm close (m, 2.0mm) — applied to EVERY soft grasp. This is the
@@ -462,6 +475,8 @@ def execute_and_collect(
     use_minjerk: bool = True,                # v4: min-jerk time scaling in every phase
     preshape_factor: float = PRESHAPE_FACT,  # v4: approach aperture multiple (0 = fully open)
     shelf_kw: dict = None,                   # v4.1: shelf-lift geometry (empty/None = off)
+    retry_max: int = 0,                      # v4.1: regrasp attempts on a detected slip (0 = off)
+    width_open=None,                         # v4.1: scalar or per-env initial aperture (m)
 ) -> Tuple[List[List[dict]], List[List[np.ndarray]], List[List[float]], np.ndarray, List[List]]:
     """Execute the scripted grasp trajectory with DECOUPLED per-env phase control;
     record (obs, action, reward) per env.
@@ -504,6 +519,7 @@ def execute_and_collect(
                            lift_height=lift_height, extra_close=extra_close,
                            firm_close=FIRM_EXTRA_CLOSE_M, standoff=standoff,
                            use_minjerk=use_minjerk, preshape_factor=preshape_factor,
+                           **({} if width_open is None else {"width_open": width_open}),
                            **(shelf_kw or {}))
     pos_b, quat_b = traj.pos_b, traj.quat_b
     grasp_pos = pos_b.copy()
@@ -530,6 +546,25 @@ def execute_and_collect(
     # Per-env FSM state
     phase_idx  = np.zeros(num_envs, dtype=np.int64)
     phase_step = np.zeros(num_envs, dtype=np.int64)
+
+    # Retry state. `_lift_idx` is where the slip check lives; `obj_z_grasp` is the object's height
+    # at the moment the grasp closed, which the check measures the rise against.
+    _lift_idx = schedule.index("lift")
+    _retry_check_step = max(1, int(RETRY_CHECK_FRAC * schedule.duration(_lift_idx)))
+    n_retry = np.zeros(num_envs, dtype=np.int64)
+    checked = np.zeros(num_envs, dtype=bool)     # slip check fires once per attempt
+    # The soft firm check measures a stress RISE over a settled-rest baseline. That baseline is
+    # captured once, globally, at step 0 — but after a retry the object has been squeezed, possibly
+    # dropped and re-settled, so the old baseline describes a state that no longer exists. Mark it
+    # stale per env and re-capture when the re-approach ends.
+    rest_stale = np.zeros(num_envs, dtype=bool)
+    obj_z_grasp = np.full(num_envs, np.nan)
+    # Global step cap. The `while np.any(phase_idx < n_phases)` loop has no bound of its own, so an
+    # unbounded rewind would hang the collection forever on one bad env. One full pass through the
+    # schedule per allowed attempt, plus slack.
+    steps_per_pass = sum(schedule.duration(p) for p in range(n_phases))
+    max_total_steps = steps_per_pass * (1 + int(retry_max)) + 20
+    n_steps = 0
 
     # Soft firm-check baseline: top10 von-Mises of the SETTLED object (gripper still
     # at home, no contact) — captured on the first step, used as the "no grasp" floor
@@ -587,6 +622,12 @@ def execute_and_collect(
 
     # ── Main loop: every env advances through the schedule independently ──
     while np.any(phase_idx < n_phases):
+        n_steps += 1
+        if n_steps > max_total_steps:
+            print(f"    [retry] global step cap {max_total_steps} hit with "
+                  f"{int(np.sum(phase_idx < n_phases))} env(s) unfinished -> forcing DONE")
+            phase_idx[:] = n_phases
+            break
         active = phase_idx < n_phases   # (N,) bool — envs still progressing this step
 
         cur_pos_arr  = np.zeros((num_envs, 3), np.float32)
@@ -607,11 +648,37 @@ def execute_and_collect(
             rest_stress = (_stress_top10(vm0) if vm0 is not None
                            else np.zeros(num_envs, np.float32))
 
+        # ── Idea #2: lift-failure detection -> in-place regrasp (--retry-max) ──
+        # Fires once per attempt, partway into `lift`. The EE's rise is guaranteed by construction
+        # (its target is a pure function of the phase step), so "object has not risen" IS a slip.
+        if retry_max > 0:
+            oc = state.get("object_center")
+            if oc is not None:
+                oz = np.asarray(oc)[:, 2]
+                slipped = (active & (phase_idx == _lift_idx) & (phase_step >= _retry_check_step)
+                           & ~checked & np.isfinite(obj_z_grasp))
+                for i in np.where(slipped)[0]:
+                    checked[i] = True
+                    rise = float(oz[i] - obj_z_grasp[i])
+                    if rise >= RETRY_MIN_RISE_M or n_retry[i] >= retry_max:
+                        if rise < RETRY_MIN_RISE_M:
+                            print(f"    [retry] env {i}: slip (rise {rise*1e3:.1f}mm) but attempt "
+                                  f"cap {retry_max} reached -> continuing to a failed lift")
+                        continue
+                    n_retry[i] += 1
+                    # Re-seed the approach from HERE, then rewind to phase 0. The failed attempt
+                    # stays in the recorded buffers on purpose: a policy trained only on clean
+                    # successes has never seen what to do after a slip.
+                    traj.begin_retry(i, cur_pos_arr[i], cur_quat_arr[i])
+                    phase_idx[i] = 0
+                    phase_step[i] = -1          # the += 1 below lands it on 0
+                    checked[i] = False
+                    rest_stale[i] = True        # re-captured when the re-approach ends (gripper
+                    obj_z_grasp[i] = np.nan     # open, not yet touching) — see below
+                    print(f"    [retry] env {i}: object rose only {rise*1e3:.1f}mm during lift "
+                          f"-> regrasp attempt {int(n_retry[i])}/{retry_max}")
+
         # Advance phase state for envs that were active this step.
-        # TODO(retry): this is where a robustness pass would check per-env
-        # success/failure (e.g. at the "lift"/"hold" -> DONE boundary) and, on
-        # failure, rewind phase_idx[i] to an earlier phase instead of advancing to
-        # DONE — independent of every other env's state.
         phase_step[active] += 1
         # phase_idx may already be n_phases (done envs) — clip before indexing the schedule;
         # those entries are masked out by `active` anyway so the clipped value is unused.
@@ -625,6 +692,21 @@ def execute_and_collect(
         # relying on the trim pass to clean it up afterward — no artificial stops.
         advance = np.ones(num_envs, dtype=np.int64)   # normal: one phase forward
         leaving_grasp = rolled_over & (phase_idx == _grasp_idx)
+        if retry_max > 0:
+            # The object's height at the moment the grasp closes — the reference the slip check
+            # measures the lift rise against. Per attempt, so a retry re-captures it.
+            oc = state.get("object_center")
+            if oc is not None:
+                obj_z_grasp[leaving_grasp] = np.asarray(oc)[leaving_grasp, 2]
+            # Re-capture the rest-stress baseline as the re-approach ends: the gripper is at the
+            # grasp pose but still open at the preshape width, so nothing is touching yet.
+            reapproached = rolled_over & (phase_idx == 0) & rest_stale
+            if np.any(reapproached):
+                vm = state.get("von_mises_stress")
+                if vm is not None:
+                    cur_rest = _stress_top10(vm)
+                    rest_stress[reapproached] = cur_rest[reapproached]
+                rest_stale[reapproached] = False
         if _has_firm and np.any(leaving_grasp):
             cf = state.get("contact_force")
             if cf is not None:                        # RIGID: contact force (N). ALWAYS firm base;
@@ -652,6 +734,10 @@ def execute_and_collect(
 
         phase_idx[rolled_over]  += advance[rolled_over]
         phase_step[rolled_over]  = 0
+
+    if retry_max > 0 and np.any(n_retry > 0):
+        print(f"    [retry] {int(np.sum(n_retry > 0))}/{num_envs} env(s) regrasped "
+              f"({int(n_retry.sum())} attempts total) in {n_steps} steps")
 
     # Success check from final object height. Rigid: get_pos; soft MPM: the particle-mean centre from
     # the last step's state (MPMEntity has no get_pos).
@@ -873,6 +959,19 @@ def main() -> None:
                    help="lift-progress window over which the rotation ramps")
     p.add_argument("--shelf-open-frac", type=float, nargs=2, default=(0.60, 1.00),
                    help="lift-progress window for the width release (must FOLLOW --shelf-frac)")
+    p.add_argument("--init-width-range", type=float, nargs=2, default=None,
+                   metavar=("LO", "HI"),
+                   help="v4.1 robustness: sample each env's INITIAL gripper aperture (m) from this "
+                        "range instead of the fixed open width, e.g. --init-width-range 0.05 0.08. "
+                        "Collection knob, not a benchmark one -- it widens the start distribution a "
+                        "cloned policy has seen, and does not change the synthesized grasp.")
+    p.add_argument("--retry-max", type=int, default=0,
+                   help="v4.1: regrasp attempts when the object is detected NOT to have risen with "
+                        "the gripper partway into the lift (a slip). 0 (default) = off, "
+                        "bit-identical to v4. INDEPENDENT of --shelf-deg: this is the robustness "
+                        "fallback if the shelf trajectory turns out too hard to clone. The failed "
+                        "attempt STAYS in the recorded demo on purpose -- a policy trained only on "
+                        "clean successes has never seen what to do after a slip.")
     p.add_argument("--no-descend-check", action="store_true",
                    help="skip the swept collision check on the straight descent (which escalates the "
                         "standoff, then falls back to a top-down grasp, if the fingers would clip)")
@@ -995,7 +1094,10 @@ def main() -> None:
                         "shelf_deg": args.shelf_deg, "shelf_open": args.shelf_open,
                         "shelf_sign": args.shelf_sign,
                         "shelf_frac": list(args.shelf_frac),
-                        "shelf_open_frac": list(args.shelf_open_frac)},
+                        "shelf_open_frac": list(args.shelf_open_frac),
+                        "retry_max": args.retry_max,
+                        "init_width_range": (list(args.init_width_range)
+                                             if args.init_width_range else None)},
         "dr": exp.dr,
     }
 
@@ -1242,6 +1344,14 @@ def main() -> None:
             extra_close=args.grasp_extra_close,
             schedule=schedule, lift_height=args.lift_height, standoff=all_standoff,
             use_minjerk=not args.no_minjerk, preshape_factor=args.preshape_factor,
+            retry_max=args.retry_max, width_open=(
+                None if not args.init_width_range else
+                # Per-env, resampled every batch: the aperture the reach STARTS from. Only the
+                # start varies -- the preshape and the closed width are still derived from the
+                # synthesized grasp, so this widens the demo distribution without changing the
+                # grasp itself.
+                np.random.default_rng(args.seed + batch_idx).uniform(
+                    args.init_width_range[0], args.init_width_range[1], size=n)),
             shelf_kw=dict(shelf_kw, cam_pos=obj_kw.get("cam_pos"),
                           # TCP -> pad-centre offset along tool z (~25mm). The shelf pivots about
                           # the PAD CENTRE, not the TCP: rotating about the TCP swings the object

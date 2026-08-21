@@ -149,11 +149,15 @@ class GraspTrajectory:
         self.lift_b = self.pos_b.copy()
         self.lift_b[:, 2] += float(lift_height)
 
-        self.width_open = np.full(self.n, float(width_open), np.float32)
+        # Scalar OR per-env sequence. Per-env is the v4.1 robustness knob: the demos all started
+        # from one fixed aperture, so a cloned policy has only ever seen the gripper begin there.
+        self.width_open = np.broadcast_to(np.asarray(width_open, np.float64).ravel(),
+                                          (self.n,)).astype(np.float32).copy()
         self.width_cls = np.array([max(0.0, p[2] - base_squeeze - extra_close) for p in poses],
                                   np.float32)
         self.grip_target = self.width_cls.copy()                                 # mutated by "firm"
         self.firm_close = np.full(self.n, float(firm_close), np.float32)
+        self._firm_close0 = float(firm_close)    # the BASE close, restored by begin_retry
 
         self.home_pos = np.asarray(home_pos, np.float32).reshape(self.n, 3)
         self.home_quat = np.asarray(home_quat, np.float32).reshape(self.n, 4)
@@ -356,3 +360,31 @@ class GraspTrajectory:
     def set_firm_close(self, i: int, metres: float) -> None:
         """Set env `i`'s extra close for the "firm" phase (called once, at the grasp->firm edge)."""
         self.firm_close[i] = float(metres)
+
+    def begin_retry(self, i: int, cur_pos, cur_quat) -> None:
+        """Re-seed env `i`'s approach from where it currently is, so the caller can rewind its
+        phase index to 0 and re-run the whole reach -> grasp -> lift sequence.
+
+        The approach phase is parameterised from `home_pos/home_quat`, so a rewind WITHOUT this
+        would command an instant jump back to the robot's home pose. Re-seeding turns the rewind
+        into a continuous motion from the current (lifted, rotated) pose, curving back down through
+        the same standoff and therefore along the same collision-checked approach axis.
+
+        Also undoes every piece of per-env state the first attempt left behind. Each of these is a
+        silent compounding bug if skipped:
+          * `firm_close` — the firm phase re-fires on the retry and would stack a second extra
+            close on top of the first, squeezing harder every attempt.
+          * `grip_target` — written by `firm` and read by `lift`/`hold`; stale from the last attempt.
+          * `_approach_end_width` — `grasp` closes FROM it, and it must now be the preshape the
+            re-approach actually ends at.
+        The gripper opening itself is not smoothed: the approach commands the open width from its
+        first step, which is exactly the "reopen" a retry is supposed to do.
+        """
+        self.home_pos[i] = np.asarray(cur_pos, np.float32)
+        self.home_quat[i] = np.asarray(cur_quat, np.float32)
+        self._slerps[i] = Slerp([0.0, 1.0], Rot.concatenate([_wxyz_to_rot(self.home_quat[i]),
+                                                             _wxyz_to_rot(self.quat_b[i])]))
+        self.firm_close[i] = self._firm_close0
+        self.grip_target[i] = self.width_cls[i]
+        self._approach_end_width[i] = (self.width_open[i] if self.sched.has("approach")
+                                       else self.preshape[i])

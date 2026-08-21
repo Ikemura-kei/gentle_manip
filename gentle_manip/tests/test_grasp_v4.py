@@ -655,3 +655,96 @@ def test_standoff_pose_backs_off_along_approach():
     assert np.allclose(s[3:], x[3:])                                   # orientation + width unchanged
     assert np.allclose(s[:3], x[:3] - fg.approach_dir(x) * 0.06, atol=1e-9)
     assert s[2] > x[2]                                                 # standoff is ABOVE the grasp
+
+
+# ── v4.1 retry (begin_retry) ──────────────────────────────────────────────────
+# The rewind itself is trivial; every one of these tests pins a piece of per-env state whose
+# omission is a SILENT bug — the retried attempt still runs, it just runs wrong.
+
+def _retry_traj(**kw):
+    x = [0.47, 0.0, 0.0042, np.pi, 0.05, 0.7, 0.033]
+    return GraspTrajectory(SCHEDULE_V4_BLEND, [x], np.array([[0.40, 0.0, 0.21]], np.float32),
+                           np.array([[0.0, 1.0, 0.0, 0.0]], np.float32),
+                           lift_height=0.2, firm_close=0.002, use_minjerk=True,
+                           preshape_factor=1.35, **kw)
+
+
+def test_begin_retry_reseeds_the_approach_from_the_current_pose():
+    """Without the re-seed, rewinding to phase 0 commands an instant jump back to the robot's home
+    pose — metres away, in one step."""
+    t = _retry_traj()
+    li = SCHEDULE_V4_BLEND.index("lift")
+    cur_pos, cur_quat, _ = t.target(0, li, 20)
+    t.begin_retry(0, cur_pos, cur_quat)
+    p0 = t.target(0, 0, 0)[0]                       # first command of the re-approach
+    assert np.linalg.norm(np.asarray(p0) - np.asarray(cur_pos)) < 0.01, \
+        "re-approach must start where the failed attempt left the EE"
+    # and it must still END at the same grasp pose
+    last = SCHEDULE_V4_BLEND.duration(0) - 1
+    assert np.allclose(t.target(0, 0, last)[0], t.pos_b[0], atol=1e-5)
+
+
+def test_begin_retry_resets_firm_close_so_squeeze_cannot_compound():
+    """The firm phase re-fires on the retry. If the weak-grip extra close from the first attempt
+    survived, every attempt would squeeze strictly harder than the last."""
+    t = _retry_traj()
+    base = float(t.firm_close[0])
+    t.set_firm_close(0, base + 0.0025)              # first attempt found a weak grip
+    t.begin_retry(0, t.pos_b[0], t.quat_b[0])
+    assert float(t.firm_close[0]) == pytest.approx(base)
+
+
+def test_begin_retry_resets_grip_target_and_approach_end_width():
+    """grip_target is written by `firm` and read back by `lift`/`hold`; _approach_end_width is what
+    `grasp` closes FROM. Both are stale after a failed attempt."""
+    t = _retry_traj()
+    fi = SCHEDULE_V4_BLEND.index("firm")
+    t.target(0, fi, SCHEDULE_V4_BLEND.duration(fi) - 1)     # firm writes grip_target
+    assert float(t.grip_target[0]) < float(t.width_cls[0])
+    t.begin_retry(0, t.pos_b[0], t.quat_b[0])
+    assert float(t.grip_target[0]) == pytest.approx(float(t.width_cls[0]))
+    assert float(t._approach_end_width[0]) == pytest.approx(float(t.preshape[0]))
+
+
+def test_begin_retry_reopens_the_gripper():
+    """A retry must let go before it re-approaches, or it drags the object down with it."""
+    t = _retry_traj()
+    li = SCHEDULE_V4_BLEND.index("lift")
+    cur_pos, cur_quat, grip_held = t.target(0, li, 10)
+    t.begin_retry(0, cur_pos, cur_quat)
+    assert float(t.target(0, 0, 0)[2]) > float(grip_held) + 0.01
+
+
+def test_begin_retry_only_touches_the_named_env():
+    """Envs run decoupled; one env's retry must not perturb another's commands."""
+    x = [0.47, 0.0, 0.0042, np.pi, 0.05, 0.7, 0.033]
+    t = GraspTrajectory(SCHEDULE_V4_BLEND, [x, x],
+                        np.tile(np.array([0.40, 0.0, 0.21], np.float32), (2, 1)),
+                        np.tile(np.array([0.0, 1.0, 0.0, 0.0], np.float32), (2, 1)),
+                        lift_height=0.2, firm_close=0.002, use_minjerk=True)
+    before = [t.target(1, pi, st) for pi in range(SCHEDULE_V4_BLEND.n_phases)
+              for st in range(SCHEDULE_V4_BLEND.duration(pi))]
+    t.begin_retry(0, np.array([0.5, 0.1, 0.3], np.float32), t.quat_b[0])
+    after = [t.target(1, pi, st) for pi in range(SCHEDULE_V4_BLEND.n_phases)
+             for st in range(SCHEDULE_V4_BLEND.duration(pi))]
+    for a, b in zip(before, after):
+        assert np.array_equal(np.asarray(a[0]), np.asarray(b[0]))
+        assert np.array_equal(np.asarray(a[1]), np.asarray(b[1]))
+
+
+def test_begin_retry_unwinds_the_shelf_rotation():
+    """With the shelf on, the failed attempt leaves the wrist rotated. The re-approach must slerp
+    back to the grasp orientation rather than snapping."""
+    t = _retry_traj(shelf_deg=55.0, shelf_pivot_z=-0.0251, shelf_open=0.0025)
+    li = SCHEDULE_V4_BLEND.index("lift")
+    cur_pos, cur_quat, _ = t.target(0, li, SCHEDULE_V4_BLEND.duration(li) - 1)
+    t.begin_retry(0, cur_pos, cur_quat)
+    q_first = t.target(0, 0, 0)[1]
+    ang = Rot.from_quat([q_first[1], q_first[2], q_first[3], q_first[0]]).inv() * \
+        Rot.from_quat([cur_quat[1], cur_quat[2], cur_quat[3], cur_quat[0]])
+    assert np.degrees(ang.magnitude()) < 15.0, "re-approach must start near the current orientation"
+    last = SCHEDULE_V4_BLEND.duration(0) - 1
+    q_last = t.target(0, 0, last)[1]
+    ang2 = Rot.from_quat([q_last[1], q_last[2], q_last[3], q_last[0]]).inv() * \
+        Rot.from_quat([t.quat_b[0][1], t.quat_b[0][2], t.quat_b[0][3], t.quat_b[0][0]])
+    assert np.degrees(ang2.magnitude()) < 1.0, "re-approach must finish at the grasp orientation"
