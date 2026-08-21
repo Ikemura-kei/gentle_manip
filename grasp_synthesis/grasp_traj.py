@@ -128,6 +128,7 @@ class GraspTrajectory:
     """
 
     BASE_SQUEEZE = 0.0025      # commanded width = synthesized width - this (v3 constant)
+    RETRY_OPEN_FRAC = 0.20     # fraction of the re-approach spent opening back up after a retry
     WIDTH_OPEN = 0.08          # gripper width during approach when no preshape is configured
 
     def __init__(self, schedule: PhaseSchedule, best_x: Sequence, home_pos, home_quat, *,
@@ -194,6 +195,10 @@ class GraspTrajectory:
         # discarded the preshape and polluted the action stream this design exists to smooth.
         self._approach_end_width = (self.width_open.copy() if schedule.has("approach")
                                     else self.preshape.copy())
+        # The aperture the approach STARTS from. Normally the fully-open width; after a retry it is
+        # whatever the failed attempt left the gripper at, so the reopen is a ramp from the closed
+        # width instead of a one-step jump to fully open (see begin_retry).
+        self._reach_start_w = self.width_open.copy()
 
         # ── SHELF geometry, precomputed per env ───────────────────────────────
         # BOTH knobs default off -> _shelf_on False -> every shelf branch is skipped and the
@@ -269,7 +274,7 @@ class GraspTrajectory:
             # (SPARC -4.35 vs -2.93). Rotation still completes before the descent, so the straight
             # collision-free descent is preserved.
             quat = _rot_to_wxyz(self._slerps[i](s)) if self.rotate_during_travel else self.home_quat[i]
-            grip = self.width_open[i] + s * (self.preshape[i] - self.width_open[i])
+            grip = self._open_ramp(i, s, a)
         elif name == "align":                            # v4: rotate in place (no translation)
             pos = self.standoff_pos[i]
             quat = self.quat_b[i] if self.rotate_during_travel else _rot_to_wxyz(self._slerps[i](s))
@@ -289,7 +294,7 @@ class GraspTrajectory:
             # finish the wrist rotation EARLY (by `rot_frac` of the reach) so the final approach is
             # a pure translation, as in v3's descend
             quat = _rot_to_wxyz(self._slerps[i](min(1.0, u / self.rot_frac)))
-            grip = self.width_open[i] + s * (self.preshape[i] - self.width_open[i])
+            grip = self._open_ramp(i, s, a)
         elif name == "descend":                          # v4: straight line along the approach axis
             pos = self.standoff_pos[i] + s * (self.pos_b[i] - self.standoff_pos[i])
             quat = self.quat_b[i]
@@ -317,6 +322,26 @@ class GraspTrajectory:
         else:
             raise KeyError(f"unknown phase {name!r}")
         return pos, quat, grip
+
+    def _open_ramp(self, i: int, s: float, a: float) -> float:
+        """Approach aperture: from this env's start width to its preshape.
+
+        Normally start == fully open, so this is the original linear term exactly. After a retry the
+        start is the CLOSED width the failed attempt left behind, and going straight to the phase's
+        nominal start would fling the gripper from ~29mm to 80mm in a single step -- a 51mm jump in
+        the commanded gripper channel, larger than the 36.7mm discontinuity this class of bug already
+        cost once. The reopen is instead ramped, and finishes within RETRY_OPEN_FRAC of the reach so
+        the fingers are clear well before the descent.
+        """
+        w0 = self._reach_start_w[i]
+        if w0 == self.width_open[i]:                     # normal approach: unchanged, bit-identical
+            return w0 + s * (self.preshape[i] - w0)
+        # Ramp on the RAW phase progress `a`, not the min-jerk-scaled `s`. Using `s` eases the
+        # aperture twice -- once by the phase's own time scaling, again here -- and minjerk is
+        # deliberately flat near 0, so the gripper stayed shut for the first ~0.6s while the arm was
+        # already retreating. A regrasp should let go promptly and then move.
+        u = min(1.0, a / self.RETRY_OPEN_FRAC)
+        return float(w0 + minjerk(u) * (self.preshape[i] - w0))
 
     # ── shelf lift ────────────────────────────────────────────────────────────
     def _u_rot(self, s: float) -> float:
@@ -369,7 +394,7 @@ class GraspTrajectory:
         """Set env `i`'s extra close for the "firm" phase (called once, at the grasp->firm edge)."""
         self.firm_close[i] = float(metres)
 
-    def begin_retry(self, i: int, cur_pos, cur_quat) -> None:
+    def begin_retry(self, i: int, cur_pos, cur_quat, cur_grip=None) -> None:
         """Re-seed env `i`'s approach from where it currently is, so the caller can rewind its
         phase index to 0 and re-run the whole reach -> grasp -> lift sequence.
 
@@ -385,8 +410,10 @@ class GraspTrajectory:
           * `grip_target` — written by `firm` and read by `lift`/`hold`; stale from the last attempt.
           * `_approach_end_width` — `grasp` closes FROM it, and it must now be the preshape the
             re-approach actually ends at.
-        The gripper opening itself is not smoothed: the approach commands the open width from its
-        first step, which is exactly the "reopen" a retry is supposed to do.
+        The reopen is RAMPED from the width the failed attempt left behind (`cur_grip`) to the
+        preshape, over the first RETRY_OPEN_FRAC of the re-approach. Rewinding without this makes
+        the reach phase command its nominal start aperture -- fully open -- so the gripper snaps from
+        ~29mm to 80mm in one step and the recovery looks nothing like a regrasp.
         """
         self.home_pos[i] = np.asarray(cur_pos, np.float32)
         self.home_quat[i] = np.asarray(cur_quat, np.float32)
@@ -396,3 +423,5 @@ class GraspTrajectory:
         self.grip_target[i] = self.width_cls[i]
         self._approach_end_width[i] = (self.width_open[i] if self.sched.has("approach")
                                        else self.preshape[i])
+        self._reach_start_w[i] = (self.width_open[i] if cur_grip is None
+                                  else float(cur_grip))

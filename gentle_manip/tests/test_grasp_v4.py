@@ -706,13 +706,40 @@ def test_begin_retry_resets_grip_target_and_approach_end_width():
     assert float(t._approach_end_width[0]) == pytest.approx(float(t.preshape[0]))
 
 
-def test_begin_retry_reopens_the_gripper():
-    """A retry must let go before it re-approaches, or it drags the object down with it."""
+def test_begin_retry_reopens_the_gripper_as_a_RAMP_not_a_jump():
+    """A retry must let go before it re-approaches -- but gradually.
+
+    Rewinding without passing the current width makes the reach command its nominal start aperture,
+    fully open, so the gripper snaps ~29mm -> 80mm in ONE step. That is a bigger discontinuity than
+    the 36.7mm one this class of bug already cost once, and it looks nothing like a regrasp.
+    """
     t = _retry_traj()
     li = SCHEDULE_V4_BLEND.index("lift")
     cur_pos, cur_quat, grip_held = t.target(0, li, 10)
-    t.begin_retry(0, cur_pos, cur_quat)
-    assert float(t.target(0, 0, 0)[2]) > float(grip_held) + 0.01
+    t.begin_retry(0, cur_pos, cur_quat, grip_held)
+
+    first = float(t.target(0, 0, 0)[2])
+    assert first == pytest.approx(float(grip_held), abs=2e-3), "must start from the CLOSED width"
+    # opens monotonically, reaching preshape (not the fully-open width) partway through the reach
+    dur = SCHEDULE_V4_BLEND.duration(0)
+    widths = [float(t.target(0, 0, k)[2]) for k in range(dur)]
+    assert all(b >= a - 1e-9 for a, b in zip(widths, widths[1:])), "aperture must be monotone"
+    assert max(widths) == pytest.approx(float(t.preshape[0]), abs=1e-6)
+    assert max(widths) < float(t.width_open[0]) - 1e-3, "must NOT fling fully open"
+    # ...and the biggest single-step change is a small fraction of the old 51mm jump
+    assert max(b - a for a, b in zip(widths, widths[1:])) < 0.004
+    # clear of the object well before the descent
+    assert widths[int(0.4 * dur)] == pytest.approx(float(t.preshape[0]), abs=1e-6)
+
+
+def test_normal_approach_aperture_is_unchanged_by_the_retry_ramp():
+    """The ramp is per-env and keyed on the start width, so a non-retry approach is bit-identical."""
+    t = _retry_traj()
+    dur = SCHEDULE_V4_BLEND.duration(0)
+    for k in range(dur):
+        s_ = minjerk((k + 1) / dur)
+        expect = t.width_open[0] + s_ * (t.preshape[0] - t.width_open[0])
+        assert float(t.target(0, 0, k)[2]) == pytest.approx(float(expect), abs=1e-9)
 
 
 def test_begin_retry_only_touches_the_named_env():

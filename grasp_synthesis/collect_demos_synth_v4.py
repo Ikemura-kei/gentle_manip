@@ -669,7 +669,7 @@ def execute_and_collect(
                     # Re-seed the approach from HERE, then rewind to phase 0. The failed attempt
                     # stays in the recorded buffers on purpose: a policy trained only on clean
                     # successes has never seen what to do after a slip.
-                    traj.begin_retry(i, cur_pos_arr[i], cur_quat_arr[i])
+                    traj.begin_retry(i, cur_pos_arr[i], cur_quat_arr[i], cur_grip_arr[i])
                     phase_idx[i] = 0
                     phase_step[i] = -1          # the += 1 below lands it on 0
                     checked[i] = False
