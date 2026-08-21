@@ -616,13 +616,17 @@ def execute_and_collect(
             c_pos, c_quat, c_grip = clamp_absolute_target(
                 prev_pos, prev_quat, prev_grip, cur_pos, cur_quat, cur_grip, _rate_lim)
             # 'Engaged' = the clamp moved a command by a MEANINGFUL amount, >1% of the per-axis
-            # bound. The quat path round-trips through a float32 rotvec, so a 1e-9 comparison
-            # counts pure numerical noise: the first run of this audit reported 99.2% engagement
-            # on a trajectory bound_scaled_schedule had already made compliant.
-            _rot_eps = 1.0 - np.cos(0.005 * float(np.min(_rate_lim[3:6])))
+            # bound. Two false-positive traps already hit here: (1) comparing at 1e-9 counted the
+            # rotvec round-trip's float32 noise; (2) a |quat dot|-based angle test is QUADRATIC in
+            # the angle (1 - cos(theta/2) ~ theta^2/8), so 1% of the bound sits at 1.8e-9 — BELOW
+            # the same float noise, and the audit read 99.2% on a compliant trajectory twice.
+            # Component-wise quat difference is LINEAR in the angle (~theta/2 = 6e-5 at 1% of the
+            # bound vs ~6e-8 noise), after sign alignment (q and -q are the same rotation).
+            _sign = np.where(np.sum(c_quat * cur_quat, axis=1, keepdims=True) < 0, -1.0, 1.0)
             moved = (np.max(np.abs(c_pos - cur_pos)) > 0.01 * float(np.min(_rate_lim[:3]))
                      or np.max(np.abs(c_grip - cur_grip)) > 0.01 * float(_rate_lim[6])
-                     or np.max(np.abs(np.abs(np.sum(c_quat * cur_quat, axis=1)) - 1.0)) > _rot_eps)
+                     or np.max(np.abs(c_quat - _sign * cur_quat))
+                     > 0.005 * float(np.min(_rate_lim[3:6])))
             rate_audit["steps"] += 1
             if moved:
                 rate_audit["clamped"] += 1
