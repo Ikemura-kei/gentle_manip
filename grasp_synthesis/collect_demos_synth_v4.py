@@ -392,8 +392,18 @@ def build_schedule(args) -> PhaseSchedule:
 # INDEPENDENT of the shelf. This is the fallback path: if the shelf trajectory turns out too hard
 # for BC to clone, v4 + retry is still a better dataset than v4 alone, at no cost in trajectory
 # difficulty.
-RETRY_CHECK_FRAC   = 0.45      # fraction into `lift` at which the slip check fires
-RETRY_MIN_RISE_M   = 0.010     # object must have risen at least this much by then, else it slipped
+# Measured (grasp_synthesis/retry_window_probe.py, forced slip at each fraction, 5 envs):
+#   frac  object risen  recovered
+#   0.10       0.1 mm      0/5      -- releasing before the lift starts; the regrasp misses
+#   0.15       2.0 mm      5/5
+#   0.20       8.3 mm      5/5
+#   0.25      15.6 mm      5/5      <- default: a genuine lift attempt, still a short drop
+#   0.30      25.3 mm      5/5
+#   0.45      81.4 mm      0/3      -- the object bounces out from under the planned pose
+# 0.45 was the original guess and is outside the working window on BOTH counts: too late to
+# recover, and it wastes most of a lift before deciding. 0.25 is in the middle of the plateau.
+RETRY_CHECK_FRAC   = 0.25      # fraction into `lift` at which the slip check fires
+RETRY_MIN_RISE_M   = 0.008     # object must have risen at least this much by then, else it slipped
 FIRM_FORCE_THRESH_N  = 1.0     # rigid: below this measured contact force -> needs firming
 FIRM_STRESS_THRESH_PA = 2000.0 # soft: below this top10 von-Mises rise (Pa) -> grasp came out WEAK
 FIRM_EXTRA_CLOSE_M   = 0.002   # BASE firm close (m, 2.0mm) — applied to EVERY soft grasp. This is the
