@@ -23,6 +23,12 @@ _Range = Tuple[float, float]
 class DRConfig:
     # ── per-reset (no rebuild) ────────────────────────────────────────────────
     object_pos_xy: float = 0.0          # half-range (m); per-env uniform object x/y jitter
+    # ASYMMETRIC per-axis offset ranges (m, relative to the object's nominal spawn), overriding
+    # object_pos_xy when set. Needed when the target workspace is not centred on the nominal pose:
+    # the real reachable area is x [0.29, 0.48], y [-0.11, 0.11] while the mushroom's nominal x
+    # is ~0.47 — i.e. AT the far edge of the range, which no symmetric half-range can express.
+    object_dx_range: Optional[_Range] = None   # (lo, hi) offset added to nominal x
+    object_dy_range: Optional[_Range] = None   # (lo, hi) offset added to nominal y
     robot_init_pos_xyz: float = 0.0     # half-range (m); per-env uniform jitter on the reset home EE xyz
     robot_init_offset_xyz: Optional[tuple] = None  # FIXED (dx,dy,dz) offset (m) added to the reset home
                                         # EE pose, SAME for all envs (a fixed home at a shifted location).
@@ -88,6 +94,12 @@ class DRConfig:
     # ── sampling ──────────────────────────────────────────────────────────────
     def sample_object_dxy(self, rng: np.random.Generator, num_envs: int) -> Optional[np.ndarray]:
         """Per-env object (dx, dy) offset from the default pose, or None if disabled."""
+        if self.object_dx_range is not None or self.object_dy_range is not None:
+            dx = (rng.uniform(*self.object_dx_range, num_envs) if self.object_dx_range is not None
+                  else rng.uniform(-self.object_pos_xy, self.object_pos_xy, num_envs))
+            dy = (rng.uniform(*self.object_dy_range, num_envs) if self.object_dy_range is not None
+                  else rng.uniform(-self.object_pos_xy, self.object_pos_xy, num_envs))
+            return np.stack([dx, dy], axis=1).astype(np.float32)
         if self.object_pos_xy <= 0:
             return None
         return rng.uniform(-self.object_pos_xy, self.object_pos_xy, (num_envs, 2)).astype(np.float32)

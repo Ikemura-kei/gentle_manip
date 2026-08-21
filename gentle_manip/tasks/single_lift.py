@@ -45,6 +45,8 @@ class SingleLiftTask(BaseTask):
         # MPM domain padding at coarse grid_density (see ObjectEntry.spawn_z).
         _sz = task_cfg.get("object_spawn_z")
         self.object_spawn_z: float | None = float(_sz) if _sz is not None else None
+        _sxy = task_cfg.get("object_spawn_xy")
+        self.object_spawn_xy = tuple(float(v) for v in _sxy) if _sxy is not None else None
         # MPM domain. The default is the mushroom-tuned box below and MUST stay exactly that, so
         # existing tasks are untouched. It is configurable because domain volume and grid density
         # trade off directly: cost ~ volume x density^3, so TIGHTENING the box is what buys the
@@ -67,6 +69,7 @@ class SingleLiftTask(BaseTask):
         # single-camera rig (cam_ext at the calibrated WORLD_T_CAM_EXT pose).
         return SceneSpec(
             objects=[ObjectEntry(name=self.object_name, object_type=self.object_type,
+                                 spawn_xy=self.object_spawn_xy,
                                  spawn_z=self.object_spawn_z)],
             fixtures=[FixtureEntry(fixture_type="table")],
             cameras=[

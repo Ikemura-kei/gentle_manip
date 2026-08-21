@@ -16,6 +16,9 @@ class ObjectEntry:
     scale: float = 1.0
     mesh_path: Optional[str] = None                 # per-scene mesh override (e.g. a shape-DR
                                                     # deformed .obj); None => registry default
+    spawn_xy: Optional[Tuple[float, float]] = None  # override the registry default_pos x/y — the
+                                                    # NOMINAL spawn. Iteration-2 recenters it on the
+                                                    # real workspace centre so DR stays symmetric.
     spawn_z: Optional[float] = None                 # override the registry default_pos z (spawn
                                                     # height, m). None => registry default. Used to
                                                     # clear the MPM domain's inward safety padding

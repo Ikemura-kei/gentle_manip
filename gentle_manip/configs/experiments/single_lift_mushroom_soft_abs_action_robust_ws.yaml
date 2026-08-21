@@ -1,0 +1,19 @@
+# [experiment] Iteration-2 (collection): single_lift_mushroom_soft_abs_action_robust with the REAL-WORKSPACE object range
+# (x [0.29,0.48], y [-0.11,0.11] absolute; dr: soft_orientation_robust_ws). Only the DR reference differs.
+# Status: active
+task: single_lift_mushroom_soft_ws     # recentred nominal (workspace centre); camera unchanged
+action: abs_pose_abs_gripper
+dr: soft_orientation_robust_ws
+augmentation: l515_noise
+
+obs: superset_soft                   # soft superset (privileged incl. von Mises stress) + point_cloud
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+
+rl:                                  # mirrors the base experiment (unused during scripted collection)
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400
