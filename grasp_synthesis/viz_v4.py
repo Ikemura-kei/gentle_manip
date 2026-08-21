@@ -296,10 +296,86 @@ def table_markdown(runs: list[Path], yield_pa: float = 4e4) -> str:
     return "\n".join(L) + "\n"
 
 
+# ── shelf theta sweep ─────────────────────────────────────────────────────────
+
+def figure_shelf_sweep(runs: list[Path], out: Path, mu: float = 0.7) -> Path:
+    """Measured stress vs shelf angle, against the static-equilibrium prediction.
+
+    The theory curve is the required grip normalised to theta=0:
+
+        P_min(theta)/P(0) = max( cos(theta), mu*sin(theta) )
+
+    minimised at theta* = arctan(1/mu). Overlaying it does two things: it says whether the shelf
+    behaves as the statics predicts at all, and — if the measured minimum sits elsewhere — it
+    LOCATES the simulator's effective friction coefficient, which is otherwise not directly
+    observable.
+
+    Both time reductions are plotted because they behave differently: the worst-instant metrics are
+    pinned across every configuration measured so far while the time-averaged ones move freely, and
+    a single-metric plot would hide that.
+    """
+    plt = _mpl()
+    pts = []
+    for r in runs:
+        try:
+            s = json.loads((r / "summary.json").read_text())
+        except Exception:
+            continue
+        pts.append((float(s.get("shelf_deg") or 0.0), s, _row(r)))
+    pts.sort(key=lambda p: p[0])
+    if not pts:
+        raise SystemExit("no runs with a summary.json")
+
+    th = np.array([p[0] for p in pts])
+    fig, (ax, ax2) = plt.subplots(1, 2, figsize=(13, 5))
+
+    series = [("stress_mean_tmean", "bulk (mean over all t)", "tab:blue"),
+              ("stress_top20_ttop20", "sustained (hottest 20% of t)", "tab:green"),
+              ("stress_max_tmax", "peak (worst instant)", "tab:red")]
+    for key, label, c in series:
+        m = np.array([p[2].get(key, {}).get("mean", np.nan) for p in pts], float)
+        sd = np.array([p[2].get(key, {}).get("std", np.nan) for p in pts], float)
+        n = np.array([p[1]["n_episodes"] for p in pts], float)
+        base = m[0] if np.isfinite(m[0]) else np.nanmax(m)
+        ax.errorbar(th, 100 * m / base, yerr=100 * sd / np.sqrt(n) / base, marker="o", color=c,
+                    lw=1.8, capsize=3, label=label)
+
+    grid = np.linspace(0, 90, 181)
+    theory = np.maximum(np.cos(np.radians(grid)), mu * np.sin(np.radians(grid)))
+    ax.plot(grid, 100 * theory, "k--", lw=1.4,
+            label=f"required grip, statics (mu={mu}): max(cos, mu sin)")
+    ax.axvline(np.degrees(np.arctan(1 / mu)), color="k", ls=":", lw=1,
+               label=f"theta* = arctan(1/mu) = {np.degrees(np.arctan(1 / mu)):.0f}deg")
+    ax.set_xlabel("shelf angle theta [deg]")
+    ax.set_ylabel("% of the theta=0 value")
+    ax.set_title("Stress vs shelf angle (error bars = SE)")
+    ax.grid(alpha=0.3); ax.legend(fontsize=8)
+
+    succ = np.array([p[1]["success_rate"] for p in pts])
+    ax2.plot(th, succ, marker="s", color="tab:purple", lw=1.8)
+    ax2.set_ylim(0, 1.05)
+    ax2.set_xlabel("shelf angle theta [deg]")
+    ax2.set_ylabel("success rate")
+    ax2.set_title("Success must not regress — all headroom here is downside")
+    ax2.grid(alpha=0.3)
+    for x, y, p in zip(th, succ, pts):
+        ax2.annotate(f"n={p[1]['n_episodes']}", (x, y), textcoords="offset points",
+                     xytext=(0, -14), ha="center", fontsize=7)
+
+    fig.suptitle("v4.1 shelf lift: rotating the closing axis toward vertical during the lift",
+                 fontsize=13)
+    fig.tight_layout(rect=(0, 0, 1, 0.94))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=140)
+    plt.close(fig)
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("what", choices=["trajectory", "benchmark", "table"])
+    ap.add_argument("what", choices=["trajectory", "benchmark", "table", "shelf"])
+    ap.add_argument("--mu", type=float, default=0.7, help="friction used for the theory curve")
     ap.add_argument("runs", nargs="*", type=Path, help="eval run dirs (benchmark only)")
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
@@ -307,6 +383,10 @@ def main() -> None:
     outdir = ROOT / "logs" / "figures"
     if args.what == "trajectory":
         p = figure_trajectory(args.out or outdir / "v4_trajectory.png")
+    elif args.what == "shelf":
+        if not args.runs:
+            ap.error("shelf needs the sweep's eval run dirs")
+        p = figure_shelf_sweep(args.runs, args.out or outdir / "v41_shelf_sweep.png", mu=args.mu)
     elif args.what == "table":
         if not args.runs:
             ap.error("table needs at least one eval run dir")
