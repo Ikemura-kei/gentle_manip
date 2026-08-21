@@ -119,6 +119,28 @@ replan would help. The real check fires at 45 % but with a 10 mm rise threshold,
 when the object never left the table — i.e. the low-drop regime the recovery is good at.
 
 
+### NEXT-PHASE BACKLOG (captured 2026-08-21, not yet planned)
+
+**Rate-bounded absolute actions.** Every absolute 7d/10d action should be constrained so its delta
+w.r.t. the current pose stays inside the per-step limits of
+`configs/action/delta_pose_delta_gripper_fast_rot.yaml`
+(`[4.5mm, 4.5mm, 5.5mm, 0.008, 0.008, 0.03 rad, 5mm]`). Two places, two reasons:
+
+* **Generator side** (`GraspTrajectory.target`) — clamp each commanded target against the previous
+  one. All synthesis versions funnel through here, so the recorded absolute actions become bounded
+  by construction and no policy ever learns a jump.
+* **Execution side** (`ActionPipeline`, absolute mode) — clamp the decoded target against the CURRENT
+  MEASURED pose. Shared sim/real code, so it cannot diverge, and it protects the real XArm from any
+  policy that emits a jump, including a learned one.
+
+This is the SAME fix as the shelf's IK problem. At 30Hz the roll/pitch bound is 0.24 rad/s; the
+shelf commands 1.64 rad/s at theta=55 (6.8x over), which is exactly the excess the IK probe measured
+as joint 6 whipping at 3.11 rad/s with the wrist 14 deg behind command and the object shaking off.
+
+It also SIZES the shelf: within one 66-step lift the bound admits **30 deg** with a linear ramp, or
+**16 deg** with min-jerk easing (peak = 1.875x mean). theta=30 was already the most jerk-efficient
+arm in the sweep, so the rate limit independently selects roughly the same operating point.
+
 ### Findings that change the plan
 
 1. **`w_peak` had never been active.** Fixed behind a three-way `_UNSET` sentinel rather than by
