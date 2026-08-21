@@ -49,20 +49,26 @@ def commanded_pose_trajectory(ep: dict, source_config) -> tuple:
     out = pipe.process(a.astype(np.float32)).astype(np.float64)
     if source_config.mode == "absolute":            # (T, 8): pos + quat_wxyz + width
         return out[:, 0:3], out[:, 3:7], out[:, 7]
-    # delta: accumulate physical deltas from the initial achieved pose
+    # delta: accumulate physical deltas from the initial achieved pose, clamping the running
+    # target PER STEP exactly like the backend did at collection time (RealBackend clips the
+    # accumulated target to EE_BOUNDS and the gripper range each step — an end-of-episode clip
+    # is NOT equivalent when the teleop pushes past a bound and then reverses).
+    from gentle_manip.robot.xarm7_config import (DEFAULT_GRIPPER_WIDTH, EE_BOUNDS_MAX,
+                                                 EE_BOUNDS_MIN)
+    lo, hi = np.asarray(EE_BOUNDS_MIN, np.float64), np.asarray(EE_BOUNDS_MAX, np.float64)
     o = ep["observations"]
     pos = np.empty((T, 3)); quat = np.empty((T, 4)); grip = np.empty(T)
     p = np.asarray(o["ee_pos"], np.float64).reshape(T, 3)[0].copy()
     q = R.from_quat(obs_quat(o, T)[0][[1, 2, 3, 0]])
     g = float(np.asarray(o["gripper_width"], np.float64).reshape(T, -1)[0, 0])
     for t in range(T):
-        p = p + out[t, 0:3]
+        p = np.clip(p + out[t, 0:3], lo, hi)
         q = R.from_rotvec(out[t, 3:6]) * q
-        g = g + out[t, 6]
+        g = float(np.clip(g + out[t, 6], 0.0, DEFAULT_GRIPPER_WIDTH))
         xyzw = q.as_quat()
         pos[t], grip[t] = p, g
         quat[t] = xyzw[[3, 0, 1, 2]]
-    return pos, quat, np.clip(grip, 0.0, None)
+    return pos, quat, grip
 
 
 def derive_action_set(ep: dict, action_config, lookahead: int = 1,
