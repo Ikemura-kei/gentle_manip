@@ -212,6 +212,14 @@ class GraspTrajectory:
                                           (self.n,)).astype(np.float32).copy()
         self.width_cls = np.array([max(0.0, p[2] - base_squeeze - extra_close) for p in poses],
                                   np.float32)
+        # SAFETY FLOOR on the aperture: a sampled width_open below the preshape need inverts the
+        # preshape clip (lo > hi -> np.clip returns hi), collapsing the approach aperture to the
+        # GRASP width -- the fingers plough through the object during the descent and the grasp
+        # closes on nothing. Measured in the first v5 collection batch: 3/8 envs 'lifted' an object
+        # that rose 0.1mm, because scale-1.46 mushrooms need ~50mm of aperture while
+        # --init-width-range drew 50mm. The floor keeps aperture DR only where physically safe.
+        _need = np.minimum(self.width_cls * max(float(preshape_factor), 1.0) + 0.003, 0.08)
+        self.width_open = np.maximum(self.width_open, _need.astype(np.float32))
         self.grip_target = self.width_cls.copy()                                 # mutated by "firm"
         self.firm_close = np.full(self.n, float(firm_close), np.float32)
         self._firm_close0 = float(firm_close)    # the BASE close, restored by begin_retry

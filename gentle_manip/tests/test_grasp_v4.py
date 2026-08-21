@@ -855,3 +855,25 @@ def test_bound_scaled_schedule_is_identity_when_already_bounded():
               use_minjerk=True, preshape_factor=1.35)
     sc = bound_scaled_schedule(SCHEDULE_V4_BLEND, [x], hp, hq, RATE_LIM, **kw)
     assert sc.phases == SCHEDULE_V4_BLEND.phases
+
+
+def test_sampled_aperture_is_floored_at_the_preshape_need():
+    """--init-width-range can draw an aperture SMALLER than a big object's grasp width. Without a
+    floor, the preshape clip inverts (np.clip(lo>hi) returns hi) and the approach aperture
+    collapses to the grasp width — the fingers plough through the object during the descent.
+    First v5 collection batch: 3/8 envs 'lifted' an object that rose 0.1mm this way."""
+    x_big = [0.47, 0.0, 0.0042, np.pi, 0.05, 0.7, 0.050]     # scale-1.46-mushroom-sized grasp
+    t = GraspTrajectory(SCHEDULE_V4_BLEND, [x_big],
+                        np.array([[0.40, 0.0, 0.21]], np.float32),
+                        np.array([[0.0, 1.0, 0.0, 0.0]], np.float32),
+                        lift_height=0.2, firm_close=0.002, use_minjerk=True,
+                        preshape_factor=1.35, width_open=[0.050])     # sampled BELOW the need
+    assert float(t.preshape[0]) > float(t.width_cls[0]) + 0.004, "preshape collapsed to grasp width"
+    assert float(t.width_open[0]) >= float(t.preshape[0]) - 1e-6
+    # and a SAFE sample is respected, so the aperture DR still varies
+    t2 = GraspTrajectory(SCHEDULE_V4_BLEND, [[0.47, 0, 0.0042, np.pi, 0.05, 0.7, 0.030]],
+                         np.array([[0.40, 0.0, 0.21]], np.float32),
+                         np.array([[0.0, 1.0, 0.0, 0.0]], np.float32),
+                         lift_height=0.2, firm_close=0.002, use_minjerk=True,
+                         preshape_factor=1.35, width_open=[0.060])
+    assert float(t2.width_open[0]) == pytest.approx(0.060, abs=1e-6)

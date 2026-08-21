@@ -615,9 +615,14 @@ def execute_and_collect(
             from gentle_manip.actions.pipeline import clamp_absolute_target, invert_delta_action
             c_pos, c_quat, c_grip = clamp_absolute_target(
                 prev_pos, prev_quat, prev_grip, cur_pos, cur_quat, cur_grip, _rate_lim)
-            moved = (np.max(np.abs(c_pos - cur_pos)) > 1e-9
-                     or np.max(np.abs(c_grip - cur_grip)) > 1e-9
-                     or np.max(np.abs(np.abs(np.sum(c_quat * cur_quat, axis=1)) - 1.0)) > 1e-9)
+            # 'Engaged' = the clamp moved a command by a MEANINGFUL amount, >1% of the per-axis
+            # bound. The quat path round-trips through a float32 rotvec, so a 1e-9 comparison
+            # counts pure numerical noise: the first run of this audit reported 99.2% engagement
+            # on a trajectory bound_scaled_schedule had already made compliant.
+            _rot_eps = 1.0 - np.cos(0.005 * float(np.min(_rate_lim[3:6])))
+            moved = (np.max(np.abs(c_pos - cur_pos)) > 0.01 * float(np.min(_rate_lim[:3]))
+                     or np.max(np.abs(c_grip - cur_grip)) > 0.01 * float(_rate_lim[6])
+                     or np.max(np.abs(np.abs(np.sum(c_quat * cur_quat, axis=1)) - 1.0)) > _rot_eps)
             rate_audit["steps"] += 1
             if moved:
                 rate_audit["clamped"] += 1
