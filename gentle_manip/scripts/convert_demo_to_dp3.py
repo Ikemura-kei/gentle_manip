@@ -75,6 +75,7 @@ def episode_to_dp3_arrays(
     point_cloud_key: str = "point_cloud",
     image_key_map: dict[str, str] | None = None,
     derive_action_config=None,
+    derive_lookahead: int = 1,
 ) -> dict[str, np.ndarray]:
     """Convert one gentle_manip episode to DP3 zarr arrays.
 
@@ -88,7 +89,8 @@ def episode_to_dp3_arrays(
     observations = episode["observations"]
     if derive_action_config is not None:
         from gentle_manip.actions.derive import derive_action_set
-        actions = derive_action_set(episode, derive_action_config).astype(np.float32)
+        actions = derive_action_set(episode, derive_action_config,
+                                    lookahead=derive_lookahead).astype(np.float32)
     else:
         actions = np.asarray(episode["actions"], dtype=np.float32)
     if actions.ndim != 2:
@@ -207,6 +209,7 @@ def convert_pickles_to_dp3(
     overwrite: bool = False,
     chunk_length: int = 100,
     derive_action_config=None,
+    derive_lookahead: int = 1,
 ) -> dict[str, tuple[tuple[int, ...], str]]:
     paths = _iter_pickles(inputs)
     episodes, source_meta = _load_episodes(paths)
@@ -218,6 +221,7 @@ def convert_pickles_to_dp3(
             point_cloud_key=point_cloud_key,
             image_key_map=image_key_map,
             derive_action_config=derive_action_config,
+            derive_lookahead=derive_lookahead,
         )
         for ep in episodes
     ]
@@ -272,6 +276,10 @@ def main() -> None:
     )
     parser.add_argument("--chunk-length", type=int, default=100)
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--derive-lookahead", type=int, default=1,
+                        help="ABSOLUTE --derive-action only: target = pose this many steps "
+                             "ahead (default 1; use ~4 -- see actions.derive docstring: K=1 "
+                             "stalls a BC absolute policy at a closed-loop fixed point)")
     parser.add_argument("--derive-action", type=Path, default=None,
                         help="DERIVE the action from the recorded EE-pose trajectory using this "
                              "action config (delta / abs_pose_abs_gripper / abs_pose_euler_abs_gripper) "
@@ -297,6 +305,7 @@ def main() -> None:
         overwrite=args.overwrite,
         chunk_length=args.chunk_length,
         derive_action_config=derive_cfg,
+        derive_lookahead=args.derive_lookahead,
     )
     print(f"wrote {args.output}")
     for key, (shape, dtype) in summary.items():

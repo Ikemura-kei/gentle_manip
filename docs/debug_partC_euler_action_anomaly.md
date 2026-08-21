@@ -1,5 +1,39 @@
 # Debug report: Part C (7d-euler-absolute) DPPO policy scores ~0% success
 
+> **SECOND ROOT CAUSE FOUND AND FIXED 2026-08-21 — closed-loop fixed-point stall from
+> K=1 achieved-pose derivation.** The seam fix below was necessary but NOT sufficient: the
+> seam-fixed retrains (zwiex/qvwdj on armfocus) still scored ~0%. Full forensic chain:
+> - Offline probe (aarch64 GPU job, model built exactly as eval builds it): the trained
+>   policy reproduces its OWN training actions with ~zero bias (descent-bottom z +0.5 mm) —
+>   training is fine.
+> - Offline full-transform replay (train.npz actions → venv de-norm → server ActionPipeline):
+>   decodes to the exact demo poses (commanded z bottoms at 0.003) — the transforms are fine.
+> - Instrumented live eval (`GM_EVAL_DUMP` in `gentle_manip/dppo/genesis_venv.py`, 5 eps):
+>   execution tracks commands within ~1 mm, but the policy NEVER COMMANDS below z=0.0341 —
+>   it approaches the mushroom-top asymptotically (and the gripper closes ever slower).
+> - Data measurement: with `--derive-action` at K=1 (target = NEXT achieved pose), the mean
+>   "pull" E[cmd_z − obs_z | obs_z] is **0.0 mm at every height** (spread ±2-3 mm mixing
+>   descend/hold/ascend frames) — a mean-seeking deterministic diffusion rollout has a
+>   closed-loop FIXED POINT everywhere, and any step-shrinkage compounds through the
+>   2-frame obs history (velocity feedback) into a stall. jfhlu's dataset (recorded
+>   COMMANDED targets) instead leads the achieved pose by 5-10 mm (controller lag) — that
+>   lead is what keeps its closed loop moving. Delta is immune (a shrunken delta still
+>   moves; no fixed point) — which is exactly the observed delta-works/abs-stalls split.
+>
+> **Fix:** `--derive-lookahead K` on both converters (`gentle_manip.actions.derive` K
+> parameter): absolute target = pose at t+K. K=4 restores a jfhlu-like lead (measured p75
+> +11.4 mm vs jfhlu's +10.3) with the euler seam still clean (0 jumps). All abs datasets
+> re-derived at K=4 and all abs arms relaunched (partA_dppo_abs_la4 / partA_dp3_abs_la4 /
+> partB_abs_s42/43_la4 / partC_7d_la4). K=1 runs zwiex/qvwdj/fvfnx marked
+> `invalid-k1-stall` in experiments.csv. Note this means oppsu failed from BOTH bugs
+> stacked (seam + stall), and the doc's original "achieved vs commanded are near-identical
+> for absolute mode" fairness claim is FALSE in closed loop — only the lookahead/commanded
+> form is closed-loop stable for BC'd absolute actions.
+>
+> Open separate issue (armfocus delta arms): success degrades over checkpoints
+> (uzgjm 0.625@100 → 0.01@300) via hold-phase drops while ever_success only drifts to
+> 0.43 — under investigation; unrelated to the encoding fixes above.
+
 > **RESOLVED 2026-08-20 (commit `76f5efa`).** The wraparound diagnosis below was verified
 > against ALL THREE abs datasets (Part A real 24.0%, Part B armfocus 18.1%, Part C hwo
 > 26.5% of consecutive-frame labels sign-flipping, while the physical orientation from the

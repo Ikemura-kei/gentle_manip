@@ -57,12 +57,13 @@ def _episode_state(ep: dict, obs_keys: Sequence[str]) -> np.ndarray:
 
 def convert(demo_paths: Sequence[Path], out_dir: Path, obs_keys: Sequence[str] = STATE_VIEW,
             pointcloud_key: str = None, val_split: float = 0.1, seed: int = 0,
-            derive_action_config=None) -> dict:
+            derive_action_config=None, derive_lookahead: int = 1) -> dict:
     episodes = _load_episodes(demo_paths)
     states = [_episode_state(ep, obs_keys) for ep in episodes]
     if derive_action_config is not None:                  # derive delta/absolute from the pose traj
         from gentle_manip.actions.derive import derive_action_set
-        actions = [derive_action_set(ep, derive_action_config) for ep in episodes]
+        actions = [derive_action_set(ep, derive_action_config, lookahead=derive_lookahead)
+                   for ep in episodes]
     else:
         actions = [np.asarray(ep["actions"], np.float32) for ep in episodes]
     rewards = [np.asarray(ep["rewards"], np.float32).reshape(-1) for ep in episodes]
@@ -173,6 +174,12 @@ def main() -> None:
                          "config (delta / abs_pose_abs_gripper / abs_pose_euler_abs_gripper), instead "
                          "of using the demo's stored actions. Lets ONE collection produce both a delta "
                          "and an absolute dataset (run convert twice with different --derive-action).")
+    ap.add_argument("--derive-lookahead", type=int, default=1,
+                    help="ABSOLUTE --derive-action only: target = pose this many steps ahead "
+                         "(default 1). Use ~4 so the target LEADS the current pose like recorded "
+                         "commanded targets do — K=1 has ~zero mean lead and the BC'd absolute "
+                         "policy stalls at a closed-loop fixed point above the object (see "
+                         "gentle_manip.actions.derive.derive_action_set).")
     args = ap.parse_args()
 
     derive_cfg = None
@@ -204,7 +211,8 @@ def main() -> None:
     paths = _find_demo_pkls(args.demos)
     print(f"converting {len(paths)} demo file(s): {[str(p) for p in paths]}")
     meta = convert(paths, args.out, obs_keys=obs_keys, pointcloud_key=args.pc_key,
-                   val_split=args.val_split, derive_action_config=derive_cfg)
+                   val_split=args.val_split, derive_action_config=derive_cfg,
+                   derive_lookahead=args.derive_lookahead)
     for k, v in meta.items():
         print(f"  {k}: {v}")
 

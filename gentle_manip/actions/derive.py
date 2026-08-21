@@ -24,18 +24,35 @@ def obs_quat(o: dict, T: int) -> np.ndarray:
     return R.from_matrix(M).as_quat()[:, [3, 0, 1, 2]]
 
 
-def derive_action_set(ep: dict, action_config) -> np.ndarray:
+def derive_action_set(ep: dict, action_config, lookahead: int = 1) -> np.ndarray:
     """Action set (T, action_dim) for `action_config`, derived from the demo's EE-pose trajectory
-    (target for step t = the NEXT observed pose, held on the last step). Delta vs absolute (+
-    rot_repr) is selected by action_config. Matches what an ActionPipeline maps back to the pose."""
+    (target for step t = the observed pose `lookahead` steps ahead, held on the last step). Delta
+    vs absolute (+ rot_repr) is selected by action_config. Matches what an ActionPipeline maps
+    back to the pose.
+
+    lookahead (ABSOLUTE mode only, default 1): how many steps ahead the target pose is. K=1
+    (next frame) makes the target lead the current pose by only one servo step (~2-3 mm) —
+    measured to be BELOW the closed-loop stability threshold for a BC'd absolute policy: the
+    conditional mean of "next pose | current pose" is ~the current pose (mean pull ≈ 0.0 mm at
+    every height in the derived data), so a deterministic diffusion rollout stalls at a fixed
+    point just above the object (observed: zwiex/qvwdj/oppsu never command below z≈0.034, ~0%
+    success). Recorded COMMANDED targets (jfhlu, 0.9 success) lead the achieved pose by 5-10 mm
+    (controller lag); K≈4 restores an equivalent lead from an achieved-pose trajectory. Delta
+    mode ignores lookahead (a per-step difference over K steps would just saturate the scales) —
+    passing lookahead>1 with a delta config is an error to keep datasets unambiguous."""
     from gentle_manip.actions.pipeline import invert_absolute_action, invert_delta_action
     o = ep["observations"]
     T = len(ep["actions"])
     pos = np.asarray(o["ee_pos"], np.float64).reshape(T, 3)
     quat = obs_quat(o, T)
     grip = np.asarray(o["gripper_width"], np.float64).reshape(T, -1)[:, 0]
+    if action_config.mode == "absolute":
+        nxt = np.minimum(np.arange(T) + int(lookahead), T - 1)
+        tp, tq, tg = pos[nxt], quat[nxt], grip[nxt]
+        return invert_absolute_action(tp, tq, tg, action_config)            # (T, 10 rot6d | 7 euler)
+    if int(lookahead) != 1:
+        raise ValueError(f"lookahead={lookahead} is only valid for absolute mode; "
+                         "delta derivation is defined per-step (K=1)")
     nxt = np.minimum(np.arange(T) + 1, T - 1)
     tp, tq, tg = pos[nxt], quat[nxt], grip[nxt]
-    if action_config.mode == "absolute":
-        return invert_absolute_action(tp, tq, tg, action_config)            # (T, 10 rot6d | 7 euler)
     return invert_delta_action(pos, quat, grip, tp, tq, tg, action_config)  # (T, 7) delta

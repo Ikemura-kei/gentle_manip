@@ -31,6 +31,7 @@ OUT=${OUT:?set OUT=<output .zarr path>}
 AGENT_POS_KEYS=${AGENT_POS_KEYS:-"ee_pos ee_quat gripper_width"}
 POINT_CLOUD_KEY=${POINT_CLOUD_KEY:-point_cloud}
 DERIVE_ACTION=${DERIVE_ACTION:-}
+DERIVE_LOOKAHEAD=${DERIVE_LOOKAHEAD:-1}
 OVERWRITE=${OVERWRITE:-1}
 
 echo "[sbatch] host=$(hostname) arch=$(uname -m) job=${SLURM_JOB_ID:-NA}"
@@ -39,7 +40,7 @@ echo "[sbatch] pkl=$PKL out=$OUT derive_action=${DERIVE_ACTION:-<none>}"
 
 ARGS=("$PKL" -o "$OUT" --agent-pos-keys $AGENT_POS_KEYS --point-cloud-key "$POINT_CLOUD_KEY")
 [ "$OVERWRITE" = "1" ] && ARGS+=(--overwrite)
-[ -n "$DERIVE_ACTION" ] && ARGS+=(--derive-action "$DERIVE_ACTION")
+[ -n "$DERIVE_ACTION" ] && ARGS+=(--derive-action "$DERIVE_ACTION" --derive-lookahead "$DERIVE_LOOKAHEAD")
 
 unset PYTHONPATH ROS_DISTRO 2>/dev/null || true
 uv run --project envs/dp3_arrhenius --no-sync python gentle_manip/scripts/convert_demo_to_dp3.py "${ARGS[@]}"
