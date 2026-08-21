@@ -191,9 +191,38 @@ correlates with measured peak stress at ρ = +0.80, and mass goes as scale³. Th
 why the firm pass is needed for success (it buys grip margin against a load the holdability check
 underestimates) and why the two are entangled.
 
-**Next experiment, and it is cheap:** log WHICH PHASE the peak stress occurs in. If the peak lands
-in `lift` rather than `grasp`/`firm`, the gentleness objective is modelling the wrong phase
-entirely, and no amount of squeeze-side tuning will fix it.
+#### ✅ ANSWERED — the objective models the wrong phase
+
+Logged the phase of peak stress over 25 episodes on the demo-generating config:
+
+| phase | episodes | share | mean peak |
+|---|---|---|---|
+| **lift** | **24** | **96 %** | 38 948 Pa |
+| firm | 1 | 4 % | 43 920 Pa |
+| grasp | 0 | 0 % | — |
+
+**The peak never occurs during the squeeze.** The gentleness objective computes stress from a
+static indentation at a commanded width, but 96 % of the damage happens when the object's WEIGHT
+loads the grasp during the lift — a phase the quasi-static model does not represent at all.
+
+This single fact explains every loose end:
+
+* why correcting the operating point eliminated **pinching** (a squeeze-phase property) but left
+  **yield exceedance** untouched (a lift-phase property);
+* why object **scale** is the dominant correlate of measured peak stress at ρ = +0.80 — mass goes
+  as scale³, and lift load goes as mass;
+* why FEM-predicted and sim-measured stress barely correlate (ρ = +0.10) — they are measurements
+  of *different phases*;
+* why the demonstrator needs a 4.5 mm blind over-squeeze to hold reliably — it is buying grip
+  margin against exactly the load the objective does not see.
+
+**Implication.** `accel` already enters the HOLDABILITY constraint (a binary feasibility check), but
+the reported STRESS comes from the indentation alone. Making the objective gentle in the sense that
+matters requires the stress term to include the **lift load** — the body-force/gravity contribution
+that `smgrasp/lift_stress.py` was originally built to compute (§11.1) and that the width-controlled
+path dropped. That machinery still exists; it needs reconnecting, not reinventing.
+
+Until then, no squeeze-side tuning — including the operating-point fix — can address gentleness.
 
 The operating-point fix is still correct and should be kept — it eliminated pinching and made the
 metric honest — but it is **necessary, not sufficient**.
