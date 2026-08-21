@@ -132,6 +132,39 @@ env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/dppo python -m gentle_mani
 # 4. eval every checkpoint through the canonical harness (see docs/training_and_eval.md)
 ```
 
+### Iteration 6' — the v4.1 payoff: TWO datasets, trained and compared
+
+The imitation-learnability question is the real one. The shelf adds a late wrist rotation — a large,
+novel action mode — so a gentler demonstrator does not automatically produce a better policy. Budget
+for training BOTH and comparing rather than assuming.
+
+| dataset | shelf | retry | role |
+|---|---|---|---|
+| `..._v4_7d` | off | off | the existing reference |
+| `..._v4retry_7d` | off | **on** | **the fallback** — robustness with no extra trajectory difficulty |
+| `..._v41_7d` | **on** | on | the candidate |
+
+```bash
+# fallback dataset (collect BOTH; the sim is the bottleneck, not the training)
+env -u PYTHONPATH -u ROS_DISTRO MUJOCO_GL=egl uv run --project envs/sim python \
+  grasp_synthesis/collect_demos_synth_v4.py \
+  --experiment single_lift_mushroom_soft_abs_action \
+  --n-episodes 500 --n-envs 8 --scene-dr-every 1 --record-video 20 \
+  --retry-max 2 --dr soft_orientation_robust --init-width-range 0.05 0.08
+
+# candidate: same, plus the winning shelf configuration from run_shelf_ablation.sh
+  ... --shelf-deg <winner> --shelf-open <winner> --retry-max 2 \
+      --dr soft_orientation_robust --init-width-range 0.05 0.08
+```
+
+Convert and train each exactly as in the Iteration 6 recipe above (only `--out` / `env=` differ),
+then eval every checkpoint through the canonical harness. **The comparison is between the trained
+policies, not between the demonstrators** — a demonstrator that is gentler in sim but produces a
+worse clone is not the better demonstrator for this project.
+
+Note the robustness knobs (`--dr soft_orientation_robust`, `--init-width-range`) are applied to BOTH
+datasets, so they are held constant and the comparison isolates the shelf.
+
 ### Iteration-0 gate RESULT (2x100 episodes, identical scenarios)
 
 I predicted the honest `collector_v3` baseline would come in materially below the reported
