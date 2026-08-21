@@ -796,3 +796,62 @@ def test_width_release_works_without_any_rotation():
     assert np.allclose(np.abs(np.asarray(q_r)), np.abs(np.asarray(q_b)), atol=1e-6)
     # the release must still be ramped, not a step at the start of the lift
     assert float(rel.target(0, li, 0)[2]) == pytest.approx(float(base.target(0, li, 0)[2]), abs=1e-7)
+
+
+# ── v5: rate-bounded trajectories ─────────────────────────────────────────────
+
+RATE_LIM = [0.0045, 0.0045, 0.0055, 0.012, 0.012, 0.045, 0.005]
+
+
+def _rollout_max_ratio(sched, traj):
+    """Worst per-axis (delta / bound) ratio over the full rolled-out command stream."""
+    from scipy.spatial.transform import Rotation as R
+    lim = np.asarray(RATE_LIM)
+    worst = 0.0
+    prev = None
+    for pi in range(sched.n_phases):
+        for k in range(sched.duration(pi)):
+            p, q, g = traj.target(0, pi, k)
+            p, q, g = np.asarray(p, float), np.asarray(q, float), float(g)
+            if prev is not None:
+                worst = max(worst, float(np.max(np.abs(p - prev[0]) / lim[:3])))
+                Rp = R.from_quat([prev[1][1], prev[1][2], prev[1][3], prev[1][0]])
+                Rc = R.from_quat([q[1], q[2], q[3], q[0]])
+                worst = max(worst, float(np.max(np.abs((Rc * Rp.inv()).as_rotvec()) / lim[3:6])))
+                worst = max(worst, abs(g - prev[2]) / lim[6])
+            prev = (p, q, g)
+    return worst
+
+
+@pytest.mark.parametrize("x", [
+    [0.470, 0.0, 0.0042, np.pi, 0.10, np.pi / 2, 0.0334],        # yaw-90 (worst yaw case)
+    [0.470, 0.0, 0.0042, np.pi, np.radians(27), 0.3, 0.0334],    # worst measured tilt
+    [0.470, 0.0, 0.0042, np.pi, np.radians(35), np.pi / 2, 0.0334],  # beyond-DR extreme
+])
+def test_bound_scaled_schedule_makes_the_rollout_fit_the_bounds(x):
+    """After scaling, NO step of the commanded stream exceeds the per-axis rate limit — which is
+    what makes the runtime clamp a no-op and keeps the executed motion genuinely min-jerk."""
+    from grasp_traj import bound_scaled_schedule
+    hp = np.array([[0.40, 0.0, 0.21]], np.float32)
+    hq = np.array([[0.0, 1.0, 0.0, 0.0]], np.float32)
+    kw = dict(lift_height=0.2, firm_close=0.002, standoff=0.05,
+              use_minjerk=True, preshape_factor=1.35)
+    sc = bound_scaled_schedule(SCHEDULE_V4_BLEND, [x], hp, hq, RATE_LIM, **kw)
+    ratio = _rollout_max_ratio(sc, GraspTrajectory(sc, [x], hp, hq, **kw))
+    assert ratio <= 1.0 + 1e-9, f"still {ratio:.3f}x over after scaling"
+    # and scaling never SHRINKS a phase (it only lengthens where needed)
+    for i in range(SCHEDULE_V4_BLEND.n_phases):
+        assert sc.duration(i) >= SCHEDULE_V4_BLEND.duration(i)
+
+
+def test_bound_scaled_schedule_is_identity_when_already_bounded():
+    """A yaw-90 top-down grasp fits the (1.5x-rotation) bounds with the stock durations — the
+    scaling must then return the schedule untouched, so default behaviour cannot drift."""
+    from grasp_traj import bound_scaled_schedule
+    x = [0.470, 0.0, 0.0042, np.pi, 0.10, np.pi / 2, 0.0334]
+    hp = np.array([[0.40, 0.0, 0.21]], np.float32)
+    hq = np.array([[0.0, 1.0, 0.0, 0.0]], np.float32)
+    kw = dict(lift_height=0.2, firm_close=0.002, standoff=0.05,
+              use_minjerk=True, preshape_factor=1.35)
+    sc = bound_scaled_schedule(SCHEDULE_V4_BLEND, [x], hp, hq, RATE_LIM, **kw)
+    assert sc.phases == SCHEDULE_V4_BLEND.phases

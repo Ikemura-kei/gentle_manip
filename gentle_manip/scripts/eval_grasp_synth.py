@@ -37,7 +37,7 @@ sys.path.insert(0, str(_REPO / "grasp_synthesis"))
 
 import collect_demos_synth_v3 as gsv3          # noqa: E402 — SDF synth helpers + firm constants
 from grasp_traj import (GraspTrajectory, PhaseSchedule, SCHEDULE_V3,  # noqa: E402
-                        SCHEDULE_V4, SCHEDULE_V4_BLEND)
+                        SCHEDULE_V4, SCHEDULE_V4_BLEND, bound_scaled_schedule)
 from smgrasp import finger_grasp as fg          # noqa: E402
 
 
@@ -122,6 +122,12 @@ class GraspSynthPolicy:
         # Recorded into summary.json so every run self-documents which objective produced it.
         self.objective = dict(objective or {})
         self.schedule = schedule
+        self._sched_nominal = schedule       # scaling in _setup_fsm always starts from THIS
+        # Per-step rate limit (delta-`scales` layout) from the experiment's action config — the
+        # same bound the collector enforces, so the benchmark measures the bounded trajectory.
+        self._rate_lim = (np.asarray(action_config.rate_limit, np.float64)
+                          if getattr(action_config, "rate_limit", None) is not None
+                          and action_config.mode == "absolute" else None)
         self.lift_height = float(gsv3.LIFT_HEIGHT if lift_height is None else lift_height)
         self.standoff = float(standoff)
         self.use_minjerk = bool(use_minjerk)
@@ -315,15 +321,26 @@ class GraspSynthPolicy:
         """Build the shared trajectory engine. Replaces the hand-rolled copy of the collector's
         `_env_target` that used to live here — the duplication (plus reading gsv3's mutable PHASES
         globals) is exactly how the benchmark drifted away from the collector's real behaviour."""
-        self.traj = GraspTrajectory(
-            self.schedule, all_best_x, home_pos, home_quat,
-            lift_height=self.lift_height, extra_close=self.extra_close,
-            firm_close=gsv3.FIRM_EXTRA_CLOSE_M, standoff=self.standoff,
-            use_minjerk=self.use_minjerk, preshape_factor=self.preshape_factor,
-            **self._resolve_shelf(all_best_x))
+        traj_kw = dict(lift_height=self.lift_height, extra_close=self.extra_close,
+                       firm_close=gsv3.FIRM_EXTRA_CLOSE_M, standoff=self.standoff,
+                       use_minjerk=self.use_minjerk, preshape_factor=self.preshape_factor,
+                       **self._resolve_shelf(all_best_x))
+        sched = self._sched_nominal
+        if self._rate_lim is not None:
+            # Same duration scaling the collector applies, same helper, same kwargs — so the
+            # benchmark measures the trajectory the collector actually generates.
+            sched = bound_scaled_schedule(sched, all_best_x, home_pos, home_quat,
+                                          self._rate_lim, **traj_kw)
+        self.schedule = sched          # FSM reads (act/_advance) use the SCALED schedule
+        self.traj = GraspTrajectory(sched, all_best_x, home_pos, home_quat, **traj_kw)
         N = self.num_envs
         self.phase_idx = np.zeros(N, np.int64)
         self.phase_step = np.zeros(N, np.int64)
+        # previous COMMANDED target per env, for the per-step clamp (same reference the backends
+        # use); seeded from the measured home the FSM starts at.
+        self._prev_cmd = (np.asarray(home_pos, np.float32).copy(),
+                          np.asarray(home_quat, np.float32).copy(),
+                          self.traj.width_open.copy())
         self.rest_stress = None
 
     def _resolve_shelf(self, all_best_x):
@@ -376,6 +393,15 @@ class GraspSynthPolicy:
             else:                                             # FSM done -> freeze at lift/hold target
                 p, q, g = self.traj.frozen_target(i)
             cur_pos[i], cur_quat[i], cur_grip[i] = p, q, g
+        if self._rate_lim is not None:
+            # Same per-step clamp the collector applies before recording — the benchmark executes
+            # (and scores the smoothness of) the exact command stream the dataset would contain.
+            from gentle_manip.actions.pipeline import clamp_absolute_target
+            pp, pq, pg = self._prev_cmd
+            cur_pos, cur_quat, cur_grip = clamp_absolute_target(
+                pp, pq, pg, cur_pos, cur_quat, cur_grip, self._rate_lim)
+            self._prev_cmd = (cur_pos.copy(), cur_quat.copy(), cur_grip.copy())
+
         # Ground-truth occlusion, sampled AFTER the targets so the finger geometry subtracted is the
         # pose actually commanded THIS step. Using the grasp pose throughout would be wrong during
         # the lift, when the gripper has moved away from it.

@@ -115,6 +115,11 @@ class PolicyEnv:
 
         self.perception = PerceptionPipeline(obs_config)
         self.action_pipeline = ActionPipeline(action_config)
+        # Absolute-mode per-step rate limit -> the backend seam (sim AND real), so an
+        # absolute policy emitting a pose jump is executed as a bounded walk toward the
+        # target instead of one full-speed servo motion. None = attribute untouched.
+        if getattr(action_config, "rate_limit", None) is not None:
+            self.backend.rate_limit = list(action_config.rate_limit)
         # Sim-only stochastic obs augmentation — set by sim experiments to close the
         # sim2real gap; left None for real deployment (the camera is already noisy).
         self._augmentor = build_augmentor(augmentation)

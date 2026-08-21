@@ -87,17 +87,73 @@ class PhaseSchedule:
 SCHEDULE_V3 = PhaseSchedule((("approach", 98), ("settle", 1), ("grasp", 37),
                              ("firm", 8), ("lift", 66), ("hold", 12)))
 
+# lift 66 -> 70 (v4 only; SCHEDULE_V3 mirrors the FROZEN v3 collector and keeps 66): dz needs 68
+# steps to fit the 5.5mm/step rate bound at min-jerk peak = 1.875x mean over the 200mm lift.
+# MUST match the v4 collector's N_LIFT — a duration differing between these constants and the
+# collector's CLI defaults is the same collector-vs-benchmark drift this file exists to prevent.
 SCHEDULE_V4 = PhaseSchedule((("approach_xy", 55), ("align", 25), ("descend", 18), ("settle", 1),
-                             ("grasp", 37), ("firm", 8), ("lift", 66), ("hold", 12)))
+                             ("grasp", 37), ("firm", 8), ("lift", 70), ("hold", 12)))
 
 # BLENDED v4: one continuous Bezier reach (home -> grasp, standoff as control point) instead of
 # travel/rotate/descend. Arrives along the approach axis without ever stopping mid-reach, which
 # is what the stop-and-go split costs (~5.7x dimensionless jerk).
 SCHEDULE_V4_BLEND = PhaseSchedule((("reach", 98), ("settle", 1), ("grasp", 37),
-                                   ("firm", 8), ("lift", 66), ("hold", 12)))
+                                   ("firm", 8), ("lift", 70), ("hold", 12)))
 
 # Phases during which the gripper is still opening/holding open (used by the collectors' firm check)
 _PRE_GRASP = ("approach", "approach_xy", "align", "descend", "settle")
+
+
+def bound_scaled_schedule(schedule: PhaseSchedule, best_x, home_pos, home_quat,
+                          rate_limit, *, max_iters: int = 3, **traj_kwargs) -> PhaseSchedule:
+    """Lengthen phase durations so the rolled-out trajectory fits `rate_limit` per step.
+
+    `rate_limit` is the delta-`scales` layout ([dx,dy,dz, droll,dpitch,dyaw, dgrip]); rotation is
+    measured as the world-frame rotvec between consecutive commanded quats — the same convention as
+    `clamp_absolute_target` and the backends' delta accumulation, so "fits the bound" here means
+    the executed clamp never engages.
+
+    Implementation is EMPIRICAL, not analytic: build the trajectory with exactly the kwargs the
+    caller will use, roll out every env's targets (pure math, no sim), measure each phase's worst
+    per-axis delta ratio, and scale that phase's duration by it. Min-jerk peak rate ~ 1/duration,
+    so one scaling pass is near-exact; iterate to convergence for the Bezier reach (whose peak
+    shifts slightly with duration). An analytic formula was rejected because the reach is a
+    Bezier x min-jerk composite whose peak has no closed form — and an approximation here would be
+    a bound that silently is not one.
+
+    Called by BOTH the collector and the benchmark with the same kwargs — one helper, two callers,
+    because a trajectory knob meaning different things in those two programs was a thrice-repeated
+    bug (shelf gate, shelf resolver, the --traj v4 schedule itself).
+    """
+    from scipy.spatial.transform import Rotation as _R
+
+    lim = np.asarray(rate_limit, np.float64)
+    sched = schedule
+    for _ in range(max_iters):
+        traj = GraspTrajectory(sched, best_x, home_pos, home_quat, **traj_kwargs)
+        worst = np.ones(sched.n_phases)                      # per-phase max delta/bound ratio
+        for i in range(traj.n):
+            prev = None
+            for pi in range(sched.n_phases):
+                for k in range(sched.duration(pi)):
+                    p, q, g = traj.target(i, pi, k)
+                    cur = (np.asarray(p, np.float64), np.asarray(q, np.float64), float(g))
+                    if prev is not None:
+                        dp = np.abs(cur[0] - prev[0]) / lim[:3]
+                        Rp = _R.from_quat([prev[1][1], prev[1][2], prev[1][3], prev[1][0]])
+                        Rc = _R.from_quat([cur[1][1], cur[1][2], cur[1][3], cur[1][0]])
+                        dr = np.abs((Rc * Rp.inv()).as_rotvec()) / lim[3:6]
+                        dg = abs(cur[2] - prev[2]) / lim[6]
+                        worst[pi] = max(worst[pi], dp.max(), dr.max(), dg)
+                    prev = cur
+        if worst.max() <= 1.0 + 1e-9:
+            return sched
+        phases = tuple((sched.name(pi),
+                        int(np.ceil(sched.duration(pi) * worst[pi])) if worst[pi] > 1.0
+                        else sched.duration(pi))
+                       for pi in range(sched.n_phases))
+        sched = PhaseSchedule(phases)
+    return sched
 
 
 def _wxyz_to_rot(q) -> Rot:

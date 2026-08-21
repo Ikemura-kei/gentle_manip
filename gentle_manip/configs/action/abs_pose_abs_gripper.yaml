@@ -25,3 +25,12 @@ pos_max: [0.59,  0.225, 0.50]
 
 gripper_min: 0.0
 gripper_max: 0.088
+
+# Per-step rate limit on the decoded absolute target (same layout/units as delta `scales`):
+# translation + gripper = delta_pose_delta_gripper_fast_rot.yaml exactly; rotation = 1.5x its
+# values (user decision 2026-08-21 — the fast_rot rotation bounds were conservatively tight for
+# scripted trajectories; 1.5x lets the standard reach/lift fit without lengthening episodes).
+# Enforced in TWO places: the backends clamp every executed command against the running target
+# (protects the real arm from any policy emitting a pose jump), and the scripted collectors clamp
+# the commanded targets before action inversion (so recorded datasets are bounded by construction).
+rate_limit: [0.0045, 0.0045, 0.0055, 0.012, 0.012, 0.045, 0.005]

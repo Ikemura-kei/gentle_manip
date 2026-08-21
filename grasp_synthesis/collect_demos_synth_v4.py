@@ -66,7 +66,8 @@ from synth_utils import (  # noqa: E402
 )
 from smgrasp import finger_grasp as fg  # noqa: E402  (FEM gentleness synthesis)
 from smgrasp import finger_viz          # noqa: E402  (grasp-pose viz paired with each execution video)
-from grasp_traj import (GraspTrajectory, PhaseSchedule,  # noqa: E402  (shared with the benchmark)
+from grasp_traj import (bound_scaled_schedule,
+                        GraspTrajectory, PhaseSchedule,  # noqa: E402  (shared with the benchmark)
                         SCHEDULE_V3, SCHEDULE_V4, SCHEDULE_V4_BLEND)
 from gentle_manip.actions.action_config import ActionConfig
 from gentle_manip.experiment import Experiment
@@ -83,7 +84,8 @@ from gentle_manip.domain_randomization.dr_config import DRConfig
 N_HOME_TO_PRE = 98          # v3 schedule: home → grasp pose interpolation steps
 N_SETTLE      = 1           # hold at grasp pose before closing
 N_GRASP       = 37           # gripper close steps
-N_LIFT        = 66          # lift steps
+N_LIFT        = 70          # lift steps (66 -> 70: dz needs 68 steps to fit the 5.5mm/step
+                            # rate bound at min-jerk peak = 1.875x mean over the 200mm lift)
 N_HOLD        = 12           # hold at lift height (success eval window)
 LIFT_HEIGHT   = 0.2         # metres above grasp position (default; --lift-height overrides)
 # v4 schedule: the approach budget is split across travel / rotate-in-place / straight descent.
@@ -525,12 +527,28 @@ def execute_and_collect(
     # The shared trajectory engine — same object the benchmark drives, so collection and evaluation
     # cannot diverge. It owns the standoff geometry, min-jerk time scaling, preshape, and the
     # stateful grip_target that the "firm" phase writes and lift/hold read back.
-    traj = GraspTrajectory(schedule, all_best_x, home_pos, home_quat,
-                           lift_height=lift_height, extra_close=extra_close,
-                           firm_close=FIRM_EXTRA_CLOSE_M, standoff=standoff,
-                           use_minjerk=use_minjerk, preshape_factor=preshape_factor,
-                           **({} if width_open is None else {"width_open": width_open}),
-                           **(shelf_kw or {}))
+    # ONE kwargs dict for both the duration scaling and the real construction — passing them
+    # separately is how the two would drift apart.
+    traj_kw = dict(lift_height=lift_height, extra_close=extra_close,
+                   firm_close=FIRM_EXTRA_CLOSE_M, standoff=standoff,
+                   use_minjerk=use_minjerk, preshape_factor=preshape_factor,
+                   **({} if width_open is None else {"width_open": width_open}),
+                   **(shelf_kw or {}))
+    _rate_lim = (np.asarray(action_config.rate_limit, np.float64)
+                 if getattr(action_config, "rate_limit", None) is not None
+                 and action_config.mode == "absolute" else None)
+    if _rate_lim is not None:
+        # Lengthen phases so the min-jerk trajectory FITS the rate bound by construction (the
+        # per-step clamp below then never engages and the executed motion keeps its bell profile).
+        scaled = bound_scaled_schedule(schedule, all_best_x, home_pos, home_quat, _rate_lim,
+                                       **traj_kw)
+        if scaled.phases != schedule.phases:
+            chg = [f"{scaled.name(i)} {schedule.duration(i)}->{scaled.duration(i)}"
+                   for i in range(schedule.n_phases)
+                   if scaled.duration(i) != schedule.duration(i)]
+            print(f"    [rate-limit] schedule lengthened to fit bounds: {', '.join(chg)}")
+        schedule = scaled
+    traj = GraspTrajectory(schedule, all_best_x, home_pos, home_quat, **traj_kw)
     pos_b, quat_b = traj.pos_b, traj.quat_b
     grasp_pos = pos_b.copy()
     _has_firm = schedule.has("firm")       # --n-firm 0 drops the phase: skip the check too
@@ -581,8 +599,29 @@ def execute_and_collect(
     # the grasp->firm rise is measured against. None until the first soft state.
     rest_stress = None
 
+    # Rate-limit audit: how often the per-step clamp engaged. bound_scaled_schedule above should
+    # make it a no-op; if it engages often, the scaling missed something and the executed motion is
+    # riding the clamp instead of being min-jerk.
+    rate_audit = {"steps": 0, "clamped": 0, "worst_ratio": 0.0}
+
     def _step(cur_pos, cur_quat, cur_grip, record_mask):
         nonlocal prev_pos, prev_quat, prev_grip
+
+        if _rate_lim is not None:
+            # Clamp the commanded target against the PREVIOUS commanded target BEFORE both the
+            # sim step and the action inversion, so the recorded action IS the clamped command
+            # and dataset == execution. Same primitive the backends run at deploy time.
+            from gentle_manip.actions.pipeline import clamp_absolute_target, invert_delta_action
+            c_pos, c_quat, c_grip = clamp_absolute_target(
+                prev_pos, prev_quat, prev_grip, cur_pos, cur_quat, cur_grip, _rate_lim)
+            moved = (np.max(np.abs(c_pos - cur_pos)) > 1e-9
+                     or np.max(np.abs(c_grip - cur_grip)) > 1e-9
+                     or np.max(np.abs(np.abs(np.sum(c_quat * cur_quat, axis=1)) - 1.0)) > 1e-9)
+            rate_audit["steps"] += 1
+            if moved:
+                rate_audit["clamped"] += 1
+            cur_pos, cur_quat, cur_grip = (c_pos.astype(np.float32), c_quat.astype(np.float32),
+                                           c_grip.astype(np.float32))
 
         # Invert scripted target → normalized action (delta needs prev_*; absolute
         # is a stateless per-step transform of the current target alone).
@@ -744,6 +783,14 @@ def execute_and_collect(
 
         phase_idx[rolled_over]  += advance[rolled_over]
         phase_step[rolled_over]  = 0
+
+    if _rate_lim is not None and rate_audit["steps"]:
+        frac = rate_audit["clamped"] / rate_audit["steps"]
+        msg = (f"    [rate-limit] clamp engaged on {rate_audit['clamped']}/{rate_audit['steps']} "
+               f"steps ({100 * frac:.1f}%)")
+        if frac > 0.02:
+            msg += "  *** >2%: bound_scaled_schedule missed something — motion is riding the clamp ***"
+        print(msg)
 
     if retry_max > 0 and np.any(n_retry > 0):
         print(f"    [retry] {int(np.sum(n_retry > 0))}/{num_envs} env(s) regrasped "
