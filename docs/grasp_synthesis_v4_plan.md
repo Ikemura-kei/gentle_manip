@@ -58,6 +58,49 @@ sweep only runs afterwards, at whichever release won.
 Status: geometry verified offline (pad centre held to 1.8e-8 m; fingers stack at every yaw; 55 deg
 optimum reproduced numerically), 5-episode sim smoke passed at 5/5 success, 2x2 in flight.
 
+### THE 2x2 RESULT (25 episodes/arm, identical scenarios) — my hypothesis was wrong twice
+
+| arm | theta | release | success | peak | sustained | bulk |
+|---|---|---|---|---|---|---|
+| baseline (= v4) | 0 | 0 | 0.960 | 51476 | 26945 | 7102 |
+| release only | 0 | 2.5mm | 0.960 | -0.0%~ | -0.0%~ | -0.0%~ |
+| release only (probe) | 0 | 6.0mm | 1.000 | -1.2%~ | -3.0%~ | -3.9%~ |
+| **rotation only** | **55** | **0** | **0.960** | +0.9%~ | **-11.8%**~ | **-28.6%** |
+| rotation + release | 55 | 2.5mm | **0.840** | +3.3%~ | -4.6%~ | -33.1% |
+
+`~` = inside 2 SE of the difference (n=25 -> the sustained floor is ~13%).
+
+**I predicted the opposite on both axes.** The plan argued that rotation at a FIXED width should be a
+regression (it adds `mg sin(theta)/2` of normal load, first order in von Mises, while removing only
+second-order shear) and that the benefit would come from spending the freed margin on a width
+release. Measured:
+
+1. **Rotation alone is the best arm.** Bulk stress -28.6 % (outside noise), sustained -11.8 %
+   (borderline), success unchanged at 0.960. The first-order normal-load argument was either wrong
+   or swamped by the shear it removes.
+2. **The release does essentially nothing at theta=0** — 2.5 mm moves every metric by <0.5 % per
+   episode, i.e. MPM noise, and a 6 mm probe only reaches -3 %. Consistent with the operating point:
+   v4fix already over-closes by ~9 mm (`base_squeeze` 2.5 + `execute_offset` 4.5 + `firm` 2.0), so
+   handing 2.5 mm back still leaves ~6.5 mm of indentation. The knob is live (unit-tested, and the
+   6 mm probe does move the numbers) — it is simply small against the over-squeeze.
+3. **The release COSTS success once the gripper is rotated**: 0.960 -> 0.840, four extra failures in
+   25, and sustained stress ends up WORSE than rotation alone. Loosening a tilted grip is not free.
+4. **Peak stress is immovable.** Every arm lands at 51-53 kPa against a 40 kPa yield. Six
+   configurations now (v2, v3 strict, v3 collector, v4fix, and all shelf arms) have failed to move
+   it, while bulk and sustained move freely. Peak is looking like a property of the contact
+   singularity rather than of the grasp strategy — worth its own investigation, separately.
+
+**Working conclusion: theta = 55, release = 0.** The theta sweep therefore runs at release = 0, not
+at 2.5 mm, and a 100-episode confirmation is running to move the -11.8 % sustained figure out of the
+noise band.
+
+⚠️ **A process note worth keeping.** The release-only arm first ran with `_shelf_on` gated on
+`shelf_deg` alone, so `shelf_open` was unreachable at theta=0 and the arm silently executed the
+BASELINE. It returned means agreeing with the baseline to ~1 Pa. Two independent 25-episode MPM runs
+cannot agree that closely, so "suspiciously clean null result" was the tell — the fix is in
+`grasp_traj.py` with a test, and the arm was re-run. This is the same failure mode as v4's headline
+bug: a knob that looks set but does not reach the thing it names.
+
 **Retry is deliberately INDEPENDENT of the shelf** and is the fallback: if the late wrist rotation
 turns out too hard for BC to clone, `v4 + retry` is still a better dataset at no cost in trajectory
 difficulty. Validated in sim by forcing the slip check to fire (a genuine slip is a few %, so an
