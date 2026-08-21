@@ -365,7 +365,28 @@ def _contact_area(obj, nodes) -> float:
     return float(obj._bface_area[full].sum())
 
 
-def score_finger_grasp(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
+def score_finger_grasp(obj, x_tcp, *, cam_pos=None, cam_azimuth_max_deg=None, **kw) -> dict:
+    """Public scoring entry: the full feasibility/gentleness ladder (below), plus the camera-
+    azimuth bound applied UNIFORMLY to every rung's score.
+
+    The azimuth penalty is added outside the ladder on purpose: `w_occ` failed precisely because
+    occlusion-reducing candidates returned at a flat infeasibility floor where a weight has no
+    gradient. A uniform shaped penalty preserves the ladder's ordering (feasibility still
+    dominates) while giving CMA an azimuth gradient at EVERY rung — and when no feasible grasp
+    exists inside the cone, the search degrades gracefully to the least-occluding feasible one
+    instead of failing.
+    """
+    r = _score_finger_grasp_impl(obj, x_tcp, **kw)
+    if cam_pos is not None:
+        az = cam_azimuth_deg(x_tcp, kw["obj_com"], cam_pos)
+        r["cam_azimuth_deg"] = az                              # audit, even with the bound off
+        if cam_azimuth_max_deg is not None and az > float(cam_azimuth_max_deg):
+            r = dict(r)
+            r["score"] = float(r["score"]) - CAM_AZ_SLOPE * (az - float(cam_azimuth_max_deg))
+    return r
+
+
+def _score_finger_grasp_impl(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                        table_z: float = 0.0, ground_buf: float = 0.0035, g: float = 9.81,
                        accel: float = 0.0, max_indent: float = 0.01, obj_sdf=None,
                        pen_tol: float = 0.003, table_tol: float = 0.002,
@@ -494,6 +515,32 @@ def _closing_axis_world(x_tcp) -> np.ndarray:
     return Rot.from_euler("xyz", np.asarray(x_tcp[3:6], float)).apply([0.0, 1.0, 0.0])
 
 
+# Shaped-penalty slope for the camera-azimuth bound, per DEGREE of excess. Sized against the score
+# scale: stress terms span ~20-60 kPa, so ~6 deg of excess (30000) outweighs any stress difference
+# between basins — the search leaves the cone only when NO feasible grasp exists inside it.
+CAM_AZ_SLOPE = 5000.0
+
+
+def cam_azimuth_deg(x_tcp, obj_com, cam_pos) -> float:
+    """Angle (deg) between the closing axis and the vertical plane PERPENDICULAR to the camera
+    ray: 0 = axis perpendicular to the ray (fingers stand BESIDE the line of sight — no
+    occlusion), 90 = axis along the ray (one finger sits between camera and object).
+
+    Measured on the rendered cloud: axis ⊥ ray -> occ 0.000, axis ∥ ray -> occ 0.698 for an
+    otherwise identical top-down grasp. This is the geometric quantity `w_occ` could not steer
+    (occlusion-reducing candidates sat at the flat infeasibility floor where a weight has no
+    gradient), so it is bounded structurally instead — the `roll_max` pattern, not a soft weight.
+    Horizontal projections only: a near-vertical closing axis occludes nothing from a
+    near-horizontal camera, and the degenerate case returns 0 accordingly.
+    """
+    a_h = _closing_axis_world(x_tcp)[:2]
+    d_h = (np.asarray(obj_com, float) - np.asarray(cam_pos, float))[:2]
+    na, nd_ = float(np.linalg.norm(a_h)), float(np.linalg.norm(d_h))
+    if na < 1e-8 or nd_ < 1e-8:
+        return 0.0
+    return float(np.degrees(np.arcsin(np.clip(abs(a_h @ d_h) / (na * nd_), 0.0, 1.0))))
+
+
 def _distinct_tcp_poses(feasible, n, *, pos_thr, ang_thr):
     """Top-scoring but spatially DISTINCT 7-DOF poses from the feasible pool — two poses are the same if
     their TCP positions are within `pos_thr` AND their closing axes within `ang_thr`. Returns up to `n`
@@ -523,6 +570,7 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                       w_align=None, w_peak=_UNSET, w_area=_UNSET, w_press=None,
                       w_com: float = 0.0, w_tilt: float = 0.0, w_occ: float = 0.0,
                       area_min: float = 0.0, cam_pos=None, occ_k: int = 96,
+                      cam_azimuth_max_deg=None,
                       execute_offset: float = 0.0,
                       roll_max: float = np.pi / 2,
                       refine: bool = True, refine_scan: int = 25, seed: int = 0, verbose: bool = False,
@@ -562,6 +610,9 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
         if _fwd: aln[_name] = _v
     aln.update(w_com=w_com, w_tilt=w_tilt, w_occ=w_occ, area_min=area_min,
                execute_offset=execute_offset)
+    if cam_pos is not None:
+        # cam_pos always -> the azimuth AUDIT is computed; the bound only bites when max is set.
+        aln.update(cam_pos=np.asarray(cam_pos, float), cam_azimuth_max_deg=cam_azimuth_max_deg)
     com = np.asarray(obj_com, float)
     if obj_sdf is None:                                          # build the penetration SDF once (reused)
         obj_sdf = build_object_sdf(obj)
@@ -631,6 +682,17 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
         return float(np.clip((proj.max() - proj.min()) - 2 * indent, 0.01, 0.079))
 
     yaws = np.linspace(-np.pi / 2, np.pi / 2, n_starts)
+    if cam_azimuth_max_deg is not None and cam_pos is not None:
+        # Centre the seed fan on the yaw whose closing axis is PERPENDICULAR to the camera ray and
+        # span only the allowed cone, so every start begins feasible w.r.t. the bound instead of
+        # paying the shaped penalty from step one. Top-down closing axis(yaw) = [sin y, -cos y, 0]
+        # is ⊥ d_h exactly when tan(y) = d_y/d_x; axis symmetry folds yaw0 into [-pi/2, pi/2].
+        d_h = (np.asarray(obj_com, float) - np.asarray(cam_pos, float))[:2]
+        if np.linalg.norm(d_h) > 1e-8:
+            yaw0 = float(np.arctan2(d_h[1], d_h[0]))
+            yaw0 = (yaw0 + np.pi / 2) % np.pi - np.pi / 2                  # fold mod pi
+            half = np.radians(float(cam_azimuth_max_deg))
+            yaws = yaw0 + np.linspace(-half, half, n_starts)
     pitch_seeds = np.zeros(n_starts)
     if _drng is not None:
         if diversity_tol > 0.0:
@@ -722,6 +784,7 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
            # grasp-quality AUDIT (always populated, independent of whether the terms are weighted) —
            # consumed by the benchmark's per-episode columns to make stem/pinch/side grasps countable.
            "tilt_deg": r.get("tilt_deg"), "com_lever": r.get("com_lever"), "occ": r.get("occ"),
+           "cam_azimuth_deg": r.get("cam_azimuth_deg"),
            "status": r.get("status")}
     if record_history:
         out["history"] = history

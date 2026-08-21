@@ -76,6 +76,17 @@ GRASP_PROFILES = {
     "v4fix": dict(w_align=2000.0, diversity_tol=0.3, jitter_deg=20.0, jitter_pos=0.003,
                   pitch_seed_deg=25.0, w_peak=0.3, area_min=4e-5,
                   execute_offset=0.0045),
+    # v5 = v4fix + the camera-azimuth bound. Occlusion was one of the THREE original v4 defects and
+    # the only one still standing: 38% of v4fix episodes hide >50% of the object, 24% hide >80%,
+    # and the soft w_occ penalty is provably inert (identical output for weights 0..20000 — the
+    # occlusion-reducing candidates sit at a flat infeasibility floor where a weight has no
+    # gradient). The bound is structural instead: closing-axis azimuth to the camera ray capped
+    # (roll_max pattern), applied as a shaped penalty at EVERY ladder rung + seed fan centred on
+    # the perpendicular direction. 45 deg is the starting value — the 45-vs-60 sweep on the
+    # *_grasp_eval_pcd experiment (ground-truth occ_pcd_lift) picks the final one.
+    "v5": dict(w_align=2000.0, diversity_tol=0.3, jitter_deg=20.0, jitter_pos=0.003,
+               pitch_seed_deg=25.0, w_peak=0.3, area_min=4e-5,
+               execute_offset=0.0045, cam_azimuth_max_deg=45.0),
 }
 from gentle_manip.envs.rpc import SimEnvClient   # noqa: E402
 from gentle_manip.evaluation import EvalSpec, run_eval  # noqa: E402
@@ -490,6 +501,9 @@ def main() -> None:
                     help="score each candidate at width MINUS this (metres) — the extra squeeze the "
                          "executor applies (base 2.5mm + firm 2mm = 0.0045). 0 scores an operating "
                          "point the robot never visits; see the v4fix profile.")
+    ap.add_argument("--grasp-cam-azimuth-max", type=float, default=None,
+                    help="override cam_azimuth_max_deg (v5's occlusion bound); None keeps the "
+                         "profile's value")
     ap.add_argument("--grasp-roll-max-deg", type=float, default=None,
                     help="half-width of the roll search band about top-down. 90 (default) admits a "
                          "fully horizontal tool axis, i.e. pure side grasps; try 15-30 to exclude them.")
@@ -535,7 +549,8 @@ def main() -> None:
                      ("w_occ", args.grasp_occ), ("area_min", args.grasp_area_min),
                      ("execute_offset", args.grasp_execute_offset),
                      ("diversity_tol", args.grasp_diversity_tol), ("jitter_deg", args.grasp_jitter_deg),
-                     ("jitter_pos", args.grasp_jitter_pos), ("pitch_seed_deg", args.grasp_pitch_seed_deg)):
+                     ("jitter_pos", args.grasp_jitter_pos), ("pitch_seed_deg", args.grasp_pitch_seed_deg),
+                     ("cam_azimuth_max_deg", args.grasp_cam_azimuth_max)):
         if val is not None:
             objective[key] = val
     if args.grasp_roll_max_deg is not None:

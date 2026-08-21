@@ -1029,6 +1029,12 @@ def main() -> None:
                         "fallback if the shelf trajectory turns out too hard to clone. The failed "
                         "attempt STAYS in the recorded demo on purpose -- a policy trained only on "
                         "clean successes has never seen what to do after a slip.")
+    p.add_argument("--grasp-cam-azimuth-max", type=float, default=None,
+                   help="v5 occlusion bound: cap the closing-axis azimuth to the camera ray (deg). "
+                        "0 = axis perpendicular to the ray (no occlusion), 90 = along it (a finger "
+                        "between camera and object). Structural (shaped penalty at every ladder "
+                        "rung + seeds centred on the perpendicular), because the soft w_occ weight "
+                        "is measurably inert. None = off; 45 is the v5 profile's value.")
     p.add_argument("--no-descend-check", action="store_true",
                    help="skip the swept collision check on the straight descent (which escalates the "
                         "standoff, then falls back to a top-down grasp, if the fingers would clip)")
@@ -1071,7 +1077,8 @@ def main() -> None:
     # The v4 objective priors, resolved once and applied to BOTH the primary synthesis and the
     # no-diversity retry (otherwise a retried env would be scored by a different objective).
     obj_kw = dict(w_com=args.grasp_com, w_tilt=args.grasp_tilt, w_occ=args.grasp_occ,
-                  area_min=args.grasp_area_min)   # cam_pos added below, once the task is loaded
+                  area_min=args.grasp_area_min,
+                  cam_azimuth_max_deg=args.grasp_cam_azimuth_max)  # cam_pos added below, once the task is loaded
     if args.grasp_peak is not None:
         obj_kw["w_peak"] = args.grasp_peak
     if args.grasp_roll_max_deg is not None:
@@ -1147,6 +1154,7 @@ def main() -> None:
                         "w_occ": args.grasp_occ, "w_peak": args.grasp_peak,
                         "area_min": args.grasp_area_min,
                         "roll_max_deg": args.grasp_roll_max_deg,
+                        "cam_azimuth_max_deg": args.grasp_cam_azimuth_max,
                         # v4.1 shelf lift
                         "shelf_deg": args.shelf_deg, "shelf_open": args.shelf_open,
                         "shelf_sign": args.shelf_sign,
