@@ -120,6 +120,22 @@ floor just relocates the pathology. With `area_min` the optimizer instead starts
 `area_min` (a hard floor) does the work; `w_peak` (a soft penalty) does not prevent the pinch on
 its own — worth knowing before tuning weights.
 
+**`area_min` swept, not guessed** (4 poses, executed-width stress):
+
+| area_min | exec stress | worst pad | held |
+|---|---|---|---|
+| 0 | 5 085 Pa | 9.2 mm² ← pinch | 4/4 |
+| 1–2e-5 | 10 918 Pa | 21.1 mm² | 4/4 |
+| 3e-5 | 15 478 Pa | 53.7 mm² | 4/4 |
+| **4e-5** | **15 022 Pa** | **59.1 mm²** | 4/4 |
+| 5e-5 | 15 022 Pa | 59.1 mm² | 4/4 |
+
+There is a real trade-off — more required contact means more genuine compression — but every value
+stays 3.6x or more below the historical 54.8 kPa, and **nothing loses holdability**, so the floor is
+not being bought with grip. 4e-5 dominates 3e-5 (more area at slightly lower stress) and sits at the
+start of a plateau, so that is the profile default. Caveat: one object, nominal mesh, 4 poses; the
+discrete plateaus suggest CMA is landing in a few distinct basins rather than varying smoothly.
+
 ⚠️ This is ONE grasp on the nominal mesh. It needs the 100-episode benchmark to confirm, above all
 that success does not regress: a wider grip could slip.
 
