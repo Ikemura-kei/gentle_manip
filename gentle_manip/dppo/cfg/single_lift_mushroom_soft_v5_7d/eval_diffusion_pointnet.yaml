@@ -24,12 +24,12 @@ _target_: gentle_manip.dppo.eval_agent.EvalHarnessAgent
 name: ${env_name}_eval_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
 logdir: ${eval_base:${base_policy_path}}/eval/${now:%Y-%m-%d}_${now:%H-%M-%S}
 base_policy_path: ???        # set on CLI: the pre_diffusion_pointnet (BC) checkpoint (state_700.pt)
-normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_mushroom_soft_abs_pcd_rot6d/normalization.npz
+normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_mushroom_soft_v5_7d/normalization.npz
 experiment: single_lift_mushroom_soft_abs_action  # EVAL stays on the canonical soft_orientation DR (robust DR is a COLLECTION knob; eval on it would break cross-version comparability)
 
 seed: 42
 device: cuda:0
-env_name: single_lift_mushroom_soft_abs_pcd_rot6d
+env_name: single_lift_mushroom_soft_v5_7d
 obs_dim: 8                     # proprio only (ee_pos3 + ee_quat4 + gripper1); cloud is separate
 action_dim: 7                 # abs pos3 + euler3 (frame-offset encoded) + gripper1
 denoising_steps: 20
@@ -64,7 +64,7 @@ env:
     act_steps: ${act_steps}
     normalization_path: ${normalization_path}
     port: 5570
-    obs_keys: [ee_pos, ee_rot6d, gripper_width]
+    obs_keys: [ee_pos, ee_quat, gripper_width]   # quat proprio (obs_dim 8), matches the v5_7d dataset
     pointcloud_key: point_cloud
 
 shape_meta:

@@ -12,7 +12,7 @@ PORT=${2:-5745}
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$REPO"
 CFG=$REPO/gentle_manip/dppo/cfg/single_lift_mushroom_soft_v5_7d
-EXP=single_lift_mushroom_soft_abs_action
+EXP=single_lift_mushroom_soft_abs_action_7d   # euler 7d action decode (matches the policy), canonical task+DR
 NORM=$REPO/dataset/dppo/single_lift_mushroom_soft_v5_7d/normalization.npz
 SRV_LOG=logs/grasp_bench/v5_eval_server_$PORT.log
 
