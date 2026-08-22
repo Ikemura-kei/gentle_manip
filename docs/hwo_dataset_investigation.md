@@ -88,6 +88,39 @@ the CLOUD after all.
 Both new datasets must pass the standard pre-flight (euler seam-free + commanded lead
 p75 ≥ 5 mm) before training — same gate as the `_cmd` arms.
 
+## Follow-up rounds (2026-08-22): real-workspace box + sim/real co-training
+
+**realws** (user-requested): absolute spawn box x [0.29, 0.48] × y [−0.11, 0.11] applied to
+BOTH collection and eval (`dr: soft_orientation_realws`). Collection `26-08-22-lov`
+(v3 firm recipe): 92.99% success on the 4.6×-larger region. Pure-sim policy `nmbtz`:
+0.47 / 0.655 / 0.69 / 0.665 / **0.71 (peak @500)** / 0.675 — modest cost vs 0.76 on the
+small box for full-workspace coverage. NOTE: realws-family evals use the (harder) realws
+box — not directly comparable to standard-box numbers.
+
+**R1 completed** (`khxdo`, state_400 re-run after a 4h eval timeout): full curve
+0.485 / 0.76 / 0.76 / 0.755 / 0.72 / 0.665 — peak 0.76 @200, = R2. Verdict above stands.
+
+**Sim+real co-training** (sim demos + the 50 real teleop demos `real_abs_cmd`, union
+normalization, aux dropped; {plain concat ~8% real, ×4 oversample ~25%} × 2 seeds):
+
+| run | sim data / eval box | real | curve peak |
+|---|---|---|---|
+| `wyigy` | armfocus_firm / std | 8% | **0.785 @100** |
+| `zgwyi` | armfocus_firm / std | 8% | 0.76 @200 (300 re-running after timeout) |
+| `fbeoe` | armfocus_firm / std | 25% | 0.745 @200 |
+| `gmxsx` | armfocus_firm / std | 25% | 0.65 @300 |
+| `afucm` | realws / realws | 8% | 0.685 @400 |
+| `jbtmt` | realws / realws | 8% | 0.585 @300-400 |
+| `yrwdd` | realws / realws | 25% | 0.65 @200 |
+| `eswpt` | realws / realws | 25% | 0.23 (outlier seed) |
+
+Reads: **plain-concat co-training is free in sim** (0.76-0.785 ≈ the pure-sim baselines
+0.76/0.71) — those checkpoints strictly dominate for real deployment. **×4 oversampling
+costs sim success and adds seed variance**; whether it buys real performance is a
+hardware question. Deployment shortlist: `nmbtz/state_500`, `afucm/state_400` (realws box);
+`wyigy/state_100`, `zgwyi/state_200`, `vdmtb/state_200` (standard box); `qjzsf/state_500-1000`
+(real-only Part A).
+
 ## Context: final ablation numbers these compare against (best checkpoint, canonical eval)
 
 | run | data / obs | action | best success |
