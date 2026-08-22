@@ -12,8 +12,14 @@
 >   stable across checkpoints (the commanded-supervision signature; contrast the
 >   achieved-derived arms' collapse). **Best sim2real candidate: `vdmtb` state_200** —
 >   real-matched arm-focus cloud + firm-grasp behavior + 7d euler abs.
-> - With the recipe equalized, the arm-focus cloud's sim cost is ~0.08-0.12
->   (0.76 vs eibno 0.84 / jfhlu 0.88) — the price of real-matched observations.
+> - **Cloud cost ≈ ZERO (corrected 2026-08-22):** R1 (`khxdo`, fresh hwo-obs collection,
+>   same recipe) peaks at 0.76@200-300 — identical to R2's 0.76 with the arm-focus cloud.
+>   The earlier "cloud costs 0.08-0.12" read compared fresh collections against the
+>   ORIGINAL hwo and was confounded. Arm-focus is strictly preferable (real-matched, free).
+> - **Residual original-vs-fresh gap ~0.08** (original hwo → 0.84-0.88; both fresh
+>   v3-recipe collections → 0.76): either run-level collection variance or v3 code drift —
+>   the post-af3540a commits include a genesis submodule bump (87f0dc9, different physics
+>   build), a concrete suspect. At this magnitude it does not change any decision.
 > - All future soft-body collections must use the v3 launcher with
 >   `N_HOME_TO_PRE=77 N_GRASP=30 GRASP_EXTRA_CLOSE=0.005` (see memory + this doc).
 > - R1 (hwo reproduction, `26-08-21-sxx`): collection reproduced at **94.2%** (hwo 94.75,
