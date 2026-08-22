@@ -153,11 +153,26 @@ class GraspSynthPolicy:
         scene_params (scale baked in), or the nominal registry mesh (× scale) if no scene DR."""
         sc = (self.venv.scenario_params() or {}).get("scene") or {}
         mp = sc.get("mesh_path")
+        scale = float(sc.get("scale", 1.0) or 1.0)
+        # ⚠️ THE SERVER'S DEFORMED FILE IS NOMINAL-SIZE. SimBackend._apply_scene_dr bakes the
+        # uniform scale onto ObjectEntry.scale (Genesis applies it at LOAD) and mesh_deform saves
+        # only the shape ops — so returning mesh_path directly hands the FEM/SDF a ~33mm mushroom
+        # while Genesis simulates it at 1.0-1.5x. Every scaled-scene benchmark synthesis before
+        # this fix planned on an undersized object: the executed widths silently over-squeezed by
+        # up to ~10mm, which held everything (success looked fine) while measuring a grasp nobody
+        # designed. Found via a 10-arm collector-vs-benchmark bisect: the collector (which BAKES
+        # scale into its files) failed honestly where the benchmark 'passed'.
         if mp and Path(mp).exists():
-            return str(mp)
+            if abs(scale - 1.0) < 1e-6:
+                return str(mp)
+            import trimesh
+            m = trimesh.load(str(mp), process=False, force="mesh")
+            m.apply_scale(scale)
+            dst = self._log_dir / f"{Path(mp).stem}_x{scale:.4f}.obj"
+            m.export(str(dst))
+            return str(dst)
         from gentle_manip.assets.registry import get_object_def
         nom = get_object_def(self.object_name).mesh_path
-        scale = float(sc.get("scale", 1.0) or 1.0)
         if abs(scale - 1.0) < 1e-6:
             return str(nom)
         import trimesh
