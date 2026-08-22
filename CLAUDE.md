@@ -56,6 +56,14 @@ checklist — do not skip an item because "it's just a quick run".
    (default 5570) and owns exactly ONE genesis child (single sim). When launching concurrently,
    give each its own `--port` and never share a server between two trainers. GPU memory is the
    limiter — check `nvidia-smi` headroom before stacking runs.
+9. **Document into `docs/DEVLOG.md` — always.** The devlog is the project's living memory
+   (mission, adopted foundation + repro recipe, conclusions, open questions, roadmap, dated
+   log). WHENEVER you (a) conclude an experiment round or investigation, (b) change an
+   adopted practice/recipe/config default, (c) discover a bug with a reusable lesson, or
+   (d) add a future-work idea worth keeping — record it in the DEVLOG in the same work
+   session: update the affected section (foundation table / conclusions / open questions /
+   TODO) and add or extend a dated Log entry. Deep dives go in a separate `docs/*.md`
+   subpage linked from the DEVLOG. A campaign is not finished until the DEVLOG reflects it.
 
 ## Architecture — The Big Picture
 
