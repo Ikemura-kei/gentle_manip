@@ -28,7 +28,9 @@ EXPERIMENT=${EXPERIMENT:?set EXPERIMENT=<sim experiment name (action pipeline!)>
 N_EPISODES=${N_EPISODES:-200}
 NUM_ENVS=${NUM_ENVS:-5}
 SEED=${SEED:-42}
-PORT=${PORT:-5570}
+# per-job port (jobs sharing a 4-GPU node MUST NOT collide on the rpc port —
+# a client connected to another job's server dies with "socket closed mid-message")
+PORT=${PORT:-$((5570 + ${SLURM_JOB_ID:-0} % 400))}
 OUT=${OUT:-}
 
 GCCLIB=/software/sse2/el9_gh200/manual/GCC/14.3.0/hpc1/lib64
