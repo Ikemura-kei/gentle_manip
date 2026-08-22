@@ -46,4 +46,15 @@ GRASP_PROFILES = {
     "v5": dict(w_align=2000.0, diversity_tol=0.3, jitter_deg=20.0, jitter_pos=0.003,
                pitch_seed_deg=25.0, w_peak=0.3, area_min=4e-5,
                execute_offset=0.0045, cam_azimuth_max_deg=45.0),
+    # v5c — the COLLECTION profile (2026-08-22). execute_offset is RETIRED here: it removes the
+    # historical 4.5mm blind over-squeeze, and the FEM's holdable margin does not survive MPM at
+    # honest widths (collector bisect on true-size meshes: offset alone 8/8 -> 1/8; +4g hold
+    # margin still 3/8; v5-minus-offset 6/8). w_peak/area_min are dropped with it — they were
+    # tuned AT the offset operating point. What remains measured-safe on true-size meshes:
+    # the collector_v3 diversity defaults + the azimuth occlusion bound (8/8 on the hardest
+    # scene-DR batch). Re-admitting the offset requires calibrating the FEM's mu/margin against
+    # MPM first — the '_current_mesh scale' fix (43b388a) explains why the benchmark never saw
+    # this: it planned on nominal-size meshes for every scaled scene.
+    "v5c": dict(w_align=2000.0, diversity_tol=0.3, jitter_deg=20.0, jitter_pos=0.003,
+                pitch_seed_deg=25.0, cam_azimuth_max_deg=45.0),
 }
