@@ -8,12 +8,20 @@
 > ≤0.72) for the xhk-based abs arms. Grasping with the arm-focus cloud now matches the
 > hwo-obs arms; the residual ~0.1 gap to eibno's 0.84 is either later-checkpoint headroom
 > (sweep in flight) or a small true cloud cost. Practical consequences:
-> - **`vdmtb` is the current best sim2real candidate**: real-matched arm-focus cloud +
->   firm-grasp behavior + 7d euler abs.
+> - **`vdmtb` full curve: 0.715 / 0.76 (peak @200) / 0.745 / 0.755 / 0.725 / 0.63** —
+>   stable across checkpoints (the commanded-supervision signature; contrast the
+>   achieved-derived arms' collapse). **Best sim2real candidate: `vdmtb` state_200** —
+>   real-matched arm-focus cloud + firm-grasp behavior + 7d euler abs.
+> - With the recipe equalized, the arm-focus cloud's sim cost is ~0.08-0.12
+>   (0.76 vs eibno 0.84 / jfhlu 0.88) — the price of real-matched observations.
 > - All future soft-body collections must use the v3 launcher with
 >   `N_HOME_TO_PRE=77 N_GRASP=30 GRASP_EXTRA_CLOSE=0.005` (see memory + this doc).
-> - R1 (hwo reproduction, collection `26-08-21-sxx`) still running as the final
->   luck-control; expected ≈ eibno.
+> - R1 (hwo reproduction, `26-08-21-sxx`): collection reproduced at **94.2%** (hwo 94.75,
+>   R2 94.2 — three v3-recipe collections within 0.6%); its policy training in flight as
+>   the final luck-control, expected ≈ eibno.
+> - realws follow-up (user-requested): optimal setup re-collected with the REAL-workspace
+>   spawn box x [0.29, 0.48] × y [−0.11, 0.11] applied to BOTH collection and eval
+>   (dr `soft_orientation_realws`, experiments `*_armfocus[_7d]_realws`).
 
 **Question (2026-08-21):** every policy trained on the hwo demos (jfhlu 0.88, eibno 0.84)
 beats every policy trained on the fresh armfocus collection xhk (0.62-0.75, both action
