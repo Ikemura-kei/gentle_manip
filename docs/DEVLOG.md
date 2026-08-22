@@ -167,6 +167,22 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
 
 ## Log
 
+**2026-08-23 — DP3 harness integration + two eval-comparability bugs (user-caught).**
+DP3 checkpoints now evaluate through the canonical harness (`eval_dp3_harness.py` +
+`dp3_eval.sbatch`). The user noticed from renders that DP3 evals' MPM particles looked
+randomly sampled where DPPO's looked regular — real bug: `GM_MPM_SAMPLER=regular` is
+pinned in `dppo_eval.sbatch` but was missing from the DP3 launcher (genesis silently
+falls back to the random sampler → different physics discretization). Second bug found
+while verifying: a venv horizon that isn't exactly `policy_steps × act_steps` skips the
+per-batch truncation auto-reset and shifts the DR RNG stream → pose scenarios diverge
+from batch 1 on (DP3's 37×8=296 vs DPPO's 75×4=300). Both fixed; batch-0 scenario params
+verified bit-identical across stacks. **Eval-protocol rules adopted:** (1) any new eval
+launcher must replicate ALL of `dppo_eval.sbatch`'s pinned GM_* env (sampler, substeps
+discipline) — diff the sim-server logs' `[scene_builder] GM overrides` line when in
+doubt; (2) real-demo-trained policies are evaluated with the `_realws` experiments (the
+real workspace box is their data's home turf), sim-trained policies with the experiment
+matching their collection's DR.
+
 **2026-08-20 → 08-23 — Action-space ablation campaign + follow-ups.** Parts A/B/C
 (DPPO vs DP3 × abs vs delta × real/sim data), two derivation-bug hunts (euler seam,
 fixed-point stall), commanded-target derivation, hwo recipe forensics (R1/R2), the realws
