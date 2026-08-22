@@ -24,13 +24,46 @@ def obs_quat(o: dict, T: int) -> np.ndarray:
     return R.from_matrix(M).as_quat()[:, [3, 0, 1, 2]]
 
 
-def derive_action_set(ep: dict, action_config) -> np.ndarray:
-    """Action set (T, action_dim) for `action_config`, derived from the demo's EE-pose trajectory
-    (target for step t = the NEXT observed pose, held on the last step). Delta vs absolute (+
-    rot_repr) is selected by action_config. Matches what an ActionPipeline maps back to the pose."""
+def commanded_pose_set(ep: dict, source_action_config) -> tuple | None:
+    """(pos, quat, grip) COMMANDED targets decoded from the demo's own recorded ABSOLUTE actions,
+    or None when the recording is delta-mode (no absolute target stream to decode)."""
+    if getattr(source_action_config, "mode", None) != "absolute":
+        return None
+    from gentle_manip.actions.pipeline import ActionPipeline
+    acts = np.asarray(ep["actions"], np.float32)
+    cmd = ActionPipeline(source_action_config).process(acts)      # (T, 8) pos+quat_wxyz+grip
+    return cmd[:, :3].astype(np.float64), cmd[:, 3:7].astype(np.float64), cmd[:, 7].astype(np.float64)
+
+
+def derive_action_set(ep: dict, action_config, source_action_config=None) -> np.ndarray:
+    """Action set (T, action_dim) for `action_config`, derived from the demo. Delta vs absolute
+    (+ rot_repr) is selected by action_config; matches what an ActionPipeline maps back to the pose.
+
+    SOURCE OF THE TARGET POSES — this choice decides whether the derived policy attenuates:
+
+    * `source_action_config` given AND the recording is absolute-mode: re-encode the demo's own
+      COMMANDED targets (decode its native actions, encode in the new representation). Exact — the
+      derived actions command precisely what the demonstrator commanded.
+    * fallback (delta-mode recordings, e.g. teleop): the MEASURED pose trajectory, target for step
+      t = the NEXT observed pose. ⚠️ The measured pose trails the commanded target by the
+      controller's tracking gap (v6 demos: 6.5mm mean, 16.5mm p95, 47mm max). A policy cloned from
+      measured-pose targets commands where the arm WAS; in closed loop the controller then lags
+      behind THAT, and the executed trajectory attenuates step over step. This is the mechanism
+      that put every derived-7d-euler policy at 0 success while their rot6d twins (native
+      commanded actions) were fine — and open-loop replay validation cannot see it.
+    """
     from gentle_manip.actions.pipeline import invert_absolute_action, invert_delta_action
-    o = ep["observations"]
     T = len(ep["actions"])
+    cmd = commanded_pose_set(ep, source_action_config) if source_action_config is not None else None
+    if cmd is not None:
+        tp, tq, tg = cmd                                   # commanded targets, step-aligned
+        if action_config.mode == "absolute":
+            return invert_absolute_action(tp, tq, tg, action_config)
+        # delta from commanded: prev = previous commanded target (the accumulation reference)
+        pp = np.vstack([tp[:1], tp[:-1]]); pq = np.vstack([tq[:1], tq[:-1]])
+        pg = np.concatenate([tg[:1], tg[:-1]])
+        return invert_delta_action(pp, pq, pg, tp, tq, tg, action_config)
+    o = ep["observations"]
     pos = np.asarray(o["ee_pos"], np.float64).reshape(T, 3)
     quat = obs_quat(o, T)
     grip = np.asarray(o["gripper_width"], np.float64).reshape(T, -1)[:, 0]
