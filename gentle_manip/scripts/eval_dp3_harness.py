@@ -111,15 +111,20 @@ def main() -> None:
     out = out if out.is_absolute() else (_REPO / out)
     out.mkdir(parents=True, exist_ok=True)
 
+    # venv horizon must be EXACTLY policy_steps*act_steps: the truncation auto-reset then
+    # fires once per batch like in DPPO evals (75*4=300), keeping the server-side DR RNG
+    # stream aligned so both stacks see IDENTICAL per-batch scenarios (measured: with a
+    # 296<300 horizon the auto-reset is skipped and pose draws diverge from batch 1 on).
+    max_policy_steps = args.max_episode_steps // n_action_steps
     venv = build_genesis_venv(
         num_envs=args.num_envs, obs_steps=n_obs_steps, act_steps=n_action_steps,
-        max_episode_steps=args.max_episode_steps,
+        max_episode_steps=max_policy_steps * n_action_steps,
         normalization_path=_identity_norm_npz(obs_dim, act_dim),
         obs_keys=["ee_pos", "ee_quat", "gripper_width"], pointcloud_key="point_cloud",
         port=args.port)
 
     spec = EvalSpec(n_episodes=args.n_episodes, num_envs=args.num_envs, seed=args.seed,
-                    max_policy_steps=args.max_episode_steps // n_action_steps,
+                    max_policy_steps=max_policy_steps,
                     scene_group_size=args.scene_group_size)
     run_eval(venv, _DP3Policy(policy, args.device, n_action_steps), spec, str(out),
              experiment_name=args.experiment, checkpoint=str(ckpt))

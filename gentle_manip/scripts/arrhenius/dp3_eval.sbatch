@@ -33,6 +33,8 @@ SEED=${SEED:-42}
 PORT=${PORT:-$((5570 + ${SLURM_JOB_ID:-0} % 400))}
 OUT=${OUT:-}
 
+export GM_MPM_SAMPLER=${GM_MPM_SAMPLER:-regular}   # pinned MPM sampler (aarch64 reference,
+                                   # matches dppo_eval.sbatch — random fallback breaks apples-to-apples)
 GCCLIB=/software/sse2/el9_gh200/manual/GCC/14.3.0/hpc1/lib64
 unset PYTHONPATH ROS_DISTRO 2>/dev/null || true
 

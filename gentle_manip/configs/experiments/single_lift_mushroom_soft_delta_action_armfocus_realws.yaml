@@ -1,0 +1,25 @@
+# [experiment] delta armfocus with the REAL-workspace object spawn box (dr: soft_orientation_realws).
+# Used by: Part B (arm-focus 7d delta) of docs/cluster_experiment_action_space_ablation.md — collect + eval
+# Status: experimental (action-space ablation, sim arm-focus delta arm)
+#
+# IDENTICAL to single_lift_mushroom_soft_abs_action_armfocus EXCEPT the action is
+# delta_pose_delta_gripper_fast_rot (7d: dx,dy,dz,droll,dpitch,dyaw,dgrip — accumulated by the backend)
+# instead of abs_pose_abs_gripper. Both euler-abs and delta policy outputs are 7-wide, so the sim server
+# CANNOT tell them apart by width — the DELTA arm must be evaluated with THIS (delta-mode) experiment and
+# the ABS arm with the euler-abs experiment, else the ActionPipeline mis-interprets the policy output.
+task: single_lift_mushroom_soft
+action: delta_pose_delta_gripper_fast_rot
+dr: soft_orientation_realws   # REAL-workspace object spawn box
+augmentation: l515_noise
+
+obs: superset_soft_armfocus
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400
