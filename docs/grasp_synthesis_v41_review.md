@@ -256,6 +256,39 @@ Methodology corrections:
 
 ---
 
+## 7b. OVERNIGHT ADDENDUM (2026-08-22, during plan execution) — two root causes found
+
+The approved plan's Part D (500-demo collection) failed on launch: 3-5 of 8 envs per batch closed
+on nothing. A 12-arm same-seed bisect followed. Everything previously suspected was exonerated
+one arm at a time (robust DR, init-width aperture, rate limit, azimuth bound, w_peak, area_min);
+two real defects remained:
+
+1. **`execute_offset` (v4's central fix) is not survivable in MPM at honest widths.** It removes
+   the historical 4.5mm blind over-squeeze — but that squeeze was silently PROVIDING the grip
+   margin. With it gone, the FEM's holdability (2μ·grip ≥ m·g) does not transfer to MPM:
+   offset alone took the batch from 8/8 to 1/8; a 4× hold margin (accel 29.4) still failed 3/8;
+   half offset 4/8. RETIRED from collection (profile `v5c`) pending FEM-vs-MPM margin calibration.
+
+2. **The benchmark has planned on NOMINAL-SIZE meshes for every scaled scene, all along.**
+   `SimBackend._apply_scene_dr` bakes scale onto `ObjectEntry.scale` (applied by Genesis at load)
+   while the deformed mesh FILE stays nominal; `eval_grasp_synth._current_mesh` returned that file
+   directly. The FEM planned a ~33mm mushroom while Genesis simulated 1.0–1.5× — executed widths
+   silently over-squeezed by up to ~10mm, which holds everything. **This is why the benchmark
+   scored v4fix/v5 at 0.95–0.97 while the collector (which bakes scale into its files — correct)
+   failed honestly at 1/8 with the same objective.** Fixed in `43b388a`.
+
+**Taint disclosure:** every scaled-scene benchmark number in this document (v4fix validation, the
+shelf 2×2/sweep, the azimuth sweep, the v5 0.970 gate) executed grasps planned for undersized
+objects. PAIRED comparisons stay internally consistent (both arms planned on the same wrong mesh,
+identical scenarios), so the shelf's relative conclusions and the azimuth's occlusion-tail
+collapse likely survive — but absolute success/stress levels describe over-squeezed executions
+and need re-measuring on the fixed benchmark before being quoted.
+
+**What went into the actual 500-episode collection** (probed 8/8 on the hardest scene-DR batch,
+true-size meshes): collector_v3 diversity defaults + `cam_azimuth_max_deg=45` (occlusion bound,
+re-validated without the offset) + rate bound (clamp engagement measured 0.0% with the honest
+audit) + retry 0.25 + robust-start DR + aperture DR with the preshape floor.
+
 ## 8. Proposed plan
 
 **Headline recommendation: drop the shelf, fix the demonstrator's soundness, and finally run the
