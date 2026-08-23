@@ -188,6 +188,7 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
 | 13 | Aux objectives on the real-data co-train | cluster agent | testable on afucm |
 | 14 | Camera-pose DR (slight: ~0.5 cm/axis, 1–5°) | cluster agent | testable on afucm |
 | 15 | DP horizon ablation: predict 8 / execute 4 (current: 4/4; re-planning at half-horizon is the standard diffusion-policy sweet spot) | cluster agent | testable on afucm |
+| 16 | **Paired-feature encoder regularization**: add a consistency term to the BC loss pulling the encoder features of PAIRED real/sim steps together (e.g. L2/cosine between the PointNet features of real step t and its sim-twin step t), using the paired cube3 datasets below (and any future real recording — the twin generator works on any run). Hypothesis: aligning the visual representation across domains improves sim2real beyond raw co-training | cluster agent | data ready (see 2026-08-23 paired-twin log entry); testable on the afucm setup |
 
 Sequencing summary: **1+2 first (local)** · 3 ongoing · 4 immediately next working day (user) ·
 5 after 2 confirms · 6 mesh-prep parallel (user) · 7 parallel (cluster) · 10 after 2+5 (or on
@@ -309,6 +310,22 @@ wherever the operator paused); (2) a DISCARDED episode's frames leaked as a ghos
 the next episode's video — this was the dominant desync (ghost contains real motion). Legacy
 videos from before the fixes align exactly by END-ANCHORING (the save side flushes at the save
 tick); the paired renderer does this automatically.
+
+**2026-08-23 — Paired real–sim twin of the cube3 probe (for item 1 analysis + item 16
+regularization).** New committed generator `gentle_manip/scripts/replay_real_to_sim_paired.py`:
+replays a real recording's delta actions open-loop in sim with the cube at the real
+first-frame TCP xy, the sim home Cartesian-matched to the real first frame, and obs/action
+processing taken from the real run's own `config.yaml` (the baked authority) — producing a
+demo-schema pkl paired STEP-FOR-STEP with the real one. Output (data, not committed — upload
+separately): **`dataset/demos/single_lift_cube3_rigid/26-08-23-oso`**, the sim twin of
+`single_lift_cube3_real/26-08-23-oso`; per-episode `match_report.yaml` + proprio-overlay PNGs
++ real|sim rolling cloud mp4s live beside the pkl. Pairing quality (ep1; full 5-ep report in
+`match_report.yaml`): EE err 1.7 mm mean / 8.0 mm max, quat 1.0°, gripper 0.2 mm, cloud NN
+13.5 mm (the cloud number includes the known real L515 noise + ~6–11 mm table-z extrinsic
+offset, not just replay drift). Sim nominal home landed within ~1 mm of the real home —
+home_offset correction is tiny. This is the data for allocation item 16 (paired-feature
+encoder regularization, cluster agent) and the substrate for item 1's data-difference
+analysis.
 
 **2026-08-23 — Work allocation & sequencing adopted** (user): items 1–14 above; local agent
 on real-vs-sim data analysis (cube probe + demo matching) first, occlusion integration and
