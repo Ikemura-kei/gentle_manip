@@ -35,16 +35,18 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
         # true extrinsics.
         self.jit_trans = float(cloud_pose_jitter_trans)
         self.jit_rot = float(cloud_pose_jitter_rot_deg)
+        self.first_frame_context = bool(first_frame_context)
+        data = np.load(dataset_path, allow_pickle=False)
+        total = int(np.sum(data["traj_lengths"][:max_n_episodes]))
+        self.point_clouds = torch.from_numpy(data["point_cloud"][:total]).float().to(device)
         # item 12: map every global step -> its episode's FIRST step (for the first-frame
         # context cloud). Never jittered — the anchor frame is the trustworthy view.
-        self.first_frame_context = bool(first_frame_context)
+        # (Placed AFTER the data load; the first revision referenced `data` before it
+        # existed -> UnboundLocalError, run gzjkf died at init.)
         if self.first_frame_context:
             tl = data["traj_lengths"][:max_n_episodes]
             firsts = np.repeat(np.concatenate([[0], np.cumsum(tl)[:-1]]), tl)[:total]
             self.first_idx = torch.from_numpy(firsts.astype(np.int64)).to(device)
-        data = np.load(dataset_path, allow_pickle=False)
-        total = int(np.sum(data["traj_lengths"][:max_n_episodes]))
-        self.point_clouds = torch.from_numpy(data["point_cloud"][:total]).float().to(device)
         # Auxiliary-objective LABELS (training-only), aligned per-transition. Present iff the
         # converter wrote them; the model reads them from conditions only when aux heads are on
         # (extra condition keys are ignored by the baseline network). The label is for the CURRENT
