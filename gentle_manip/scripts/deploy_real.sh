@@ -254,9 +254,12 @@
 # (plain concat, no oversampling — the winning co-train variant).
 #
 # Wiring notes (all verified 2026-08-23):
-#   * obs-config point_cloud_1cam_armfocus.yaml — REQUIRED: crop/1024/outlier identical to
-#     point_cloud_1cam_outlier PLUS the shared object_focus (arm-focus is sim+real-shared geometry;
-#     deploying without it feeds a cloud distribution the policy never saw).
+#   * obs-config point_cloud_1cam_armfocus.yaml — matches the DOMINANT (92% sim) training cloud.
+#     KNOWN CAVEAT: the 8% real co-train slice was recorded (July) BEFORE arm-focus existed
+#     (Aug 19) and the pkls keep only the final 1024-pt clouds, so it trained NON-focused and
+#     cannot be re-focused post-hoc — afucm's real-domain exposure never looked like deploy-time
+#     input under either config. Armfocus is still the right deploy choice (majority
+#     distribution); if afucm underperforms nmbtz in real, suspect this first.
 #   * action-config abs_pose_euler_abs_gripper.yaml — carries the euler frame offset AND
 #     rate_limit: the RealBackend clamps every executed step to the delta-fast_rot bounds
 #     (rotation x1.5), so a policy-emitted pose jump executes as a bounded walk, never a
