@@ -291,10 +291,26 @@ class DemoRecorder:
         obs_out = [o for o, k in zip(obs_buf, keep) if k]
         act_out = [a for a, k in zip(act_buf, keep) if k]
         rew_out = [r for r, k in zip(rew_buf, keep) if k]
+        # RGB frames (--record-rgb) are captured once per tick, exactly like the buffers —
+        # apply the SAME mask or the saved video runs ahead of the saved steps wherever the
+        # operator paused (leading idle is dropped entirely, so the video started seconds early).
+        if self._frames:
+            if len(self._frames) == T:
+                self._frames = [f for f, k in zip(self._frames, keep) if k]
+            else:  # defensive: never let a count mismatch silently desync — trim to min, warn
+                print(f"  [warn] frame/step count mismatch ({len(self._frames)} vs {T}); "
+                      f"masking best-effort")
+                m = min(len(self._frames), T)
+                self._frames = [f for f, k in zip(self._frames[:m], keep[:m]) if k]
         return obs_out, act_out, rew_out
 
     def _discard_episode(self) -> None:
         self._clear()
+        # Drop captured RGB frames too (the SAVE path flushes them AFTER _clear, so the wipe
+        # must live here, not in _clear): without this, a DISCARDED episode's frames stayed
+        # buffered and PREPENDED the next episode's video (ghost prefix -> desynced videos,
+        # found on the cube3 probe recordings).
+        self._frames = []
 
     def _clear(self) -> None:
         self._obs_buf = []

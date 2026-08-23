@@ -398,3 +398,71 @@ def test_record_rgb_frames_flow_from_last_raw_obs(tmp_path):
     rec.run()
     vids = list(tmp_path.glob("unit/*/videos/*.mp4"))
     assert len(vids) == 1, f"expected exactly one mp4 (saved ep only), got {vids}"
+
+
+def test_discarded_episode_frames_do_not_leak_into_the_next_video(tmp_path):
+    """_clear() must drop captured frames: before the fix, a DISCARDED episode's frames stayed
+    buffered and PREPENDED the next episode's mp4 (a ghost prefix with real motion in it, which
+    desynced every video after a discard — found on the cube3 probe recordings)."""
+    class _Raw:
+        def __init__(self):
+            self.rgb_images = {"cam_ext": np.random.randint(0, 255, (1, 16, 16, 3), np.uint8)}
+
+    env = MockEnv(); env.last_raw_obs = _Raw()
+    _orig = env.step
+    def step(a):
+        env.last_raw_obs = _Raw(); return _orig(a)
+    env.step = step
+
+    # ep A: 4 ticks then DISCARD; ep B: 3 ticks then SAVE; QUIT
+    rec = DemoRecorder(
+        env=env, teleop=FakeTeleop((0, 0, 0.01, 0, 0, 0, 0)),
+        keyboard=ScriptedKeyboard([set()]*4 + [{DISCARD}] + [set()]*3 + [{SAVE}, {QUIT}]),
+        task_name="unit", out_dir=tmp_path, rate_hz=0.0,
+        frame_fn=lambda: env.last_raw_obs.rgb_images["cam_ext"][0],
+        video_episodes=10**9)
+    rec.run()
+    import imageio.v2 as imageio
+    vid = imageio.mimread(str(next(tmp_path.glob("unit/*/videos/*.mp4"))), memtest=False)
+    kept = len(rec.episodes[0]["actions"])
+    assert len(vid) == kept, f"ghost prefix: video {len(vid)} frames != saved steps {kept}"
+
+
+def test_record_rgb_frames_pass_through_the_idle_trim(tmp_path):
+    """Frames must be masked by the SAME idle trim as the obs/action buffers, or the video
+    runs ahead of the saved steps wherever the operator paused (the leading pause is dropped
+    entirely from the data but was fully present in the video)."""
+    class _Raw:
+        def __init__(self):
+            self.rgb_images = {"cam_ext": np.random.randint(0, 255, (1, 16, 16, 3), np.uint8)}
+
+    env = MockEnv(); env.last_raw_obs = _Raw()
+    _orig = env.step
+    def step(a):
+        env.last_raw_obs = _Raw(); return _orig(a)
+    env.step = step
+
+    idle = np.zeros(7, np.float32)                      # |a| <= idle_threshold -> idle tick
+    move = np.array([0, 0, 0.01, 0, 0, 0, 0], np.float32)
+    seq = [idle]*4 + [move]*3 + [idle]*6 + [move]*2     # leading 4 (drop all) + interior 6 (keep 3)
+    class _SeqTeleop:
+        def __init__(self): self.i = 0
+        def open(self): pass
+        def close(self): pass
+        def get_action(self):
+            a = seq[min(self.i, len(seq)-1)]; self.i += 1; return a.copy()
+
+    rec = DemoRecorder(
+        env=env, teleop=_SeqTeleop(),
+        keyboard=ScriptedKeyboard([set()]*len(seq) + [{SAVE}, {QUIT}]),
+        task_name="unit", out_dir=tmp_path, rate_hz=0.0,
+        idle_threshold=1e-3, max_interior_idle=3, keep_trailing_idle=5,
+        frame_fn=lambda: env.last_raw_obs.rgb_images["cam_ext"][0],
+        video_episodes=10**9)
+    rec.run()
+    ep = rec.episodes[0]
+    kept = len(ep["actions"])                           # 3 + 3 + 2 = 8 of 15 ticks
+    import imageio.v2 as imageio
+    vid = imageio.mimread(str(next(tmp_path.glob("unit/*/videos/*.mp4"))), memtest=False)
+    assert kept == 8, f"idle trim changed? kept {kept}"
+    assert len(vid) == kept, f"video {len(vid)} frames != saved steps {kept}"

@@ -294,6 +294,22 @@ discipline) — diff the sim-server logs' `[scene_builder] GM overrides` line wh
 doubt; (2) real-demo-trained policies are evaluated with the `_realws` experiments (the
 real workspace box is their data's home turf), sim-trained policies with the experiment
 matching their collection's DR.
+**2026-08-23 — Item 1 real probe dataset recorded + verified** (user-recorded, local-agent
+checks): **`dataset/demos/single_lift_cube3_real/26-08-23-oso`** — 5 teleop episodes / 4,148
+steps of the 3 cm red cube placed right below the arm. Confirmed setup: armfocus obs at record
+time (fingerprint 0.93–0.94, matches the mushroom foundation band), delta fast_rot actions
+(±0.75 speed clip), 30 Hz, per-episode RGB mp4s (`videos/`) via the new `--record-rgb` knob,
+and paired RGB|cloud videos rendered (`videos_paired/`, via
+`gentle_manip/visualization/paired_rgb_cloud_video.py`). Content: ep1/2/5 real grasps (close
+at z≈0.3–1 cm, width settling 37 mm, lifted holding; ep1 also contains a genuine slip+retry),
+ep3/4 are air-closes (no cube grasp — width 17–21 mm at z≈8–9 cm). Sim twin staged: `cube3`
+mesh/registry/task (true 3 cm, rigid). TWO RECORDER BUGS found via the pairing and fixed with
+regression tests: (1) RGB frames were not masked by the idle trim (video ran ahead of the data
+wherever the operator paused); (2) a DISCARDED episode's frames leaked as a ghost prefix into
+the next episode's video — this was the dominant desync (ghost contains real motion). Legacy
+videos from before the fixes align exactly by END-ANCHORING (the save side flushes at the save
+tick); the paired renderer does this automatically.
+
 **2026-08-23 — Work allocation & sequencing adopted** (user): items 1–14 above; local agent
 on real-vs-sim data analysis (cube probe + demo matching) first, occlusion integration and
 missed-grasp robustness later; cluster agent on the afucm ablation (running), OOD, gentler
