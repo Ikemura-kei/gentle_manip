@@ -295,7 +295,7 @@
 #
 # ckpt=downloaded_runs/nmbtz/checkpoint/state_500.pt
 # normalization=downloaded_runs/nmbtz/normalization.npz
-#
+
 # uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
 #   --ckpt ${ckpt} \
 #   --ft-denoising-steps 0 \
@@ -326,17 +326,17 @@
 #   * big net auto-loads from downloaded_runs/qjzsf/.hydra; load-smoked.
 #   * Object placement: the real demos' own workspace (the realws box is a safe subset).
 #
-# ckpt=downloaded_runs/qjzsf/checkpoint/state_1000.pt
-# normalization=downloaded_runs/qjzsf/normalization.npz
-#
-# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-#   --ckpt ${ckpt} \
-#   --ft-denoising-steps 0 \
-#   --normalization ${normalization} \
-#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
-#   --smooth-alpha 0.6 \
-#   --max-pos-step-m 0.0065 \
-#   --record dataset/real_deploy/qjzsf1000 \
-#   --shard-size 10 \
-#   --max-steps 5000
+ckpt=downloaded_runs/qjzsf/checkpoint/state_1000.pt
+normalization=downloaded_runs/qjzsf/normalization.npz
+
+uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+  --ckpt ${ckpt} \
+  --ft-denoising-steps 0 \
+  --normalization ${normalization} \
+  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+  --smooth-alpha 0.6 \
+  --max-pos-step-m 0.0065 \
+  --record dataset/real_deploy/qjzsf1000 \
+  --shard-size 10 \
+  --max-steps 5000
