@@ -189,7 +189,14 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
 - [ ] Camera-pose DR (real extrinsics drift between calibrations).
 
 **Bookkeeping**
-- [~] Deploy-script entries for the shortlist: `afucm/state_400` added to `deploy_real.sh`
+- [x] Deploy-script entries for the shortlist: `afucm/state_400`, `nmbtz/state_500` and
+  `qjzsf/state_1000` all in `deploy_real.sh` (local agent, 2026-08-23), each wiring-verified
+  and load-smoked. Obs configs differ deliberately: armfocus for afucm/nmbtz (their training
+  cloud), plain outlier for qjzsf (its superset_real obs has no object_focus — verified
+  value-identical). afucm-vs-nmbtz on the same rig answers the "does real co-training help
+  in real?" open question. Remaining: `single_lift_mushroom_real_abs_7d` experiment config
+  (not blocking — deploy composes from obs/action files directly).
+  (was: `afucm/state_400` added to `deploy_real.sh`
   (local agent, 2026-08-23) — wiring verified (armfocus obs config, euler offset,
   rate-limit clamp active at the RealBackend, big-net auto-load, load-smoked). Remaining:
   the other shortlist checkpoints + the `single_lift_mushroom_real_abs_7d` experiment

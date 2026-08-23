@@ -267,17 +267,72 @@
 #   * REAL TABLE PLACEMENT: object inside x [0.29, 0.48], y [-0.11, 0.11] (robot-base frame)
 #     — the realws box this policy trained on.
 #
-ckpt=downloaded_runs/afucm/checkpoint/state_400.pt
-normalization=downloaded_runs/afucm/normalization.npz
+# ckpt=downloaded_runs/afucm/checkpoint/state_400.pt
+# normalization=downloaded_runs/afucm/normalization.npz
 
-uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-  --ckpt ${ckpt} \
-  --ft-denoising-steps 0 \
-  --normalization ${normalization} \
-  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
-  --smooth-alpha 0.6 \
-  --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/afucm400 \
-  --shard-size 10 \
-  --max-steps 5000
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} \
+#   --ft-denoising-steps 0 \
+#   --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --smooth-alpha 0.6 \
+#   --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/afucm400 \
+#   --shard-size 10 \
+#   --max-steps 5000
+
+# ── CLUSTER SHORTLIST: nmbtz/state_500 — PURE-SIM realws, 7d euler abs, arm-focus cloud ──────────
+# The pure-sim deployment candidate (realws sim success 0.71 @ state_500 — the campaign's best
+# no-real-data policy; curve 0.47/0.655/0.69/0.665/0.71/0.675). Identical stack to the afucm entry
+# above MINUS the real co-training: quat proprio (obs_dim 8) + ARM-FOCUS cloud + euler-7d COMMANDED
+# actions on the realws box. Deploying BOTH this and afucm answers "does real co-training help in
+# real?" — the devlog's open question — on the same rig, same day.
+# Wiring identical to afucm (armfocus obs REQUIRED; rate-limit clamp active; big net auto-loads
+# from downloaded_runs/nmbtz/.hydra). REAL TABLE PLACEMENT: x [0.29, 0.48], y [-0.11, 0.11].
+#
+# ckpt=downloaded_runs/nmbtz/checkpoint/state_500.pt
+# normalization=downloaded_runs/nmbtz/normalization.npz
+#
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} \
+#   --ft-denoising-steps 0 \
+#   --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --smooth-alpha 0.6 \
+#   --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/nmbtz500 \
+#   --shard-size 10 \
+#   --max-steps 5000
+
+# ── CLUSTER SHORTLIST: qjzsf/state_1000 — REAL-ONLY (55 demos), 7d euler abs (commanded + K4) ────
+# The real-data-only candidate: DPPO trained purely on the 55 real teleop demos, actions DERIVED
+# as euler-7d absolute from the delta recordings (commanded accumulation + K=4 lookahead — teleop
+# moves ±2.6mm/step, so K4 restores a stall-safe lead; see DEVLOG conclusion 5). Val-loss minimum
+# spans state_500-1000; state_1000 is the downloaded one (realws-box real→sim eval: 0.60 @1000,
+# 0.58 @500). No sim2real gap by construction — its weakness is 55 demos of coverage, not transfer.
+#
+# Wiring notes:
+#   * obs-config point_cloud_1cam_outlier.yaml — NOT armfocus: qjzsf's training obs
+#     (superset_real) has outlier denoise only, no object_focus; verified value-identical
+#     (crop/1024/voxel 0.01/min_neighbors 23/quat_noise 0.003). Deploying with armfocus would
+#     mismatch its cloud distribution.
+#   * action-config abs_pose_euler_abs_gripper.yaml — euler offset + rate-limit clamp active.
+#   * big net auto-loads from downloaded_runs/qjzsf/.hydra; load-smoked.
+#   * Object placement: the real demos' own workspace (the realws box is a safe subset).
+#
+# ckpt=downloaded_runs/qjzsf/checkpoint/state_1000.pt
+# normalization=downloaded_runs/qjzsf/normalization.npz
+#
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} \
+#   --ft-denoising-steps 0 \
+#   --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_outlier.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --smooth-alpha 0.6 \
+#   --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/qjzsf1000 \
+#   --shard-size 10 \
+#   --max-steps 5000
