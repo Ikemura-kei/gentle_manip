@@ -5,7 +5,7 @@
 # IDENTICAL to single_lift_mushroom_soft_abs_action_armfocus EXCEPT the action is abs_pose_euler_abs_gripper
 # (7d: 3 pos + 3 euler + 1 grip) instead of abs_pose_abs_gripper (10d rot6d). The eval sim server derives
 # its ActionPipeline from this action, so the 7d arm-focus ABS policy must be evaluated with THIS experiment.
-task: single_lift_mushroom_soft
+task: single_lift_mushroom_soft_ood   # raised spawn z for OOD scale
 action: abs_pose_euler_abs_gripper
 dr: soft_orientation_realws_ood   # OOD size+shape eval (item 7)
 augmentation: l515_noise

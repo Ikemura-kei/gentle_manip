@@ -1,0 +1,60 @@
+# [task] OOD twin of single_lift_mushroom_soft: raised spawn z for the 1.5-1.8x scaled
+# meshes (a 1.8x + bent mushroom's lowest point dipped 0.6mm below the MPM boundary at
+# the default spawn height -> GenesisWorker init failure). Settles onto the plane anyway.
+# Used by: experiments (task:) -> SERL teacher, DP3/DPPO, demo collection
+# Status: active
+#
+# Lift a real scanned mushroom (soft MPM body). The point of this task is GENTLE
+# manipulation: lift it without bruising, i.e. keep von Mises stress under the ~40 kPa
+# yield. Uses the soft-body "Config C" sim params (see materials.py / CLAUDE.md).
+# Success = the object CENTER sits in an ABSOLUTE height band [0.175, 0.275] m, held for
+# hold_steps. Absolute (not relative) so it's checkable on the real robot with a ruler.
+# Upper bound widened 0.225->0.275 (2026-07-29): see single_lift_mushroom_rigid.yaml note —
+# a trained policy stably overshot to ~0.23-0.25 despite the demos themselves sitting at
+# 0.209+-0.005, so the old ceiling was penalizing an otherwise-successful held lift.
+success_z_min: 0.175
+success_z_max: 0.275
+hold_steps: 30           # consecutive steps in the band for success (~1 s at 30 Hz)
+object_name: "mushroom"
+object_type: "soft"      # MPM -> has von_mises_stress for the stress reward
+
+# Config C (from examples/mushroom_soft_dev.py sweep): E=0.3 MPa needs ~210 substeps
+# for CFL stability at grid_density 250 (~840 particles, ~15 physics steps/s, 1 env).
+# aarch64/GH200: 210 (tuned on x86) NaNs during grasp on GH200 (rigid "decrease timestep").
+# 420 fully restores parity (success 0.76, stress 47.6k ≈ x86 44.9k); trying 220 as a cheaper
+# value — testing whether a small bump above 210 is enough. TODO: confirm 220 is stable.
+sim_substeps: 235
+mpm_grid_density: 250
+
+# Reward ×0.1 globally (2026-07-02): dense return was ~78/episode -> large Q-targets gave
+# SAC's overestimation room to diverge (Q climbed to ~370+, return dropped, succeed stayed 0
+# even with grad-clip+UTD+low LR). Every reward scale below is 1/10th its prior value so
+# returns are ~8 and Q stays small/bounded. Demo rewards are rescaled ×0.1 to match.
+# (Paired with discount 0.97->0.92 in the experiment rl block.)
+success_scale: 0.2
+
+rewards:
+  # Gentleness: penalty = -(von_mises / yield)^2 * scale. yield (~40 kPa) auto-injected
+  # from the material, so cap is a FRACTION of yield (1.0 = bruising onset). scale=2.0
+  # (bumped from 1.0) so gentle beats bruising by ~1.5/step vs the +2/step success — a
+  # firmer gentleness incentive. TODO: confirm a gentle grasp can still succeed.
+  stress:
+    scale: 0.2
+    cap: 1.5
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 0.1
+    # decay 20 -> 8 (2026-07-02): exp(-20d) is ~flat (~0.02) beyond 10cm, so from the
+    # ~20cm home pose the policy got no gradient to approach. exp(-8d) gives a smooth,
+    # informative pull across the whole 0.02-0.3m approach range.
+    decay: 8.0
+  # Lift: rise normalized to [0,1] by lift_target (~rest->success-band rise) then *scale,
+  # so a fully-lifted object gives ~1.0 (a real gradient toward the success band), ~10x
+  # the old raw-metres term, with no runaway for over-lifting.
+  lift:
+    scale: 0.1
+    grasp_gate_dist: 0.079
+    lift_target: 0.16
+
+object_spawn_z: 0.035   # default (registry) is 0.016; extra clearance for OOD scale
