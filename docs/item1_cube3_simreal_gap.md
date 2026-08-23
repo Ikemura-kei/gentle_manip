@@ -64,9 +64,11 @@ appearance differences (below).
   table patch: real 6.9–8.6 mm vs sim 8.7 mm. The historical ~6–11 mm table-z extrinsic
   offset is NOT present in this recording (both clouds are floor-censored by the crop's
   z_min 4 mm, so sub-4 mm offsets are unobservable — but nothing like the old offset shows).
-- **Real cube is sparser.** 58–70 object points vs sim's 92, and thinner top face (9–16 vs
-  27 pts): L515 dropout on a small object at grazing incidence. Real extents also flutter
-  ep-to-ep (x 28–51 mm) where sim is constant at 51 mm.
+- **Real cube is sparser, but the shape matches.** 58–70 object points vs sim's 92, and a
+  thinner top face (9–16 vs 27 pts): L515 dropout on a small object at grazing incidence.
+  Real extents also flutter ep-to-ep (x 28–51 mm) where sim is constant at 51 mm (unstable
+  silhouette). After removing the 25 mm translation, the object chamfer drops to roughly
+  the noise floor — the object-region difference is POSITION + SPARSITY, not geometry.
 - **Rigid physics replays even accidental contact.** In ep1 the operator pushed the cube
   ~7 cm before grasping; the open-loop sim twin reproduced the push to **3 mm** final
   position. ep2/ep5 pushes diverged 20–24 mm (contact-outcome sensitivity) — still the same

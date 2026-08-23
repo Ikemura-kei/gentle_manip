@@ -320,7 +320,13 @@ over-read / extrinsic xy residual — actionable via the existing `point_cloud_s
 recalibration). The OBJECT segment is displaced +25 mm x: the 9 mm bias plus ~16 mm of
 by-eye placement offset (protocol fix: register the cube by jogging the TCP onto it). One
 rigid translation explains 43 % of the whole gap (14.8 → 8.4 mm); the residual is diffuse
-(L515 noise; real cube renders 58–70 pts vs sim 92 — grazing-angle dropout). z is healthy
+(L515 noise; real cube renders 58–70 pts vs sim 92 — grazing-angle dropout). Object-point
+detail: the real top face is thin (9–16 pts vs sim 27) and reads ~2 mm lower (both domains
+read the 31 mm top low at the L515's near-edge-on elevation); the real x-extent flutters
+28–51 mm between episodes where sim is a constant 51 mm (unstable silhouette); after
+removing the 25 mm translation the object chamfer drops to roughly the noise floor — the
+difference is POSITION + SPARSITY, not shape, i.e. exactly the nuisance variation item 16's
+paired feature-consistency loss should absorb. z is healthy
 (top face within ~2 mm; the historical 6–11 mm table-z offset is absent here). Bonus
 findings: armfocus clouds are ~93 % arm with NO far-field table in either domain; rigid sim
 replayed an accidental 7 cm cube push to 3 mm (ep1); the real servo's ROTATION tracking lags
