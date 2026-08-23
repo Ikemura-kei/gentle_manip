@@ -173,7 +173,7 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
 
 | # | item | owner | status / sequencing |
 |---|---|---|---|
-| 1 | Real data: 3 cm cube placed right below the arm; analyze sim-vs-real data difference | **local agent** | FIRST (with 2). Sim-side counterpart partly staged: `cube4` task/experiment configs exist |
+| 1 | Real data: 3 cm cube placed right below the arm; analyze sim-vs-real data difference | **local agent** | **DONE** — probe recorded, sim twin generated, gap decomposed (~9 mm perception x-bias + placement offset; [report](item1_cube3_simreal_gap.md)) |
 | 2 | Real-vs-sim demo analysis (trajectory character, speed, grasp speed, grasp width, …); match the scripted demo to real properties → better co-training | **local agent** | FIRST (with 1). Slow/pausing trajectories are fine when the derivation carries lead — qjzsf (real-only, slow teleop, K=4 lookahead) works in real; the v6 stall was K=1 with near-zero lead. Just derive slowed sim demos with lookahead (or verify the lead/dwell gates) as done for teleop |
 | 3 | afucm real-data-amount ablation {1, 5, 10, 20, 30 demos}, tested in real | cluster agent | RUNNING. Paper-grade ablation re-done on the finalized method later |
 | 4 | Sync colleague on the FIXED SETUP: native 7d euler action · arm-focus cloud · quat proprio · realws DR · DPPO codebase · ×3.5 big net (512 + [1024]³, 2.89 M EMA) | user | next working day. (Note: "native 7d" — recording native euler commands is bit-equivalent to the validated 10d-record + `--derive-source-action` path, ~1e-7; either satisfies the setup) |
@@ -310,6 +310,23 @@ wherever the operator paused); (2) a DISCARDED episode's frames leaked as a ghos
 the next episode's video — this was the dominant desync (ghost contains real motion). Legacy
 videos from before the fixes align exactly by END-ANCHORING (the save side flushes at the save
 tick); the paired renderer does this automatically.
+
+**2026-08-23 — Item 1 gap analysis: the real-sim cloud difference decomposes into a ~9 mm
+perception bias + placement offset.** Full report: [item1_cube3_simreal_gap.md](item1_cube3_simreal_gap.md).
+On the paired cube3 datasets (below): full-cloud chamfer 14–18 mm/frame. The proprio-pinned
+ARM segment shows a systematic real→sim displacement of **+9 mm in x** (8.0–10.8 across all
+5 eps, y/z ≤2 mm) = the real rig's perception bias along the cam_ext ray (L515 depth
+over-read / extrinsic xy residual — actionable via the existing `point_cloud_shift` knob or
+recalibration). The OBJECT segment is displaced +25 mm x: the 9 mm bias plus ~16 mm of
+by-eye placement offset (protocol fix: register the cube by jogging the TCP onto it). One
+rigid translation explains 43 % of the whole gap (14.8 → 8.4 mm); the residual is diffuse
+(L515 noise; real cube renders 58–70 pts vs sim 92 — grazing-angle dropout). z is healthy
+(top face within ~2 mm; the historical 6–11 mm table-z offset is absent here). Bonus
+findings: armfocus clouds are ~93 % arm with NO far-field table in either domain; rigid sim
+replayed an accidental 7 cm cube push to 3 mm (ep1); the real servo's ROTATION tracking lags
+(ep4 drifts to ~8–15° during fast yaw) — an execution-side gap already mitigated by the
+rate-limit bounds. Paired videos now render 3 views per side (`--render-only` re-render;
+RGB|cloud renderer likewise upgraded).
 
 **2026-08-23 — Paired real–sim twin of the cube3 probe (for item 1 analysis + item 16
 regularization).** New committed generator `gentle_manip/scripts/replay_real_to_sim_paired.py`:
