@@ -30,7 +30,7 @@ real robot — that is the next gate.**
 | action derivation | **recorded COMMANDED targets** (`--derive-source-action`), +K=4 lookahead for slow real teleop | achieved-pose derivation stalls at a closed-loop fixed point (see debug doc); commanded supervision also gives stable checkpoint curves. NOTE: commanded targets carry the closed-loop lead INHERENTLY (controller tracking lag, 5-10 mm) — natively recording 7d-euler commands at collection time would be bit-equivalent (decode→re-encode is lossless, ~1e-7) and needs no lookahead; we record 10d + derive only to keep one collection convertible to ANY action space. Lookahead is a patch for lead-deficient sources only (achieved poses; slow real teleop at ±2.6 mm) |
 | workspace DR | **real-workspace absolute spawn box** x [0.29, 0.48] × y [−0.11, 0.11] | matches the physical table; 0.71 sim success on the 4.6×-larger region |
 | demo collection | **v3 collector, hwo recipe**: phases 77/30, `grasp_extra_close=5 mm` (+2 mm soft-firm) | the recipe (not the cloud, not luck) explains the 0.62→0.76+ policy gap and 85%→94% collection success |
-| trainer | DPPO PointNet diffusion (big net) | DP3-vs-DPPO comparison in flight (see Open questions) |
+| trainer | **DPPO** PointNet diffusion (big net) | beats DP3 on both regimes: sim 0.76-stable vs 0.74-unstable/0.53-plateau; real 0.60 vs 0.52 (canonical harness, resolved 2026-08-23) |
 | checkpoint selection | sweep every checkpoint with the canonical harness; peak is at 100-300/600 | every stable run peaks early; never ship the final epoch |
 
 ### Reproduction recipe (exact commands)
@@ -109,10 +109,9 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
 
 - **Real-robot validation of the whole foundation** — nothing above is real-verified yet.
 - **Does real co-training help in real?** (sim says it's free; real says nothing yet)
-- **DP3 vs DPPO codebase** — harness evals of DP3 now exist (real-data DP3-abs already
-  shows 0.40 sim success through the real→sim gap in a smoke); a DP3-on-sim arm
-  (armfocus_firm data) is training for the clean comparison vs DPPO's 0.76. **We keep
-  whichever trains better.**
+- ~~DP3 vs DPPO codebase~~ **RESOLVED: DPPO** (sim: stable 0.76 vs DP3's unstable curve
+  plateauing ~0.53; real: 0.60 vs 0.52 — see final report §6b). DP3's real-delta arm
+  (0.48 ever → 0.01 success, hold-drift) doubles as the empirical proof of abs-over-delta.
 - Residual ~0.08 original-hwo vs fresh-collection gap: run variance vs the genesis
   submodule bump — only matters if it reappears.
 
@@ -139,7 +138,7 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
   retry brainstorm) so the policy sees recovery behavior.
 
 **Policy / architecture**
-- [ ] **DP horizon ablation**: prediction horizon 8 with execution steps 4 (current DPPO:
+- [ ] (deprioritized: DPPO chosen) **DP horizon ablation**: prediction horizon 8 with execution steps 4 (current DPPO:
   4/4; DP3 default: 16 predict / 8 execute) — re-planning at half-horizon is the standard
   diffusion-policy sweet spot.
 - [ ] **Memory in the policy** (RNN/GRU or temporal transformer over obs history): retain

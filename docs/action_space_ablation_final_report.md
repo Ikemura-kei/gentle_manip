@@ -139,6 +139,27 @@ sim success and adds seed variance; its real-robot value is untested.
 
 ---
 
+## 6b. DP3 vs DPPO (the Part A algorithm axis, resolved 2026-08-23)
+
+DP3 checkpoints are evaluated through the same canonical harness (`eval_dp3_harness.py` +
+`dp3_eval.sbatch`; identity normalization since DP3 normalizes internally; pinned
+`GM_MPM_SAMPLER=regular` + venv horizon = policy_steps×act_steps for scenario-exact
+comparability — see DEVLOG 2026-08-23 entry for the two bugs this surfaced).
+
+| comparison | DPPO | DP3 |
+|---|---|---|
+| sim data (armfocus_firm, std box) | `vdmtb` **0.76 @200** (stable 0.715-0.76) | best 0.74 @epoch-0, drops to 0.285 @100, plateaus 0.52-0.55; ever ~0.70 |
+| real 55 demos (realws box eval) | `qjzsf` **0.58 @500 / 0.60 @1000** (ever 0.61) | 0.52 @5500 / 0.51 @6000 (ever 0.53-0.54) |
+| real delta (realws box) | — | 0.015/0.005 success but 0.445-0.48 ever — grasps, then DRIFTS during hold |
+
+**Verdict: DPPO** — higher and far more stable on sim data, ~0.08 ahead on real data.
+DP3's real-delta result is also the cleanest empirical demonstration of conclusion #2:
+same demos, same algorithm, only the action space differs — abs holds (0.52), delta lifts
+but drops (0.48 ever → 0.01 success). Notes: real-trained policies are evaluated on the
+REALWS box (their data's home turf; abs went 0.40 → 0.52 switching to it). DP3 runs need
+`checkpoint.topk.k=12` or only the most-overfit checkpoint survives. Retrained DP3-abs
+(12 ckpts) selective sweep in flight for robot-side checkpoint selection.
+
 ## 7. Deployment guide
 
 **Shortlist (sim-ranked; real value to be measured on the robot):**
