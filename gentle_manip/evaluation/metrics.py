@@ -38,7 +38,39 @@ CSV_FIELDS = ["episode", "batch", "env", "scenario_seed", "success", "ever_succe
               "obj_dx", "obj_dy", "obj_roll", "obj_pitch", "obj_yaw",
               "home_dx", "home_dy", "home_dz", "mat_E", "mat_nu", "mat_rho", "mat_yield",
               "obj_scale", "obj_bend_deg", "obj_twist_deg", "obj_taper", "obj_rbf",
-              "obj_axis_scale", "obj_axis"]
+              "obj_axis_scale", "obj_axis",
+              # ── APPEND-ONLY below. New columns go at the END so existing parsers that key on
+              # position keep working, and any record missing them is written blank (see
+              # write_episodes_csv) rather than erroring.
+              #
+              # Trajectory smoothness / "human-likeness" of the EE path (gentle_manip.evaluation
+              # .smoothness). BLANK unless the venv exposes `policy_dt` — jerk is a third
+              # derivative, so a chunked venv's aliased trace would give wrong, not just noisy,
+              # numbers. sparc: spectral arc length (less negative = smoother, human reaches
+              # ~ -1.4..-1.6); njerk: dimensionless jerk (lower = smoother); vpeaks: submovement
+              # count (a human point-to-point reach has exactly 1).
+              "ee_sparc", "ee_njerk", "ee_vpeaks", "ee_path_len", "grip_sparc", "grip_njerk",
+              # act_* = smoothness of the COMMANDED action stream. Reported alongside ee_*
+              # because they measure different things: ee_* is dominated by the position
+              # controller's tracking, while act_* is exactly what a cloned policy must
+              # reproduce. A reference-trajectory change can move act_* 5.6x with no
+              # visible effect on ee_*, so an ee_*-only gate would miss it.
+              "act_sparc", "act_njerk", "act_vpeaks",
+              # Grasp-quality audit, contributed by the POLICY via the optional episode_metrics()
+              # hook. Blank for every learned policy; populated by the scripted grasp synthesizer,
+              # which is the only thing that knows which grasp it chose and why.
+              # stem_grasp / pinch_grasp are 0/1 indicators of the two defects v4 targets.
+              "grasp_tilt_deg", "grasp_min_pad_mm2", "grasp_com_lever_mm", "grasp_width_mm",
+              "grasp_occ_pred", "grasp_stress_pred_pa", "grasp_score", "grasp_status",
+              "stem_grasp", "pinch_grasp",
+              # GROUND-TRUTH occlusion from the rendered cloud (the *_grasp_eval_pcd
+              # experiment only). occ_pcd_* = fraction of the object points visible at
+              # rest that are gone by that phase. Validates grasp_occ_pred, which is
+              # only a geometric prediction.
+              "occ_pcd_baseline_pts", "occ_pcd_grasp", "occ_pcd_lift",
+              # WHICH PHASE the peak stress occurred in. The gentleness objective models the
+              # SQUEEZE; if the peak lands in `lift`, it is aimed at the wrong phase.
+              "peak_stress_phase", "peak_stress_pa"]
 
 
 def _nan(x) -> float:
@@ -55,7 +87,24 @@ def write_episodes_csv(records: List[Dict[str, Any]], path: Path) -> None:
 
 
 def _clean(vals: List[float]) -> np.ndarray:
-    return np.asarray([v for v in vals if v is not None and not math.isnan(v)], dtype=float)
+    """Finite numeric entries only, skipping anything that is not a number.
+
+    Deliberately tolerant: `math.isnan` raises TypeError on a str, so a single non-numeric value in
+    an aggregated column used to abort the ENTIRE eval inside aggregate() — after every episode had
+    already been simulated and written. Categorical columns (grasp_status, peak_stress_phase) live
+    in the same record dicts as numeric ones, so this must not be a fatal combination.
+    """
+    out = []
+    for v in vals:
+        if v is None or isinstance(v, str):
+            continue
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if not math.isnan(f):
+            out.append(f)
+    return np.asarray(out, dtype=float)
 
 
 def _mean_std(vals: List[float]):
@@ -78,6 +127,30 @@ STRESS_COLS = [
     ("stress_top20_tmax", False), ("stress_top20_ttop20", True),  # headline interaction tail
     ("stress_mean_tmean", False),                                 # backup == old stress_mean
 ]
+
+
+# Auxiliary per-episode columns to aggregate into summary.json: (column, success_gated).
+# Smoothness is NOT gated — a failed episode still has a trajectory worth scoring. The grasp audit
+# IS gated, matching the stress convention (a grasp that never happened shouldn't set the average).
+AUX_COLS = [
+    ("ee_sparc", False), ("ee_njerk", False), ("ee_vpeaks", False), ("ee_path_len", False),
+    ("grip_sparc", False), ("grip_njerk", False),
+    ("act_sparc", False), ("act_njerk", False), ("act_vpeaks", False),
+    ("grasp_tilt_deg", True), ("grasp_min_pad_mm2", True), ("grasp_com_lever_mm", True),
+    ("grasp_width_mm", True), ("grasp_occ_pred", True), ("grasp_stress_pred_pa", True),
+    ("occ_pcd_grasp", True), ("occ_pcd_lift", True),
+    ("peak_stress_pa", True),
+]
+# 0/1 defect indicators -> reported as RATES over ALL episodes (counting failures is the point).
+# ONLY genuine indicators belong here: a "rate" of a point count or a pressure is a mislabelled
+# mean (an earlier copy-paste put occ_pcd_baseline_pts and peak_stress_pa here and reported
+# `peak_stress_pa_rate: 50187`, which reads as a fraction and is not one).
+AUX_RATE_COLS = ["stem_grasp", "pinch_grasp"]
+
+# Categorical columns -> reported as a {value: fraction} distribution. peak_stress_phase is the
+# one that matters: the gentleness objective models the SQUEEZE, so a distribution concentrated on
+# `lift` means the objective is aimed at the wrong phase entirely.
+AUX_DIST_COLS = ["peak_stress_phase"]
 
 
 def aggregate(records: List[Dict[str, Any]], **meta) -> Dict[str, Any]:
@@ -123,6 +196,25 @@ def aggregate(records: List[Dict[str, Any]], **meta) -> Dict[str, Any]:
         # all-episode backup mean (exposes the "gentle but failed" trap; compare to old evals)
         allm, _ = _mean_std([r.get("stress_mean_tmean") for r in records])
         out["stress_mean_tmean_mean_all"] = _nan(allm)
+
+    # ── auxiliary aggregates (smoothness + grasp-quality audit) ──────────────
+    # Only emitted when the columns are actually populated, so summaries from runs without them
+    # are unchanged. Smoothness is over ALL episodes (a failed episode still has a trajectory, and
+    # its smoothness is meaningful); the grasp audit is SUCCESS-GATED for the same reason stress is
+    # — except the defect RATES, which are the whole point and must count failures too.
+    for col, gated in AUX_COLS:
+        src = succ_recs if gated else records
+        vals = _clean([r.get(col) for r in src])
+        if vals.size:
+            out[col + "_mean"] = _nan(float(vals.mean()))
+    for col in AUX_RATE_COLS:                       # defect rates over ALL episodes
+        vals = _clean([r.get(col) for r in records])
+        if vals.size:
+            out[col + "_rate"] = float(vals.mean())
+    for col in AUX_DIST_COLS:                       # categorical -> {value: fraction}
+        vals = [str(r[col]) for r in records if r.get(col) not in (None, "")]
+        if vals:
+            out[col + "_dist"] = {v: vals.count(v) / len(vals) for v in sorted(set(vals))}
     return out
 
 

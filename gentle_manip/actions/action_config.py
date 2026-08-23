@@ -74,6 +74,15 @@ class ActionConfig:
     # the seam. None (default) = no offset — backward compatible with rot6d and delta configs.
     euler_frame_offset_deg: Tuple[float, float, float] = None
 
+    # Absolute mode only: per-step rate limit on the DECODED target, same layout/units as the
+    # delta-mode `scales` ([dx,dy,dz (m), droll,dpitch,dyaw (rad, world-frame rotvec), dgrip (m)]).
+    # When set, each commanded absolute target is clamped against the PREVIOUS commanded target so
+    # no single step moves the arm faster than a delta-mode policy could — an absolute policy that
+    # emits a pose jump (e.g. its very first step, from home straight to a far target) otherwise
+    # executes that jump at full servo speed, which on the real XArm is an abrupt, potentially
+    # damaging motion. None (default) = no limiting, bit-identical to before.
+    rate_limit: List[float] = None
+
     @property
     def action_dim(self) -> int:
         if self.mode == "absolute":
@@ -106,6 +115,12 @@ class ActionConfig:
             if self.euler_frame_offset_deg is not None and len(self.euler_frame_offset_deg) != 3:
                 raise ValueError(f"euler_frame_offset_deg must be length 3, got "
                                  f"{self.euler_frame_offset_deg}")
+            if self.rate_limit is not None:
+                if len(self.rate_limit) != 7:
+                    raise ValueError(f"rate_limit must be length 7 "
+                                     f"([dx,dy,dz,droll,dpitch,dyaw,dgrip]), got {self.rate_limit}")
+                if any(v <= 0 for v in self.rate_limit):
+                    raise ValueError(f"rate_limit entries must be positive, got {self.rate_limit}")
 
     @classmethod
     def from_dict(cls, d: dict) -> ActionConfig:
@@ -125,6 +140,8 @@ class ActionConfig:
             kwargs["euler_seq"] = d.get("euler_seq", cls.euler_seq)
             off = d.get("euler_frame_offset_deg")
             kwargs["euler_frame_offset_deg"] = None if off is None else tuple(off)
+            rl = d.get("rate_limit")
+            kwargs["rate_limit"] = None if rl is None else [float(v) for v in rl]
         else:
             kwargs["scales"] = d.get("scales", cls.__dataclass_fields__["scales"].default_factory())
         cfg = cls(**kwargs)

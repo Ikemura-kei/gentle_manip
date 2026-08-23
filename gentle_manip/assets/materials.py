@@ -40,4 +40,16 @@ MATERIALS: dict[str, Material] = {
     # 4e4 / E 3e5 -> ~13% yield strain, so it bruises under a firm grasp (the regime
     # the gentle-manipulation stress reward targets). TODO: calibrate to a real mushroom.
     "mushroom": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=1000.0, von_mises_yield_stress=4e4),
+    # ── Grasp-benchmark shape objects ────────────────────────────────────────────────────────────
+    # These exist to vary GEOMETRY, not material: cylinder/cube share the mushroom's stiffness,
+    # density and yield so a benchmark difference is attributable to shape rather than to a
+    # confounded material change. Same soft-end E for the same MPM-stability reason.
+    "soft_shape": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=1000.0,
+                           von_mises_yield_stress=4e4),
+    # Raspberry (Rubus idaeus): a drupelet aggregate, markedly more fragile than a mushroom —
+    # it bruises at a light squeeze. Softer (E 0.1 MPa) with a lower yield (15 kPa) and lower
+    # density (it is largely water in thin-walled drupelets, and juicier/lighter than a mushroom).
+    # TODO: calibrate against a real berry; these are literature-plausible, not measured.
+    "raspberry": Material(youngs_modulus=1e5, poisson_ratio=0.4, density=900.0,
+                          von_mises_yield_stress=1.5e4),
 }

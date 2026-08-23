@@ -111,6 +111,10 @@ class RealBackend:
         self._target_pos = np.zeros(3, dtype=np.float64)
         self._target_quat = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
         self._target_gripper = self._gripper_max
+        # Optional per-step rate limit for ABSOLUTE commands (delta-`scales` layout). Assigned by
+        # PolicyEnv from ActionConfig.rate_limit. THIS is the guard that keeps a policy-emitted
+        # pose jump from being executed at full servo speed on the real arm.
+        self.rate_limit = None
 
     # ── Backend protocol ──────────────────────────────────────────────────────
 
@@ -137,6 +141,13 @@ class RealBackend:
             # to set directly (no accumulation). Still clip to the workspace box for
             # safety even though ActionPipeline already mapped into pos_min/pos_max.
             pos, quat, grip = action[:3], action[3:7], action[7]
+            if self.rate_limit is not None:
+                from gentle_manip.actions.pipeline import clamp_absolute_target
+                p_, q_, g_ = clamp_absolute_target(
+                    self._target_pos, self._target_quat, self._target_gripper,
+                    pos, quat, grip, self.rate_limit)
+                pos, quat, grip = (p_[0].astype(np.float64), q_[0].astype(np.float64),
+                                   float(g_[0]))
             self._target_pos = np.clip(pos, self._bounds_min, self._bounds_max)
             quat = np.array(quat, dtype=np.float64)
             if quat[0] < 0:

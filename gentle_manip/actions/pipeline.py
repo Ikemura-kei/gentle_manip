@@ -96,6 +96,46 @@ def invert_absolute_action(pos: np.ndarray, quat: np.ndarray, gripper: np.ndarra
     return np.concatenate([a_pos, a_rot, a_grip], axis=1).astype(np.float32)
 
 
+def clamp_absolute_target(prev_pos: np.ndarray, prev_quat: np.ndarray, prev_grip: np.ndarray,
+                          pos: np.ndarray, quat: np.ndarray, grip: np.ndarray,
+                          rate_limit) -> tuple:
+    """Clamp an absolute (pos, quat_wxyz, grip) command so its per-step delta from the PREVIOUS
+    command stays inside `rate_limit` ([dx,dy,dz, droll,dpitch,dyaw, dgrip], the delta-`scales`
+    layout). Batched; returns (pos, quat, grip) float32.
+
+    The rotation clamp uses the WORLD-FRAME rotvec `(R_cmd * R_prev^-1).as_rotvec()`, clipped
+    per-axis and reapplied as `from_rotvec(rv) * R_prev` — the exact inverse-consistent twin of
+    `invert_delta_action` above and of the backends' delta accumulation, so "one step of this
+    clamp" and "one maximal delta action" mean the same physical motion. A geodesic-angle clamp
+    would be smoother but would let a pure-roll step spend the (much larger) yaw budget.
+
+    Reference is the previous COMMANDED target, not the measured pose — matching delta mode, which
+    accumulates on the commanded target. Under a jump the clamped command walks toward the goal at
+    the bound rate, one step per call.
+    """
+    lim = np.asarray(rate_limit, np.float64)
+    prev_pos = np.asarray(prev_pos, np.float64).reshape(-1, 3)
+    pos = np.asarray(pos, np.float64).reshape(-1, 3)
+    prev_grip = np.asarray(prev_grip, np.float64).reshape(-1)
+    grip = np.asarray(grip, np.float64).reshape(-1)
+
+    out_pos = prev_pos + np.clip(pos - prev_pos, -lim[:3], lim[:3])
+    out_grip = prev_grip + np.clip(grip - prev_grip, -lim[6], lim[6])
+
+    pq = np.asarray(prev_quat, np.float64).reshape(-1, 4)[:, [1, 2, 3, 0]]   # wxyz -> xyzw
+    cq = np.asarray(quat, np.float64).reshape(-1, 4)[:, [1, 2, 3, 0]]
+    R_prev = Rotation.from_quat(pq)
+    rv = (Rotation.from_quat(cq) * R_prev.inv()).as_rotvec()                 # world frame (N,3)
+    rv_c = np.clip(rv, -lim[3:6], lim[3:6])
+    xyzw = (Rotation.from_rotvec(rv_c) * R_prev).as_quat()
+    out_quat = np.column_stack([xyzw[:, 3], xyzw[:, 0], xyzw[:, 1], xyzw[:, 2]])
+    neg = out_quat[:, 0] < 0
+    out_quat[neg] = -out_quat[neg]                                           # keep w >= 0
+
+    return (out_pos.astype(np.float32), out_quat.astype(np.float32),
+            out_grip.astype(np.float32))
+
+
 def invert_delta_action(prev_pos: np.ndarray, prev_quat: np.ndarray, prev_grip: np.ndarray,
                         cur_pos: np.ndarray, cur_quat: np.ndarray, cur_grip: np.ndarray,
                         action_config: ActionConfig) -> np.ndarray:

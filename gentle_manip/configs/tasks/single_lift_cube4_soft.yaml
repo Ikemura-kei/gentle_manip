@@ -1,0 +1,41 @@
+# [task] Lift a soft 4cm CUBE (sharp edges) — grasp-benchmark shape object.
+# Used by: eval_grasp_synth / collect_demos_synth_v4 via experiments/single_lift_cube4_soft*.yaml
+# Status: experimental (v4 grasp-synthesis 4-object benchmark)
+#
+# The control case for a gentleness metric developed on organic blobs: flat, near-antipodal faces
+# and genuinely sharp edges. It is the one object in the set where force closure is achievable
+# (see grasp_synthesis/CLAUDE.md §10.2 — the cube was the only test object with a non-degenerate
+# wrench hull), so it also checks that the stress-minimizing objective does not do something silly
+# on a shape the classical theory handles well.
+#
+# ⚠️ PLAN THIS OBJECT WITH prepare=False. The FEM path's `prepare_mesh` runs a watertight voxel
+# remesh that ROUNDS SHARP EDGES, which would erase exactly the property the cube is here to test.
+# Set it in the experiment's grasp_fem block (see docs/grasp_synthesis_v4_plan.md Iteration 0b).
+
+object_name: "cube4"
+object_type: "soft"          # MPM -> reports von_mises_stress
+
+# Same material and resolution as the mushroom/cylinder: this object varies GEOMETRY only.
+# 4cm across at 4mm cells = 10 cells — adequately resolved.
+sim_substeps: 235
+mpm_grid_density: 250
+
+# Rests with its centroid at z=0.021 (half-height + 1mm), same as the cylinder, so the band matches.
+success_z_min: 0.180
+success_z_max: 0.280
+hold_steps: 30
+success_scale: 0.2
+
+rewards:
+  stress:
+    scale: 0.2
+    cap: 1.5
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 0.1
+    decay: 8.0
+  lift:
+    scale: 0.1
+    grasp_gate_dist: 0.079
+    lift_target: 0.16

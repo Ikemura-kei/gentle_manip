@@ -38,6 +38,26 @@ _ROOT = Path(__file__).resolve().parents[2]                     # repo root (for
 # one (~100 kPa/pad) despite the latter's slightly LOWER masked stress. See width_grasp.width_grasp_stress.
 W_PRESS = 0.1
 
+# Three-way sentinel for the optional score weights forwarded by `plan_finger_grasp`.
+#   _UNSET  -> forward the LEGACY value the caller has always effectively used (v3 bit-identity)
+#   None    -> don't forward at all, so `score_finger_grasp`'s own module default applies
+#   numeric -> forward as given
+# Needed because `w_peak`/`w_area` defaulted to 0.0 and were forwarded under `if x is not None`,
+# which is always True for 0.0 -> W_PEAK (0.3) was silently overridden to 0 in EVERY run. Fixing
+# that by flipping the default would change every existing collector/demo caller, so the legacy
+# 0.0 stays the _UNSET behaviour and opting in is explicit.
+_UNSET = object()
+
+
+def _resolve_w(value, legacy):
+    """(forward?, value) for a three-way sentinel weight — see `_UNSET`."""
+    if value is _UNSET:
+        return True, legacy
+    if value is None:
+        return False, None
+    return True, float(value)
+
+
 # ── Gripper geometry (verbatim from synth_utils; meters) ──────────────────────
 FINGER_TO_TCP_Z = -0.069863       # finger-local origin z below TCP origin, along tool z
 FINGER_GRIP_OFF = 0.0261          # finger body half-width (TCP y offset of each finger origin, + width/2)
@@ -124,6 +144,186 @@ def finger_min_world_z(x_tcp, pad_geo) -> float:
     return float(min(Lw[:, 2].min(), Rw[:, 2].min()))
 
 
+# ── v4 geometry priors ────────────────────────────────────────────────────────
+
+def approach_dir(x_tcp) -> np.ndarray:
+    """Unit world direction the gripper travels along when closing on the object = the TCP's tool
+    +z axis. For the canonical top-down seed (`_down_quat_euler`, roll=pi) this is world (0,0,-1),
+    i.e. straight down. The pre-grasp standoff is `grasp_pos - approach_dir * d`."""
+    return Rot.from_euler("xyz", np.asarray(x_tcp[3:6], float)).apply([0.0, 0.0, 1.0])
+
+
+def _tilt_cos(x_tcp) -> float:
+    """cos of the angle between the approach direction and straight-down: +1 top-down, 0 horizontal
+    (a pure side grasp), -1 pointing up. The verticality prior penalizes (1 - this)."""
+    return float(-approach_dir(x_tcp)[2])
+
+
+def tilt_deg(x_tcp) -> float:
+    """Angle of the approach direction off straight-down, degrees (0 = top-down, 90 = side grasp)."""
+    return float(np.degrees(np.arccos(np.clip(_tilt_cos(x_tcp), -1.0, 1.0))))
+
+
+def pad_center_world(x_tcp, pad_geo) -> np.ndarray:
+    """World position of the pad midplane centre (the point the two pads close around). Same
+    placement convention as `tcp_to_local_grasp`, which computes this in its own frame."""
+    tcp_pos = np.asarray(x_tcp[:3], float)
+    R = Rot.from_euler("xyz", np.asarray(x_tcp[3:6], float))
+    return tcp_pos + R.apply([0.0, 0.0, _z_off(float(x_tcp[6])) + pad_geo["z_center"]])
+
+
+def _com_lever(x_tcp, pad_geo, obj_com) -> float:
+    """HORIZONTAL (gravity-perpendicular) distance from the pad centre to the object COM, metres.
+    This is the lever arm the object's weight acts on: a stem or edge grasp holds far from the mass,
+    so the body hangs off-axis and tends to rotate out of the fingers during the lift. Measured in
+    world (not object-local) because gravity — not the mesh — defines which plane matters."""
+    return float(np.linalg.norm((pad_center_world(x_tcp, pad_geo) - np.asarray(obj_com, float))[:2]))
+
+
+# ── Camera occlusion ──────────────────────────────────────────────────────────
+# Does the finger geometry block the external camera's view of the object? The policy's point cloud
+# loses the very surface whose grip width it must judge. Nothing else in the objective knows a
+# camera exists, so without this term the search has no reason to prefer an unoccluding grasp.
+#
+# MEASURED (mushroom, cam_ext at (0.989, 0, 0.098) — i.e. ~9 deg above horizontal, looking down -x):
+# occlusion is driven mainly by the YAW of the closing axis, NOT by tilt. Sweeping yaw of an
+# otherwise identical top-down grasp gives occ = 0.06 (finger pair across y, clear of the sightline)
+# -> 0.94 (pair across x, straddling it). So `w_occ` and `w_tilt` are COMPLEMENTARY, not redundant:
+# a perfectly vertical grasp can still occlude badly, and tightening roll_max alone will not fix it.
+#
+# The AABB approximation was validated against exact finger-STL ray casts over that sweep: it
+# overestimates by at most +0.094 and preserves the ORDERING exactly, at 0.053 ms/call vs ~1.4 ms
+# for the exact test. A ranking prior does not need more fidelity than that.
+
+def build_occlusion_ctx(obj, obj_com, obj_quat_wxyz, cam_pos, pad_geo, *, k: int = 96) -> dict:
+    """Precompute the occlusion ray set ONCE per synthesis (the object pose is fixed for the whole
+    search; only the fingers move). Returns the context `_occ_frac` consumes, or None if disabled.
+
+    Samples the object's boundary vertices by DETERMINISTIC STRIDE — never RNG. `plan_finger_grasp`
+    drives its seed-yaw smear / pitch seeds / diversity / jitter from ONE `_drng` stream, so drawing
+    even one extra random number here would shift that stream and silently change every v3 grasp.
+
+    Keeps only FRONT-FACING vertices (outward normal pointing toward the camera), so the object's
+    own far side is not counted as finger occlusion.
+    """
+    if cam_pos is None:
+        return None
+    from .viz import boundary_faces
+    tri, _ = boundary_faces(obj.tets)
+    vid = np.unique(tri)
+    v = np.asarray(obj.verts, float)[vid]                          # object-local, COM-centred
+    # outward vertex normals = area-weighted face normals of the boundary surface
+    m = trimesh.Trimesh(np.asarray(obj.verts, float), np.asarray(tri, np.int64), process=False)
+    trimesh.repair.fix_normals(m)
+    nrm = np.asarray(m.vertex_normals, float)[vid]
+    q = np.asarray(obj_quat_wxyz, float)
+    R = Rot.from_quat([q[1], q[2], q[3], q[0]])                    # object-local -> world
+    pw = R.apply(v) + np.asarray(obj_com, float)
+    nw = R.apply(nrm)
+    cam = np.asarray(cam_pos, float)
+    front = np.einsum("ij,ij->i", cam - pw, nw) > 0.0              # visible side of the object
+    pw, nw = pw[front], nw[front]
+    if len(pw) == 0:
+        return None
+    step = max(1, len(pw) // int(k))                               # deterministic stride
+    pw = pw[::step][:k]
+    # finger-local AABBs of the FULL finger bodies (pad_geo samples the real STL surfaces)
+    lo_l, hi_l = pad_geo["left_pts"].min(0),  pad_geo["left_pts"].max(0)
+    lo_r, hi_r = pad_geo["right_pts"].min(0), pad_geo["right_pts"].max(0)
+    return {"pts": pw, "cam": cam, "aabb": ((lo_l, hi_l), (lo_r, hi_r))}
+
+
+def _seg_hits_aabb(o: np.ndarray, d: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
+    """Batched slab test: does segment o + t*d, t in [0,1], intersect the axis-aligned box? Pure
+    numpy, ~0.01 ms for ~100 rays — cheap enough to sit inside the CMA inner loop (an exact
+    finger-mesh ray query is ~100x slower for a term that only needs to rank)."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        inv = 1.0 / d
+        t0 = (lo - o) * inv
+        t1 = (hi - o) * inv
+    tmin = np.maximum(np.minimum(t0, t1), 0.0).max(axis=1)
+    tmax = np.minimum(np.maximum(t0, t1), 1.0).min(axis=1)
+    return tmin <= tmax
+
+
+def _occ_frac(x_tcp, pad_geo, occ_ctx) -> float:
+    """Fraction of the sampled object->camera rays blocked by either finger at this grasp."""
+    if occ_ctx is None:
+        return 0.0
+    pts, cam = occ_ctx["pts"], occ_ctx["cam"]
+    R = Rot.from_euler("xyz", np.asarray(x_tcp[3:6], float))
+    tcp_pos = np.asarray(x_tcp[:3], float)
+    w = float(x_tcp[6]); z = _z_off(w)
+    Rinv = R.inv()
+    d_world = cam - pts                                            # segment object-point -> camera
+    d_local = Rinv.apply(d_world)
+    base = Rinv.apply(pts - tcp_pos)                               # into TCP frame
+    blocked = np.zeros(len(pts), bool)
+    for sgn, (lo, hi) in zip((+1.0, -1.0), occ_ctx["aabb"]):
+        t = np.array([0.0, sgn * (w / 2.0 + FINGER_GRIP_OFF), z])  # finger origin in TCP frame
+        blocked |= _seg_hits_aabb(base - t, d_local, lo, hi)
+    return float(blocked.mean())
+
+
+def standoff_pose(x_tcp, d: float) -> np.ndarray:
+    """The pre-grasp pose `d` metres back along the approach axis — same orientation and width, so
+    the standoff -> grasp motion is a pure translation along the fingers' own approach direction."""
+    x = np.asarray(x_tcp, float).copy()
+    x[:3] = x[:3] - approach_dir(x) * float(d)
+    return x
+
+
+def path_clearance(poses, pad_geo, obj_sdf, obj_com, obj_quat_wxyz, *, pen_tol: float = 0.003,
+                   stride: int = 3) -> tuple:
+    """Is an ARBITRARY commanded finger path free of gross object penetration?
+
+    `poses` is an iterable of 7-DOF `[tx,ty,tz,roll,pitch,yaw,width]` — i.e. exactly what the
+    trajectory will command, orientation and gripper width included. Returns `(ok, max_pen_m)`.
+
+    Prefer this over `descend_clearance` whenever the executed approach is not the straight
+    standoff->grasp chord. Measured on a blended (Bezier) reach: the chord bottoms out at 0.8mm of
+    finger/object overlap while the path actually executed reaches 2.0mm — so checking the chord
+    UNDER-reports the real clearance rather than bounding it. Checking the executed path removes
+    that gap entirely.
+    """
+    q = np.asarray(obj_quat_wxyz, float)
+    Rinv = Rot.from_quat([q[1], q[2], q[3], q[0]]).inv()
+    com = np.asarray(obj_com, float)
+    worst = 0.0
+    for x in poses:
+        Lw, Rw = finger_world_pts(np.asarray(x, float), pad_geo)
+        sd = obj_sdf(Rinv.apply(np.vstack([Lw, Rw])[::stride] - com))
+        worst = max(worst, float(np.maximum(-sd - pen_tol, 0.0).max()))
+    return worst <= 0.0, worst
+
+
+def descend_clearance(x_tcp, pad_geo, obj_sdf, obj_com, obj_quat_wxyz, *, d: float,
+                      n: int = 8, pen_tol: float = 0.003) -> tuple:
+    """Is the straight standoff->grasp descent free of gross finger/object penetration?
+
+    Samples `n` poses along the segment and reuses the SAME finger-body penetration test the
+    per-candidate filter uses (`finger_world_pts` + the object SDF in COM-local frame). Returns
+    `(ok, max_penetration_m)`. Called ONCE per planned grasp, not per CMA eval, so the
+    `trimesh.proximity` cost is irrelevant here.
+
+    The final pose is the grasp itself, whose pads intentionally indent the object by ~1 mm — that
+    is under `pen_tol`, so intended contact is not flagged; only a finger sweeping THROUGH geometry
+    (e.g. clipping a mushroom cap on the way down to a stem grasp) trips it.
+    """
+    q = np.asarray(obj_quat_wxyz, float)
+    Rinv = Rot.from_quat([q[1], q[2], q[3], q[0]]).inv()
+    com = np.asarray(obj_com, float)
+    start = standoff_pose(x_tcp, d)
+    worst = 0.0
+    for t in np.linspace(0.0, 1.0, max(int(n), 2)):
+        x = np.asarray(x_tcp, float).copy()
+        x[:3] = start[:3] + t * (np.asarray(x_tcp[:3], float) - start[:3])
+        Lw, Rw = finger_world_pts(x, pad_geo)
+        sd = obj_sdf(Rinv.apply(np.vstack([Lw, Rw])[::3] - com))
+        worst = max(worst, float(np.maximum(-sd - pen_tol, 0.0).max()))
+    return worst <= 0.0, worst
+
+
 def build_object_sdf(obj, *, simplify_faces: int = 500):
     """Signed-distance function on the FEM object's OWN recentered surface (negative = inside), for the
     finger-body penetration filter. Built once per object from the tet-mesh boundary (already in the COM
@@ -165,12 +365,36 @@ def _contact_area(obj, nodes) -> float:
     return float(obj._bface_area[full].sum())
 
 
-def score_finger_grasp(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
+def score_finger_grasp(obj, x_tcp, *, cam_pos=None, cam_azimuth_max_deg=None, **kw) -> dict:
+    """Public scoring entry: the full feasibility/gentleness ladder (below), plus the camera-
+    azimuth bound applied UNIFORMLY to every rung's score.
+
+    The azimuth penalty is added outside the ladder on purpose: `w_occ` failed precisely because
+    occlusion-reducing candidates returned at a flat infeasibility floor where a weight has no
+    gradient. A uniform shaped penalty preserves the ladder's ordering (feasibility still
+    dominates) while giving CMA an azimuth gradient at EVERY rung — and when no feasible grasp
+    exists inside the cone, the search degrades gracefully to the least-occluding feasible one
+    instead of failing.
+    """
+    r = _score_finger_grasp_impl(obj, x_tcp, **kw)
+    if cam_pos is not None:
+        az = cam_azimuth_deg(x_tcp, kw["obj_com"], cam_pos)
+        r["cam_azimuth_deg"] = az                              # audit, even with the bound off
+        if cam_azimuth_max_deg is not None and az > float(cam_azimuth_max_deg):
+            r = dict(r)
+            r["score"] = float(r["score"]) - CAM_AZ_SLOPE * (az - float(cam_azimuth_max_deg))
+    return r
+
+
+def _score_finger_grasp_impl(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                        table_z: float = 0.0, ground_buf: float = 0.0035, g: float = 9.81,
                        accel: float = 0.0, max_indent: float = 0.01, obj_sdf=None,
                        pen_tol: float = 0.003, table_tol: float = 0.002,
                        w_align: float = W_ALIGN, w_peak: float = W_PEAK, w_area: float = 0.0,
-                       w_press: float = W_PRESS) -> dict:
+                       w_press: float = W_PRESS,
+                       w_com: float = 0.0, w_tilt: float = 0.0, w_occ: float = 0.0,
+                       area_min: float = 0.0, occ_ctx=None,
+                       execute_offset: float = 0.0) -> dict:
     """Score one 7-DOF TCP grasp candidate (higher = gentler; MAXIMIZED). Ladder mirrors
     `width_grasp.score_candidate` but in TCP space with the real finger pad, plus two TOLERANCE-based
     geometric pre-filters (cheap, no FEM): gross table scratch >> gross finger-body penetration >>
@@ -178,6 +402,24 @@ def score_finger_grasp(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, densit
     (~1-3 mm) table scratch / finger-into-object penetration — the object deforms and the controller has
     error at that scale, so only GROSS violations are rejected (the pad's own ~1 mm indent is under
     pen_tol, so intended contact is never flagged). Returns dict(score, status, holdable, ...)."""
+    # OPERATING POINT. The executor does not command the synthesized width: it closes an extra
+    # `execute_offset` (the collector's base squeeze + firm pass). Stress is steeply nonlinear in
+    # indentation, so scoring the un-squeezed width evaluates a grasp the robot never performs —
+    # measured 5.4 kPa at the scored width vs 54.8 kPa at the executed one, a 10x gap that made the
+    # metric uncorrelated with the stress the simulator actually produces. Scoring at the executed
+    # width closes that gap. Default 0.0 reproduces the historical behaviour exactly.
+    #
+    # KNOWN APPROXIMATION: the offset is not a single constant in the collector. A soft grasp closes
+    # base 2.5mm + firm 2.0mm = 4.5mm normally, but a grasp the firm check judges WEAK closes a
+    # further 2.5mm, i.e. 7.0mm total. 0.0045 therefore describes the normal path only, and a weak
+    # grasp still executes 2.5mm tighter than it was scored. Two mitigations, neither complete:
+    # scoring at the executed width makes the chosen grasp firmer at the point the check reads, so
+    # the weak branch should fire less often; and the residual 2.5mm is much smaller than the 4.5mm
+    # this fixes. The exact fix would feed the per-env firm decision back into synthesis, which is
+    # not possible — the check runs on measured contact AFTER the grasp closes.
+    if execute_offset:
+        x_tcp = np.asarray(x_tcp, float).copy()
+        x_tcp[6] = max(0.0, float(x_tcp[6]) - float(execute_offset))
     half_uv = (pad_geo["half_u1"], pad_geo["half_u2"])
     ph = max(half_uv)                                             # nominal pad_half (overridden by half_uv)
     q = np.asarray(obj_quat_wxyz, float)
@@ -232,18 +474,71 @@ def score_finger_grasp(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, densit
     # (min area) so a good big pad can't dilute one bad pad (e.g. one finger on the mushroom stem).
     nd, lm = prim["nodes"], prim["left_mask"]
     aL = _contact_area(obj, nd[lm]); aR = _contact_area(obj, nd[~lm])
-    pressure = r["grip"] / max(min(aL, aR), 1e-6)                 # Pa (worst pad); grip is per-pad (= both)
+    min_pad = min(aL, aR)
+    # v4 ANTI-PINCH hard floor: a grasp gripping less than `area_min` of surface on its WORST pad is
+    # a pinch, not a grasp. Rejected into the same (-2*PEN_BASE, -PEN_BASE] band the not-holdable
+    # branch uses, shaped by how close it is to the floor so CMA still gets a gradient toward fatter
+    # pads. `is_real_grasp` treats it as infeasible. Default 0.0 -> never fires (v3 unchanged).
+    if area_min > 0.0 and min_pad < area_min:
+        return {"score": -PEN_BASE * (2.0 - min_pad / area_min), "status": "thin_pad",
+                "holdable": False, "stress_top10": r["stress_top10"], "grip": r["grip"],
+                "min_pad_area": float(min_pad)}
+    pressure = r["grip"] / max(min_pad, 1e-6)                     # Pa (worst pad); grip is per-pad (= both)
     carea = _contact_area(obj, nd) if w_area else 0.0            # optional whole-grasp area reward
+    # v4 geometry-prior terms (all default 0.0 -> the expression below is float-exact v3):
+    #   lever    — HORIZONTAL distance from the pad centre to the object COM. A stem/edge grasp sits
+    #              far from the mass, so the body dangles on a lever arm and rotates out on lift.
+    #   1-cos_t  — deviation of the approach axis from straight down (0 top-down, 1 horizontal,
+    #              2 upward). Smooth and bounded, unlike raw angle which kinks at 0.
+    #   occ      — fraction of the camera's view of the object the fingers block (see _occ_frac).
+    # lever/cos_t are ~free (one rotation apply each) and are ALWAYS computed so the grasp-quality
+    # AUDIT columns are meaningful even with the terms disabled; only `occ` (ray work) is gated.
+    # Multiplying by a 0.0 weight below is float-exact, so v3 bit-identity is preserved either way.
+    lever = _com_lever(x_tcp, pad_geo, obj_com)
+    cos_t = _tilt_cos(x_tcp)
+    # Computed whenever the ray context exists, NOT only when w_occ > 0 — otherwise the audit
+    # column reports a placeholder 0.0 that reads as "no occlusion" when it means "not measured".
+    # It costs ~0.05 ms and is inert in the score while w_occ == 0.
+    occ = _occ_frac(x_tcp, pad_geo, occ_ctx) if occ_ctx is not None else None
     score = (-r["stress_top10"] - w_align * (1.0 - align) - w_peak * E * prim["hi_1"]
-             - w_press * pressure + w_area * carea)
+             - w_press * pressure + w_area * carea
+             - w_com * lever - w_tilt * (1.0 - cos_t) - w_occ * (occ or 0.0))
     return {"score": float(score), "status": "ok", "holdable": True,
             "stress_top10": float(r["stress_top10"]), "grip": float(r["grip"]), "align": float(align),
-            "pressure": float(pressure), "min_pad_area": float(min(aL, aR)), "contact_area": float(carea),
-            "width_face": wface, "center": center, "axis": axis, "delta_left": dl, "delta_right": dr}
+            "pressure": float(pressure), "min_pad_area": float(min_pad), "contact_area": float(carea),
+            "width_face": wface, "center": center, "axis": axis, "delta_left": dl, "delta_right": dr,
+            "com_lever": float(lever), "tilt_deg": float(np.degrees(np.arccos(np.clip(cos_t, -1.0, 1.0)))),
+            "occ": (None if occ is None else float(occ))}
 
 
 def _closing_axis_world(x_tcp) -> np.ndarray:
     return Rot.from_euler("xyz", np.asarray(x_tcp[3:6], float)).apply([0.0, 1.0, 0.0])
+
+
+# Shaped-penalty slope for the camera-azimuth bound, per DEGREE of excess. Sized against the score
+# scale: stress terms span ~20-60 kPa, so ~6 deg of excess (30000) outweighs any stress difference
+# between basins — the search leaves the cone only when NO feasible grasp exists inside it.
+CAM_AZ_SLOPE = 5000.0
+
+
+def cam_azimuth_deg(x_tcp, obj_com, cam_pos) -> float:
+    """Angle (deg) between the closing axis and the vertical plane PERPENDICULAR to the camera
+    ray: 0 = axis perpendicular to the ray (fingers stand BESIDE the line of sight — no
+    occlusion), 90 = axis along the ray (one finger sits between camera and object).
+
+    Measured on the rendered cloud: axis ⊥ ray -> occ 0.000, axis ∥ ray -> occ 0.698 for an
+    otherwise identical top-down grasp. This is the geometric quantity `w_occ` could not steer
+    (occlusion-reducing candidates sat at the flat infeasibility floor where a weight has no
+    gradient), so it is bounded structurally instead — the `roll_max` pattern, not a soft weight.
+    Horizontal projections only: a near-vertical closing axis occludes nothing from a
+    near-horizontal camera, and the degenerate case returns 0 accordingly.
+    """
+    a_h = _closing_axis_world(x_tcp)[:2]
+    d_h = (np.asarray(obj_com, float) - np.asarray(cam_pos, float))[:2]
+    na, nd_ = float(np.linalg.norm(a_h)), float(np.linalg.norm(d_h))
+    if na < 1e-8 or nd_ < 1e-8:
+        return 0.0
+    return float(np.degrees(np.arcsin(np.clip(abs(a_h @ d_h) / (na * nd_), 0.0, 1.0))))
 
 
 def _distinct_tcp_poses(feasible, n, *, pos_thr, ang_thr):
@@ -272,7 +567,12 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                       bbox_margin: float = 1.2, z_lift=(0.02, 0.12), sigma: float = 0.15, maxfevals: int = 400,
                       n_starts: int = 6, g: float = 9.81, accel: float = 0.0, max_indent: float = 0.01,
                       obj_sdf=None, pen_tol: float = 0.003, table_tol: float = 0.002,
-                      w_align=None, w_peak: float = 0.0, w_area: float = 0.0, w_press=None,
+                      w_align=None, w_peak=_UNSET, w_area=_UNSET, w_press=None,
+                      w_com: float = 0.0, w_tilt: float = 0.0, w_occ: float = 0.0,
+                      area_min: float = 0.0, cam_pos=None, occ_k: int = 96,
+                      cam_azimuth_max_deg=None,
+                      execute_offset: float = 0.0,
+                      roll_max: float = np.pi / 2,
                       refine: bool = True, refine_scan: int = 25, seed: int = 0, verbose: bool = False,
                       record_history: bool = False,
                       diversity_tol: float = 0.0, jitter_deg: float = 0.0, jitter_pos: float = 0.0,
@@ -281,16 +581,47 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
     table constraint. Multi-start over top-down approaches at diverse yaw (a good starting basin for a
     tabletop grasp); the search may tilt/translate from there. `obj_com` is the object world COM,
     `obj_size` a rough object diameter for the xy search box. Returns dict(x, score, stress_top10, grip,
-    align, evals[, history])."""
+    align, evals[, history]).
+
+    v4 additions, ALL default-inert so an unchanged caller gets bit-identical v3 results:
+      w_com / w_tilt / w_occ  geometry priors (COM lever arm, verticality, camera occlusion)
+      area_min                hard floor on the worst pad's contact area (anti-pinch)
+      cam_pos, occ_k          camera position + ray count for the occlusion term (None -> term off)
+      roll_max                half-width of the roll search band about top-down. The default pi/2
+                              reproduces the historical bounds, which admit a FULLY HORIZONTAL tool
+                              axis (a pure side grasp); tighten it to structurally exclude those.
+      w_peak / w_area         now three-way sentinels (see `_UNSET`) — omitting them keeps the
+                              long-standing 0.0 behaviour; pass None to get the module defaults.
+      execute_offset          extra metres the EXECUTOR closes beyond the returned width (the
+                              collector's base squeeze + firm). Every candidate is scored at
+                              `width - execute_offset`, i.e. at the grip the robot will actually
+                              apply. Leaving this at 0 optimizes an operating point that is never
+                              executed and, because stress is steeply nonlinear in indentation,
+                              yields a metric uncorrelated with the simulator's measured stress
+                              (rho +0.10 over 100 canonical episodes). 0.0 = historical behaviour.
+    """
     import cma
 
-    aln = {"w_area": w_area}
+    aln = {}
     if w_align is not None: aln["w_align"] = w_align
-    if w_peak is not None:  aln["w_peak"] = w_peak
     if w_press is not None: aln["w_press"] = w_press
+    for _name, _val, _legacy in (("w_peak", w_peak, 0.0), ("w_area", w_area, 0.0)):
+        _fwd, _v = _resolve_w(_val, _legacy)
+        if _fwd: aln[_name] = _v
+    aln.update(w_com=w_com, w_tilt=w_tilt, w_occ=w_occ, area_min=area_min,
+               execute_offset=execute_offset)
+    if cam_pos is not None:
+        # cam_pos always -> the azimuth AUDIT is computed; the bound only bites when max is set.
+        aln.update(cam_pos=np.asarray(cam_pos, float), cam_azimuth_max_deg=cam_azimuth_max_deg)
     com = np.asarray(obj_com, float)
     if obj_sdf is None:                                          # build the penetration SDF once (reused)
         obj_sdf = build_object_sdf(obj)
+    # Occlusion rays are fixed for the whole search (only the fingers move), so build them once.
+    # Built whenever a camera is given, even with w_occ == 0: the term stays inert in the score but
+    # the AUDIT then reports a real occlusion figure instead of a misleading placeholder.
+    # Deterministic — must not touch `_drng` below (see build_occlusion_ctx).
+    if cam_pos is not None:
+        aln["occ_ctx"] = build_occlusion_ctx(obj, com, obj_quat_wxyz, cam_pos, pad_geo, k=occ_k)
     _div_on = (diversity_tol > 0.0 or jitter_deg > 0.0 or jitter_pos > 0.0 or pitch_seed_deg > 0.0)
     _drng = np.random.default_rng(seed) if _div_on else None    # one stream: seed smear + sampling/jitter
 
@@ -329,10 +660,13 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
     half_xy = np.maximum(0.5 * bbox_margin * (vw_xy.max(0) - vw_xy.min(0)), 0.01)  # ≥1cm floor
     tz_lo = com[2] + FINGER_TO_TCP_Z - 0.04
     tz_hi = com[2] + z_lift[1]
+    # roll_max = pi/2 (default) reproduces the historical band, which reaches a fully HORIZONTAL
+    # tool axis at either end -> pure side grasps are inside the feasible set. Tightening roll_max
+    # excludes them structurally, rather than relying on the w_tilt penalty alone.
     lb = [com[0] - half_xy[0], com[1] - half_xy[1], tz_lo,
-          np.pi - np.pi / 2, -0.2 * np.pi, -np.pi, 0.008]
+          np.pi - roll_max, -0.2 * np.pi, -np.pi, 0.008]
     ub = [com[0] + half_xy[0], com[1] + half_xy[1], tz_hi,
-          np.pi + np.pi / 2,  0.2 * np.pi,  np.pi, 0.079]
+          np.pi + roll_max,  0.2 * np.pi,  np.pi, 0.079]
 
     # object world→local rotation, for measuring the cross-section along each seed's closing axis
     q = np.asarray(obj_quat_wxyz, float)
@@ -348,6 +682,17 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
         return float(np.clip((proj.max() - proj.min()) - 2 * indent, 0.01, 0.079))
 
     yaws = np.linspace(-np.pi / 2, np.pi / 2, n_starts)
+    if cam_azimuth_max_deg is not None and cam_pos is not None:
+        # Centre the seed fan on the yaw whose closing axis is PERPENDICULAR to the camera ray and
+        # span only the allowed cone, so every start begins feasible w.r.t. the bound instead of
+        # paying the shaped penalty from step one. Top-down closing axis(yaw) = [sin y, -cos y, 0]
+        # is ⊥ d_h exactly when tan(y) = d_y/d_x; axis symmetry folds yaw0 into [-pi/2, pi/2].
+        d_h = (np.asarray(obj_com, float) - np.asarray(cam_pos, float))[:2]
+        if np.linalg.norm(d_h) > 1e-8:
+            yaw0 = float(np.arctan2(d_h[1], d_h[0]))
+            yaw0 = (yaw0 + np.pi / 2) % np.pi - np.pi / 2                  # fold mod pi
+            half = np.radians(float(cam_azimuth_max_deg))
+            yaws = yaw0 + np.linspace(-half, half, n_starts)
     pitch_seeds = np.zeros(n_starts)
     if _drng is not None:
         if diversity_tol > 0.0:
@@ -435,7 +780,12 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
            "score": r.get("score", best["score"]), "evals": n_eval[0],
            "stress_top10": r.get("stress_top10"), "grip": r.get("grip"), "align": r.get("align"),
            "pressure": r.get("pressure"), "min_pad_area": r.get("min_pad_area"),
-           "width_face": r.get("width_face")}
+           "width_face": r.get("width_face"),
+           # grasp-quality AUDIT (always populated, independent of whether the terms are weighted) —
+           # consumed by the benchmark's per-episode columns to make stem/pinch/side grasps countable.
+           "tilt_deg": r.get("tilt_deg"), "com_lever": r.get("com_lever"), "occ": r.get("occ"),
+           "cam_azimuth_deg": r.get("cam_azimuth_deg"),
+           "status": r.get("status")}
     if record_history:
         out["history"] = history
     return out

@@ -13,10 +13,16 @@ from gentle_manip.evaluation.video import MultiClipRecorder
 
 
 class SimEvalVenv:
-    def __init__(self, client, num_envs: int, max_episode_steps: int):
+    def __init__(self, client, num_envs: int, max_episode_steps: int, policy_dt: float = None):
         self.client = client
         self.num_envs = int(num_envs)
         self.max_episode_steps = int(max_episode_steps)
+        # Seconds of sim time per POLICY step. This venv steps the sim exactly once per policy
+        # step, so it equals the scene's sim_dt. The harness computes trajectory-smoothness
+        # metrics only when this is set: jerk is a third derivative, so a venv that advances
+        # several sim steps per policy step (DPPO action chunks) yields an aliased trace whose
+        # jerk/SPARC are not comparable — leaving it None gives blank columns instead of wrong ones.
+        self.policy_dt = float(policy_dt) if policy_dt else None
         self._cnt = np.zeros(self.num_envs, np.int64)
         self._rec = MultiClipRecorder()          # one clip per env (per-trajectory video)
 

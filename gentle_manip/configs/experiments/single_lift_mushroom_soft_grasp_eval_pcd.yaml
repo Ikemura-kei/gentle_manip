@@ -1,0 +1,21 @@
+# [experiment] Mushroom soft lift — grasp benchmark WITH a rendered point cloud.
+# Used by: gentle_manip/scripts/eval_grasp_synth.py (+ serl_sim_server --view teacher, own --port)
+# Status: experimental (v4 Iteration 1b — ground-truth occlusion)
+#
+# Identical to single_lift_mushroom_soft_grasp_eval.yaml except the obs carries a point cloud, so
+# occ_pcd_* can be measured and correlated against the geometric grasp_occ_pred. Kept separate
+# because depth render + a 4096-point cloud over 5 envs is a real per-step cost that the routine
+# benchmark should not pay — run this one deliberately, on its own port.
+task: single_lift_mushroom_soft
+action: abs_pose_abs_gripper
+dr: soft_orientation
+obs: superset_soft_grasp_eval_pcd
+views:
+  teacher: [privileged, point_cloud]
+
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400

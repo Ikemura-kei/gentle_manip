@@ -18,6 +18,12 @@ If anything was installed for running the modules, please add them into `pyproje
 
 ## Experiment Discipline (HARD REQUIREMENTS — read before launching ANY run)
 
+0. **docs/DEVLOG.md is the cross-agent development log — read it BEFORE starting work,
+   write it AFTER finishing any experiment/finding.** Two agents (local + cluster) work this
+   repo in parallel and have independently re-derived the same root causes at hours of cost;
+   the devlog is where recipes, conclusions, gates and roadmap live. A finding that exists
+   only in a chat transcript does not exist.
+
 Non-negotiable for every experiment (training, eval, demo collection), and especially when
 running many in parallel on a cluster. Details live in the bracketed sections; this is the
 checklist — do not skip an item because "it's just a quick run".

@@ -35,8 +35,22 @@ from scipy.spatial.transform import Rotation as Rot, Slerp
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "grasp_synthesis"))
 
-import collect_demos_synth_v3 as gsv3          # noqa: E402 — FSM + SDF/FEM synth helpers + constants
+import collect_demos_synth_v3 as gsv3          # noqa: E402 — SDF synth helpers + firm constants
+from grasp_traj import (GraspTrajectory, PhaseSchedule, SCHEDULE_V3,  # noqa: E402
+                        SCHEDULE_V4, SCHEDULE_V4_BLEND, bound_scaled_schedule)
 from smgrasp import finger_grasp as fg          # noqa: E402
+
+
+# ── Grasp-objective PROFILES ──────────────────────────────────────────────────
+# THE bug this fixes: the benchmark used to build grasp_kw WITHOUT w_align / diversity / jitter /
+# pitch-seed, so `plan_finger_grasp` fell back to its strict defaults — while the v3 COLLECTOR
+# deliberately runs w_align=2000 (15x weaker) + tilt seeding to broaden the demo distribution. The
+# benchmark was therefore never measuring the configuration that actually generates the datasets,
+# which is why it reported 98-100% success on demos containing stem/pinch/side grasps.
+#
+# `strict` reproduces the historical benchmark EXACTLY (pass nothing -> metric defaults), so the
+# existing 200-episode runs stay comparable. `collector_v3` is the honest v3 baseline.
+from grasp_profiles import GRASP_PROFILES  # noqa: E402 — shared with the collector
 from gentle_manip.envs.rpc import SimEnvClient   # noqa: E402
 from gentle_manip.evaluation import EvalSpec, run_eval  # noqa: E402
 from gentle_manip.evaluation.sim_eval_venv import SimEvalVenv  # noqa: E402
@@ -66,7 +80,9 @@ class GraspSynthPolicy:
     """
 
     def __init__(self, num_envs, action_config, venv, *, synth, maxfevals, yield_pa,
-                 object_name, grasp_kw, table_z, seed, extra_close=0.0):
+                 object_name, grasp_kw, table_z, seed, extra_close=0.0,
+                 objective=None, schedule=SCHEDULE_V3, lift_height=None,
+                 standoff=0.05, use_minjerk=False, preshape_factor=0.0, shelf_kw=None):
         self.num_envs = int(num_envs)
         self.action_config = action_config
         self.venv = venv
@@ -76,6 +92,33 @@ class GraspSynthPolicy:
         self.yield_pa = float(yield_pa)
         self.object_name = object_name
         self.grasp_kw = dict(grasp_kw)           # E, density, mu, accel, n_starts, voxel_div, target_tets, gpu
+        # The RESOLVED grasp objective (profile + CLI overrides) forwarded to plan_finger_grasp.
+        # Recorded into summary.json so every run self-documents which objective produced it.
+        self.objective = dict(objective or {})
+        self.schedule = schedule
+        self._sched_nominal = schedule       # scaling in _setup_fsm always starts from THIS
+        # Per-step rate limit (delta-`scales` layout) from the experiment's action config — the
+        # same bound the collector enforces, so the benchmark measures the bounded trajectory.
+        self._rate_lim = (np.asarray(action_config.rate_limit, np.float64)
+                          if getattr(action_config, "rate_limit", None) is not None
+                          and action_config.mode == "absolute" else None)
+        self.lift_height = float(gsv3.LIFT_HEIGHT if lift_height is None else lift_height)
+        self.standoff = float(standoff)
+        self.use_minjerk = bool(use_minjerk)
+        self.preshape_factor = float(preshape_factor)
+        # v4.1 shelf lift — forwarded verbatim to GraspTrajectory. MUST stay identical to the
+        # collector's kwargs or the benchmark measures a trajectory nobody collects (v4's headline
+        # bug). shelf_pivot_z is filled in at _setup_fsm time, once the pad geometry exists.
+        self.shelf_kw = dict(shelf_kw or {})
+        self._audit = [{} for _ in range(self.num_envs)]      # per-env grasp-quality audit
+        self._obj_radius_m = 0.02                             # bbox radius; refined once the FEM builds
+        self._r_obj = 0.03                                    # object-point radius (bbox + 5mm)
+        self._occ_gt = [{} for _ in range(self.num_envs)]     # rendered-cloud occlusion
+        # WHERE the peak stress happens. The objective models the SQUEEZE; if the peak lands in
+        # `lift` instead, the gentleness term is aimed at the wrong phase entirely and no amount
+        # of squeeze-side tuning can fix it. Tracked per env: running max and the phase at it.
+        self._peak = [{'stress': -1.0, 'phase': ''} for _ in range(self.num_envs)]
+        self.traj = None
         self.table_z = float(table_z)
         self._seed_rng = np.random.default_rng(seed)
         self._synthed = False
@@ -94,6 +137,12 @@ class GraspSynthPolicy:
     # ── plumbing ──────────────────────────────────────────────────────────────
     def reset(self):
         self._synthed = False
+        # Clear the audit too: it is overwritten per env during synthesis, so without this an env
+        # whose synthesis failed (or the SDF arm, which never fills it) would report the PREVIOUS
+        # episode's grasp as if it were this one's.
+        self._audit = [{} for _ in range(self.num_envs)]
+        self._occ_gt = [{} for _ in range(self.num_envs)]
+        self._peak = [{'stress': -1.0, 'phase': ''} for _ in range(self.num_envs)]
 
     def close(self):
         if self._pool is not None:
@@ -104,11 +153,26 @@ class GraspSynthPolicy:
         scene_params (scale baked in), or the nominal registry mesh (× scale) if no scene DR."""
         sc = (self.venv.scenario_params() or {}).get("scene") or {}
         mp = sc.get("mesh_path")
+        scale = float(sc.get("scale", 1.0) or 1.0)
+        # ⚠️ THE SERVER'S DEFORMED FILE IS NOMINAL-SIZE. SimBackend._apply_scene_dr bakes the
+        # uniform scale onto ObjectEntry.scale (Genesis applies it at LOAD) and mesh_deform saves
+        # only the shape ops — so returning mesh_path directly hands the FEM/SDF a ~33mm mushroom
+        # while Genesis simulates it at 1.0-1.5x. Every scaled-scene benchmark synthesis before
+        # this fix planned on an undersized object: the executed widths silently over-squeezed by
+        # up to ~10mm, which held everything (success looked fine) while measuring a grasp nobody
+        # designed. Found via a 10-arm collector-vs-benchmark bisect: the collector (which BAKES
+        # scale into its files) failed honestly where the benchmark 'passed'.
         if mp and Path(mp).exists():
-            return str(mp)
+            if abs(scale - 1.0) < 1e-6:
+                return str(mp)
+            import trimesh
+            m = trimesh.load(str(mp), process=False, force="mesh")
+            m.apply_scale(scale)
+            dst = self._log_dir / f"{Path(mp).stem}_x{scale:.4f}.obj"
+            m.export(str(dst))
+            return str(dst)
         from gentle_manip.assets.registry import get_object_def
         nom = get_object_def(self.object_name).mesh_path
-        scale = float(sc.get("scale", 1.0) or 1.0)
         if abs(scale - 1.0) < 1e-6:
             return str(nom)
         import trimesh
@@ -121,6 +185,84 @@ class GraspSynthPolicy:
     def _stress_pa(self, obs) -> np.ndarray:
         """(N,) top10 von-Mises in Pa from priv_stress ([mean, top10] / yield)."""
         return np.asarray(obs["priv_stress"], np.float64)[:, 1] * self.yield_pa
+
+    # ── grasp-quality audit ─────────────────────────────────────────────────────
+    # The synthesizer already knows everything needed to COUNT the three reported defects; it was
+    # simply thrown away. `episode_metrics()` hands it to the harness so stem/pinch/side grasps
+    # become numbers in episodes.csv instead of something you have to eyeball in a video.
+    # PROVISIONAL thresholds — calibrate against the Iteration-1 distribution before drawing
+    # conclusions from the RATES (the underlying grasp_min_pad_mm2 / grasp_com_lever_mm columns are
+    # the ground truth and are always reported raw). First measurement on 10 collector_v3 episodes:
+    # worst-pad areas spanned ~8-40 mm2 (mean 25), so 20 mm2 sits mid-distribution and flags ~half
+    # — informative as a relative signal, but not yet a calibrated "this is a pinch" boundary.
+    STEM_LEVER_FRAC = 0.25      # lever > this * object bbox radius => grasping away from the mass
+    PINCH_AREA_MM2 = 20.0       # worst-pad contact area below this => a pinch, not a grasp
+
+    def _audit_row(self, r, obj_pos) -> dict:
+        x = r.get("x")
+        area_mm2 = (float(r["min_pad_area"]) * 1e6) if r.get("min_pad_area") is not None else None
+        lever_mm = (float(r["com_lever"]) * 1e3) if r.get("com_lever") is not None else None
+        row = {
+            "grasp_tilt_deg": r.get("tilt_deg"),
+            "grasp_min_pad_mm2": area_mm2,
+            "grasp_com_lever_mm": lever_mm,
+            "grasp_width_mm": (float(x[6]) * 1e3) if x is not None else None,
+            "grasp_occ_pred": r.get("occ"),
+            "grasp_stress_pred_pa": r.get("stress_top10"),
+            "grasp_score": r.get("score"),
+            "grasp_status": r.get("status"),
+        }
+        thr = self.STEM_LEVER_FRAC * self._obj_radius_m * 1e3
+        row["stem_grasp"] = int(lever_mm is not None and lever_mm > thr)
+        row["pinch_grasp"] = int(area_mm2 is not None and area_mm2 < self.PINCH_AREA_MM2)
+        return row
+
+    # ── ground-truth occlusion from the RENDERED cloud ──────────────────────────
+    # `grasp_occ_pred` is a geometric prediction; this is what the camera actually lost. Only
+    # active when the eval obs carries a point cloud (the *_grasp_eval_pcd experiment).
+    def _count_object_points(self, obs, j: int, tcp_pos, tcp_quat, grip) -> int:
+        """Object points visible to the camera for env j, this step.
+
+        No segmentation exists in the pipeline, so object-ness is recovered in two steps:
+          1. keep points within `r_obj` of the TRUE object centre (priv_object_pos), extending the
+             precedent in examples/fov_check_always_fail.py — privileged, so it tracks the object
+             through the lift rather than assuming it stays put;
+          2. SUBTRACT the gripper analytically: reject points within ~5mm of the finger surface at
+             the COMMANDED TCP pose. The policy knows that pose exactly, so this costs nothing and
+             removes the one confounder the radius test cannot (fingers closing INSIDE the radius
+             would otherwise read as extra "object" points and mask the very occlusion we measure).
+        """
+        pc = np.asarray(obs["point_cloud"][j], np.float64)
+        pc = pc[np.any(pc != 0.0, axis=1)]                 # drop the zero padding
+        if pc.size == 0:
+            return 0
+        oc = np.asarray(obs["priv_object_pos"][j], np.float64)
+        near = pc[np.linalg.norm(pc - oc, axis=1) < self._r_obj]
+        if near.size == 0 or self._fem_pad is None:
+            return int(len(near))
+        q = np.asarray(tcp_quat, float)
+        x = np.concatenate([np.asarray(tcp_pos, float),
+                            Rot.from_quat(q[[1, 2, 3, 0]]).as_euler("xyz"),
+                            [float(grip)]])
+        Lw, Rw = fg.finger_world_pts(x, self._fem_pad)
+        fingers = np.vstack([Lw, Rw])[::4]
+        d = np.linalg.norm(near[:, None, :] - fingers[None, :, :], axis=2).min(axis=1)
+        return int((d > 0.005).sum())
+
+    def episode_metrics(self):
+        """Optional harness hook: per-env grasp-quality columns for this episode."""
+        rows = [dict(a) for a in self._audit]
+        for j, r in enumerate(rows):
+            if self._peak[j]["phase"]:
+                r["peak_stress_phase"] = self._peak[j]["phase"]
+                r["peak_stress_pa"] = self._peak[j]["stress"]
+            b = self._occ_gt[j]
+            if b.get("baseline"):
+                r["occ_pcd_baseline_pts"] = b["baseline"]
+                for k in ("grasp", "lift"):
+                    if b.get(k) is not None:
+                        r[f"occ_pcd_{k}"] = max(0.0, 1.0 - b[k] / max(b["baseline"], 1))
+        return rows
 
     # ── synthesis ───────────────────────────────────────────────────────────────
     def _synthesize(self, obs):
@@ -137,15 +279,21 @@ class GraspSynthPolicy:
                 self._fem_obj, self._fem_pad, meta = fg.build_grasp_fem(
                     mesh, voxel_div=gk["voxel_div"], target_tets=gk["target_tets"], use_gpu=gk["gpu"])
                 self._fem_mesh = mesh
+                # object bbox radius -> scales the stem-grasp lever threshold to THIS object/DR scale
+                ext = self._fem_obj.verts.max(0) - self._fem_obj.verts.min(0)
+                self._obj_radius_m = float(np.linalg.norm(ext[:2]) / 2.0)
+                self._r_obj = float(np.linalg.norm(ext) / 2.0) + 0.005
                 print(f"  [{self.synth}] FEM {meta['tets']} tets ndof={meta['ndof']} gpu={meta['gpu']}"
-                      f"  mesh={Path(mesh).name}", flush=True)
+                      f"  mesh={Path(mesh).name}  r_xy={self._obj_radius_m*1e3:.1f}mm", flush=True)
             for i in range(N):
                 seed = int(self._seed_rng.integers(1, 2**31 - 1))
                 r = fg.synthesize_grasp(self._fem_obj, self._fem_pad, obj_pos[i], obj_quat[i],
                                         E=gk["E"], density=gk["density"], mu=gk["mu"],
                                         table_z=self.table_z, maxfevals=self.maxfevals,
-                                        n_starts=gk["n_starts"], seed=seed, accel=gk["accel"])
+                                        n_starts=gk["n_starts"], seed=seed, accel=gk["accel"],
+                                        **self.objective)
                 best_x.append(r["x"])
+                self._audit[i] = self._audit_row(r, obj_pos[i])
         else:  # sdf (v2 geometric grasp cost)
             payloads = []
             for i in range(N):
@@ -159,91 +307,128 @@ class GraspSynthPolicy:
         self._synthed = True
 
     def _setup_fsm(self, all_best_x, home_pos, home_quat):
+        """Build the shared trajectory engine. Replaces the hand-rolled copy of the collector's
+        `_env_target` that used to live here — the duplication (plus reading gsv3's mutable PHASES
+        globals) is exactly how the benchmark drifted away from the collector's real behaviour."""
+        traj_kw = dict(lift_height=self.lift_height, extra_close=self.extra_close,
+                       firm_close=gsv3.FIRM_EXTRA_CLOSE_M, standoff=self.standoff,
+                       use_minjerk=self.use_minjerk, preshape_factor=self.preshape_factor,
+                       **self._resolve_shelf(all_best_x))
+        sched = self._sched_nominal
+        if self._rate_lim is not None:
+            # Same duration scaling the collector applies, same helper, same kwargs — so the
+            # benchmark measures the trajectory the collector actually generates.
+            sched = bound_scaled_schedule(sched, all_best_x, home_pos, home_quat,
+                                          self._rate_lim, **traj_kw)
+        self.schedule = sched          # FSM reads (act/_advance) use the SCALED schedule
+        self.traj = GraspTrajectory(sched, all_best_x, home_pos, home_quat, **traj_kw)
         N = self.num_envs
-        poses = [gsv3._x_to_targets(x, 1) for x in all_best_x]
-        self.pos_b = np.concatenate([p[0] for p in poses], 0).astype(np.float32)
-        self.quat_b = np.concatenate([p[1] for p in poses], 0).astype(np.float32)
-        self.lift_b = self.pos_b.copy(); self.lift_b[:, 2] += gsv3.LIFT_HEIGHT
-        self.width_open = np.full(N, 0.08, np.float32)
-        self.width_cls = np.array([p[2] - 0.0025 - self.extra_close for p in poses], np.float32)
-        self.grip_target = self.width_cls.copy()
-        # per-env firm close: soft firms EVERY grasp by the base amount, weak grasps more (never skip)
-        self.firm_close = np.full(N, gsv3.FIRM_EXTRA_CLOSE_M, np.float32)
-        self.home_pos = home_pos.copy()
-        self.home_quat = home_quat.copy()
-
-        def _wxyz_to_rot(q):
-            return Rot.from_quat([q[1], q[2], q[3], q[0]])
-        self.slerps = [Slerp([0., 1.], Rot.concatenate([_wxyz_to_rot(home_quat[i]),
-                                                        _wxyz_to_rot(self.quat_b[i])]))
-                       for i in range(N)]
         self.phase_idx = np.zeros(N, np.int64)
         self.phase_step = np.zeros(N, np.int64)
+        # previous COMMANDED target per env, for the per-step clamp (same reference the backends
+        # use); seeded from the measured home the FSM starts at.
+        self._prev_cmd = (np.asarray(home_pos, np.float32).copy(),
+                          np.asarray(home_quat, np.float32).copy(),
+                          self.traj.width_open.copy())
         self.rest_stress = None
 
-    # ── FSM per-env target (mirrors collect_demos_synth_v3._env_target) ─────────
-    def _env_target(self, i, phase_idx, phase_step):
-        name, dur = gsv3.PHASES[phase_idx]
-        if name == "approach":
-            alpha = (phase_step + 1) / dur
-            pos = self.home_pos[i] + alpha * (self.pos_b[i] - self.home_pos[i])
-            xyzw = self.slerps[i](alpha).as_quat()
-            quat = np.array([xyzw[3], xyzw[0], xyzw[1], xyzw[2]], np.float32)
-            grip = self.width_open[i]
-        elif name == "settle":
-            pos, quat, grip = self.pos_b[i], self.quat_b[i], self.width_open[i]
-        elif name == "grasp":
-            alpha = (phase_step + 1) / dur
-            pos, quat = self.pos_b[i], self.quat_b[i]
-            grip = self.width_open[i] + alpha * (self.width_cls[i] - self.width_open[i])
-        elif name == "firm":
-            pos, quat = self.pos_b[i], self.quat_b[i]
-            alpha = (phase_step + 1) / dur
-            self.grip_target[i] = max(0.0, self.width_cls[i] - alpha * self.firm_close[i])
-            grip = self.grip_target[i]
-        elif name == "lift":
-            alpha = (phase_step + 1) / dur
-            pos = self.pos_b[i] + alpha * (self.lift_b[i] - self.pos_b[i])
-            quat, grip = self.quat_b[i], self.grip_target[i]
-        else:  # "hold"
-            pos, quat, grip = self.lift_b[i], self.quat_b[i], self.grip_target[i]
-        return pos, quat, grip
+    def _resolve_shelf(self, all_best_x):
+        """Fill in shelf_pivot_z from the actual pad geometry (TCP -> pad-centre along tool z,
+        ~25mm). Rotating about the TCP instead would swing the object on a 25mm arc, which is
+        enough to push obj_z out of the eval success band -- a silent success regression that
+        would look like the shelf failing.
+
+        The early-out must test BOTH knobs. Testing shelf_deg alone meant `--shelf-deg 0
+        --shelf-open X` forwarded NOTHING, so the release-only arms of the 2x2 silently ran the
+        plain baseline -- twice, at 2.5mm and at 6mm, both of which came back changing stress by
+        <0.15% per episode. That is the same bug as the `_shelf_on` gate in grasp_traj.py, one
+        layer up: fixing the engine did not fix the caller that decides whether to configure it.
+        """
+        deg = float(self.shelf_kw.get("shelf_deg") or 0.0)
+        open_m = float(self.shelf_kw.get("shelf_open") or 0.0)
+        if deg <= 0.0 and open_m == 0.0:
+            return {}
+        pivot = 0.0
+        if deg > 0.0:                     # the pivot only matters when there IS a rotation
+            if self._fem_pad is None:
+                raise SystemExit("--shelf-deg requires --synth fem (the pad geometry that defines "
+                                 "the rotation pivot is only built on the FEM path)")
+            w = float(np.mean([float(np.asarray(x, float)[6]) for x in all_best_x]))
+            pivot = float(self._fem_pad["z_center"] + fg._z_off(w))
+        return dict(self.shelf_kw, shelf_pivot_z=pivot,
+                    cam_pos=self.objective.get("cam_pos"))
 
     def act(self, obs):
         if not self._synthed:
             self._synthesize(obs)
         if self.rest_stress is None:
             self.rest_stress = self._stress_pa(obs)          # settled-rest baseline (top10 Pa)
+        try:                                                  # phase-of-peak-stress (diagnostic)
+            _st = self._stress_pa(obs)
+            for _j in range(self.num_envs):
+                if float(_st[_j]) > self._peak[_j]["stress"]:
+                    _pi = int(self.phase_idx[_j])
+                    self._peak[_j] = {"stress": float(_st[_j]),
+                                      "phase": self.schedule.name(min(_pi, self.schedule.n_phases - 1))}
+        except Exception:
+            pass
         N = self.num_envs
         cur_pos = np.zeros((N, 3), np.float32)
         cur_quat = np.zeros((N, 4), np.float32)
         cur_grip = np.zeros(N, np.float32)
         for i in range(N):
-            if self.phase_idx[i] < gsv3.N_PHASES:
-                p, q, g = self._env_target(i, int(self.phase_idx[i]), int(self.phase_step[i]))
+            if self.phase_idx[i] < self.schedule.n_phases:
+                p, q, g = self.traj.target(i, int(self.phase_idx[i]), int(self.phase_step[i]))
             else:                                             # FSM done -> freeze at lift/hold target
-                p, q, g = self.lift_b[i], self.quat_b[i], self.grip_target[i]
+                p, q, g = self.traj.frozen_target(i)
             cur_pos[i], cur_quat[i], cur_grip[i] = p, q, g
+        if self._rate_lim is not None:
+            # Same per-step clamp the collector applies before recording — the benchmark executes
+            # (and scores the smoothness of) the exact command stream the dataset would contain.
+            from gentle_manip.actions.pipeline import clamp_absolute_target
+            pp, pq, pg = self._prev_cmd
+            cur_pos, cur_quat, cur_grip = clamp_absolute_target(
+                pp, pq, pg, cur_pos, cur_quat, cur_grip, self._rate_lim)
+            self._prev_cmd = (cur_pos.copy(), cur_quat.copy(), cur_grip.copy())
+
+        # Ground-truth occlusion, sampled AFTER the targets so the finger geometry subtracted is the
+        # pose actually commanded THIS step. Using the grasp pose throughout would be wrong during
+        # the lift, when the gripper has moved away from it.
+        if isinstance(obs, dict) and "point_cloud" in obs and "priv_object_pos" in obs:
+            gi, li = self.schedule.index("grasp"), self.schedule.index("lift")
+            for j in range(N):
+                ph, b = int(self.phase_idx[j]), self._occ_gt[j]
+                if not b.get("baseline"):                 # step 0: arm at home, nothing occluded
+                    b["baseline"] = self._count_object_points(obs, j, cur_pos[j], cur_quat[j],
+                                                             cur_grip[j])
+                elif gi >= 0 and ph == gi and b.get("grasp") is None:
+                    b["grasp"] = self._count_object_points(obs, j, cur_pos[j], cur_quat[j],
+                                                           cur_grip[j])
+                elif li >= 0 and ph == li and b.get("lift") is None:
+                    b["lift"] = self._count_object_points(obs, j, cur_pos[j], cur_quat[j],
+                                                          cur_grip[j])
         action = gsv3._invert_actions_absolute(cur_pos, cur_quat, cur_grip, self.action_config)
         self._advance(obs)
         return action.astype(np.float32)
 
     def _advance(self, obs):
         N = self.num_envs
-        active = self.phase_idx < gsv3.N_PHASES
+        n_phases = self.schedule.n_phases
+        active = self.phase_idx < n_phases
         self.phase_step[active] += 1
-        durations = np.array([gsv3.PHASES[min(int(p), gsv3.N_PHASES - 1)][1] for p in self.phase_idx])
+        durations = np.array([self.schedule.duration(min(int(p), n_phases - 1))
+                              for p in self.phase_idx])
         rolled = active & (self.phase_step >= durations)
-        advance = np.ones(N, np.int64)
-        leaving_grasp = rolled & (self.phase_idx == gsv3._GRASP_IDX)
+        grasp_idx = self.schedule.index("grasp")
+        leaving_grasp = rolled & (self.phase_idx == grasp_idx)
         if np.any(leaving_grasp):                            # soft: ALWAYS firm base, weak firms more
             cur = self._stress_pa(obs)
             for i in np.where(leaving_grasp)[0]:
                 rise = float(cur[i] - self.rest_stress[i])
                 if rise < gsv3.FIRM_STRESS_THRESH_PA:        # weak grasp -> extra close
-                    self.firm_close[i] = gsv3.FIRM_EXTRA_CLOSE_M + gsv3.FIRM_WEAK_EXTRA_CLOSE_M
+                    self.traj.set_firm_close(i, gsv3.FIRM_EXTRA_CLOSE_M + gsv3.FIRM_WEAK_EXTRA_CLOSE_M)
                 # else: base firm close (never skip)
-        self.phase_idx[rolled] += advance[rolled]
+        self.phase_idx[rolled] += 1
         self.phase_step[rolled] = 0
 
 
@@ -276,7 +461,78 @@ def main() -> None:
     ap.add_argument("--grasp-extra-close", type=float, default=0.0,
                     help="squeeze TIGHTER than the synthesized width by this many meters (e.g. 0.005 = "
                          "5mm), for EVERY grasp — mirrors collect_demos_synth_v3.py. 0 = native synth width.")
+    # ── grasp OBJECTIVE (the fix for the benchmark-vs-collector mismatch) ──────
+    ap.add_argument("--grasp-profile", choices=sorted(GRASP_PROFILES), default="strict",
+                    help="which grasp objective to evaluate. 'strict' (default) = the historical "
+                         "benchmark, bit-identical. 'collector_v3' = what collect_demos_synth_v3.py "
+                         "ACTUALLY runs (w_align 2000 + tilt seeding + diversity) — the honest v3 "
+                         "baseline. 'v4' = collector diversity + the re-enabled peak term and the new "
+                         "geometry priors. Individual --grasp-* flags below override the profile.")
+    ap.add_argument("--grasp-align", type=float, default=None, help="override w_align")
+    ap.add_argument("--grasp-peak", type=float, default=None, help="override w_peak (0.3 = metric default)")
+    ap.add_argument("--grasp-com", type=float, default=None, help="override w_com (COM lever arm)")
+    ap.add_argument("--grasp-tilt", type=float, default=None, help="override w_tilt (verticality prior)")
+    ap.add_argument("--grasp-occ", type=float, default=None, help="override w_occ (camera occlusion)")
+    ap.add_argument("--grasp-area-min", type=float, default=None,
+                    help="override area_min (m^2 floor on the worst pad's contact area)")
+    ap.add_argument("--grasp-execute-offset", type=float, default=None,
+                    help="score each candidate at width MINUS this (metres) — the extra squeeze the "
+                         "executor applies (base 2.5mm + firm 2mm = 0.0045). 0 scores an operating "
+                         "point the robot never visits; see the v4fix profile.")
+    ap.add_argument("--grasp-cam-azimuth-max", type=float, default=None,
+                    help="override cam_azimuth_max_deg (v5's occlusion bound); None keeps the "
+                         "profile's value")
+    ap.add_argument("--grasp-roll-max-deg", type=float, default=None,
+                    help="half-width of the roll search band about top-down. 90 (default) admits a "
+                         "fully horizontal tool axis, i.e. pure side grasps; try 15-30 to exclude them.")
+    ap.add_argument("--grasp-diversity-tol", type=float, default=None)
+    ap.add_argument("--grasp-jitter-deg", type=float, default=None)
+    ap.add_argument("--grasp-jitter-pos", type=float, default=None)
+    ap.add_argument("--grasp-pitch-seed-deg", type=float, default=None)
+    # ── trajectory ────────────────────────────────────────────────────────────
+    ap.add_argument("--traj", choices=["v3", "v4", "v4split"], default="v3",
+                    help="v3 = single lerp+slerp home->grasp (linear time). v4 = pre-grasp standoff "
+                         "(approach_xy -> align -> descend) with minimum-jerk time scaling.")
+    ap.add_argument("--standoff", type=float, default=0.05, help="v4 pre-grasp standoff distance (m)")
+    ap.add_argument("--preshape-factor", type=float, default=0.0,
+                    help="v4: preshape the gripper to this multiple of the grasp width during the "
+                         "approach instead of holding it fully open (1.4 ~ human reach). 0 = disabled.")
+    ap.add_argument("--no-minjerk", action="store_true",
+                    help="use linear time scaling even with --traj v4 (isolates the standoff change)")
+    # ── v4.1 shelf lift (see docs/grasp_synthesis_v4_algorithm.md) ───────────
+    ap.add_argument("--shelf-deg", type=float, default=0.0,
+                    help="rotate the gripper DURING the lift so one finger becomes a floor under "
+                         "the object. 0 = off (bit-identical to v4). Theory optimum is "
+                         "arctan(1/mu) = 55deg for mu=0.7; 90deg is WORSE.")
+    ap.add_argument("--shelf-open", type=float, default=0.0,
+                    help="metres of width released after the rotation completes -- where the stress "
+                         "reduction actually comes from (rotation alone can be a regression)")
+    ap.add_argument("--shelf-sign", default="auto", help="+1 / -1 / auto (swing away from camera)")
+    ap.add_argument("--shelf-frac", type=float, nargs=2, default=(0.10, 0.60))
+    ap.add_argument("--shelf-open-frac", type=float, nargs=2, default=(0.60, 1.00))
+    ap.add_argument("--pinch-area-mm2", type=float, default=None,
+                    help="worst-pad contact area below which a grasp is flagged pinch_grasp "
+                         "(provisional default 20; the raw grasp_min_pad_mm2 column is the truth)")
+    ap.add_argument("--stem-lever-frac", type=float, default=None,
+                    help="COM lever arm, as a fraction of the object's bbox radius, above which a "
+                         "grasp is flagged stem_grasp (provisional default 0.25)")
     args = ap.parse_args()
+
+    # Resolve profile + explicit overrides into ONE objective dict, and record it in summary.json so
+    # every run self-documents the objective that produced it (the missing piece that let the
+    # benchmark silently diverge from the collector in the first place).
+    objective = dict(GRASP_PROFILES[args.grasp_profile])
+    for key, val in (("w_align", args.grasp_align), ("w_peak", args.grasp_peak),
+                     ("w_com", args.grasp_com), ("w_tilt", args.grasp_tilt),
+                     ("w_occ", args.grasp_occ), ("area_min", args.grasp_area_min),
+                     ("execute_offset", args.grasp_execute_offset),
+                     ("diversity_tol", args.grasp_diversity_tol), ("jitter_deg", args.grasp_jitter_deg),
+                     ("jitter_pos", args.grasp_jitter_pos), ("pitch_seed_deg", args.grasp_pitch_seed_deg),
+                     ("cam_azimuth_max_deg", args.grasp_cam_azimuth_max)):
+        if val is not None:
+            objective[key] = val
+    if args.grasp_roll_max_deg is not None:
+        objective["roll_max"] = np.radians(args.grasp_roll_max_deg)
 
     exp = Experiment.load(args.experiment)
     # object von-Mises yield (priv_stress is normalized by it -> convert back to Pa for the firm check)
@@ -287,14 +543,53 @@ def main() -> None:
                      or (_mat.get("von_mises_yield_stress") if isinstance(_mat, dict) else None) or 4e4)
 
     client = SimEnvClient(port=args.port)
-    venv = SimEvalVenv(client, args.num_envs, args.max_steps)
+    # policy_dt = the scene's sim_dt: this venv steps the sim exactly once per policy step, so the
+    # EE trace is sampled at the true sim rate and the smoothness metrics are meaningful.
+    from gentle_manip.tasks.single_lift import SingleLiftTask as _SLT
+    venv = SimEvalVenv(client, args.num_envs, args.max_steps,
+                       policy_dt=float(_SLT(exp.task_cfg).scene_spec.sim_dt))
     grasp_kw = dict(E=args.grasp_E, density=args.grasp_density, mu=args.grasp_mu, accel=args.grasp_accel,
                     n_starts=args.grasp_n_starts, voxel_div=args.grasp_voxel_div,
                     target_tets=args.grasp_target_tets, gpu=not args.grasp_cpu)
+    # Always pass the camera the sim actually renders from, even when w_occ == 0: the term stays
+    # inert in the objective, but the grasp AUDIT then reports real occlusion instead of a
+    # placeholder zero. Costs ~0.05 ms/candidate.
+    from gentle_manip.tasks.single_lift import SingleLiftTask
+    objective.setdefault("cam_pos", tuple(SingleLiftTask(exp.task_cfg).scene_spec.cameras[0].pos))
+    # `--traj v4` MUST mean what it means in the collector: the BLENDED Bezier reach. It used to map
+    # to SCHEDULE_V4, the split travel->align->descend decomposition -- the trajectory the
+    # Iteration-2 gate REJECTED for costing ~5.7x in jerk by stopping mid-reach. With
+    # rotate_during_travel on (the default) `align` translates nowhere and rotates nothing, so it is
+    # 25 frames of pure dwell: the benchmark spent 38% of every episode commanding zero motion
+    # against the collector's 27%, and reported 3 velocity peaks where the collector produces 2.
+    # Every benchmark number recorded before this fix describes a trajectory the collector does not
+    # generate. `v4split` keeps the old behaviour reachable for reproduction.
+    schedule = {"v3": SCHEDULE_V3, "v4": SCHEDULE_V4_BLEND, "v4split": SCHEDULE_V4}[args.traj]
+    shelf_kw = dict(shelf_deg=args.shelf_deg, shelf_open=args.shelf_open,
+                    shelf_sign=(args.shelf_sign if args.shelf_sign == "auto"
+                                else float(args.shelf_sign)),
+                    shelf_frac=tuple(args.shelf_frac),
+                    shelf_open_frac=tuple(args.shelf_open_frac))
+    if args.shelf_deg > 0:
+        if exp.action_config.mode != "absolute":
+            raise SystemExit(f"--shelf-deg needs an absolute action config, got "
+                             f"{exp.action_config.mode!r}")
+        print(f"[eval_grasp_synth] SHELF LIFT {args.shelf_deg:.0f}deg, "
+              f"release {args.shelf_open * 1e3:.1f}mm, sign={args.shelf_sign}", flush=True)
+    print(f"[eval_grasp_synth] objective profile={args.grasp_profile} traj={args.traj} -> "
+          f"{ {k: v for k, v in objective.items() if k != 'cam_pos'} }", flush=True)
     policy = GraspSynthPolicy(args.num_envs, exp.action_config, venv, synth=args.synth,
                               maxfevals=args.maxfevals, yield_pa=yield_pa, object_name=obj_name,
                               grasp_kw=grasp_kw, table_z=args.table_z, seed=args.seed,
-                              extra_close=args.grasp_extra_close)
+                              extra_close=args.grasp_extra_close,
+                              objective=objective, schedule=schedule,
+                              standoff=args.standoff, preshape_factor=args.preshape_factor,
+                              use_minjerk=(args.traj == "v4" and not args.no_minjerk),
+                              shelf_kw=shelf_kw)
+    if args.pinch_area_mm2 is not None:
+        policy.PINCH_AREA_MM2 = float(args.pinch_area_mm2)
+    if args.stem_lever_frac is not None:
+        policy.STEM_LEVER_FRAC = float(args.stem_lever_frac)
     spec = EvalSpec(n_episodes=args.n_episodes, num_envs=args.num_envs, seed=args.seed,
                     max_policy_steps=args.max_steps, scene_group_size=args.scene_group_size)
 
@@ -303,7 +598,19 @@ def main() -> None:
     run_eval(venv, policy, spec, out_dir, experiment_name=args.experiment, checkpoint=None,
              record_batches=args.record_batches,
              extra_meta={"algorithm": "scripted_policy", "algo_variant": f"grasp_synth_{args.synth}",
-                         "maxfevals": args.maxfevals, "grasp_extra_close": args.grasp_extra_close})
+                         "maxfevals": args.maxfevals, "grasp_extra_close": args.grasp_extra_close,
+                         # the RESOLVED objective + trajectory, so a run is self-documenting
+                         "grasp_profile": args.grasp_profile,
+                         "grasp_objective": {k: (list(v) if isinstance(v, tuple) else v)
+                                             for k, v in objective.items()},
+                         "traj": args.traj, "standoff": args.standoff,
+                         "minjerk": bool(args.traj == "v4" and not args.no_minjerk),
+                         "preshape_factor": args.preshape_factor,
+                         # v4.1 — a shelf run must be distinguishable from a v4 run in summary.json
+                         "shelf_deg": args.shelf_deg, "shelf_open": args.shelf_open,
+                         "shelf_sign": args.shelf_sign,
+                         "shelf_frac": list(args.shelf_frac),
+                         "shelf_open_frac": list(args.shelf_open_frac)})
     policy.close()
     venv.close()
     print(f"\n[eval_grasp_synth:{args.synth}] done -> {out_dir}", flush=True)

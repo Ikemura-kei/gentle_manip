@@ -15,16 +15,23 @@ import csv
 import json
 from pathlib import Path
 
-from gentle_manip.evaluation.metrics import STRESS_COLS, aggregate, write_summary
+from gentle_manip.evaluation.metrics import (AUX_COLS, AUX_RATE_COLS, STRESS_COLS,
+                                             aggregate, write_summary)
 
 # keys aggregate() computes itself — everything else in the old summary is provenance meta.
 _COMPUTED = {"n_episodes", "success_rate", "ever_success_rate", "mean_episode_reward",
-             "is_soft_task", "stress_n_success", "stress_mean_tmean_mean_all"}
+             "is_soft_task", "stress_n_success", "stress_mean_tmean_mean_all",
+             "ever_in_band_rate", "hold_failure_gap"}
 for _c, _pct in STRESS_COLS:
     _COMPUTED.add(_c + "_mean")
     if _pct:
         _COMPUTED.update({_c + "_std", _c + "_p90", _c + "_p95"})
+# Keep in lockstep with metrics.aggregate: anything aggregate() derives must be listed here, or a
+# recompute would carry the OLD value through as if it were provenance metadata.
+_COMPUTED.update(c + "_mean" for c, _ in AUX_COLS)
+_COMPUTED.update(c + "_rate" for c in AUX_RATE_COLS)
 _STRESS_KEYS = [c for c, _ in STRESS_COLS]
+_AUX_KEYS = [c for c, _ in AUX_COLS] + AUX_RATE_COLS
 
 
 def _num(v):
@@ -45,6 +52,9 @@ def _records(csv_path: Path) -> list[dict]:
                 "ever_success": int(float(r["ever_success"])) if r.get("ever_success") not in ("", None) else 0,
                 "episode_reward": _num(r.get("episode_reward")) or 0.0,
                 **{k: _num(r.get(k)) for k in _STRESS_KEYS},
+                # smoothness + grasp-quality audit, so a recompute regenerates them instead of
+                # silently preserving whatever the previous summary happened to contain
+                **{k: _num(r.get(k)) for k in _AUX_KEYS},
             })
     return out
 

@@ -1,0 +1,879 @@
+"""v4 grasp-synthesis regressions: v3 behaviour must be preserved bit-for-bit.
+
+Two independent identity guarantees are pinned here, because both are easy to break silently:
+
+1. `GraspTrajectory` with `SCHEDULE_V3` reproduces the v3 collector's `_env_target` arithmetic
+   EXACTLY — same lerp/slerp, same `alpha = (step+1)/dur`, same stateful `grip_target` mutation in
+   the "firm" phase. The reference implementation is inlined below rather than imported, so the
+   test keeps validating the original arithmetic even after the v3 collector is eventually retired.
+
+2. The new `finger_grasp` scoring terms (`w_com`, `w_tilt`, `w_occ`, `area_min`) and the `_UNSET`
+   weight sentinel are inert at their defaults, so an unchanged caller gets the identical score.
+
+Note on (2): `plan_finger_grasp` drives its seed-yaw smear, pitch seeds, diversity sampling and
+jitter from ONE RNG stream. Any new random draw inside it shifts that stream and silently changes
+every grasp, so `test_occlusion_ctx_is_deterministic` guards the occlusion sampler specifically.
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import numpy as np
+import pytest
+from scipy.spatial.transform import Rotation as Rot, Slerp
+
+_REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_REPO / "grasp_synthesis"))
+
+from grasp_traj import (GraspTrajectory, PhaseSchedule, SCHEDULE_V3, SCHEDULE_V4,  # noqa: E402
+                        SCHEDULE_V4_BLEND, minjerk, x_to_pose)
+
+
+# ── reference: v3's _env_target, verbatim (collect_demos_synth_v3.py:483-517) ─────────────────────
+
+def _v3_reference(best_x, home_pos, home_quat, lift_height, extra_close, firm_close):
+    """Rebuild v3's per-env target closure exactly, returning (target_fn, frozen_fn)."""
+    def _x_to_targets(x):
+        pos = np.asarray(x[:3], np.float32)
+        q = Rot.from_euler("xyz", x[3:6]).as_quat()
+        return pos, np.array([q[3], q[0], q[1], q[2]], np.float32), float(x[6])
+
+    n = len(best_x)
+    poses = [_x_to_targets(np.asarray(x, float)) for x in best_x]
+    pos_b = np.stack([p[0] for p in poses]).astype(np.float32)
+    quat_b = np.stack([p[1] for p in poses]).astype(np.float32)
+    lift_b = pos_b.copy(); lift_b[:, 2] += lift_height
+    width_open = np.full(n, 0.08, np.float32)
+    width_cls = np.array([max(0.0, p[2] - 0.0025 - extra_close) for p in poses], np.float32)
+    grip_target = width_cls.copy()
+    fc = np.full(n, firm_close, np.float32)
+    home_pos = np.asarray(home_pos, np.float32).reshape(n, 3)
+    home_quat = np.asarray(home_quat, np.float32).reshape(n, 4)
+
+    def _w2r(q): return Rot.from_quat([q[1], q[2], q[3], q[0]])
+    home_r = _w2r(home_quat[0])
+    slerps = [Slerp([0., 1.], Rot.concatenate([home_r, _w2r(quat_b[i])])) for i in range(n)]
+    PHASES = SCHEDULE_V3.phases
+
+    def target(i, phase_idx, phase_step):
+        name, dur = PHASES[phase_idx]
+        if name == "approach":
+            alpha = (phase_step + 1) / dur
+            pos = home_pos[i] + alpha * (pos_b[i] - home_pos[i])
+            xyzw = slerps[i](alpha).as_quat()
+            quat = np.array([xyzw[3], xyzw[0], xyzw[1], xyzw[2]], np.float32)
+            grip = width_open[i]
+        elif name == "settle":
+            pos, quat, grip = pos_b[i], quat_b[i], width_open[i]
+        elif name == "grasp":
+            alpha = (phase_step + 1) / dur
+            pos, quat = pos_b[i], quat_b[i]
+            grip = width_open[i] + alpha * (width_cls[i] - width_open[i])
+        elif name == "firm":
+            pos, quat = pos_b[i], quat_b[i]
+            alpha = (phase_step + 1) / dur
+            grip_target[i] = max(0.0, width_cls[i] - alpha * fc[i])
+            grip = grip_target[i]
+        elif name == "lift":
+            alpha = (phase_step + 1) / dur
+            pos = pos_b[i] + alpha * (lift_b[i] - pos_b[i])
+            quat, grip = quat_b[i], grip_target[i]
+        else:
+            pos, quat, grip = lift_b[i], quat_b[i], grip_target[i]
+        return pos, quat, grip
+
+    return target, (lambda i: (lift_b[i], quat_b[i], grip_target[i]))
+
+
+BEST_X = [
+    [0.470, 0.000, 0.0042, np.pi, 0.00, np.pi / 2, 0.0334],
+    [0.455, -0.021, 0.0100, np.pi - 0.30, 0.12, -0.40, 0.0410],
+    [0.492, 0.018, -0.0050, np.pi + 0.25, -0.18, 1.90, 0.0280],
+]
+HOME_POS = np.tile(np.array([0.40, 0.0, 0.21], np.float32), (3, 1))
+HOME_QUAT = np.tile(np.array([0.0, 1.0, 0.0, 0.0], np.float32), (3, 1))
+
+
+def _traj(**kw):
+    return GraspTrajectory(SCHEDULE_V3, BEST_X, HOME_POS, HOME_QUAT,
+                           lift_height=0.2, extra_close=0.0, firm_close=0.002,
+                           use_minjerk=False, **kw)
+
+
+def test_schedule_v3_matches_v3_reference_exactly():
+    """Every (env, phase, step) command is bit-identical to v3's closure."""
+    traj = _traj()
+    ref, _ = _v3_reference(BEST_X, HOME_POS, HOME_QUAT, 0.2, 0.0, 0.002)
+    checked = 0
+    for pi in range(SCHEDULE_V3.n_phases):
+        for step in range(SCHEDULE_V3.duration(pi)):
+            for i in range(len(BEST_X)):
+                gp, gq, gg = traj.target(i, pi, step)
+                rp, rq, rg = ref(i, pi, step)
+                assert np.array_equal(np.asarray(gp, np.float32), np.asarray(rp, np.float32)), \
+                    f"pos mismatch env{i} {SCHEDULE_V3.name(pi)} step{step}"
+                assert np.array_equal(np.asarray(gq, np.float32), np.asarray(rq, np.float32)), \
+                    f"quat mismatch env{i} {SCHEDULE_V3.name(pi)} step{step}"
+                assert float(gg) == float(rg), \
+                    f"grip mismatch env{i} {SCHEDULE_V3.name(pi)} step{step}"
+                checked += 1
+    assert checked == 3 * sum(d for _, d in SCHEDULE_V3.phases)
+
+
+def test_frozen_target_matches_reference():
+    traj = _traj()
+    ref, ref_frozen = _v3_reference(BEST_X, HOME_POS, HOME_QUAT, 0.2, 0.0, 0.002)
+    fi = SCHEDULE_V3.index("firm")                      # drive both through firm to set grip_target
+    for step in range(SCHEDULE_V3.duration(fi)):
+        for i in range(len(BEST_X)):
+            traj.target(i, fi, step); ref(i, fi, step)
+    for i in range(len(BEST_X)):
+        g, r = traj.frozen_target(i), ref_frozen(i)
+        assert np.array_equal(np.asarray(g[0], np.float32), np.asarray(r[0], np.float32))
+        assert np.array_equal(np.asarray(g[1], np.float32), np.asarray(r[1], np.float32))
+        assert float(g[2]) == float(r[2])
+
+
+def test_firm_phase_mutates_grip_target():
+    """The 'firm' phase must WRITE grip_target, which lift/hold then read (v3 semantics)."""
+    traj = _traj()
+    fi, li = SCHEDULE_V3.index("firm"), SCHEDULE_V3.index("lift")
+    before = traj.grip_target.copy()
+    for step in range(SCHEDULE_V3.duration(fi)):
+        traj.target(0, fi, step)
+    assert traj.grip_target[0] < before[0]                       # closed further
+    assert traj.target(0, li, 0)[2] == traj.grip_target[0]       # lift reads the firmed width
+
+
+def test_set_firm_close_widens_the_squeeze():
+    traj = _traj()
+    fi = SCHEDULE_V3.index("firm")
+    traj.set_firm_close(1, 0.0045)
+    last = SCHEDULE_V3.duration(fi) - 1
+    for step in range(SCHEDULE_V3.duration(fi)):
+        traj.target(1, fi, step)
+    assert traj.grip_target[1] == pytest.approx(traj.width_cls[1] - 0.0045, abs=1e-7)
+    assert traj.target(1, fi, last)[2] == traj.grip_target[1]
+
+
+# ── minimum jerk ──────────────────────────────────────────────────────────────
+
+def test_minjerk_endpoints_and_derivatives():
+    """s(0)=0, s(1)=1, and zero velocity AND acceleration at both ends (Flash & Hogan).
+
+    The boundary derivatives are checked against the CLOSED FORM, not np.gradient: the latter falls
+    back to a one-sided difference at the array edges, whose O(h) truncation error (~2.5e-6 here)
+    would mask a genuine violation at any tolerance tight enough to be meaningful.
+        s'(a)  = 30a^2(1-a)^2
+        s''(a) = 60a(1-a)(1-2a)
+    """
+    assert minjerk(0.0) == 0.0
+    assert minjerk(1.0) == pytest.approx(1.0)
+
+    def ds(a):  return 30 * a**2 * (1 - a)**2
+    def dds(a): return 60 * a * (1 - a) * (1 - 2 * a)
+
+    for a in (0.0, 1.0):
+        assert ds(a) == 0.0 and dds(a) == 0.0                    # exactly zero, not approximately
+
+    n = 2001
+    t = np.linspace(0, 1, n)
+    s = minjerk(t)
+    # The closed form must actually be the derivative of the implementation. Tolerance is the
+    # ANALYTIC central-difference bound, not a guess: err <= h^2/6 * max|s'''|, with
+    # s'''(a) = 60(1 - 6a + 6a^2) so max|s'''| = 60 at the endpoints.
+    h = 1.0 / (n - 1)
+    assert np.max(np.abs(np.gradient(s, t)[1:-1] - ds(t)[1:-1])) <= h * h / 6 * 60 * 1.05
+    assert np.all(np.diff(s) >= -1e-12)                          # monotone
+    assert s[len(s) // 2] == pytest.approx(0.5, abs=1e-9)        # symmetric
+    # and the profile really does start/stop gently vs the linear ramp it replaces
+    assert ds(0.02) < 0.02 * ds(0.5)
+
+
+def test_minjerk_velocity_is_bell_shaped_single_peak():
+    """The signature of human point-to-point reaching: exactly one velocity peak, mid-movement."""
+    t = np.linspace(0, 1, 1001)
+    v = np.gradient(minjerk(t), t)
+    peaks = np.where((v[1:-1] > v[:-2]) & (v[1:-1] > v[2:]))[0]
+    assert len(peaks) == 1
+    assert t[peaks[0] + 1] == pytest.approx(0.5, abs=0.01)
+    # and it is strictly smoother than the linear profile it replaces
+    assert v.max() > 1.0                                          # peak exceeds the constant rate
+
+
+def test_minjerk_changes_targets_but_not_endpoints():
+    """Min-jerk reshapes the interior of a phase while landing on the identical final command."""
+    lin = _traj()
+    mj = GraspTrajectory(SCHEDULE_V3, BEST_X, HOME_POS, HOME_QUAT, lift_height=0.2,
+                         firm_close=0.002, use_minjerk=True)
+    ai = SCHEDULE_V3.index("approach")
+    last = SCHEDULE_V3.duration(ai) - 1
+    assert np.allclose(lin.target(0, ai, last)[0], mj.target(0, ai, last)[0])   # same endpoint
+    mid = SCHEDULE_V3.duration(ai) // 2
+    assert not np.allclose(lin.target(0, ai, mid)[0], mj.target(0, ai, mid)[0])  # different interior
+
+
+# ── v4 schedule ───────────────────────────────────────────────────────────────
+
+def _traj_v4(**kw):
+    return GraspTrajectory(SCHEDULE_V4, BEST_X, HOME_POS, HOME_QUAT, lift_height=0.2,
+                           firm_close=0.002, use_minjerk=True, standoff=0.05, **kw)
+
+
+def test_v4_descend_is_straight_along_the_approach_axis():
+    """The descend segment must be a pure translation along the grasp's own tool +z, so the fingers
+    move exactly the way they point — that is what makes it collision-free by construction."""
+    traj = _traj_v4()
+    di = SCHEDULE_V4.index("descend")
+    for i, x in enumerate(BEST_X):
+        want = Rot.from_euler("xyz", np.asarray(x, float)[3:6]).apply([0.0, 0.0, 1.0])
+        pts = np.stack([traj.target(i, di, s)[0] for s in range(SCHEDULE_V4.duration(di))])
+        d = np.diff(pts, axis=0)
+        d = d[np.linalg.norm(d, axis=1) > 1e-9]
+        u = d / np.linalg.norm(d, axis=1, keepdims=True)
+        assert np.allclose(np.abs(u @ want), 1.0, atol=1e-5)      # every step parallel to the axis
+        assert np.allclose(pts[-1], traj.pos_b[i], atol=1e-6)     # ends exactly at the grasp
+
+
+def test_v4split_align_does_not_translate():
+    """In the SPLIT schedule, rotating in place at the standoff is what makes align collision-free."""
+    traj = _traj_v4(rotate_during_travel=False)
+    ai = SCHEDULE_V4.index("align")
+    pts = np.stack([traj.target(0, ai, s)[0] for s in range(SCHEDULE_V4.duration(ai))])
+    assert np.allclose(pts, pts[0], atol=1e-9)
+    q = np.stack([traj.target(0, ai, s)[1] for s in range(SCHEDULE_V4.duration(ai))])
+    assert not np.allclose(q[0], q[-1])                           # ...but it does rotate
+
+
+def test_v4split_approach_holds_home_orientation():
+    """With rotate_during_travel=False the travel phase stays top-down and turns only at the standoff."""
+    traj = _traj_v4(rotate_during_travel=False)
+    ai = SCHEDULE_V4.index("approach_xy")
+    for s in range(SCHEDULE_V4.duration(ai)):
+        assert np.array_equal(traj.target(0, ai, s)[1], traj.home_quat[0])
+
+
+def test_v4_rotate_during_travel_finishes_before_the_descent():
+    """Default mode: the wrist turns WHILE travelling, so `align` is a hold and the descent is a
+    pure translation. Splitting travel and rotation into separate min-jerk phases forces a full
+    stop at each junction — measured as ~5.7x worse dimensionless jerk."""
+    traj = _traj_v4(rotate_during_travel=True)
+    ai, al = SCHEDULE_V4.index("approach_xy"), SCHEDULE_V4.index("align")
+    last_travel = traj.target(0, ai, SCHEDULE_V4.duration(ai) - 1)[1]
+    assert np.allclose(np.abs(np.dot(last_travel, traj.quat_b[0])), 1.0, atol=1e-6)
+    q = np.stack([traj.target(0, al, s)[1] for s in range(SCHEDULE_V4.duration(al))])
+    assert np.allclose(q, q[0])                                   # align is now a hold
+
+
+# ── the blended Bezier reach (the default v4 trajectory) ─────────────────────
+
+def _traj_blend(**kw):
+    return GraspTrajectory(SCHEDULE_V4_BLEND, BEST_X, HOME_POS, HOME_QUAT, lift_height=0.2,
+                           firm_close=0.002, use_minjerk=True, standoff=0.05, **kw)
+
+
+def test_blended_reach_arrives_along_the_approach_axis():
+    """THE property that keeps the blended reach collision-safe: a quadratic Bezier's end tangent is
+    2*(grasp - standoff), i.e. exactly the approach axis — so the fingers still arrive along the
+    direction they point, without the mid-reach stop a separate descend phase forces."""
+    traj = _traj_blend()
+    ri = SCHEDULE_V4_BLEND.index("reach")
+    dur = SCHEDULE_V4_BLEND.duration(ri)
+    for i, x in enumerate(BEST_X):
+        want = Rot.from_euler("xyz", np.asarray(x, float)[3:6]).apply([0.0, 0.0, 1.0])
+        pts = np.stack([traj.target(i, ri, s)[0] for s in range(dur)])
+        d = pts[-1] - pts[-3]
+        d /= np.linalg.norm(d)
+        assert np.dot(d, want) == pytest.approx(1.0, abs=1e-3)
+        assert np.allclose(pts[-1], traj.pos_b[i], atol=1e-6)      # ends exactly at the grasp
+
+
+def test_blended_reach_is_one_continuous_motion():
+    """The reach must be a SINGLE submovement — one speed peak, no interior stop.
+
+    Note min-jerk deliberately has zero speed at both ENDPOINTS (that is the whole point), so the
+    property to assert is unimodality, not "speed stays high": the split schedule's cost is an
+    interior deceleration to rest at the standoff, which shows up as an extra peak.
+    """
+    from gentle_manip.evaluation.smoothness import n_velocity_peaks, speed_profile
+    traj = _traj_blend()
+    ri = SCHEDULE_V4_BLEND.index("reach")
+    pts = np.stack([traj.target(0, ri, s)[0] for s in range(SCHEDULE_V4_BLEND.duration(ri))])
+    speed = speed_profile(pts, 1 / 30.0)
+    assert n_velocity_peaks(speed) == 1                            # one submovement
+    # and no interior trough: the profile rises then falls monotonically about its single peak
+    k = int(np.argmax(speed))
+    assert np.all(np.diff(speed[:k + 1]) >= -1e-9)
+    assert np.all(np.diff(speed[k:]) <= 1e-9)
+
+
+def test_blended_reach_is_smoother_than_the_split_schedule():
+    """Pins the measured trajectory-quality ordering the v4 default was chosen on."""
+    from gentle_manip.evaluation.smoothness import trajectory_metrics
+
+    def roll(sched, **kw):
+        t = GraspTrajectory(sched, BEST_X, HOME_POS, HOME_QUAT, lift_height=0.2,
+                            firm_close=0.002, standoff=0.05, **kw)
+        pts = [t.target(0, pi, s)[0]
+               for pi in range(sched.n_phases) for s in range(sched.duration(pi))]
+        return trajectory_metrics(np.stack(pts), 1 / 30.0, prefix="")
+
+    linear = roll(SCHEDULE_V3, use_minjerk=False)
+    blend = roll(SCHEDULE_V4_BLEND, use_minjerk=True)
+    split = roll(SCHEDULE_V4, use_minjerk=True)
+    assert blend["njerk"] < 0.1 * linear["njerk"]        # min-jerk is the big win (~43x measured)
+    assert blend["njerk"] < 0.5 * split["njerk"]         # blending beats stopping at the standoff
+    assert blend["vpeaks"] <= split["vpeaks"]
+    assert blend["vpeaks"] < linear["vpeaks"]
+
+
+def test_v4_standoff_is_offset_back_along_approach():
+    traj = _traj_v4()
+    for i, x in enumerate(BEST_X):
+        d = Rot.from_euler("xyz", np.asarray(x, float)[3:6]).apply([0.0, 0.0, 1.0])
+        assert np.allclose(traj.standoff_pos[i], traj.pos_b[i] - d * 0.05, atol=1e-6)
+
+
+def test_preshape_narrows_the_gripper_during_descent():
+    """Human reach preshapes to ~1.4x object size rather than opening fully; it also reduces the
+    swept volume during descent. preshape_factor=0 must reproduce the fully-open behaviour."""
+    wide = _traj_v4(preshape_factor=0.0)
+    pre = _traj_v4(preshape_factor=1.4)
+    di = SCHEDULE_V4.index("descend")
+    assert wide.target(0, di, 0)[2] == pytest.approx(0.08)
+    g = pre.target(0, di, 0)[2]
+    assert pre.width_cls[0] < g < 0.08
+    assert g == pytest.approx(min(max(pre.width_cls[0] * 1.4, pre.width_cls[0] + 0.005), 0.08), abs=1e-6)
+
+
+def test_slerp_uses_each_envs_own_home_orientation():
+    """Regression: the v3 COLLECTOR slerped every env from home_quat[0] (valid there — all envs
+    share the robot home pose), but the BENCHMARK seeds home_quat from each env's MEASURED ee_quat
+    at reset, where rows differ. Using [0] for all envs would silently change eval behaviour."""
+    hq = np.stack([
+        np.array([0.0, 1.0, 0.0, 0.0], np.float32),                       # env 0
+        np.array([0.0, 0.9659258, 0.0, 0.2588190], np.float32),           # env 1: +30 deg
+        np.array([0.0, 0.9238795, 0.3826834, 0.0], np.float32),           # env 2: different axis
+    ])
+    traj = GraspTrajectory(SCHEDULE_V3, BEST_X, HOME_POS, hq, lift_height=0.2,
+                           firm_close=0.002, use_minjerk=False)
+    ai = SCHEDULE_V3.index("approach")
+    # at the very first step each env should still be near ITS OWN home orientation, not env 0's
+    for i in range(3):
+        q0 = traj.target(i, ai, 0)[1]
+        assert abs(float(np.dot(q0, hq[i]))) > abs(float(np.dot(q0, hq[0]))) or i == 0
+
+
+@pytest.mark.parametrize("sched", [SCHEDULE_V4, SCHEDULE_V4_BLEND],
+                         ids=["v4split", "v4blend"])
+def test_gripper_width_is_continuous_across_every_phase_boundary(sched):
+    """Regression: the commanded gripper width must never jump.
+
+    `settle`/`grasp` originally decided their starting width by probing for the "descend" phase,
+    which silently missed the BLENDED schedule (whose approach phase is "reach"). The gripper
+    preshaped to 43mm during the reach and then snapped back to 80mm for settle — a 37mm
+    discontinuity that both threw away the preshape and polluted the action stream the whole
+    min-jerk design exists to smooth (the gripper is a channel of the action vector).
+    """
+    traj = GraspTrajectory(sched, BEST_X, HOME_POS, HOME_QUAT, lift_height=0.2,
+                           firm_close=0.002, use_minjerk=True, standoff=0.05,
+                           preshape_factor=1.4)
+    widths = [traj.target(0, pi, s)[2]
+              for pi in range(sched.n_phases) for s in range(sched.duration(pi))]
+    jumps = np.abs(np.diff(np.asarray(widths, float)))
+    # the largest single-step change should be a smooth interpolation step, not a snap
+    assert jumps.max() < 2e-3, f"gripper jumps {jumps.max()*1e3:.1f}mm at step {int(jumps.argmax())}"
+
+
+@pytest.mark.parametrize("sched", [SCHEDULE_V4, SCHEDULE_V4_BLEND],
+                         ids=["v4split", "v4blend"])
+def test_preshape_survives_into_the_grasp(sched):
+    """The approach must hand its aperture to the grasp, otherwise preshaping bought nothing."""
+    traj = GraspTrajectory(sched, BEST_X, HOME_POS, HOME_QUAT, lift_height=0.2,
+                           firm_close=0.002, use_minjerk=True, standoff=0.05,
+                           preshape_factor=1.4)
+    gi = sched.index("grasp")
+    assert traj.target(0, gi, 0)[2] < 0.06                    # closing from the preshape, not 0.08
+    assert traj.target(0, gi, 0)[2] == pytest.approx(float(traj.preshape[0]), abs=2e-3)
+
+
+def test_v3_schedule_still_approaches_fully_open():
+    """v3 has no preshape concept: its approach ends fully open and grasp closes from there.
+
+    Checked one interpolation step in, not at 0.08 exactly: v3's convention is alpha=(step+1)/dur,
+    so step 0 is ALREADY 1/dur of the way closed. That off-by-one is part of the bit-identity-
+    verified v3 arithmetic, so the test must match it rather than the other way round.
+    """
+    traj = GraspTrajectory(SCHEDULE_V3, BEST_X, HOME_POS, HOME_QUAT, lift_height=0.2,
+                           firm_close=0.002, use_minjerk=False)
+    gi = SCHEDULE_V3.index("grasp")
+    dur = SCHEDULE_V3.duration(gi)
+    w0, wc = float(traj.width_open[0]), float(traj.width_cls[0])
+    assert traj.target(0, gi, 0)[2] == pytest.approx(w0 + (wc - w0) / dur, abs=1e-6)
+    assert traj.target(0, gi, 0)[2] > 0.078                    # i.e. still essentially wide open
+
+
+# ── shelf lift (v4.1) ────────────────────────────────────────────────────────
+
+def _finger_heights(quat_wxyz, width=0.033):
+    """World z of the two finger origins for a given TCP orientation. The fingers sit at
+    +-(w/2 + GRIP_OFF) along tool y, so their height difference is what makes a shelf."""
+    r = Rot.from_quat([quat_wxyz[1], quat_wxyz[2], quat_wxyz[3], quat_wxyz[0]])
+    off = width / 2.0 + 0.0261                       # FINGER_GRIP_OFF
+    return float(r.apply([0, +off, 0])[2]), float(r.apply([0, -off, 0])[2])
+
+
+def _shelf_traj(best_x, deg, **kw):
+    n = len(best_x)
+    return GraspTrajectory(SCHEDULE_V3, best_x,
+                           np.tile(np.array([0.40, 0.0, 0.21], np.float32), (n, 1)),
+                           np.tile(np.array([0.0, 1.0, 0.0, 0.0], np.float32), (n, 1)),
+                           lift_height=0.2, firm_close=0.002, use_minjerk=False,
+                           shelf_deg=deg, shelf_pivot_z=-0.0251, **kw)
+
+
+@pytest.mark.parametrize("yaw_deg", [0.0, 45.0, 90.0, 135.0])
+def test_shelf_puts_one_finger_below_the_other_at_every_yaw(yaw_deg):
+    """THE geometry test. The rotation axis must come from the POSE (equivalently, be a body-frame
+    tool-x rotation) — a fixed WORLD-x axis is identical at yaw=0 and does NOTHING at yaw=90,
+    because there world x IS the closing axis. Testing only yaw=0 would miss that entirely.
+    """
+    x = [0.47, 0.0, 0.0042, np.pi, 0.0, np.radians(yaw_deg), 0.033]
+    traj = _shelf_traj([x], 90.0)
+    li = SCHEDULE_V3.index("lift")
+    dur = SCHEDULE_V3.duration(li)
+    q0 = traj.target(0, li, 0)[1]
+    q1 = traj.target(0, li, dur - 1)[1]
+    l0, r0 = _finger_heights(q0)
+    l1, r1 = _finger_heights(q1)
+    assert abs(l0 - r0) < 1e-3, "fingers should start level (horizontal closing axis)"
+    # after the rotation they must be separated in z by ~the full jaw offset
+    assert abs(l1 - r1) > 0.9 * 2 * (0.033 / 2 + 0.0261), \
+        f"yaw={yaw_deg}: fingers not stacked after rotation (dz={abs(l1 - r1):.4f})"
+
+
+def test_shelf_angle_scales_the_finger_separation():
+    """Partial rotations must give partial shelves — separation ~ sin(theta)."""
+    x = [0.47, 0.0, 0.0042, np.pi, 0.0, 0.0, 0.033]
+    li = SCHEDULE_V3.index("lift")
+    last = SCHEDULE_V3.duration(li) - 1
+    seps = []
+    for deg in (0.0, 30.0, 55.0, 90.0):
+        t = _shelf_traj([x], deg)
+        l, r = _finger_heights(t.target(0, li, last)[1])
+        seps.append(abs(l - r))
+    assert seps[0] < 1e-6                                   # shelf off -> level
+    assert seps[1] < seps[2] < seps[3]                      # monotone in theta
+    full = 2 * (0.033 / 2 + 0.0261)
+    assert seps[2] == pytest.approx(full * np.sin(np.radians(55)), rel=0.05)
+
+
+def test_shelf_pivots_about_the_pad_centre_not_the_tcp():
+    """Rotating about the TCP would swing the object on a ~25mm arc, enough to push obj_z out of
+    the eval success band. The compensation keeps the PAD CENTRE on the nominal lift path."""
+    x = [0.47, 0.0, 0.0042, np.pi, 0.0, 0.0, 0.033]
+    piv = -0.0251
+    traj = _shelf_traj([x], 90.0)
+    li = SCHEDULE_V3.index("lift")
+    dur = SCHEDULE_V3.duration(li)
+    nominal = _shelf_traj([x], 0.0)
+    for st in (0, dur // 2, dur - 1):
+        pos, quat, _ = traj.target(0, li, st)
+        pad = pos + Rot.from_quat([quat[1], quat[2], quat[3], quat[0]]).apply([0, 0, piv])
+        pos_n, quat_n, _ = nominal.target(0, li, st)
+        pad_n = pos_n + Rot.from_quat([quat_n[1], quat_n[2], quat_n[3], quat_n[0]]).apply([0, 0, piv])
+        assert np.allclose(pad, pad_n, atol=1e-5), f"pad centre moved at step {st}"
+
+
+def test_shelf_off_is_bit_identical():
+    """shelf_deg=0 must not perturb a single command."""
+    x = [0.47, 0.0, 0.0042, np.pi, 0.05, 0.7, 0.033]
+    a = _shelf_traj([x], 0.0)
+    b = GraspTrajectory(SCHEDULE_V3, [x], np.array([[0.40, 0.0, 0.21]], np.float32),
+                        np.array([[0.0, 1.0, 0.0, 0.0]], np.float32),
+                        lift_height=0.2, firm_close=0.002, use_minjerk=False)
+    for pi in range(SCHEDULE_V3.n_phases):
+        for st in range(SCHEDULE_V3.duration(pi)):
+            pa, qa, ga = a.target(0, pi, st)
+            pb, qb, gb = b.target(0, pi, st)
+            assert np.array_equal(np.asarray(pa, np.float32), np.asarray(pb, np.float32))
+            assert np.array_equal(np.asarray(qa, np.float32), np.asarray(qb, np.float32))
+            assert float(ga) == float(gb)
+    assert np.array_equal(np.asarray(a.frozen_target(0)[0], np.float32),
+                          np.asarray(b.frozen_target(0)[0], np.float32))
+
+
+def test_frozen_target_keeps_the_shelf_rotation():
+    """A finished env is still COMMANDED while others run. Returning the un-rotated pose here would
+    snap the wrist back through the whole shelf angle in one step and fling the object."""
+    x = [0.47, 0.0, 0.0042, np.pi, 0.0, 0.0, 0.033]
+    traj = _shelf_traj([x], 90.0)
+    hi = SCHEDULE_V3.index("hold")
+    hold_q = traj.target(0, hi, SCHEDULE_V3.duration(hi) - 1)[1]
+    frozen = traj.frozen_target(0)
+    assert np.allclose(np.abs(np.dot(frozen[1], hold_q)), 1.0, atol=1e-6)
+    l, r = _finger_heights(frozen[1])
+    assert abs(l - r) > 0.9 * 2 * (0.033 / 2 + 0.0261)
+
+
+def test_width_release_follows_the_rotation_and_never_precedes_it():
+    """Releasing width before the shelf exists just drops the object."""
+    x = [0.47, 0.0, 0.0042, np.pi, 0.0, 0.0, 0.033]
+    traj = _shelf_traj([x], 55.0, shelf_open=0.0025)
+    li = SCHEDULE_V3.index("lift")
+    dur = SCHEDULE_V3.duration(li)
+    grips = np.array([traj.target(0, li, s)[2] for s in range(dur)], float)
+    rot = np.array([traj._u_rot((s + 1) / dur) for s in range(dur)])
+    first_open = int(np.argmax(grips > grips[0] + 1e-6))
+    assert rot[first_open] > 0.99, "width opened before the rotation completed"
+    assert grips[-1] == pytest.approx(grips[0] + 0.0025, abs=1e-6)
+    assert np.all(np.diff(grips) >= -1e-9)                  # monotone, no snap
+
+
+def _gripper_base_x(pos, quat_wxyz, tcp_off=0.171):
+    """World x of the gripper BASE. SIM_TCP_OFFSET puts xarm_gripper_base_link at TCP - 0.171*tool_z.
+
+    The base is what occludes, and it moves OPPOSITE to the TCP: the pivot compensation holds the
+    pad centre fixed, so as the body swings one way the TCP shifts the other. Checking the TCP
+    instead would read the sign exactly backwards.
+    """
+    tz = Rot.from_quat([quat_wxyz[1], quat_wxyz[2], quat_wxyz[3], quat_wxyz[0]]).apply([0, 0, 1])
+    return float(np.asarray(pos)[0] - tcp_off * tz[0])
+
+
+def test_shelf_sign_auto_swings_the_wrist_away_from_the_camera():
+    """Both signs make a shelf; the sign picks which way the gripper BODY swings (~146mm at full
+    rotation), so it should move away from the camera rather than between it and the object."""
+    cam = (0.98910661, -0.00034108, 0.09825304)
+    x = [0.47, 0.0, 0.0042, np.pi, 0.0, np.pi / 2, 0.033]   # closing axis along world x -> at camera
+    li = SCHEDULE_V3.index("lift")
+    last = SCHEDULE_V3.duration(li) - 1
+
+    def base_x(sign):
+        t = _shelf_traj([x], 90.0, shelf_sign=sign, cam_pos=cam)
+        p, q, _ = t.target(0, li, last)
+        return _gripper_base_x(p, q)
+
+    toward, away, auto = base_x(1), base_x(-1), base_x("auto")
+    assert toward > x[0] and away < x[0], "the two signs should straddle the grasp point"
+    assert auto == pytest.approx(away), "auto picked the branch that swings toward the camera"
+    assert abs(auto - cam[0]) > abs(toward - cam[0]), "auto is not the farther-from-camera branch"
+
+
+def test_schedule_index_reports_missing_phase():
+    sched = PhaseSchedule((("approach", 5), ("grasp", 5)))        # e.g. --n-firm 0 drops "firm"
+    assert sched.index("firm") == -1 and not sched.has("firm")
+    assert sched.has("grasp") and sched.n_phases == 2
+
+
+def test_x_to_pose_roundtrip():
+    for x in BEST_X:
+        pos, quat, w = x_to_pose(x)
+        assert np.allclose(pos, np.asarray(x[:3], np.float32), atol=1e-7)
+        assert w == pytest.approx(x[6])
+        back = Rot.from_quat([quat[1], quat[2], quat[3], quat[0]])
+        assert np.allclose(back.as_matrix(), Rot.from_euler("xyz", np.asarray(x, float)[3:6]).as_matrix(),
+                           atol=1e-6)
+
+
+# ── finger_grasp: new terms are inert by default ──────────────────────────────
+
+def _fem_fixture():
+    fg = pytest.importorskip("smgrasp.finger_grasp", reason="needs trimesh/tetgen")
+    mesh = _REPO / "gentle_manip/assets/objects/mushroom.obj"
+    if not mesh.exists():
+        pytest.skip("mushroom.obj missing")
+    obj, pad, _ = fg.build_grasp_fem(str(mesh), voxel_div=9, target_tets=600, use_gpu=False)
+    return fg, obj, pad
+
+
+@pytest.mark.slow
+def test_new_score_terms_are_inert_at_defaults():
+    """w_com/w_tilt/w_occ/area_min at their defaults must not perturb the score at all."""
+    fg, obj, pad = _fem_fixture()
+    com, q = np.array([0.47, 0.0, 0.016]), np.array([1.0, 0, 0, 0])
+    x = np.array([0.47, 0.0, 0.0042, np.pi, 0.0, np.pi / 2, 0.0334])
+    kw = dict(obj_com=com, obj_quat_wxyz=q, pad_geo=pad, E=3e5, density=1000.0, mu=0.7, table_z=0.0)
+    base = fg.score_finger_grasp(obj, x, **kw)
+    same = fg.score_finger_grasp(obj, x, w_com=0.0, w_tilt=0.0, w_occ=0.0, area_min=0.0, **kw)
+    assert base["score"] == same["score"]                         # exact, not approx
+
+
+@pytest.mark.slow
+def test_audit_fields_populated_even_when_terms_disabled():
+    """tilt/lever must be reported for the grasp-quality audit regardless of their weights."""
+    fg, obj, pad = _fem_fixture()
+    com, q = np.array([0.47, 0.0, 0.016]), np.array([1.0, 0, 0, 0])
+    x = np.array([0.47, 0.0, 0.0042, np.pi, 0.0, np.pi / 2, 0.0334])
+    r = fg.score_finger_grasp(obj, x, obj_com=com, obj_quat_wxyz=q, pad_geo=pad,
+                              E=3e5, density=1000.0, mu=0.7, table_z=0.0)
+    if r["status"] == "ok":
+        assert r["tilt_deg"] == pytest.approx(0.0, abs=1e-6)      # this x IS top-down
+        assert r["com_lever"] >= 0.0
+
+
+@pytest.mark.slow
+def test_occlusion_ctx_is_deterministic():
+    """MUST be RNG-free: plan_finger_grasp drives its diversity/jitter from one stream, so any
+    random draw added here would shift it and silently change every v3 grasp."""
+    fg, obj, pad = _fem_fixture()
+    com, q = np.array([0.47, 0.0, 0.016]), np.array([1.0, 0, 0, 0])
+    cam = (0.98910661, -0.00034108, 0.09825304)
+    a = fg.build_occlusion_ctx(obj, com, q, cam, pad, k=96)
+    b = fg.build_occlusion_ctx(obj, com, q, cam, pad, k=96)
+    assert np.array_equal(a["pts"], b["pts"])
+    assert fg.build_occlusion_ctx(obj, com, q, None, pad) is None    # no camera -> term off
+
+
+@pytest.mark.slow
+def test_occlusion_increases_when_fingers_straddle_the_sightline():
+    """Occlusion is driven by the YAW of the closing axis relative to the camera, not by tilt:
+    yaw=0 puts the finger pair across y (clear of a camera on +x), yaw=90 straddles it."""
+    fg, obj, pad = _fem_fixture()
+    com, q = np.array([0.47, 0.0, 0.016]), np.array([1.0, 0, 0, 0])
+    ctx = fg.build_occlusion_ctx(obj, com, q, (0.98910661, -0.00034108, 0.09825304), pad, k=96)
+    occ = [fg._occ_frac(np.array([0.47, 0, 0.004, np.pi, 0.0, np.radians(d), 0.033]), pad, ctx)
+           for d in (0, 45, 90)]
+    assert occ[0] < occ[1] < occ[2]
+    assert occ[0] < 0.2 and occ[2] > 0.7
+
+
+def test_tilt_and_approach_dir_conventions():
+    fg = pytest.importorskip("smgrasp.finger_grasp")
+    down = np.array([0.47, 0, 0.05, np.pi, 0.0, 0.0, 0.03])
+    assert fg.tilt_deg(down) == pytest.approx(0.0, abs=1e-6)
+    assert np.allclose(fg.approach_dir(down), [0, 0, -1], atol=1e-9)   # tool +z points DOWN
+    side = np.array([0.47, 0, 0.10, np.pi - np.pi / 2, 0.0, 0.0, 0.03])
+    assert fg.tilt_deg(side) == pytest.approx(90.0, abs=1e-6)          # the old roll bound = side grasp
+
+
+def test_standoff_pose_backs_off_along_approach():
+    fg = pytest.importorskip("smgrasp.finger_grasp")
+    x = np.array([0.47, 0.0, 0.0042, np.pi, 0.1, np.pi / 2, 0.0334])
+    s = fg.standoff_pose(x, 0.06)
+    assert np.allclose(s[3:], x[3:])                                   # orientation + width unchanged
+    assert np.allclose(s[:3], x[:3] - fg.approach_dir(x) * 0.06, atol=1e-9)
+    assert s[2] > x[2]                                                 # standoff is ABOVE the grasp
+
+
+# ── v4.1 retry (begin_retry) ──────────────────────────────────────────────────
+# The rewind itself is trivial; every one of these tests pins a piece of per-env state whose
+# omission is a SILENT bug — the retried attempt still runs, it just runs wrong.
+
+def _retry_traj(**kw):
+    x = [0.47, 0.0, 0.0042, np.pi, 0.05, 0.7, 0.033]
+    return GraspTrajectory(SCHEDULE_V4_BLEND, [x], np.array([[0.40, 0.0, 0.21]], np.float32),
+                           np.array([[0.0, 1.0, 0.0, 0.0]], np.float32),
+                           lift_height=0.2, firm_close=0.002, use_minjerk=True,
+                           preshape_factor=1.35, **kw)
+
+
+def test_begin_retry_reseeds_the_approach_from_the_current_pose():
+    """Without the re-seed, rewinding to phase 0 commands an instant jump back to the robot's home
+    pose — metres away, in one step."""
+    t = _retry_traj()
+    li = SCHEDULE_V4_BLEND.index("lift")
+    cur_pos, cur_quat, _ = t.target(0, li, 20)
+    t.begin_retry(0, cur_pos, cur_quat)
+    p0 = t.target(0, 0, 0)[0]                       # first command of the re-approach
+    assert np.linalg.norm(np.asarray(p0) - np.asarray(cur_pos)) < 0.01, \
+        "re-approach must start where the failed attempt left the EE"
+    # and it must still END at the same grasp pose
+    last = SCHEDULE_V4_BLEND.duration(0) - 1
+    assert np.allclose(t.target(0, 0, last)[0], t.pos_b[0], atol=1e-5)
+
+
+def test_begin_retry_resets_firm_close_so_squeeze_cannot_compound():
+    """The firm phase re-fires on the retry. If the weak-grip extra close from the first attempt
+    survived, every attempt would squeeze strictly harder than the last."""
+    t = _retry_traj()
+    base = float(t.firm_close[0])
+    t.set_firm_close(0, base + 0.0025)              # first attempt found a weak grip
+    t.begin_retry(0, t.pos_b[0], t.quat_b[0])
+    assert float(t.firm_close[0]) == pytest.approx(base)
+
+
+def test_begin_retry_resets_grip_target_and_approach_end_width():
+    """grip_target is written by `firm` and read back by `lift`/`hold`; _approach_end_width is what
+    `grasp` closes FROM. Both are stale after a failed attempt."""
+    t = _retry_traj()
+    fi = SCHEDULE_V4_BLEND.index("firm")
+    t.target(0, fi, SCHEDULE_V4_BLEND.duration(fi) - 1)     # firm writes grip_target
+    assert float(t.grip_target[0]) < float(t.width_cls[0])
+    t.begin_retry(0, t.pos_b[0], t.quat_b[0])
+    assert float(t.grip_target[0]) == pytest.approx(float(t.width_cls[0]))
+    assert float(t._approach_end_width[0]) == pytest.approx(float(t.preshape[0]))
+
+
+def test_begin_retry_reopens_the_gripper_as_a_RAMP_not_a_jump():
+    """A retry must let go before it re-approaches -- but gradually.
+
+    Rewinding without passing the current width makes the reach command its nominal start aperture,
+    fully open, so the gripper snaps ~29mm -> 80mm in ONE step. That is a bigger discontinuity than
+    the 36.7mm one this class of bug already cost once, and it looks nothing like a regrasp.
+    """
+    t = _retry_traj()
+    li = SCHEDULE_V4_BLEND.index("lift")
+    cur_pos, cur_quat, grip_held = t.target(0, li, 10)
+    t.begin_retry(0, cur_pos, cur_quat, grip_held)
+
+    first = float(t.target(0, 0, 0)[2])
+    assert first == pytest.approx(float(grip_held), abs=2e-3), "must start from the CLOSED width"
+    # opens monotonically, reaching preshape (not the fully-open width) partway through the reach
+    dur = SCHEDULE_V4_BLEND.duration(0)
+    widths = [float(t.target(0, 0, k)[2]) for k in range(dur)]
+    assert all(b >= a - 1e-9 for a, b in zip(widths, widths[1:])), "aperture must be monotone"
+    assert max(widths) == pytest.approx(float(t.preshape[0]), abs=1e-6)
+    assert max(widths) < float(t.width_open[0]) - 1e-3, "must NOT fling fully open"
+    # ...and the biggest single-step change is a small fraction of the old 51mm jump
+    assert max(b - a for a, b in zip(widths, widths[1:])) < 0.004
+    # clear of the object well before the descent
+    assert widths[int(0.4 * dur)] == pytest.approx(float(t.preshape[0]), abs=1e-6)
+
+
+def test_normal_approach_aperture_is_unchanged_by_the_retry_ramp():
+    """The ramp is per-env and keyed on the start width, so a non-retry approach is bit-identical."""
+    t = _retry_traj()
+    dur = SCHEDULE_V4_BLEND.duration(0)
+    for k in range(dur):
+        s_ = minjerk((k + 1) / dur)
+        expect = t.width_open[0] + s_ * (t.preshape[0] - t.width_open[0])
+        assert float(t.target(0, 0, k)[2]) == pytest.approx(float(expect), abs=1e-9)
+
+
+def test_begin_retry_only_touches_the_named_env():
+    """Envs run decoupled; one env's retry must not perturb another's commands."""
+    x = [0.47, 0.0, 0.0042, np.pi, 0.05, 0.7, 0.033]
+    t = GraspTrajectory(SCHEDULE_V4_BLEND, [x, x],
+                        np.tile(np.array([0.40, 0.0, 0.21], np.float32), (2, 1)),
+                        np.tile(np.array([0.0, 1.0, 0.0, 0.0], np.float32), (2, 1)),
+                        lift_height=0.2, firm_close=0.002, use_minjerk=True)
+    before = [t.target(1, pi, st) for pi in range(SCHEDULE_V4_BLEND.n_phases)
+              for st in range(SCHEDULE_V4_BLEND.duration(pi))]
+    t.begin_retry(0, np.array([0.5, 0.1, 0.3], np.float32), t.quat_b[0])
+    after = [t.target(1, pi, st) for pi in range(SCHEDULE_V4_BLEND.n_phases)
+             for st in range(SCHEDULE_V4_BLEND.duration(pi))]
+    for a, b in zip(before, after):
+        assert np.array_equal(np.asarray(a[0]), np.asarray(b[0]))
+        assert np.array_equal(np.asarray(a[1]), np.asarray(b[1]))
+
+
+def test_begin_retry_unwinds_the_shelf_rotation():
+    """With the shelf on, the failed attempt leaves the wrist rotated. The re-approach must slerp
+    back to the grasp orientation rather than snapping."""
+    t = _retry_traj(shelf_deg=55.0, shelf_pivot_z=-0.0251, shelf_open=0.0025)
+    li = SCHEDULE_V4_BLEND.index("lift")
+    cur_pos, cur_quat, _ = t.target(0, li, SCHEDULE_V4_BLEND.duration(li) - 1)
+    t.begin_retry(0, cur_pos, cur_quat)
+    q_first = t.target(0, 0, 0)[1]
+    ang = Rot.from_quat([q_first[1], q_first[2], q_first[3], q_first[0]]).inv() * \
+        Rot.from_quat([cur_quat[1], cur_quat[2], cur_quat[3], cur_quat[0]])
+    assert np.degrees(ang.magnitude()) < 15.0, "re-approach must start near the current orientation"
+    last = SCHEDULE_V4_BLEND.duration(0) - 1
+    q_last = t.target(0, 0, last)[1]
+    ang2 = Rot.from_quat([q_last[1], q_last[2], q_last[3], q_last[0]]).inv() * \
+        Rot.from_quat([t.quat_b[0][1], t.quat_b[0][2], t.quat_b[0][3], t.quat_b[0][0]])
+    assert np.degrees(ang2.magnitude()) < 1.0, "re-approach must finish at the grasp orientation"
+
+
+def test_width_release_works_without_any_rotation():
+    """The rotation and the release are independent knobs.
+
+    Gating the whole shelf on shelf_deg made `shelf_open` unreachable at theta=0, so the 2x2's
+    release-only control arm silently ran the baseline trajectory and came back identical to it.
+    """
+    x = [0.47, 0.0, 0.0042, np.pi, 0.0, 0.0, 0.033]
+    li = SCHEDULE_V3.index("lift")
+    last = SCHEDULE_V3.duration(li) - 1
+    base = _shelf_traj([x], 0.0)
+    rel = _shelf_traj([x], 0.0, shelf_open=0.0025)
+    p_b, q_b, g_b = base.target(0, li, last)
+    p_r, q_r, g_r = rel.target(0, li, last)
+    assert float(g_r) - float(g_b) == pytest.approx(0.0025, abs=1e-6), "width was not released"
+    # ...and the POSE must be untouched: at theta=0 the rotation is the identity.
+    assert np.allclose(p_r, p_b, atol=1e-7)
+    assert np.allclose(np.abs(np.asarray(q_r)), np.abs(np.asarray(q_b)), atol=1e-6)
+    # the release must still be ramped, not a step at the start of the lift
+    assert float(rel.target(0, li, 0)[2]) == pytest.approx(float(base.target(0, li, 0)[2]), abs=1e-7)
+
+
+# ── v5: rate-bounded trajectories ─────────────────────────────────────────────
+
+RATE_LIM = [0.0045, 0.0045, 0.0055, 0.012, 0.012, 0.045, 0.005]
+
+
+def _rollout_max_ratio(sched, traj):
+    """Worst per-axis (delta / bound) ratio over the full rolled-out command stream."""
+    from scipy.spatial.transform import Rotation as R
+    lim = np.asarray(RATE_LIM)
+    worst = 0.0
+    prev = None
+    for pi in range(sched.n_phases):
+        for k in range(sched.duration(pi)):
+            p, q, g = traj.target(0, pi, k)
+            p, q, g = np.asarray(p, float), np.asarray(q, float), float(g)
+            if prev is not None:
+                worst = max(worst, float(np.max(np.abs(p - prev[0]) / lim[:3])))
+                Rp = R.from_quat([prev[1][1], prev[1][2], prev[1][3], prev[1][0]])
+                Rc = R.from_quat([q[1], q[2], q[3], q[0]])
+                worst = max(worst, float(np.max(np.abs((Rc * Rp.inv()).as_rotvec()) / lim[3:6])))
+                worst = max(worst, abs(g - prev[2]) / lim[6])
+            prev = (p, q, g)
+    return worst
+
+
+@pytest.mark.parametrize("x", [
+    [0.470, 0.0, 0.0042, np.pi, 0.10, np.pi / 2, 0.0334],        # yaw-90 (worst yaw case)
+    [0.470, 0.0, 0.0042, np.pi, np.radians(27), 0.3, 0.0334],    # worst measured tilt
+    [0.470, 0.0, 0.0042, np.pi, np.radians(35), np.pi / 2, 0.0334],  # beyond-DR extreme
+])
+def test_bound_scaled_schedule_makes_the_rollout_fit_the_bounds(x):
+    """After scaling, NO step of the commanded stream exceeds the per-axis rate limit — which is
+    what makes the runtime clamp a no-op and keeps the executed motion genuinely min-jerk."""
+    from grasp_traj import bound_scaled_schedule
+    hp = np.array([[0.40, 0.0, 0.21]], np.float32)
+    hq = np.array([[0.0, 1.0, 0.0, 0.0]], np.float32)
+    kw = dict(lift_height=0.2, firm_close=0.002, standoff=0.05,
+              use_minjerk=True, preshape_factor=1.35)
+    sc = bound_scaled_schedule(SCHEDULE_V4_BLEND, [x], hp, hq, RATE_LIM, **kw)
+    ratio = _rollout_max_ratio(sc, GraspTrajectory(sc, [x], hp, hq, **kw))
+    assert ratio <= 1.0 + 1e-9, f"still {ratio:.3f}x over after scaling"
+    # and scaling never SHRINKS a phase (it only lengthens where needed)
+    for i in range(SCHEDULE_V4_BLEND.n_phases):
+        assert sc.duration(i) >= SCHEDULE_V4_BLEND.duration(i)
+
+
+def test_bound_scaled_schedule_is_identity_when_already_bounded():
+    """A yaw-90 top-down grasp fits the (1.5x-rotation) bounds with the stock durations — the
+    scaling must then return the schedule untouched, so default behaviour cannot drift."""
+    from grasp_traj import bound_scaled_schedule
+    x = [0.470, 0.0, 0.0042, np.pi, 0.10, np.pi / 2, 0.0334]
+    hp = np.array([[0.40, 0.0, 0.21]], np.float32)
+    hq = np.array([[0.0, 1.0, 0.0, 0.0]], np.float32)
+    kw = dict(lift_height=0.2, firm_close=0.002, standoff=0.05,
+              use_minjerk=True, preshape_factor=1.35)
+    sc = bound_scaled_schedule(SCHEDULE_V4_BLEND, [x], hp, hq, RATE_LIM, **kw)
+    assert sc.phases == SCHEDULE_V4_BLEND.phases
+
+
+def test_sampled_aperture_is_floored_at_the_preshape_need():
+    """--init-width-range can draw an aperture SMALLER than a big object's grasp width. Without a
+    floor, the preshape clip inverts (np.clip(lo>hi) returns hi) and the approach aperture
+    collapses to the grasp width — the fingers plough through the object during the descent.
+    First v5 collection batch: 3/8 envs 'lifted' an object that rose 0.1mm this way."""
+    x_big = [0.47, 0.0, 0.0042, np.pi, 0.05, 0.7, 0.050]     # scale-1.46-mushroom-sized grasp
+    t = GraspTrajectory(SCHEDULE_V4_BLEND, [x_big],
+                        np.array([[0.40, 0.0, 0.21]], np.float32),
+                        np.array([[0.0, 1.0, 0.0, 0.0]], np.float32),
+                        lift_height=0.2, firm_close=0.002, use_minjerk=True,
+                        preshape_factor=1.35, width_open=[0.050])     # sampled BELOW the need
+    assert float(t.preshape[0]) > float(t.width_cls[0]) + 0.004, "preshape collapsed to grasp width"
+    assert float(t.width_open[0]) >= float(t.preshape[0]) - 1e-6
+    # and a SAFE sample is respected, so the aperture DR still varies
+    t2 = GraspTrajectory(SCHEDULE_V4_BLEND, [[0.47, 0, 0.0042, np.pi, 0.05, 0.7, 0.030]],
+                         np.array([[0.40, 0.0, 0.21]], np.float32),
+                         np.array([[0.0, 1.0, 0.0, 0.0]], np.float32),
+                         lift_height=0.2, firm_close=0.002, use_minjerk=True,
+                         preshape_factor=1.35, width_open=[0.060])
+    assert float(t2.width_open[0]) == pytest.approx(0.060, abs=1e-6)

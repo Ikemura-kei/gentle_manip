@@ -1,0 +1,39 @@
+# [task] Lift a soft CYLINDER (r 2.5cm x h 4cm) — grasp-benchmark shape object.
+# Used by: eval_grasp_synth / collect_demos_synth_v4 via experiments/single_lift_cylinder_soft*.yaml
+# Status: experimental (v4 grasp-synthesis 4-object benchmark)
+#
+# Same material as the mushroom (assets/materials.py "soft_shape"), deliberately: this object
+# varies GEOMETRY, so a benchmark difference must be attributable to shape and not to a confounded
+# material change. Curved with no antipodal faces, and the widest object in the set (5 cm across vs
+# the gripper's ~7.9 cm usable opening).
+
+object_name: "cylinder"
+object_type: "soft"          # MPM -> reports von_mises_stress
+
+# Same MPM resolution as the mushroom: the cylinder is comparable in scale (5 x 5 x 4 cm vs
+# 3.3 x 3.2 x 3.5 cm), so at grid_density 250 (4 mm cells) it spans ~12 cells — well resolved.
+# substeps track the mushroom's tuned value since E is identical (substeps ~ sqrt(E)).
+sim_substeps: 235
+mpm_grid_density: 250
+
+# Success band. The cylinder rests with its centroid at z=0.021 (half-height + 1 mm clearance) vs
+# the mushroom's 0.016, so the band is shifted up by that 5 mm difference to represent the same
+# PHYSICAL lift. Do not copy the mushroom's numbers verbatim — they are absolute heights.
+success_z_min: 0.180
+success_z_max: 0.280
+hold_steps: 30
+success_scale: 0.2
+
+rewards:
+  stress:
+    scale: 0.2
+    cap: 1.5                 # fraction of the material's von Mises yield (auto-injected)
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 0.1
+    decay: 8.0
+  lift:
+    scale: 0.1
+    grasp_gate_dist: 0.079
+    lift_target: 0.16

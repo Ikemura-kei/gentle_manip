@@ -35,3 +35,8 @@ real = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: tests that build a FEM/tet mesh or run a solver (seconds, not milliseconds)",
+]

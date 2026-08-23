@@ -1,0 +1,64 @@
+# [task] Lift a soft RASPBERRY (~1.5cm) — the small, fragile, bumpy benchmark object.
+# Used by: eval_grasp_synth / collect_demos_synth_v4 via experiments/single_lift_raspberry_soft*.yaml
+# Status: experimental — MPM RESOLUTION NOT YET STABILITY-CHECKED, see the note below.
+#
+# The hardest object in the set on two independent axes: it is the smallest (so contact resolution
+# is the binding constraint) and the most fragile (E 0.1 MPa, yield 15 kPa, vs the mushroom's
+# 0.3 MPa / 40 kPa), so a grasp that a mushroom shrugs off will bruise it.
+#
+# ⚠️ MPM RESOLUTION — the reason this config differs structurally from the other three.
+# At the shared 250 cells/m (4mm cells), a 1.5cm berry spans only ~3.8 cells: contact and
+# deformation are simply unresolved, and any stress figure would be meaningless. Cost scales as
+# domain_volume x density^3, so the density increase is paid for by TIGHTENING the domain:
+#
+#   mushroom : 0.504 x 0.304 x 0.344 m @ 250/m  =>  4.0mm cells, ~824k cells, 3.3cm = ~8 across
+#   raspberry: 0.16  x 0.12  x 0.17  m @ 600/m  =>  1.7mm cells, ~704k cells, 1.5cm = ~9 across
+#
+# i.e. slightly FEWER total cells than the mushroom while resolving the berry better than the
+# mushroom resolves itself. The tighter box is affordable because the MPM domain only has to
+# contain the OBJECT (the robot is a rigid entity, coupled but not MPM-simulated) and because this
+# task lifts less far — the mushroom's domain is tall mainly to contain a 20cm lift. Extents cover
+# the +/-4.5cm object pose DR plus the berry's own radius, with ~2cm of margin on every face (the
+# margin exists because two separate collection runs crashed on particles landing just outside a
+# tighter domain -- see the incident log in tasks/single_lift.py).
+#
+# substeps: stability needs substeps ~ density and ~ sqrt(E). Relative to the mushroom that is
+# 235 x (600/250) x sqrt(1e5/3e5) = ~325. Set to 350 for margin.
+#
+# TODO(before trusting any raspberry number): run examples/mushroom_grid_substep_sweep.py against
+# raspberry.stl to confirm this (density, substeps) pair is stable and converged. The mushroom's
+# own values came from exactly such a sweep, and its substeps had to be revised twice
+# (210 -> 420 -> 235) for cross-platform stability.
+
+object_name: "raspberry"
+object_type: "soft"
+
+mpm_grid_density: 600
+sim_substeps: 350
+# Tight domain around the workspace + the (shorter) lift. Genesis insets the usable region by
+# 3 cells per face (3 x 1.7mm = 5mm here, vs 12mm at the mushroom's density), so the effective
+# floor is much closer to the requested bound — one of the few ways the fine grid helps.
+mpm_bounds: [[0.40, -0.06, -0.02], [0.56, 0.06, 0.15]]
+
+# Shorter lift than the other objects: the domain above has to contain it, and lifting a 1.5cm
+# berry 20cm is not a more meaningful test than lifting it 8cm. The berry rests with its centroid
+# at z=0.0082, so this band is ~7-11cm of actual rise.
+success_z_min: 0.080
+success_z_max: 0.120
+hold_steps: 30
+success_scale: 0.2
+
+rewards:
+  stress:
+    scale: 0.2
+    cap: 1.5                 # fraction of the raspberry's OWN 15 kPa yield (auto-injected)
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 0.1
+    decay: 8.0
+  lift:
+    scale: 0.1
+    # gate scaled to the object: 0.079 is sized for a ~3cm object, far too loose for a 1.5cm berry
+    grasp_gate_dist: 0.040
+    lift_target: 0.07

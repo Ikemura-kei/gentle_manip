@@ -191,6 +191,107 @@ def test_sim_eval_venv_step_surfaces_success_stress_and_truncates():
     assert v.scenario_params()["material"]["E"] == 3e5
 
 
+# ── v4 aux columns: smoothness + policy-contributed grasp audit ──────────────────────────────────
+
+class _MovingClient(_FakeStateClient):
+    """Like _FakeStateClient but the EE actually MOVES, so smoothness metrics are computable."""
+    def __init__(self, n=2):
+        super().__init__(n)
+        self.t = 0
+
+    def _obs(self):
+        o = super()._obs()
+        a = min(self.t / 12.0, 1.0)
+        s = a ** 3 * (10 - 15 * a + 6 * a ** 2)                 # min-jerk in x
+        o["ee_pos"] = np.tile([0.3 + 0.2 * s, 0.0, 0.2], (self.n, 1)).astype(np.float32)
+        return o
+
+    def step(self, a):
+        self.t += 1
+        return super().step(a)
+
+
+class _AuditPolicy:
+    """Policy exposing the optional episode_metrics() hook."""
+    def __init__(self, n, rows=None, boom=False):
+        self.n, self._rows, self._boom = n, rows, boom
+
+    def reset(self): pass
+
+    def act(self, obs): return np.zeros((self.n, 7), np.float32)
+
+    def episode_metrics(self):
+        if self._boom:
+            raise RuntimeError("synthesis blew up")
+        return self._rows
+
+
+def _run(tmp_path, client, policy, n=2, steps=14, policy_dt=None):
+    from gentle_manip.evaluation import EvalSpec, run_eval
+    from gentle_manip.evaluation.sim_eval_venv import SimEvalVenv
+    venv = SimEvalVenv(client, num_envs=n, max_episode_steps=steps, policy_dt=policy_dt)
+    spec = EvalSpec(n_episodes=n, num_envs=n, seed=0, max_policy_steps=steps, scene_group_size=0)
+    run_eval(venv, policy, spec, tmp_path, experiment_name=None, checkpoint=None, record_batches=0)
+    with open(tmp_path / "episodes.csv", newline="") as f:
+        return list(csv.DictReader(f)), json.loads((tmp_path / "summary.json").read_text())
+
+
+def test_smoothness_columns_populate_when_policy_dt_is_set(tmp_path):
+    rows, summ = _run(tmp_path, _MovingClient(2), _AuditPolicy(2, rows=None), policy_dt=1 / 30)
+    assert float(rows[0]["ee_path_len"]) > 0.1                  # the EE really moved
+    assert float(rows[0]["ee_sparc"]) < 0                       # SPARC is negative by construction
+    assert int(float(rows[0]["ee_vpeaks"])) == 1                # min-jerk -> one submovement
+    assert "ee_sparc_mean" in summ
+
+
+def test_smoothness_columns_blank_without_policy_dt(tmp_path):
+    """A chunked venv samples the EE at a different rate, so jerk would be aliased. Blank columns
+    are the correct output — a wrong number is worse than a missing one."""
+    rows, summ = _run(tmp_path, _MovingClient(2), _AuditPolicy(2, rows=None), policy_dt=None)
+    assert rows[0]["ee_sparc"] == "" and rows[0]["ee_vpeaks"] == ""
+    assert "ee_sparc_mean" not in summ
+
+
+def test_policy_episode_metrics_reach_csv_and_summary(tmp_path):
+    audit = [{"grasp_tilt_deg": 5.0 + i, "grasp_min_pad_mm2": 40.0, "stem_grasp": i,
+              "pinch_grasp": 0} for i in range(2)]
+    rows, summ = _run(tmp_path, _MovingClient(2), _AuditPolicy(2, rows=audit), policy_dt=1 / 30)
+    assert [float(r["grasp_tilt_deg"]) for r in rows] == [5.0, 6.0]
+    assert summ["stem_grasp_rate"] == 0.5                        # defect RATE over all episodes
+    assert summ["grasp_tilt_deg_mean"] == pytest.approx(5.5)     # success-gated mean
+
+
+def test_policy_without_hook_leaves_blanks(tmp_path):
+    class _Plain:
+        def reset(self): pass
+        def act(self, obs): return np.zeros((2, 7), np.float32)
+    rows, _ = _run(tmp_path, _MovingClient(2), _Plain(), policy_dt=1 / 30)
+    assert rows[0]["grasp_tilt_deg"] == "" and rows[0]["stem_grasp"] == ""
+
+
+def test_failing_episode_metrics_does_not_abort_the_eval(tmp_path):
+    """An OPTIONAL metric must never be able to kill an otherwise-valid evaluation."""
+    rows, summ = _run(tmp_path, _MovingClient(2), _AuditPolicy(2, boom=True), policy_dt=1 / 30)
+    assert len(rows) == 2 and summ["n_episodes"] == 2
+    assert rows[0]["grasp_tilt_deg"] == ""
+    assert float(rows[0]["ee_path_len"]) > 0.1                   # the rest of the row survives
+
+
+def test_wrong_length_episode_metrics_is_ignored(tmp_path):
+    rows, _ = _run(tmp_path, _MovingClient(2), _AuditPolicy(2, rows=[{"stem_grasp": 1}]),
+                   policy_dt=1 / 30)
+    assert rows[0]["stem_grasp"] == ""                           # length mismatch -> blanks, no crash
+
+
+def test_new_columns_are_appended_not_inserted():
+    """Downstream parsers key on position in some places; new columns must never shift the old ones."""
+    from gentle_manip.evaluation.metrics import CSV_FIELDS
+    legacy = ["episode", "batch", "env", "scenario_seed", "success", "ever_success", "ever_in_band",
+              "first_success_step", "steps", "episode_reward"]
+    assert CSV_FIELDS[:len(legacy)] == legacy
+    assert CSV_FIELDS.index("obj_axis") < CSV_FIELDS.index("ee_sparc")
+
+
 def test_scripted_policy_produces_per_env_action_chunkless():
     from gentle_manip.scripts.eval_scripted import ScriptedPolicy
     p = ScriptedPolicy(num_envs=4, action_scales=[0.0052] * 6 + [0.005], rate_hz=30,

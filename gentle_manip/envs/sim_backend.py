@@ -97,6 +97,9 @@ class SimBackend:
         self._target_pos = np.zeros((num_envs, 3), dtype=np.float64)
         self._target_quat = np.tile([1.0, 0.0, 0.0, 0.0], (num_envs, 1)).astype(np.float64)
         self._target_gripper = np.full(num_envs, self._gripper_max, dtype=np.float64)
+        # Optional per-step rate limit for ABSOLUTE commands (delta-`scales` layout). Assigned by
+        # PolicyEnv from ActionConfig.rate_limit; None (default) = no limiting, behaviour unchanged.
+        self.rate_limit = None
         self._last_state: Optional[dict] = None
 
     # ── Backend protocol ──────────────────────────────────────────────────────
@@ -274,6 +277,17 @@ class SimBackend:
             # to set directly (no accumulation). Still clip to the workspace box for
             # safety even though ActionPipeline already mapped into pos_min/pos_max.
             pos, quat, grip = action[:, :3], action[:, 3:7], action[:, 7]
+            if self.rate_limit is not None:
+                # Per-step rate limit against the RUNNING target (seeded from the measured pose at
+                # reset): an absolute policy that emits a pose jump otherwise executes it at full
+                # servo speed. Same clamp runs on the real backend — this is the safety property,
+                # sim kept identical so training/eval see the same dynamics the real arm gets.
+                from gentle_manip.actions.pipeline import clamp_absolute_target
+                pos, quat, grip = clamp_absolute_target(
+                    self._target_pos, self._target_quat, self._target_gripper,
+                    pos, quat, grip, self.rate_limit)
+                pos, quat, grip = (pos.astype(np.float64), quat.astype(np.float64),
+                                   grip.astype(np.float64))
             self._target_pos = np.clip(pos, cfg.EE_BOUNDS_MIN, cfg.EE_BOUNDS_MAX)
             neg = quat[:, 0] < 0
             quat = quat.copy()

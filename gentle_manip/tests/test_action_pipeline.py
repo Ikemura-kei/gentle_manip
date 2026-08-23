@@ -168,7 +168,10 @@ def _topdown_quats_near_seam(n=200, seed=0):
     yaw = rng.uniform(-2.0, 2.0, n)
     jr = rng.normal(0.0, 0.05, n)     # roll jitter AROUND pi -> crosses the seam
     jp = rng.normal(0.0, 0.05, n)
-    rot = R.from_euler("z", yaw) * R.from_euler("xyz", np.stack([np.pi + jr, jp, np.zeros(n)], 1))
+    # yaw[:, None], not yaw: for a SINGLE-axis sequence scipy >= 1.17 requires the last dimension to
+    # match the number of axes, so a bare (n,) array raises. The (n,1) form works on both 1.15
+    # (envs/dppo) and 1.17 (envs/sim) — this suite must pass in every env that ships scipy.
+    rot = R.from_euler("z", yaw[:, None]) * R.from_euler("xyz", np.stack([np.pi + jr, jp, np.zeros(n)], 1))
     xyzw = rot.as_quat()
     return np.column_stack([xyzw[:, 3], xyzw[:, 0], xyzw[:, 1], xyzw[:, 2]])
 
@@ -223,3 +226,83 @@ def test_euler_offset_none_is_backward_compatible():
     out = ActionPipeline(cfg).process(invert_absolute_action(pos, quat, grip, cfg))
     dot = np.abs(np.sum(out[:, 3:7] * quat, axis=1))
     assert dot.min() > 1 - 1e-6
+
+
+# ── rate-limited absolute targets (v5) ────────────────────────────────────────
+# The rate limit exists so an absolute policy that emits a pose jump cannot make the real arm
+# execute it in one servo motion. It must mean exactly "one maximal delta action" — same layout,
+# same world-frame rotvec convention — or bounded-absolute and delta datasets describe different
+# physical speed limits.
+
+from scipy.spatial.transform import Rotation as R  # noqa: E402
+
+RATE_LIM = [0.0045, 0.0045, 0.0055, 0.012, 0.012, 0.045, 0.005]
+
+
+def _wxyz(rot):
+    xyzw = rot.as_quat()
+    return np.array([xyzw[3], xyzw[0], xyzw[1], xyzw[2]])
+
+
+def test_clamp_passthrough_when_within_bounds():
+    from gentle_manip.actions.pipeline import clamp_absolute_target
+    prev_p = np.array([[0.4, 0.0, 0.2]]); prev_q = np.array([[0.0, 1.0, 0.0, 0.0]])
+    tgt_p = prev_p + np.array([[0.003, -0.002, 0.004]])          # inside the bounds
+    tgt_q = _wxyz(R.from_rotvec([0.005, -0.004, 0.02]) * R.from_quat([1, 0, 0, 0]))[None]
+    p, q, g = clamp_absolute_target(prev_p, prev_q, [0.05], tgt_p, tgt_q, [0.052], RATE_LIM)
+    assert np.allclose(p, tgt_p, atol=1e-7)
+    assert abs(np.dot(q[0], tgt_q[0])) > 1 - 1e-7   # float32 quat
+    assert np.allclose(g, [0.052], atol=1e-6)
+
+
+def test_clamp_limits_a_jump_and_walks_toward_it():
+    """A far target is approached at exactly the bound, one step per call, and converges."""
+    from gentle_manip.actions.pipeline import clamp_absolute_target
+    prev_p = np.array([[0.40, 0.0, 0.21]]); prev_q = np.array([[0.0, 1.0, 0.0, 0.0]])
+    prev_g = np.array([0.08])
+    tgt_p = np.array([[0.47, 0.05, 0.05]])                        # 7cm+ jump
+    tgt_q = _wxyz(R.from_euler("xyz", [np.pi, 0.3, 1.2]))[None]   # large rotation
+    tgt_g = np.array([0.03])
+    p, q, g = prev_p, prev_q, prev_g
+    for step in range(400):
+        p2, q2, g2 = clamp_absolute_target(p, q, g, tgt_p, tgt_q, tgt_g, RATE_LIM)
+        # every step obeys the bound
+        assert np.all(np.abs(p2 - p) <= np.asarray(RATE_LIM[:3]) + 1e-6)  # +float32 quantization
+        Rp = R.from_quat([q[0, 1], q[0, 2], q[0, 3], q[0, 0]])
+        Rc = R.from_quat([q2[0, 1], q2[0, 2], q2[0, 3], q2[0, 0]])
+        assert np.all(np.abs((Rc * Rp.inv()).as_rotvec()) <= np.asarray(RATE_LIM[3:6]) + 1e-6)
+        assert abs(float(g2[0]) - float(g[0])) <= RATE_LIM[6] + 1e-6
+        p, q, g = p2.astype(np.float64), q2.astype(np.float64), g2.astype(np.float64)
+    assert np.allclose(p, tgt_p, atol=1e-5), "position did not converge"
+    assert abs(np.dot(q[0], tgt_q[0])) > 1 - 1e-6, "orientation did not converge"
+    assert np.allclose(g, tgt_g, atol=1e-5)
+
+
+def test_clamped_step_is_one_legal_delta_action():
+    """Inverse consistency: a maximally clamped step, encoded as a DELTA action with
+    scales == rate_limit, must land inside the clip range — the two must be the same bound."""
+    from gentle_manip.actions.pipeline import clamp_absolute_target, invert_delta_action
+    cfg = ActionConfig(mode="delta", scales=RATE_LIM)
+    rng = np.random.default_rng(0)
+    for _ in range(50):
+        prev_p = rng.uniform(0.3, 0.5, (1, 3))
+        prev_q = _wxyz(R.from_euler("xyz", rng.uniform(-np.pi, np.pi, 3)))[None]
+        prev_g = rng.uniform(0.0, 0.08, 1)
+        tgt_p = prev_p + rng.uniform(-0.2, 0.2, (1, 3))
+        tgt_q = _wxyz(R.from_euler("xyz", rng.uniform(-np.pi, np.pi, 3)))[None]
+        tgt_g = np.clip(prev_g + rng.uniform(-0.05, 0.05, 1), 0, 0.088)
+        p, q, g = clamp_absolute_target(prev_p, prev_q, prev_g, tgt_p, tgt_q, tgt_g, RATE_LIM)
+        a = invert_delta_action(prev_p, prev_q, prev_g, p, q, g, cfg)
+        assert np.all(np.abs(a) <= 1.0 + 1e-3), \
+            f"clamped step needs |delta action| {np.abs(a).max()}"   # 1e-3: float32 cast noise
+
+
+def test_rate_limit_config_roundtrip_and_validation():
+    cfg = ActionConfig.from_dict({"mode": "absolute", "rate_limit": RATE_LIM})
+    assert cfg.rate_limit == RATE_LIM
+    assert ActionConfig.from_dict({"mode": "absolute"}).rate_limit is None   # default inert
+    import pytest
+    with pytest.raises(ValueError):
+        ActionConfig.from_dict({"mode": "absolute", "rate_limit": [0.01] * 6})   # wrong length
+    with pytest.raises(ValueError):
+        ActionConfig.from_dict({"mode": "absolute", "rate_limit": [0.01] * 6 + [0.0]})  # nonpositive

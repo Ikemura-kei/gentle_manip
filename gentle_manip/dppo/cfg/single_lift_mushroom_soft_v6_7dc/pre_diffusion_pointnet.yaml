@@ -1,0 +1,106 @@
+# v6 = v5 minus the preshape ramp + aperture DR (the gripper-channel ambiguity that put v5 at 0/60)
+# [dppo cfg] v5 payoff run: 7d EULER absolute action (abs_pose_euler_abs_gripper, carries
+# the euler_frame_offset_deg seam fix), rate-bounded + azimuth-bounded v5 demonstrations.
+# Cloned from single_lift_mushroom_soft_abs_pcd_rot6d with obs_dim 10->8, action_dim 10->7.
+# Dataset: dataset/dppo/single_lift_mushroom_soft_v6_7dc (convert_demos --derive-action).
+# [dppo-pretrain] BC-pretrain a PointNet diffusion policy on SOFT mushroom lift demos — ABSOLUTE action.
+# Used by: third_party/dppo/script/run.py (TrainDiffusionAgent) via gentle_manip.dppo.train
+# Status: experimental (DPPO step-2 point-cloud student on the abs-action FEM-gentleness collection, jcw)
+#
+# Soft twin of single_lift_mushroom_rigid_abs_pcd/pre_diffusion_pointnet.yaml: action_dim=10
+# (abs pos3 + 6D rotation6 + gripper1), experiment=single_lift_mushroom_soft_abs_action_rot6d. Same student
+# view as the delta soft_pcd config (8-dim proprio + 1024-pt cloud), just the abs action head.
+# Data = gentle_manip.dppo.convert_demos --view student --point-cloud on the jcw (26-08-08) dataset.
+# Run with envs/dppo.
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${logdir}
+  callbacks:                    # snapshot the env (experiment) config -> <run>/config/
+    experiment_snapshot:
+      _target_: gentle_manip.dppo.hydra_snapshot.ExperimentSnapshot
+_target_: agent.pretrain.train_diffusion_agent.TrainDiffusionAgent
+
+name: ${env}_pre_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
+# logdir leaf = the global 5-letter experiment ID (exp_id resolver; registered in experiments.csv)
+logdir: ${oc.env:DPPO_LOG_DIR}/dppo-pretrain/${env}/${exp_id:}
+train_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/train.npz
+val_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/val.npz   # held-out split (BY TRAJECTORY)
+experiment: single_lift_mushroom_soft_abs_action_robust  # v5 collection experiment (robust-start DR, rate-bounded abs action)
+
+seed: 42
+device: cuda:0
+env: single_lift_mushroom_soft_v6_7dc
+obs_dim: 8                     # proprio only (ee_pos3 + ee_quat4 + gripper1); cloud is separate
+action_dim: 7                 # abs pos3 + euler3 (frame-offset encoded) + gripper1
+denoising_steps: 20
+horizon_steps: 4
+cond_steps: 2                 # proprio history
+pc_cond_steps: 1             # clouds encoded per step (<= cond_steps)
+n_points: 1024
+visual_feature_dim: 256
+
+wandb:                          # enabled; disable per-run with `wandb=null`, or WANDB_MODE=offline
+  entity: ${oc.env:DPPO_WANDB_ENTITY,null}   # null -> logged-in default account
+  project: gentle-manip-${env}
+  run: ${exp_id:}               # wandb run name == the experiment ID (matches the log dir)
+  group: dppo-pretrain
+
+train:
+  n_epochs: 800                 # bwvei reference setup (800 epochs)
+  batch_size: 128
+  learning_rate: 1e-4
+  weight_decay: 1e-6
+  lr_scheduler:
+    first_cycle_steps: ${train.n_epochs}   # single cosine cycle over the whole run
+    warmup_steps: 100                      # DPPO uses 100 across all pretrains
+    min_lr: 1e-5
+  epoch_start_ema: 10
+  update_ema_freq: 5
+  save_model_freq: 200          # bwvei reference setup (ckpt every 200)
+  val_freq: 10
+
+model:
+  _target_: model.diffusion.diffusion.DiffusionModel
+  predict_epsilon: True
+  denoised_clip_value: 1.0
+  network:
+    _target_: gentle_manip.dppo.pointnet_diffusion.PointNetDiffusionMLP
+    action_dim: ${action_dim}
+    horizon_steps: ${horizon_steps}
+    cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+    pc_cond_steps: ${pc_cond_steps}
+    visual_feature_dim: ${visual_feature_dim}
+    time_dim: 16
+    mlp_dims: [512, 512, 512]
+    activation_type: ReLU
+    residual_style: True
+    pointnet:
+      in_channels: 3
+      use_layernorm: True
+      final_norm: layernorm
+  horizon_steps: ${horizon_steps}
+  obs_dim: ${obs_dim}
+  action_dim: ${action_dim}
+  denoising_steps: ${denoising_steps}
+  device: ${device}
+
+ema:
+  decay: 0.995
+
+train_dataset:
+  _target_: gentle_manip.dppo.pointcloud_dataset.StitchedSequencePointCloudDataset
+  dataset_path: ${train_dataset_path}
+  horizon_steps: ${horizon_steps}
+  cond_steps: ${cond_steps}
+  pc_cond_steps: ${pc_cond_steps}
+  device: ${device}
+
+val_dataset:
+  _target_: gentle_manip.dppo.pointcloud_dataset.StitchedSequencePointCloudDataset
+  dataset_path: ${val_dataset_path}
+  horizon_steps: ${horizon_steps}
+  cond_steps: ${cond_steps}
+  pc_cond_steps: ${pc_cond_steps}
+  device: ${device}
