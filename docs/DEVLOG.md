@@ -280,6 +280,27 @@ Local agent starts items only on explicit user go.
 
 ## Log
 
+**2026-08-23 — Allocation items 7/10/12/13/14/15/16 launched (cluster agent).**
+All on the afucm setup (realws sim+real co-train baseline 0.685@400) unless noted:
+- **15**: horizon 8 / execute 4 training + sweep (config-only).
+- **7**: OOD size+shape eval configs (scale [1.5,1.8], bend [25,40], twist [20,35], taper
+  [0.15,0.3], axis [1.15,1.3]; pose/material unchanged) — evals of afucm/nmbtz/qjzsf
+  (realws-OOD) and vdmtb (std-OOD) peak checkpoints.
+- **10**: gentler-grasp collection (extra_close 2.5 mm — HALF, not zero, per conclusion 11)
+  chained through commanded-euler convert → real co-train merge → train → sweep; rank vs
+  afucm on success AND sustained stress (item 11).
+- **14**: training-time camera-pose DR (per-sample rigid cloud perturbation ≤0.5 cm/axis,
+  ≤5°, centroid pivot) — `cloud_pose_jitter_*` dataset knobs, training running.
+- **12**: first-frame context token (episode's first cloud through the shared PointNet as a
+  persistent memory feature; model/dataset/venv flag-gated) — training running.
+- **13** (possible-now variant): masked aux losses — aux_valid mask lets sim rows supervise
+  the object-pos head while real rows contribute zero aux gradient; aux-carrying merged
+  dataset + training. Real GT labels can drop into the same mask later.
+- **16**: PairedRegDiffusionModel — cosine consistency between the policy PointNet's
+  features of the 4148 paired real/sim cube3 steps (object-agnostic encoder alignment),
+  w ∈ {0.1, 0.5}, both training.
+All arms get canonical eval sweeps; results roll into the sections above as they land.
+
 **2026-08-23 — Real-data-amount ablation launched (for real-robot testing).** afucm's
 recipe (realws sim 585 eps + plain-concat real, union norm) with the FIRST N real demos,
 N ∈ {1, 5, 10, 20, 30} (nested subsets — deterministic split order), 1 seed each, full
