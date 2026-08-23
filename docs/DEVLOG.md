@@ -337,6 +337,14 @@ in the narrative sections + subpages.
 
 ## Log
 
+**2026-08-24 — Hold-tail augmentation study launched (user request).** New repo transform
+`gentle_manip/dppo/augment_hold_tail.py`: +10 frames replicating the final state+command
+at every episode end — teaching "after reaching, keep commanding the same pose" (the
+post-arrival behavior was OOD in all demos; suspected driver of hold-phase drops and
+jjjjy's h8/e4 failure). Datasets `*_n5_ht_cmd` / `*_noos_ht_cmd` (normalization verbatim —
+replicated rows change no min/max). Six runs: {wclac(n5), afucm(noos), jjjjy(noos, h8/e4)}
+× seeds {42, 43}, canonical sweeps, results to the canonical table.
+
 **2026-08-24 — Monitoring post-mortem (missed failed launch) + fixes.** The item-12
 training (gzjkf) died 59 s after submission (dataset-init ordering bug) and went UNNOTICED
 for hours despite the standing health monitor DETECTING it — root cause: the monitor ran
