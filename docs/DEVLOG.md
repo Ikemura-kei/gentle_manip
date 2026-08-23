@@ -319,13 +319,17 @@ processing taken from the real run's own `config.yaml` (the baked authority) —
 demo-schema pkl paired STEP-FOR-STEP with the real one. Output (data, not committed — upload
 separately): **`dataset/demos/single_lift_cube3_rigid/26-08-23-oso`**, the sim twin of
 `single_lift_cube3_real/26-08-23-oso`; per-episode `match_report.yaml` + proprio-overlay PNGs
-+ real|sim rolling cloud mp4s live beside the pkl. Pairing quality (ep1; full 5-ep report in
-`match_report.yaml`): EE err 1.7 mm mean / 8.0 mm max, quat 1.0°, gripper 0.2 mm, cloud NN
-13.5 mm (the cloud number includes the known real L515 noise + ~6–11 mm table-z extrinsic
-offset, not just replay drift). Sim nominal home landed within ~1 mm of the real home —
-home_offset correction is tiny. This is the data for allocation item 16 (paired-feature
-encoder regularization, cluster agent) and the substrate for item 1's data-difference
-analysis.
++ real|sim rolling cloud mp4s live beside the pkl. Pairing quality across all 5 episodes
+(`match_report.yaml`): EE err 1.1–1.8 mm mean / ≤10.2 mm max, quat 1.0–1.6° mean (ep4 3.1°:
+its fast late-episode yaw teleop shows the real servo's rotation lag vs sim IK, drifting to
+~8–15° in the last quarter — positions still ≤1.8 mm; the weakest channel of the pair),
+gripper ≤0.6 mm, cloud NN 13.3–16.3 mm mean (includes the known real L515 noise + ~6–11 mm
+table-z extrinsic offset, not just replay drift). Integrity verified: actions bit-identical
+to the real pkl, all obs shapes match, sim clouds always full 1024 pts. Sim nominal home
+landed within ~1 mm of the real home — home_offset correction is tiny. This is the data for
+allocation item 16 (paired-feature encoder regularization, cluster agent) and the substrate
+for item 1's data-difference analysis. Upload: rsync both `26-08-23-oso` dirs to the cluster
+repo under the same `dataset/demos/` relative paths.
 
 **2026-08-23 — Work allocation & sequencing adopted** (user): items 1–14 above; local agent
 on real-vs-sim data analysis (cube probe + demo matching) first, occlusion integration and
