@@ -311,6 +311,25 @@ the next episode's video — this was the dominant desync (ghost contains real m
 videos from before the fixes align exactly by END-ANCHORING (the save side flushes at the save
 tick); the paired renderer does this automatically.
 
+**2026-08-24 — Item 2 kinematics analysis + the v3.1 synthesis update (overnight campaign,
+in progress).** Full report: [item2_demo_kinematics.md](item2_demo_kinematics.md). Real
+merged 55 vs hwo 650, pose-space at 30 Hz: the hwo recipe already MATCHES human speed
+almost exactly (translation 2.20 vs 2.22 mm/step; rotation, approach depth, close-from-
+full-open, lift speed all matched) — speed is NOT the remaining data-side lever. The real
+differences cluster at the GRASP EVENT: humans hover 6 steps before closing (scripted 2),
+close 40 % faster (21 vs 34 steps), rotate less (30° vs 50° from home), stay vertical
+(tilt 2.0° vs 7.4°), and squeeze ~4 mm deeper (settle 30.9 vs 35.3 mm — deliberately NOT
+copied: fights gentleness + would confound vs afucm; recorded as a slip-robustness lever).
+**v3.1 implemented** (`collect_demos_synth_v3.py`, defaults inert): `--n-settle` (hover)
+and `--cam-azimuth-max-deg` (item-5 occlusion bound via the FEM planner's shaped azimuth
+penalty + camera-perp seed fan — one knob serves occlusion AND the rotation match).
+v3.1 recipe = hwo + `--n-settle 6 --n-grasp 20 --cam-azimuth-max-deg 45`; smoke-verified
+(hover 6, close 25, rot 43°). New npz-level merge tool `gentle_manip/dppo/merge_npz_datasets.py`
+(per-source denorm → concat → joint renorm) builds mixed sim+real datasets whose sources
+need different derivations. Overnight run: 500-ep realws collection (`26-08-24-ndr`) →
+7d-euler commanded conversion → +55 real (noos, afucm setup: big net 600 ep) → checkpoint
+sweep vs afucm under the same local protocol. Results table to follow.
+
 **2026-08-23 — Item 1 gap analysis: the real-sim cloud difference decomposes into a ~9 mm
 perception bias + placement offset.** Full report: [item1_cube3_simreal_gap.md](item1_cube3_simreal_gap.md).
 On the paired cube3 datasets (below): full-cloud chamfer 14–18 mm/frame. The proprio-pinned

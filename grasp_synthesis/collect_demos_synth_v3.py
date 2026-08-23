@@ -814,6 +814,14 @@ def main() -> None:
     p.add_argument("--n-grasp", type=int, default=N_GRASP,
                    help=f"gripper-close steps (the 'grasp' phase length); default {N_GRASP}. A shorter "
                         "close reaches the target width sooner (less dwell before the lift).")
+    p.add_argument("--n-settle", type=int, default=N_SETTLE,
+                   help=f"hold-at-grasp-pose steps before closing; default {N_SETTLE}. Item-2 finding: "
+                        "real teleop hovers ~6 steps at the grasp pose before closing (scripted ~2).")
+    p.add_argument("--cam-azimuth-max-deg", type=float, default=None,
+                   help="item-5 occlusion bound: shaped penalty on grasp yaw beyond this azimuth from "
+                        "the camera-perpendicular direction (deg; None = off). Passed to the FEM "
+                        "planner with the task camera's position; also centres the CMA seed fan. "
+                        "45 validated in the v5c profile (fully-hidden episodes 24%% -> 4%%).")
     p.add_argument("--n-lift", type=int, default=N_LIFT,
                    help=f"lift-phase steps; default {N_LIFT}.")
     p.add_argument("--n-firm", type=int, default=N_FIRM,
@@ -832,7 +840,7 @@ def main() -> None:
     global PHASES, N_PHASES, _GRASP_IDX
     PHASES = [
         ("approach", args.n_home_to_pre),
-        ("settle",   N_SETTLE),
+        ("settle",   args.n_settle),
         ("grasp",    args.n_grasp),
     ]
     if args.n_firm > 0:                    # --n-firm 0 drops the firm phase entirely (cho/v1 behaviour)
@@ -848,6 +856,10 @@ def main() -> None:
     exp        = Experiment.load(args.experiment)
     task       = SingleLiftTask(exp.task_cfg)
     spec       = task.scene_spec
+    # item-5 occlusion bound: the task camera's world position, only when the knob is on
+    # (None keeps the planner call byte-identical to the baseline recipe).
+    cam_pos = (np.asarray(spec.cameras[0].pos, float)
+               if args.cam_azimuth_max_deg is not None else None)
     obs_config = exp.collection_obs()
     priv_cfg   = obs_config.privileged        # sim-only state-teacher fields (None if not requested)
     action_config = exp.action_config
@@ -872,6 +884,8 @@ def main() -> None:
                         "n_episodes": args.n_episodes, "scene_dr_every": args.scene_dr_every,
                         "seed": args.seed, "n_home_to_pre": args.n_home_to_pre,
                         "n_grasp": args.n_grasp, "n_lift": args.n_lift, "n_firm": args.n_firm,
+                        "n_settle": args.n_settle,
+                        "cam_azimuth_max_deg": args.cam_azimuth_max_deg,
                         "grasp_extra_close": args.grasp_extra_close},
         "dr": exp.dr,
     }
@@ -1018,13 +1032,15 @@ def main() -> None:
                                     n_starts=args.grasp_n_starts, seed=cma_seed, accel=args.grasp_accel,
                                     diversity_tol=args.grasp_diversity_tol, jitter_deg=args.grasp_jitter_deg,
                                     jitter_pos=args.grasp_jitter_pos, w_align=args.grasp_align,
-                                    pitch_seed_deg=args.grasp_pitch_seed_deg)
+                                    pitch_seed_deg=args.grasp_pitch_seed_deg,
+                                    cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg)
             if r.get("x") is None or r.get("stress_top10") is None:   # diversity found no feasible grasp;
                 print(f"  Env {i}: no feasible diverse grasp -> retry WITHOUT diversity")  # retry reliably
                 r = fg.synthesize_grasp(fem_obj, fem_pad_geo, obj_pos_all[i], obj_quat_all[i],
                                         E=args.grasp_E, density=args.grasp_density, mu=args.grasp_mu,
                                         table_z=args.table_z, maxfevals=args.maxfevals,
-                                        n_starts=args.grasp_n_starts, seed=cma_seed + 7, accel=args.grasp_accel)
+                                        n_starts=args.grasp_n_starts, seed=cma_seed + 7, accel=args.grasp_accel,
+                                        cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg)
             best_x = r["x"]
             if best_x is None or r.get("stress_top10") is None:       # extremely rare: still nothing ->
                 # default straight-down grasp at the object xy so the FSM never sees None (this episode may
