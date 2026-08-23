@@ -76,17 +76,24 @@ class PointNetDiffusionMLP(nn.Module):
                  pointnet=None, pc_cond_steps=1, visual_feature_dim=256,
                  time_dim=16, mlp_dims=(512, 512, 512), activation_type="ReLU",
                  out_activation_type="Identity", use_layernorm=False, residual_style=True,
-                 aux_contact=False, aux_object_pos=False, aux_hidden=128):
+                 aux_contact=False, aux_object_pos=False, aux_hidden=128,
+                 use_first_frame_context=False):
         super().__init__()
         pn = dict(pointnet or {})
         pn.setdefault("out_channels", visual_feature_dim)
         self.backbone = PointNetEncoderXYZ(**pn)
         self.pc_cond_steps = pc_cond_steps
+        # DEVLOG item 12 (lightweight policy memory): ALSO encode the EPISODE'S FIRST cloud
+        # (object fully visible, pre-occlusion) with the SAME backbone and concatenate its
+        # feature — a persistent context token carrying object shape/size/grasp-width
+        # information through later gripper occlusion. Off (default) = bit-identical.
+        self.use_first_frame_context = bool(use_first_frame_context)
         self.time_dim = time_dim
         self.time_embedding = nn.Sequential(
             SinusoidalPosEmb(time_dim), nn.Linear(time_dim, time_dim * 2), nn.Mish(),
             nn.Linear(time_dim * 2, time_dim))
-        input_dim = time_dim + action_dim * horizon_steps + visual_feature_dim + cond_dim
+        ctx_dim = visual_feature_dim if self.use_first_frame_context else 0
+        input_dim = time_dim + action_dim * horizon_steps + visual_feature_dim + ctx_dim + cond_dim
         output_dim = action_dim * horizon_steps
         model = ResidualMLP if residual_style else MLP
         self.mlp_mean = model([input_dim] + list(mlp_dims) + [output_dim],
@@ -97,7 +104,7 @@ class PointNetDiffusionMLP(nn.Module):
         # (width = visual_feature_dim + cond_dim). Training-only; NOT used at inference — the
         # deployed policy calls forward() only, so these add ZERO deployment cost. A head exists
         # iff its flag is on, so the baseline (both off) is bit-identical to the original module.
-        self._aux_dim = visual_feature_dim + cond_dim
+        self._aux_dim = visual_feature_dim + ctx_dim + cond_dim
         self.contact_head = (nn.Sequential(nn.Linear(self._aux_dim, aux_hidden), nn.ReLU(),
                                            nn.Linear(aux_hidden, 1)) if aux_contact else None)
         self.pos_head = (nn.Sequential(nn.Linear(self._aux_dim, aux_hidden), nn.ReLU(),
@@ -108,6 +115,9 @@ class PointNetDiffusionMLP(nn.Module):
         B = cond["state"].shape[0]
         state = cond["state"].view(B, -1)
         feat = _encode_clouds(self.backbone, cond["point_cloud"], self.pc_cond_steps)
+        if self.use_first_frame_context:
+            ctx = _encode_clouds(self.backbone, cond["first_point_cloud"], 1)
+            return torch.cat([feat, ctx, state], dim=-1)
         return torch.cat([feat, state], dim=-1)
 
     def aux_predict(self, cond: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
@@ -158,6 +168,11 @@ class PointNetDiffusionUNet(nn.Module):
         pn.setdefault("out_channels", visual_feature_dim)
         self.backbone = PointNetEncoderXYZ(**pn)
         self.pc_cond_steps = pc_cond_steps
+        # DEVLOG item 12 (lightweight policy memory): ALSO encode the EPISODE'S FIRST cloud
+        # (object fully visible, pre-occlusion) with the SAME backbone and concatenate its
+        # feature — a persistent context token carrying object shape/size/grasp-width
+        # information through later gripper occlusion. Off (default) = bit-identical.
+        self.use_first_frame_context = bool(use_first_frame_context)
         # Unet1D FiLM-conditions on cond["state"]; we feed it the fused [pointnet_feat ⊕ proprio],
         # so its cond_dim is the concatenated width (visual_feature_dim + flattened proprio dim).
         self.unet = Unet1D(
@@ -189,6 +204,11 @@ class PointNetCritic(CriticObs):
         pn.setdefault("out_channels", visual_feature_dim)
         self.backbone = PointNetEncoderXYZ(**pn)
         self.pc_cond_steps = pc_cond_steps
+        # DEVLOG item 12 (lightweight policy memory): ALSO encode the EPISODE'S FIRST cloud
+        # (object fully visible, pre-occlusion) with the SAME backbone and concatenate its
+        # feature — a persistent context token carrying object shape/size/grasp-width
+        # information through later gripper occlusion. Off (default) = bit-identical.
+        self.use_first_frame_context = bool(use_first_frame_context)
 
     def forward(self, cond: Union[dict, torch.Tensor], no_augment: bool = False):
         """cond: {state:(B,To,Do), point_cloud:(B,Tpc,N,3)}. no_augment ignored (pcd has no aug)."""

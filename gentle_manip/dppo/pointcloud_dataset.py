@@ -19,7 +19,8 @@ from agent.dataset.sequence import Batch, StitchedSequenceDataset
 class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
     def __init__(self, dataset_path, horizon_steps=64, cond_steps=1, pc_cond_steps=1,
                  max_n_episodes=10000, device="cuda:0",
-                 cloud_pose_jitter_trans=0.0, cloud_pose_jitter_rot_deg=0.0):
+                 cloud_pose_jitter_trans=0.0, cloud_pose_jitter_rot_deg=0.0,
+                 first_frame_context=False):
         assert pc_cond_steps <= cond_steps, "pc_cond_steps must be <= cond_steps"
         super().__init__(dataset_path, horizon_steps=horizon_steps, cond_steps=cond_steps,
                          img_cond_steps=1, max_n_episodes=max_n_episodes, use_img=False,
@@ -34,6 +35,13 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
         # true extrinsics.
         self.jit_trans = float(cloud_pose_jitter_trans)
         self.jit_rot = float(cloud_pose_jitter_rot_deg)
+        # item 12: map every global step -> its episode's FIRST step (for the first-frame
+        # context cloud). Never jittered — the anchor frame is the trustworthy view.
+        self.first_frame_context = bool(first_frame_context)
+        if self.first_frame_context:
+            tl = data["traj_lengths"][:max_n_episodes]
+            firsts = np.repeat(np.concatenate([[0], np.cumsum(tl)[:-1]]), tl)[:total]
+            self.first_idx = torch.from_numpy(firsts.astype(np.int64)).to(device)
         data = np.load(dataset_path, allow_pickle=False)
         total = int(np.sum(data["traj_lengths"][:max_n_episodes]))
         self.point_clouds = torch.from_numpy(data["point_cloud"][:total]).float().to(device)
@@ -56,6 +64,8 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
             pc = self._jitter_pose(pc)
         conditions = dict(batch.conditions)
         conditions["point_cloud"] = pc               # (pc_cond_steps, N, 3)
+        if self.first_frame_context:
+            conditions["first_point_cloud"] = self.point_clouds[self.first_idx[start]][None]  # (1,N,3)
         if self.aux_contact is not None:
             conditions["aux_contact"] = self.aux_contact[start]        # (1,) binary
         if self.aux_object_pos is not None:

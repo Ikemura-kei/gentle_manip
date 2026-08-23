@@ -101,6 +101,12 @@ class GenesisMultiStepVecEnv:
         m = {"state": self._norm_obs(raw)}
         if self.pointcloud_key is not None:         # raw xyz (meters); crop bounds already limit it
             m["point_cloud"] = np.asarray(obs[self.pointcloud_key], np.float32).reshape(self.n_envs, -1, 3)
+            # item 12: the EPISODE'S FIRST cloud as a persistent context modality. Set at
+            # reset (falls back to the current cloud on the reset step itself); policies
+            # whose shape_meta doesn't list first_point_cloud simply ignore the key.
+            if getattr(self, "_first_pc", None) is None:
+                self._first_pc = m["point_cloud"]
+            m["first_point_cloud"] = self._first_pc
         return m
 
     def _stacked(self) -> dict:                     # per modality -> (n_envs, n_obs_steps, ...)
@@ -111,6 +117,7 @@ class GenesisMultiStepVecEnv:
         return {k: np.stack([step[k] for step in h], axis=1) for k in h[0]}
 
     def _reset_all(self) -> dict:
+        self._first_pc = None                       # re-anchored from the fresh reset obs
         m = self._modalities(self.client.reset())
         self._hist = deque([m], maxlen=self.n_obs_steps + 1)
         self._cnt[:] = 0
