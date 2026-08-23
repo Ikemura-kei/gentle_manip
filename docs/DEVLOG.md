@@ -190,8 +190,11 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
 - [ ] Camera-pose DR (real extrinsics drift between calibrations).
 
 **Bookkeeping**
-- [ ] `single_lift_mushroom_real_abs_7d` experiment config + deploy-script entries for the
-  shortlist checkpoints (deploy-side).
+- [~] Deploy-script entries for the shortlist: `afucm/state_400` added to `deploy_real.sh`
+  (local agent, 2026-08-23) — wiring verified (armfocus obs config, euler offset,
+  rate-limit clamp active at the RealBackend, big-net auto-load, load-smoked). Remaining:
+  the other shortlist checkpoints + the `single_lift_mushroom_real_abs_7d` experiment
+  config (deploy_real_dppo composes from obs/action files directly, so not blocking).
 - [ ] Port the pre-flight dataset gates (seam + lead) from the scratchpad chain scripts
   into a repo script (`gentle_manip/scripts/verify_derived_dataset.py`).
 
