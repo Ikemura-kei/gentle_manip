@@ -68,6 +68,12 @@ OBJECT_MAP: dict[str, ObjectDef] = {
     # Cube 4cm: flat antipodal faces and SHARP edges — the control case for a metric tuned on
     # organic blobs. Must be planned with prepare=False; the FEM path's watertight voxel remesh
     # rounds sharp edges, which would erase exactly what this object is here to test.
+    # TRUE 3 cm sharp cube (item 1: the real 3 cm cube probe below the arm). RIGID — the real
+    # counterpart is a solid cube; mesh (not Box) so the FEM grasp synthesis can plan on it.
+    # spawn z = half-side + 1 mm clearance (centroid-origin mesh).
+    "cube3": ObjectDef("cube3", MATERIALS["red_cube"], object_type="rigid",
+                       size=(0.03, 0.03, 0.03), default_pos=(0.47, 0.0, 0.016),
+                       mesh_path=str(_OBJ_DIR / "cube3.obj")),
     "cube4": ObjectDef("cube4", MATERIALS["soft_shape"], object_type="soft",
                        size=(0.04, 0.04, 0.04), default_pos=(0.47, 0.0, 0.021),
                        mesh_path=str(_OBJ_DIR / "cube4.obj")),

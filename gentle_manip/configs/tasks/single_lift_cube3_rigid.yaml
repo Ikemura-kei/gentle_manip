@@ -1,0 +1,33 @@
+# [task] TRUE 3cm rigid cube lift — the sim counterpart of allocation item 1 (real 3cm cube
+# placed below the arm). Mirrors single_lift_cube4_soft except: cube3 mesh (3cm sharp cube),
+# RIGID physics (the real cube is solid). Used for the sim-vs-real data-difference analysis.
+# Used by: experiments/single_lift_cube3_rigid_abs_action.yaml
+# Status: active
+
+object_name: "cube3"
+object_type: "rigid"         # real 3cm cube is solid; contact_force feedback instead of stress
+
+# Same material and resolution as the mushroom/cylinder: this object varies GEOMETRY only.
+# 4cm across at 4mm cells = 10 cells — adequately resolved.
+sim_substeps: 235
+mpm_grid_density: 250
+
+# Rests with its centroid at z=0.021 (half-height + 1mm), same as the cylinder, so the band matches.
+success_z_min: 0.180
+success_z_max: 0.280
+hold_steps: 30
+success_scale: 0.2
+
+rewards:
+  stress:
+    scale: 0.2
+    cap: 1.5
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 0.1
+    decay: 8.0
+  lift:
+    scale: 0.1
+    grasp_gate_dist: 0.079
+    lift_target: 0.16
