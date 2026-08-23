@@ -174,7 +174,7 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
 | # | item | owner | status / sequencing |
 |---|---|---|---|
 | 1 | Real data: 3 cm cube placed right below the arm; analyze sim-vs-real data difference | **local agent** | FIRST (with 2). Sim-side counterpart partly staged: `cube4` task/experiment configs exist |
-| 2 | Real-vs-sim demo analysis (trajectory character, speed, grasp speed, grasp width, …); match the scripted demo to real properties → better co-training | **local agent** | FIRST (with 1). ⚠ tension with the dwell finding (conclusion 8): real teleop moves ±2.6 mm/step with pauses — matching it can re-introduce near-identical-action stalls; every recollect must pass the dwell gate |
+| 2 | Real-vs-sim demo analysis (trajectory character, speed, grasp speed, grasp width, …); match the scripted demo to real properties → better co-training | **local agent** | FIRST (with 1). Slow/pausing trajectories are fine when the derivation carries lead — qjzsf (real-only, slow teleop, K=4 lookahead) works in real; the v6 stall was K=1 with near-zero lead. Just derive slowed sim demos with lookahead (or verify the lead/dwell gates) as done for teleop |
 | 3 | afucm real-data-amount ablation {1, 5, 10, 20, 30 demos}, tested in real | cluster agent | RUNNING. Paper-grade ablation re-done on the finalized method later |
 | 4 | Sync colleague on the FIXED SETUP: native 7d euler action · arm-focus cloud · quat proprio · realws DR · DPPO codebase · ×3.5 big net (512 + [1024]³, 2.89 M EMA) | user | next working day. (Note: "native 7d" — recording native euler commands is bit-equivalent to the validated 10d-record + `--derive-source-action` path, ~1e-7; either satisfies the setup) |
 | 5 | Reduce demo occlusion (penalty or hard angle constraint) | **local agent** | mechanism ALREADY BUILT + validated (hard azimuth bound 45°, `v5c`; fully-hidden 24%→4%, soft penalty provably inert — conclusion 10); remaining work = integrate into the post-item-2 synthesis version once 2 is confirmed |
@@ -197,7 +197,8 @@ Local agent starts items only on explicit user go.
 
 - **Pre-flight dwell gate in a repo script**: fold the dwell-fraction check (frac(|ΔA|<0.01)
   ≲ 10%, conclusion 8) into `verify_derived_dataset.py` alongside the existing seam + lead
-  gates. Near-mandatory once item 2 changes trajectory speeds toward slow real teleop.
+  gates. Cheap insurance for item-2 recollects (though K-lookahead derivation already
+  handles slow sources — see qjzsf — so this is a verification, not a blocker).
 - **FEM-vs-MPM hold-margin calibration**: why do honest (no-over-squeeze) widths slip in MPM
   when the FEM says holdable (conclusion 11)? Unowned; the enabler for item 10's "no
   over-squeeze" goal — without it, expect demonstrator success to crater.
