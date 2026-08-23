@@ -176,6 +176,7 @@ class PolicyEnv:
     def reset(self, **kwargs) -> dict:
         """Reset all envs and return the initial observation dict."""
         raw = self._do_reset(**kwargs)
+        self.last_raw_obs = raw          # for consumers of unprocessed fields (e.g. RGB recording)
         return self._observe(raw, self._sim_feedback())
 
     def randomize_scene(self) -> dict:
@@ -214,6 +215,7 @@ class PolicyEnv:
         """
         scaled = self.action_pipeline.process(np.asarray(raw_action))
         raw = self.backend.step(scaled)
+        self.last_raw_obs = raw          # see reset(); reference only, no copy
         self._episode_step += 1
 
         sim_feedback = self._sim_feedback()

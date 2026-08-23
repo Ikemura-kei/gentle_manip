@@ -371,3 +371,30 @@ def test_gripper_frame_is_not_idle(tmp_path):
     n = rec._save_episode()
     assert n == 2
     assert list(rec.episodes[0]["observations"]["ee_pos"][:, 0]) == [1, 2]
+
+
+def test_record_rgb_frames_flow_from_last_raw_obs(tmp_path):
+    """--record-rgb wiring: frame_fn reads env.last_raw_obs.rgb_images each step; one mp4 per
+    SAVED episode lands in <run>/videos; a discarded episode writes nothing."""
+    class _Raw:
+        def __init__(self):
+            self.rgb_images = {"cam_ext": np.random.randint(0, 255, (1, 32, 32, 3), np.uint8)}
+
+    env = MockEnv()
+    env.last_raw_obs = _Raw()
+    _orig_step = env.step
+    def step(a):
+        env.last_raw_obs = _Raw()          # fresh frame each step, like the real backend
+        return _orig_step(a)
+    env.step = step
+
+    rec = DemoRecorder(
+        env=env, teleop=FakeTeleop((0, 0, 0.01, 0, 0, 0, 0)),
+        # ep1: 3 ticks then SAVE; ep2: 2 ticks then DISCARD; QUIT
+        keyboard=ScriptedKeyboard([set(), set(), set(), {SAVE}, set(), set(), {DISCARD}, {QUIT}]),
+        task_name="unit", out_dir=tmp_path, rate_hz=0.0,
+        frame_fn=lambda: env.last_raw_obs.rgb_images["cam_ext"][0],
+        video_episodes=10**9)
+    rec.run()
+    vids = list(tmp_path.glob("unit/*/videos/*.mp4"))
+    assert len(vids) == 1, f"expected exactly one mp4 (saved ep only), got {vids}"

@@ -185,7 +185,7 @@ class DemoRecorder:
         if not self._frames:
             return
         import imageio.v2 as imageio
-        vdir = (self.video_dir or self.out_dir) / "videos"
+        vdir = (self.video_dir or self._run_dir()) / "videos"   # default: beside the run's data.pkl
         vdir.mkdir(parents=True, exist_ok=True)
         idx = index if index is not None else len(self.episodes)
         name = f"ep_{label}_{idx:03d}.mp4" if label else f"ep_{idx:03d}.mp4"
@@ -504,6 +504,12 @@ def main() -> None:
                    help="max trailing idle frames to keep (so the policy learns to stop)")
     p.add_argument("--max-interior-idle", type=int, default=3,
                    help="max frames to keep in a mid-episode idle run (collapses long pauses)")
+    p.add_argument("--record-rgb", nargs="?", const="cam_ext", default=None, metavar="CAM",
+                   help="save one RGB mp4 per SAVED episode from this camera (default cam_ext when "
+                        "the flag is given bare) into <run>/videos/. Presentation-only: the frame "
+                        "is already captured every step for the depth pipeline (depth is aligned "
+                        "TO the color stream), so this adds no sensor work and does not touch the "
+                        "recorded obs/action data.")
     p.add_argument("--show-pointcloud", action="store_true",
                    help="open a live Open3D window of the PROCESSED cloud (crop+filters) "
                         "as you teleop — visualize online instead of collecting to inspect")
@@ -596,6 +602,13 @@ def main() -> None:
                 crop_max=obs_config.point_cloud.crop_max,
             )
 
+    frame_fn = None
+    if args.record_rgb:
+        _cam = args.record_rgb
+        def frame_fn(_cam=_cam):
+            # RawObs.rgb_images[cam] is (1, H, W, 3) uint8 — captured every step regardless
+            # (the RealSense aligns depth TO color), we just stop dropping it.
+            return env.last_raw_obs.rgb_images[_cam][0]
     recorder = DemoRecorder(
         env=env,
         teleop=teleop,
@@ -610,6 +623,8 @@ def main() -> None:
         collection_config=collection_config,
         shard_size=args.shard_size,
         record_action_config=record_action_config,
+        frame_fn=frame_fn,
+        video_episodes=10**9 if args.record_rgb else 0,   # every saved episode
     )
     recorder.run()
     recorder.write()
