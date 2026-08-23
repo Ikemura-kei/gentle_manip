@@ -53,6 +53,8 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
                             if "aux_contact" in data.files else None)
         self.aux_object_pos = (torch.from_numpy(data["aux_object_pos"][:total]).float().to(device)
                                if "aux_object_pos" in data.files else None)
+        self.aux_valid = (torch.from_numpy(data["aux_valid"][:total]).float().to(device)
+                          if "aux_valid" in data.files else None)   # (T,1) 1=labeled row
 
     def __getitem__(self, idx):
         batch = super().__getitem__(idx)             # {"state": (cond_steps, Do)}, actions
@@ -70,6 +72,8 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
             conditions["aux_contact"] = self.aux_contact[start]        # (1,) binary
         if self.aux_object_pos is not None:
             conditions["aux_object_pos"] = self.aux_object_pos[start]  # (3,) normalized
+        if self.aux_valid is not None:
+            conditions["aux_valid"] = self.aux_valid[start]            # (1,) mask
         return Batch(batch.actions, conditions)
 
     def _jitter_pose(self, pc: torch.Tensor) -> torch.Tensor:
