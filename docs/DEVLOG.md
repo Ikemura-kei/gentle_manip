@@ -100,7 +100,38 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
    real-data val loss bottomed at ~epoch 600-1000 of 6000 — sweep-and-pick is mandatory,
    and DP3 must retain all periodic checkpoints (`checkpoint.topk.k=12`; its default k=1
    with no sim score silently keeps only the most-overfit checkpoint).
-8. **Best current deployment candidates** (sim-ranked; real value untested):
+8. **Commanded lead is necessary but NOT sufficient — trajectory DWELL is an independent
+   stall mechanism** (local agent, 2026-08-23). A v4-collector dataset with min-jerk time
+   scaling passed BOTH pre-flight gates (seam 0 jumps; commanded lead p75 9.4 mm) and still
+   evaluated 0/75 with perfect training loss, in every cell of a (rot6d vs euler) ×
+   (measured vs commanded) 2×2. Cause: min-jerk's velocity→0 tails put 32% of consecutive
+   actions within 0.01 (normalized) of each other (hwo/v3-linear: 2%) — a cond=2 policy
+   fixed-points there exactly as in the achieved-pose stall, and `act_steps=1` does not
+   rescue it. Reverting to LINEAR time scaling (same collection otherwise) dropped the
+   dwell fraction to 7% and took the same recipe from 0 → **0.66** (sqcvc/state_600, 200
+   eps; 7d-commanded twin 0.50). Proposed third pre-flight gate: frac(|ΔA| < 0.01) ≲ 10%.
+   Full forensics: `grasp_synthesis_v41_review.md` + this repo's v5/v6/v7 datasets.
+9. **Rate-bounded absolute actions are free** (local agent): per-step clamp of the decoded
+   absolute target against the previous command (delta-`scales` convention, rotation ×1.5),
+   enforced at BOTH the backends (real-arm safety: a policy-emitted pose jump executes as a
+   bounded walk) and the scripted collector (datasets bounded by construction;
+   `audit_demo_rate_bound.py` verifies the artifact — 0 violations in 115k steps). n=100
+   paired benchmark: success 0.960 = 0.960, stress at noise, act-jerk −13%.
+10. **Two demonstrator-side roadmap items are DONE** (local agent): occlusion-aware
+   synthesis — a hard closing-axis-azimuth bound (45°) at every CMA ladder rung (the soft
+   `w_occ` weight is provably inert: occluding-candidate scores sit on a flat infeasibility
+   floor); ground-truth fully-hidden grasps 24% → 4% at unchanged success. And
+   failure+recovery: `--retry-max` regrasp-on-slip with the trigger window measured
+   (0.15–0.30 of the lift recovers 5/5; the original 0.45 guess recovers 0/3), failed
+   attempts kept in the demos by design.
+11. **Grasp-synth benchmark scale bug** (local agent): `eval_grasp_synth` planned on
+   NOMINAL-size meshes for every scaled scene (server bakes scale onto ObjectEntry.scale;
+   the deformed file is nominal) — executed widths silently over-squeezed up to ~10 mm.
+   Fixed (43b388a); absolute numbers from that benchmark before the fix are tainted
+   (paired comparisons survive). Related: `execute_offset` (scoring at the executed width)
+   is retired from collection — the FEM's 2μ·grip ≥ mg hold margin does not survive MPM at
+   honest widths (8/8 → 1/8 on true-size meshes; a 4× margin does not rescue it).
+12. **Best current deployment candidates** (sim-ranked; real value untested):
    `nmbtz/state_500` (pure-sim realws 0.71), `afucm/state_400` (realws + real 0.685),
    `wyigy/state_100` (std box + real 0.785), `vdmtb/state_200` (pure-sim std 0.76),
    `qjzsf/state_500-1000` (real-only DPPO abs).
@@ -132,11 +163,12 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
   gentle manipulation, not just lift success).
 
 **Demonstrator improvements**
-- [ ] **Occlusion-aware grasp synthesis**: penalize grasp poses where the fingers occlude
-  the object from cam_ext in the CMA-ES cost — fewer finger-occluded observations should
-  help the visual policy.
-- [ ] Failure+recovery demonstrations (induced slip + regrasp — ideas 2/3 in the CLAUDE.md
-  retry brainstorm) so the policy sees recovery behavior.
+- [x] **Occlusion-aware grasp synthesis** — DONE (local agent): hard azimuth bound
+  `cam_azimuth_max_deg=45` (grasp_profiles `v5c`); a soft weight cannot work (flat
+  infeasibility floor). Ground truth: fully-hidden 24% → 4%. See conclusion 10.
+- [x] Failure+recovery demonstrations — DONE (local agent): `--retry-max` regrasp-on-slip
+  (v4 collector), trigger window measured (0.15–0.30 of the lift), failures kept in the
+  demos. Induced-failure (idea 3) still open. See conclusion 10.
 
 **Policy / architecture**
 - [ ] **DP horizon ablation**: prediction horizon 8 with execution steps 4 (current DPPO:
@@ -166,6 +198,20 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
 ---
 
 ## Log
+
+**2026-08-22 → 08-23 — Local agent: v4/v4.1/v5 grasp-synthesis line + the dwell stall.**
+v4 delivered (pinch 0.57→0, honest benchmark, min-jerk/Bézier trajectory); v4.1 shelf lift
+measured and REJECTED (10–15 pts demonstrator success for −17% sustained stress, largely an
+IK-whip artifact; the width release is pure cost); rate-bounded absolute actions + azimuth
+occlusion bound + retry-on-slip shipped with gates; grasp-synth benchmark scale bug found +
+fixed; `execute_offset` retired (FEM margin vs MPM). Payoff validation: v5 (min-jerk,
+preshape) 0/60 → v6 (no preshape) 0-across-a-2×2 despite passing both pre-flight gates →
+DWELL identified (user hypothesis, quantified 32% vs 2%) → v7 (linear) 0 → **0.66**
+(rot6d state_600) / 0.50 (7d-commanded), independently re-deriving this log's commanded-
+derivation fix en route. New third gate proposed: dwell fraction. Remaining gap to 0.76 =
+this log's firmness (extra_close 5 mm) + big-net + early-checkpoint levers, now adopted.
+Details: `grasp_synthesis_v41_review.md`, `grasp_synthesis_v4_plan.md`,
+`grasp_synthesis_v4_algorithm.md`.
 
 **2026-08-20 → 08-23 — Action-space ablation campaign + follow-ups.** Parts A/B/C
 (DPPO vs DP3 × abs vs delta × real/sim data), two derivation-bug hunts (euler seam,

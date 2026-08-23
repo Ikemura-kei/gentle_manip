@@ -20,7 +20,8 @@ env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/dppo python -m gentle_mani
     "$RUN" \
     --out dataset/dppo/single_lift_mushroom_soft_v5_7d \
     --obs-keys ee_pos ee_quat gripper_width --point-cloud \
-    --derive-action gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml
+    --derive-action gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+    --derive-source-action gentle_manip/configs/action/abs_pose_abs_gripper.yaml
 
 echo "=== 3/3 BC train (bwvei setup: 800 epochs, save/200, batch 128, lr 1e-4) ==="
 CFG="--config-path $REPO/gentle_manip/dppo/cfg/single_lift_mushroom_soft_v5_7d --config-name pre_diffusion_pointnet"
