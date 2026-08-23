@@ -132,7 +132,12 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
    (paired comparisons survive). Related: `execute_offset` (scoring at the executed width)
    is retired from collection — the FEM's 2μ·grip ≥ mg hold margin does not survive MPM at
    honest widths (8/8 → 1/8 on true-size meshes; a 4× margin does not rescue it).
-12. **Best current deployment candidates** (sim-ranked; real value untested):
+12. **REAL-ROBOT results (2026-08-23): co-training wins.** `afucm/state_400` ~**75%** real
+   success (best so far); `qjzsf/state_1000` (real-only) second; `nmbtz/state_500` (pure
+   sim; sim-best 0.71) worst. See the resolved open question — sim rankings invert across
+   data regimes. Deploy wiring for all three: `deploy_real.sh` (armfocus obs, euler-7d,
+   rate-limit clamp).
+13. **Best current deployment candidates** (sim-ranked; real value untested):
    `nmbtz/state_500` (pure-sim realws 0.71), `afucm/state_400` (realws + real 0.685),
    `wyigy/state_100` (std box + real 0.785), `vdmtb/state_200` (pure-sim std 0.76),
    `qjzsf/state_500-1000` (real-only DPPO abs).
@@ -140,7 +145,13 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
 ## Open questions (gates before further building)
 
 - **Real-robot validation of the whole foundation** — nothing above is real-verified yet.
-- **Does real co-training help in real?** (sim says it's free; real says nothing yet).
+- **~~Does real co-training help in real?~~ ANSWERED (2026-08-23, real-robot runs): YES.**
+  Real deployment of the shortlist: `afucm` (realws sim + 8% real co-train) **~75% real
+  success — best**; `qjzsf` (real-only, 55 demos) second; `nmbtz` (pure sim, the SIM-best
+  0.71) **worst**. The sim ranking INVERTS in real: a pure-sim policy still carries a
+  sim2real gap that 8% real co-training largely bridges, and 55 real demos alone beat
+  pure sim — the gap is in the data domain, not the recipe. Sim scores remain useful for
+  in-family model selection but do NOT rank across data regimes.
   Deploy-prep note (local agent, corrected): the co-train real slice is
   `single_lift_mushroom_real_merged` (55 demos = the 51-ep `26-08-20-cmh` session + a 4-ep
   top-up; uniform cloud fingerprint across all 55), RECORDED through
@@ -238,6 +249,12 @@ discipline) — diff the sim-server logs' `[scene_builder] GM overrides` line wh
 doubt; (2) real-demo-trained policies are evaluated with the `_realws` experiments (the
 real workspace box is their data's home turf), sim-trained policies with the experiment
 matching their collection's DR.
+**2026-08-23 — REAL-ROBOT shortlist deployment (user-run).** afucm/state_400 ~75% success
+(best); qjzsf/state_1000 second; nmbtz/state_500 (sim-best) worst → co-training helps in
+real, pure sim still gapped, sim rankings invert across data regimes (conclusions 12; the
+co-training open question is resolved). All three deployed via the `deploy_real.sh` entries
+(armfocus obs; rate-limit clamp active).
+
 **2026-08-22 → 08-23 — Local agent: v4/v4.1/v5 grasp-synthesis line + the dwell stall.**
 v4 delivered (pinch 0.57→0, honest benchmark, min-jerk/Bézier trajectory); v4.1 shelf lift
 measured and REJECTED (10–15 pts demonstrator success for −17% sustained stress, largely an
