@@ -27,8 +27,12 @@
 # --host HOST       SSH alias for the cluster (default: $GM_REMOTE_HOST env var, or the
 #                   ~/.ssh/config Host below -- override either if your alias differs).
 #
-# Always pulls .hydra/ (exact resolved config) and EXPERIMENT.md if present, unless only
-# --list-evals is given. Uses rsync (resumable, only transfers what changed on re-run).
+# Always pulls .hydra/ (exact resolved config), the run's config/ snapshot (experiment/
+# task/obs/ACTION/dr yamls -- what deployment needs), the TRAINING dataset's
+# normalization.npz (resolved from .hydra's env:/normalization_path -- REQUIRED at deploy,
+# easy to mismatch), and EXPERIMENT.md if present, unless only --list-evals is given.
+# Everything lands in ONE place: <dest>/{checkpoint/,config/,.hydra/,normalization.npz,eval/}.
+# Uses rsync (resumable, only transfers what changed on re-run).
 set -euo pipefail
 
 REMOTE_HOST="${GM_REMOTE_HOST:-arrhenius1.hpc.arrhenius.naiss.se}"
@@ -94,9 +98,34 @@ mkdir -p "$DEST"
 echo "[pull_run] .hydra/ ..."
 rsync -avzP "$REMOTE_HOST:$RUN_DIR/.hydra/" "$DEST/.hydra/"
 
+# The run's env-config snapshot (experiment/task/obs/ACTION/dr yamls + launch_command.sh) —
+# deployment needs the action config (euler frame offset, rate_limit) far more than .hydra.
+if ssh "$REMOTE_HOST" "[ -d '$RUN_DIR/config' ]" 2>/dev/null; then
+    echo "[pull_run] config/ (env snapshot) ..."
+    rsync -avzP "$REMOTE_HOST:$RUN_DIR/config/" "$DEST/config/"
+fi
+
 if ssh "$REMOTE_HOST" "[ -f '$RUN_DIR/EXPERIMENT.md' ]" 2>/dev/null; then
     echo "[pull_run] EXPERIMENT.md ..."
     rsync -avzP "$REMOTE_HOST:$RUN_DIR/EXPERIMENT.md" "$DEST/EXPERIMENT.md"
+fi
+
+# The run's TRAINING normalization.npz — REQUIRED at deploy time and easy to mismatch:
+# each policy is only valid with the stats of the dataset it trained on. Resolve the dataset
+# from the .hydra config: prefer an explicit literal `normalization_path:` (eval configs),
+# else `env:` (pretrain configs) -> $REMOTE_REPO/dataset/dppo/<env>/normalization.npz.
+NORM_REMOTE=$(ssh "$REMOTE_HOST" "grep -m1 '^normalization_path:' '$RUN_DIR/.hydra/config.yaml' 2>/dev/null" | awk '{print $2}' || true)
+case "$NORM_REMOTE" in *'${'*|"") NORM_REMOTE="" ;; esac       # drop unresolved interpolations
+if [ -z "$NORM_REMOTE" ]; then
+    DATA_ENV=$(ssh "$REMOTE_HOST" "grep -m1 '^env:' '$RUN_DIR/.hydra/config.yaml' 2>/dev/null" | awk '{print $2}' || true)
+    [ -n "$DATA_ENV" ] && NORM_REMOTE="$REMOTE_REPO/dataset/dppo/$DATA_ENV/normalization.npz"
+fi
+if [ -n "$NORM_REMOTE" ] && ssh "$REMOTE_HOST" "[ -f '$NORM_REMOTE' ]" 2>/dev/null; then
+    echo "[pull_run] normalization.npz ($NORM_REMOTE) ..."
+    rsync -avzP "$REMOTE_HOST:$NORM_REMOTE" "$DEST/normalization.npz"
+else
+    echo "[pull_run] WARNING: could not resolve the run's normalization.npz" \
+         "(looked for normalization_path/env in .hydra/config.yaml) — pull it manually!" >&2
 fi
 
 if [ "$NO_CKPT" != "1" ]; then
