@@ -49,21 +49,31 @@ def _load_episodes(paths: Sequence[Path]) -> list:
 
 
 def _episode_state(ep: dict, obs_keys: Sequence[str]) -> np.ndarray:
-    """(T, obs_dim) flat state = the obs_keys concatenated per timestep, in order."""
+    """(T, obs_dim) flat state = the obs_keys concatenated per timestep, in order.
+    ee_quat is synthesized from ee_rot6d when requested but not recorded (some sim
+    collections store only the rot6d form; same math as actions.derive.obs_quat)."""
     obs = ep["observations"]
-    cols = [np.asarray(obs[k], np.float32).reshape(len(ep["actions"]), -1) for k in obs_keys]
+    T = len(ep["actions"])
+    cols = []
+    for k in obs_keys:
+        if k == "ee_quat" and k not in obs and "ee_rot6d" in obs:
+            from gentle_manip.actions.derive import obs_quat
+            cols.append(obs_quat(obs, T).astype(np.float32))
+            continue
+        cols.append(np.asarray(obs[k], np.float32).reshape(T, -1))
     return np.concatenate(cols, axis=1)
 
 
 def convert(demo_paths: Sequence[Path], out_dir: Path, obs_keys: Sequence[str] = STATE_VIEW,
             pointcloud_key: str = None, val_split: float = 0.1, seed: int = 0,
-            derive_action_config=None, source_action_config=None) -> dict:
+            derive_action_config=None, derive_lookahead: int = 1,
+            derive_source_config=None) -> dict:
     episodes = _load_episodes(demo_paths)
     states = [_episode_state(ep, obs_keys) for ep in episodes]
     if derive_action_config is not None:                  # derive delta/absolute from the pose traj
         from gentle_manip.actions.derive import derive_action_set
-        actions = [derive_action_set(ep, derive_action_config,
-                                     source_action_config=source_action_config)
+        actions = [derive_action_set(ep, derive_action_config, lookahead=derive_lookahead,
+                                     source_config=derive_source_config)
                    for ep in episodes]
     else:
         actions = [np.asarray(ep["actions"], np.float32) for ep in episodes]
@@ -170,19 +180,28 @@ def main() -> None:
                          "Takes precedence over --obs-keys.")
     ap.add_argument("--view", default="teacher",
                     help="which experiment view to use with --experiment (default: teacher)")
-    ap.add_argument("--source-action", type=Path, default=None,
-                    help="action YAML the RECORDED actions were encoded with (absolute mode). When "
-                         "given, --derive-action re-encodes the demos' decoded COMMANDED targets "
-                         "instead of the measured pose trajectory — exact, no tracking-gap "
-                         "attenuation. Only valid for absolute-mode recordings.")
     ap.add_argument("--derive-action", type=Path, default=None,
                     help="DERIVE the action from the recorded EE-pose trajectory using this action "
                          "config (delta / abs_pose_abs_gripper / abs_pose_euler_abs_gripper), instead "
                          "of using the demo's stored actions. Lets ONE collection produce both a delta "
                          "and an absolute dataset (run convert twice with different --derive-action).")
+    ap.add_argument("--derive-source-action", type=Path, default=None,
+                    help="ABSOLUTE --derive-action only: reconstruct the COMMANDED target "
+                         "trajectory from the demo's RECORDED raw actions decoded through "
+                         "THIS action config (the one the demo was collected with), and "
+                         "re-encode those commands as the --derive-action space. The "
+                         "closed-loop-stable form (commanded targets lead the achieved pose "
+                         "by the controller lag); takes precedence over --derive-lookahead.")
+    ap.add_argument("--derive-lookahead", type=int, default=1,
+                    help="ABSOLUTE --derive-action only: target = pose this many steps ahead "
+                         "(default 1). Use ~4 so the target LEADS the current pose like recorded "
+                         "commanded targets do — K=1 has ~zero mean lead and the BC'd absolute "
+                         "policy stalls at a closed-loop fixed point above the object (see "
+                         "gentle_manip.actions.derive.derive_action_set).")
     args = ap.parse_args()
 
     derive_cfg = None
+    source_cfg = None
     if args.derive_action is not None:
         import yaml
         import gentle_manip
@@ -190,21 +209,15 @@ def main() -> None:
         _root = Path(gentle_manip.__file__).resolve().parents[1]   # repo root
         p = args.derive_action if args.derive_action.is_file() else (_root / args.derive_action)
         derive_cfg = ActionConfig.from_dict(yaml.safe_load(open(p)))
+        if args.derive_source_action is not None:
+            sp = (args.derive_source_action if args.derive_source_action.is_file()
+                  else (_root / args.derive_source_action))
+            source_cfg = ActionConfig.from_dict(yaml.safe_load(open(sp)))
+            print(f"  deriving from RECORDED COMMANDED targets (source={sp.name}, "
+                  f"mode={source_cfg.mode})")
         print(f"  deriving actions from pose trajectory via {p.name} "
               f"(mode={derive_cfg.mode}, rot_repr={getattr(derive_cfg,'rot_repr','-')}, "
               f"action_dim={derive_cfg.action_dim})")
-
-    src_cfg = None
-    if args.source_action is not None:
-        import yaml
-        import gentle_manip
-        from gentle_manip.actions.action_config import ActionConfig
-        _root = Path(gentle_manip.__file__).resolve().parents[1]
-        p = args.source_action if args.source_action.is_file() else (_root / args.source_action)
-        src_cfg = ActionConfig.from_dict(yaml.safe_load(open(p)))
-        print(f"  deriving from the demos' COMMANDED targets (decoded via {p.name}) — exact, no "
-              f"tracking-gap attenuation; the measured-pose fallback trails the command by the "
-              f"controller's tracking error (v6: 6.5mm mean, 16.5mm p95)")
 
     if args.experiment:
         from gentle_manip.experiment import Experiment
@@ -224,7 +237,8 @@ def main() -> None:
     print(f"converting {len(paths)} demo file(s): {[str(p) for p in paths]}")
     meta = convert(paths, args.out, obs_keys=obs_keys, pointcloud_key=args.pc_key,
                    val_split=args.val_split, derive_action_config=derive_cfg,
-                   source_action_config=src_cfg)
+                   derive_lookahead=args.derive_lookahead,
+                   derive_source_config=source_cfg)
     for k, v in meta.items():
         print(f"  {k}: {v}")
 

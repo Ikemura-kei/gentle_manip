@@ -1,5 +1,64 @@
 # Debug report: Part C (7d-euler-absolute) DPPO policy scores ~0% success
 
+> **FINAL RESOLUTION 2026-08-21 — derive from RECORDED COMMANDED targets
+> (`--derive-source-action`), optionally composed with `--derive-lookahead`.**
+> The K=4 achieved-lookahead broke the stall but plateaued low (Part B 4.5-6%, Part C 16%
+> at ckpt100, declining with epochs — the same epoch-degradation every *derived*-action
+> arm shows, incl. the delta arms which collapse 0.63-0.75@100 → 0.0@400, while jfhlu's
+> recorded-commanded supervision stayed stable 0.75-0.88 across all checkpoints).
+> `commanded_pose_trajectory()` removes the last confound: decode the demo's recorded raw
+> actions through the collection-time action config (absolute: per-step; delta: physical
+> accumulation with per-step EE-bounds/gripper clamping, matching RealBackend exactly) and
+> re-encode as the target space. **Validated:** Part B abs s42 commanded-derived (igjmd)
+> scored **0.39 success / 0.72 ever_success / 0.75 ever_in_band at ckpt100** vs 0.0 (K=1) /
+> 0.05 (K=4) — grasping fully restored to delta/jfhlu territory; the residual gap to
+> delta's 0.63-0.75 is hold-phase completion. Rolled out to every abs arm:
+> - Part B s43 cmd (1467808) + Part C cmd (1467809; lead −5.6/+10.3 mm — byte-comparable
+>   to jfhlu's supervision, so any remaining gap IS the euler-vs-rot6d encoding cost)
+> - Part A: commanded (delta-accumulated) alone leads only ±2.6 mm (slow teleop), below
+>   the stall threshold — derived with `--derive-source-action <delta cfg>
+>   --derive-lookahead 4` (mechanisms compose; conversions 1467810/11 → DPPO + DP3 arms)
+> Open question tracked separately: why every derived/absolute arm still degrades with
+> epochs (best checkpoint ≈ 100) — early-stopping at ckpt100 is the operational answer
+> for this round.
+
+> **SECOND ROOT CAUSE FOUND AND FIXED 2026-08-21 — closed-loop fixed-point stall from
+> K=1 achieved-pose derivation.** The seam fix below was necessary but NOT sufficient: the
+> seam-fixed retrains (zwiex/qvwdj on armfocus) still scored ~0%. Full forensic chain:
+> - Offline probe (aarch64 GPU job, model built exactly as eval builds it): the trained
+>   policy reproduces its OWN training actions with ~zero bias (descent-bottom z +0.5 mm) —
+>   training is fine.
+> - Offline full-transform replay (train.npz actions → venv de-norm → server ActionPipeline):
+>   decodes to the exact demo poses (commanded z bottoms at 0.003) — the transforms are fine.
+> - Instrumented live eval (`GM_EVAL_DUMP` in `gentle_manip/dppo/genesis_venv.py`, 5 eps):
+>   execution tracks commands within ~1 mm, but the policy NEVER COMMANDS below z=0.0341 —
+>   it approaches the mushroom-top asymptotically (and the gripper closes ever slower).
+> - Data measurement: with `--derive-action` at K=1 (target = NEXT achieved pose), the mean
+>   "pull" E[cmd_z − obs_z | obs_z] is **0.0 mm at every height** (spread ±2-3 mm mixing
+>   descend/hold/ascend frames) — a mean-seeking deterministic diffusion rollout has a
+>   closed-loop FIXED POINT everywhere, and any step-shrinkage compounds through the
+>   2-frame obs history (velocity feedback) into a stall. jfhlu's dataset (recorded
+>   COMMANDED targets) instead leads the achieved pose by 5-10 mm (controller lag) — that
+>   lead is what keeps its closed loop moving. Delta is immune (a shrunken delta still
+>   moves; no fixed point) — which is exactly the observed delta-works/abs-stalls split.
+>
+> **Fix:** `--derive-lookahead K` on both converters (`gentle_manip.actions.derive` K
+> parameter): absolute target = pose at t+K. K=4 restores a jfhlu-like lead (measured p75
+> +11.4 mm vs jfhlu's +10.3) with the euler seam still clean (0 jumps). All abs datasets
+> re-derived at K=4 and all abs arms relaunched (partA_dppo_abs_la4 / partA_dp3_abs_la4 /
+> partB_abs_s42/43_la4 / partC_7d_la4). K=1 runs zwiex/qvwdj/fvfnx marked
+> `invalid-k1-stall` in experiments.csv. Note this means oppsu failed from BOTH bugs
+> stacked (seam + stall), and the doc's original "achieved vs commanded are near-identical
+> for absolute mode" fairness claim is FALSE in closed loop — only the lookahead/commanded
+> form is closed-loop stable for BC'd absolute actions.
+> **Prediction confirmed:** fvfnx (seam-fixed, K=1, hwo demos — the non-armfocus control)
+> evaluated at 0.0% success / 0.0 ever_success at state_100, exactly as the stall theory
+> predicted — ruling out the armfocus cloud/collection as the cause of the abs failures.
+>
+> Open separate issue (armfocus delta arms): success degrades over checkpoints
+> (uzgjm 0.625@100 → 0.01@300) via hold-phase drops while ever_success only drifts to
+> 0.43 — under investigation; unrelated to the encoding fixes above.
+
 > **RESOLVED 2026-08-20 (commit `76f5efa`).** The wraparound diagnosis below was verified
 > against ALL THREE abs datasets (Part A real 24.0%, Part B armfocus 18.1%, Part C hwo
 > 26.5% of consecutive-frame labels sign-flipping, while the physical orientation from the
@@ -24,6 +83,18 @@
 > (exact) abs encoding does not — a small systematic asymmetry in the abs-vs-delta
 > comparison, in the ABS arm's favor. If delta evals come out clearly worse than abs,
 > re-derive delta with a larger rot scale before concluding "delta is worse".
+>
+> Interpretation note for the abs-vs-delta comparison (2026-08-21): delta has a SECOND,
+> runtime-side drift source on top of the dataset-side error above — within each action
+> chunk the steps execute open-loop, so execution error compounds until the next re-plan,
+> and the backend accumulates deltas onto its internal running target rather than the
+> measured pose. Absolute mode re-anchors to a full pose every step, so neither error
+> accumulates. A delta-arm success deficit vs abs is therefore expected to have (at least)
+> three stacked causes: (1) derivation clipping (~5-8° dataset error, measurable above),
+> (2) open-loop within-chunk drift, (3) target-vs-actual accumulation drift. Only (1) is
+> fixable by a bigger derivation rot scale; (2)/(3) are inherent to the delta
+> representation as deployed here and are part of what the ablation is legitimately
+> measuring.
 
 **TL;DR — root cause found (see "ROOT CAUSE CONFIRMED" section below):** the recorded grasp's
 roll angle sits essentially AT the euler ±π wraparound seam for ~99.5% of all timesteps, so

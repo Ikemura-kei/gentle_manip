@@ -55,6 +55,13 @@ class GenesisMultiStepVecEnv:
         self._prev_smoothed: Optional[np.ndarray] = None   # (n_envs, 9) or None
         from gentle_manip.evaluation.video import MultiClipRecorder
         self._rec = MultiClipRecorder()            # per-env clips (per-trajectory eval video)
+        # Diagnostic per-step dump (debug only): set GM_EVAL_DUMP=/path/prefix to record, at
+        # every sub-step, the RAW (un-normalized) state obs and the normalized action executed.
+        # Written as <prefix>_ep<N>.npz at each episode boundary. Zero overhead when unset.
+        import os
+        self._dump_prefix = os.environ.get("GM_EVAL_DUMP") or None
+        self._dump_buf: list = []
+        self._dump_ep = 0
 
     # ── normalization ──────────────────────────────────────────────────────────
     def _raw_state(self, obs: dict) -> np.ndarray:  # SimEnvClient obs -> (n_envs, obs_dim)
@@ -89,7 +96,9 @@ class GenesisMultiStepVecEnv:
         return a
 
     def _modalities(self, obs: dict) -> dict:       # sim obs -> {"state": norm, ["point_cloud": raw]}
-        m = {"state": self._norm_obs(self._raw_state(obs))}
+        raw = self._raw_state(obs)
+        self._last_raw = raw                        # for the GM_EVAL_DUMP diagnostic only
+        m = {"state": self._norm_obs(raw)}
         if self.pointcloud_key is not None:         # raw xyz (meters); crop bounds already limit it
             m["point_cloud"] = np.asarray(obs[self.pointcloud_key], np.float32).reshape(self.n_envs, -1, 3)
         return m
@@ -158,7 +167,10 @@ class GenesisMultiStepVecEnv:
         s_max, s_sum, s_cnt = None, None, 0         # von-Mises over the chunk (soft body)
         s_t10, s_t20 = None, None                   # top-10%/20% particle tail (chunk-max)
         for t in range(a.shape[1]):                 # execute the action chunk, sum reward
-            obs, r, _done, sub_info = self.client.step(self._unnorm_action(self._smooth(a[:, t])))
+            a_exec = self._unnorm_action(self._smooth(a[:, t]))
+            if self._dump_prefix is not None:       # diagnostic dump (see __init__)
+                self._dump_buf.append((self._last_raw.copy(), a[:, t].copy(), a_exec.copy()))
+            obs, r, _done, sub_info = self.client.step(a_exec)
             reward += np.asarray(r, np.float32).reshape(self.n_envs)
             success = np.array([bool(d.get("success", False)) for d in sub_info])
             if sub_info and "obj_z" in sub_info[0]:
@@ -190,6 +202,14 @@ class GenesisMultiStepVecEnv:
                 info["stress_top10"], info["stress_top20"] = s_t10, s_t20
         if bool(truncated.all()):                   # synchronous horizon -> auto-reset all
             self._rec.flush()                       # write this episode's per-env clips; keep recording
+            if self._dump_prefix is not None and self._dump_buf:
+                np.savez_compressed(
+                    f"{self._dump_prefix}_ep{self._dump_ep}.npz",
+                    raw_state=np.stack([b[0] for b in self._dump_buf]),     # (T, n_envs, obs_dim)
+                    action_norm=np.stack([b[1] for b in self._dump_buf]),   # (T, n_envs, act_dim)
+                    action_raw=np.stack([b[2] for b in self._dump_buf]))    # (T, n_envs, act_dim)
+                self._dump_buf = []
+                self._dump_ep += 1
             info["final_obs"] = obs_out
             obs_out = self._reset_all()
         return obs_out, reward, terminated, truncated, info

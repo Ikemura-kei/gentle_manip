@@ -23,12 +23,14 @@ _Range = Tuple[float, float]
 class DRConfig:
     # ── per-reset (no rebuild) ────────────────────────────────────────────────
     object_pos_xy: float = 0.0          # half-range (m); per-env uniform object x/y jitter
-    # ASYMMETRIC per-axis offset ranges (m, relative to the object's nominal spawn), overriding
-    # object_pos_xy when set. Needed when the target workspace is not centred on the nominal pose:
-    # the real reachable area is x [0.29, 0.48], y [-0.11, 0.11] while the mushroom's nominal x
-    # is ~0.47 — i.e. AT the far edge of the range, which no symmetric half-range can express.
-    object_dx_range: Optional[_Range] = None   # (lo, hi) offset added to nominal x
-    object_dy_range: Optional[_Range] = None   # (lo, hi) offset added to nominal y
+    # ABSOLUTE spawn-region alternative (overrides object_pos_xy when BOTH ranges are set):
+    # per-env uniform object x/y drawn from these WORLD-frame ranges (m, robot-base frame),
+    # converted to an offset from object_nominal_xy (the ObjectDef default_pos x/y this DR
+    # config is used with — keep in sync with assets/registry.py). Use when the spawn region
+    # should match a physical workspace rather than a symmetric box around the registry pose.
+    object_pos_x: Optional[_Range] = None
+    object_pos_y: Optional[_Range] = None
+    object_nominal_xy: _Range = (0.47, 0.0)   # registry mushroom default_pos x/y
     robot_init_pos_xyz: float = 0.0     # half-range (m); per-env uniform jitter on the reset home EE xyz
     robot_init_offset_xyz: Optional[tuple] = None  # FIXED (dx,dy,dz) offset (m) added to the reset home
                                         # EE pose, SAME for all envs (a fixed home at a shifted location).
@@ -65,6 +67,7 @@ class DRConfig:
 
     def has_reset_dr(self) -> bool:
         return (self.object_pos_xy > 0 or self.robot_init_pos_xyz > 0
+                or (self.object_pos_x is not None and self.object_pos_y is not None)
                 or self.robot_init_offset_xyz is not None
                 or self.object_yaw_deg > 0 or self.object_pitch_roll_deg > 0
                 or self.object_flip_prob > 0)
@@ -93,13 +96,17 @@ class DRConfig:
 
     # ── sampling ──────────────────────────────────────────────────────────────
     def sample_object_dxy(self, rng: np.random.Generator, num_envs: int) -> Optional[np.ndarray]:
-        """Per-env object (dx, dy) offset from the default pose, or None if disabled."""
-        if self.object_dx_range is not None or self.object_dy_range is not None:
-            dx = (rng.uniform(*self.object_dx_range, num_envs) if self.object_dx_range is not None
-                  else rng.uniform(-self.object_pos_xy, self.object_pos_xy, num_envs))
-            dy = (rng.uniform(*self.object_dy_range, num_envs) if self.object_dy_range is not None
-                  else rng.uniform(-self.object_pos_xy, self.object_pos_xy, num_envs))
-            return np.stack([dx, dy], axis=1).astype(np.float32)
+        """Per-env object (dx, dy) offset from the default pose, or None if disabled.
+
+        Absolute mode (object_pos_x AND object_pos_y set): x/y ~ U(range) in WORLD coords,
+        returned as offsets from object_nominal_xy — so the spawn REGION is exactly the
+        configured workspace box regardless of the registry default pose. Falls back to the
+        symmetric ±object_pos_xy jitter otherwise."""
+        if self.object_pos_x is not None and self.object_pos_y is not None:
+            x = rng.uniform(self.object_pos_x[0], self.object_pos_x[1], num_envs)
+            y = rng.uniform(self.object_pos_y[0], self.object_pos_y[1], num_envs)
+            nx, ny = self.object_nominal_xy
+            return np.stack([x - nx, y - ny], axis=1).astype(np.float32)
         if self.object_pos_xy <= 0:
             return None
         return rng.uniform(-self.object_pos_xy, self.object_pos_xy, (num_envs, 2)).astype(np.float32)

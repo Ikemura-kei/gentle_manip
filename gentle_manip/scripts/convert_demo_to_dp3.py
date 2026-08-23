@@ -75,6 +75,8 @@ def episode_to_dp3_arrays(
     point_cloud_key: str = "point_cloud",
     image_key_map: dict[str, str] | None = None,
     derive_action_config=None,
+    derive_lookahead: int = 1,
+    derive_source_config=None,
 ) -> dict[str, np.ndarray]:
     """Convert one gentle_manip episode to DP3 zarr arrays.
 
@@ -88,7 +90,9 @@ def episode_to_dp3_arrays(
     observations = episode["observations"]
     if derive_action_config is not None:
         from gentle_manip.actions.derive import derive_action_set
-        actions = derive_action_set(episode, derive_action_config).astype(np.float32)
+        actions = derive_action_set(episode, derive_action_config,
+                                    lookahead=derive_lookahead,
+                                    source_config=derive_source_config).astype(np.float32)
     else:
         actions = np.asarray(episode["actions"], dtype=np.float32)
     if actions.ndim != 2:
@@ -207,6 +211,8 @@ def convert_pickles_to_dp3(
     overwrite: bool = False,
     chunk_length: int = 100,
     derive_action_config=None,
+    derive_lookahead: int = 1,
+    derive_source_config=None,
 ) -> dict[str, tuple[tuple[int, ...], str]]:
     paths = _iter_pickles(inputs)
     episodes, source_meta = _load_episodes(paths)
@@ -218,6 +224,8 @@ def convert_pickles_to_dp3(
             point_cloud_key=point_cloud_key,
             image_key_map=image_key_map,
             derive_action_config=derive_action_config,
+            derive_lookahead=derive_lookahead,
+            derive_source_config=derive_source_config,
         )
         for ep in episodes
     ]
@@ -272,6 +280,14 @@ def main() -> None:
     )
     parser.add_argument("--chunk-length", type=int, default=100)
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--derive-source-action", type=Path, default=None,
+                        help="ABSOLUTE --derive-action only: re-encode the RECORDED "
+                             "COMMANDED targets (decoded via THIS collection-time action "
+                             "config) instead of the achieved pose trajectory")
+    parser.add_argument("--derive-lookahead", type=int, default=1,
+                        help="ABSOLUTE --derive-action only: target = pose this many steps "
+                             "ahead (default 1; use ~4 -- see actions.derive docstring: K=1 "
+                             "stalls a BC absolute policy at a closed-loop fixed point)")
     parser.add_argument("--derive-action", type=Path, default=None,
                         help="DERIVE the action from the recorded EE-pose trajectory using this "
                              "action config (delta / abs_pose_abs_gripper / abs_pose_euler_abs_gripper) "
@@ -280,11 +296,16 @@ def main() -> None:
     args = parser.parse_args()
 
     derive_cfg = None
+    source_cfg = None
     if args.derive_action is not None:
         import yaml
         from gentle_manip.actions.action_config import ActionConfig
         p = args.derive_action if args.derive_action.is_file() else (_REPO / args.derive_action)
         derive_cfg = ActionConfig.from_dict(yaml.safe_load(open(p)))
+        if args.derive_source_action is not None:
+            sp = (args.derive_source_action if args.derive_source_action.is_file()
+                  else (repo_root / args.derive_source_action))
+            source_cfg = ActionConfig.from_dict(yaml.safe_load(open(sp)))
         print(f"  deriving actions via {p.name} (mode={derive_cfg.mode}, "
               f"rot_repr={getattr(derive_cfg,'rot_repr','-')}, action_dim={derive_cfg.action_dim})")
 
@@ -297,6 +318,8 @@ def main() -> None:
         overwrite=args.overwrite,
         chunk_length=args.chunk_length,
         derive_action_config=derive_cfg,
+        derive_lookahead=args.derive_lookahead,
+        derive_source_config=source_cfg,
     )
     print(f"wrote {args.output}")
     for key, (shape, dtype) in summary.items():
