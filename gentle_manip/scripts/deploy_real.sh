@@ -254,12 +254,10 @@
 # (plain concat, no oversampling — the winning co-train variant).
 #
 # Wiring notes (all verified 2026-08-23):
-#   * obs-config point_cloud_1cam_armfocus.yaml — matches the DOMINANT (92% sim) training cloud.
-#     KNOWN CAVEAT: the 8% real co-train slice was recorded (July) BEFORE arm-focus existed
-#     (Aug 19) and the pkls keep only the final 1024-pt clouds, so it trained NON-focused and
-#     cannot be re-focused post-hoc — afucm's real-domain exposure never looked like deploy-time
-#     input under either config. Armfocus is still the right deploy choice (majority
-#     distribution); if afucm underperforms nmbtz in real, suspect this first.
+#   * obs-config point_cloud_1cam_armfocus.yaml — REQUIRED, and fully consistent: BOTH the sim
+#     demos AND the real co-train slice (26-08-20-cmh, recorded Aug 20 THROUGH this very config —
+#     see its config.yaml) are arm-focus clouds. (An earlier caveat here claimed the real slice
+#     was unfocused — that looked at the obsolete July recordings, not cmh. Retracted.)
 #   * action-config abs_pose_euler_abs_gripper.yaml — carries the euler frame offset AND
 #     rate_limit: the RealBackend clamps every executed step to the delta-fast_rot bounds
 #     (rotation x1.5), so a policy-emitted pose jump executes as a bounded walk, never a
@@ -317,10 +315,11 @@
 # 0.58 @500). No sim2real gap by construction — its weakness is 55 demos of coverage, not transfer.
 #
 # Wiring notes:
-#   * obs-config point_cloud_1cam_outlier.yaml — NOT armfocus: qjzsf's training obs
-#     (superset_real) has outlier denoise only, no object_focus; verified value-identical
-#     (crop/1024/voxel 0.01/min_neighbors 23/quat_noise 0.003). Deploying with armfocus would
-#     mismatch its cloud distribution.
+#   * obs-config point_cloud_1cam_armfocus.yaml — the training clouds are ARM-FOCUS: the real
+#     demos (26-08-20-cmh) were RECORDED through point_cloud_1cam_armfocus (baked into the pkl;
+#     conversion reads stored clouds), regardless of the superset_real yaml in the run's config
+#     snapshot (that describes the EXPERIMENT env, not the pkl's record-time processing).
+#     Deploying with plain outlier would mismatch what the policy trained on.
 #   * action-config abs_pose_euler_abs_gripper.yaml — euler offset + rate-limit clamp active.
 #   * big net auto-loads from downloaded_runs/qjzsf/.hydra; load-smoked.
 #   * Object placement: the real demos' own workspace (the realws box is a safe subset).
@@ -332,7 +331,7 @@
 #   --ckpt ${ckpt} \
 #   --ft-denoising-steps 0 \
 #   --normalization ${normalization} \
-#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_outlier.yaml \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
 #   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
 #   --smooth-alpha 0.6 \
 #   --max-pos-step-m 0.0065 \

@@ -140,11 +140,13 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
 
 - **Real-robot validation of the whole foundation** — nothing above is real-verified yet.
 - **Does real co-training help in real?** (sim says it's free; real says nothing yet).
-  CAVEAT found at deploy prep (local agent): the 50 real demos were recorded in JULY, before
-  the arm-focus filter existed (Aug 19), and their pkls keep only the final 1024-pt clouds —
-  so every co-train run mixed 92% focused sim clouds with 8% unfocused real clouds, and the
-  real slice cannot be re-focused post-hoc. A negative real co-training result may be this
-  artifact, not the idea.
+  Deploy-prep note (local agent, corrected): the co-train real slice is `26-08-20-cmh`
+  (51 demos, Aug 20), RECORDED through `point_cloud_1cam_armfocus` — so sim and real
+  training clouds are consistent, and ALL THREE shortlist deploys use the armfocus obs
+  config (qjzsf included: its pkl clouds are record-time armfocus even though the run's
+  `superset_real` env snapshot has no focus block — the snapshot describes the experiment
+  env, not the pkl's baked-in processing). An earlier caveat claiming the real slice was
+  unfocused looked at the obsolete July recordings; retracted.
 - ~~DP3 vs DPPO codebase~~ **RESOLVED: DPPO** (sim: stable 0.76 vs DP3's unstable curve
   plateauing ~0.53; real: 0.60 vs 0.52 — see final report §6b). DP3's real-delta arm
   (0.48 ever → 0.01 success, hold-drift) doubles as the empirical proof of abs-over-delta.
@@ -192,10 +194,11 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
 - [ ] Data-scale study (650 → 2k episodes; collection is cheap at ~6 h/650 and
   deterministic).
 - [ ] Camera-pose DR (real extrinsics drift between calibrations).
-- [ ] **Real-recording cloud parity**: record future real demos with the armfocus obs config
-  at RECORD time (cheap), and/or store the pre-subsample cropped cloud (or raw depth) in the
-  pkl so any future filter can be applied at conversion — the July demos are locked to their
-  record-time processing (see the co-training caveat in Open questions).
+- [ ] **Real-recording cloud provenance**: record-time processing is BAKED into real pkls
+  (only the final 1024-pt cloud is stored) — a run's experiment/env obs snapshot does NOT
+  describe it, which nearly caused a wrong deploy obs config for qjzsf. Store the pre-
+  subsample cropped cloud (or raw depth) in future recordings for filter-agnostic
+  conversion, and always read the RECORDING's own config.yaml when choosing deploy obs.
 
 **Bookkeeping**
 - [x] Deploy-script entries for the shortlist: `afucm/state_400`, `nmbtz/state_500` and
