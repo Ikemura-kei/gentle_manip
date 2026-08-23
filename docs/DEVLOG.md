@@ -201,6 +201,16 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
 
 ## Log
 
+**2026-08-23 — Real-data-amount ablation launched (for real-robot testing).** afucm's
+recipe (realws sim 585 eps + plain-concat real, union norm) with the FIRST N real demos,
+N ∈ {1, 5, 10, 20, 30} (nested subsets — deterministic split order), 1 seed each, full
+eval sweeps on the realws box. Curve endpoints already measured: nmbtz (N=0, 0.71) and
+afucm (N=50, 0.685). Datasets `single_lift_mushroom_simreal_realws_n{N}_cmd`. Sim curves
+are expected flat (~0.65-0.71 — real data is free in sim); the deliverable is the USER'S
+real-robot ranking over N, i.e. how many real demos the pipeline actually needs.
+`pull_run.sh` now ships the complete deploy kit per run (checkpoint + config/ snapshot +
+the run's own normalization.npz) so each N-arm pulls ready-to-deploy.
+
 **2026-08-23 — DP3 harness integration + two eval-comparability bugs (user-caught).**
 DP3 checkpoints now evaluate through the canonical harness (`eval_dp3_harness.py` +
 `dp3_eval.sbatch`). The user noticed from renders that DP3 evals' MPM particles looked
