@@ -187,10 +187,11 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
 | 12 | Memory in the policy (RNN/GRU/temporal transformer or first-frame context token) | cluster agent | testable on the current afucm setup |
 | 13 | Aux objectives on the real-data co-train | cluster agent | testable on afucm |
 | 14 | Camera-pose DR (slight: ~0.5 cm/axis, 1–5°) | cluster agent | testable on afucm |
+| 15 | DP horizon ablation: predict 8 / execute 4 (current: 4/4; re-planning at half-horizon is the standard diffusion-policy sweet spot) | cluster agent | testable on afucm |
 
 Sequencing summary: **1+2 first (local)** · 3 ongoing · 4 immediately next working day (user) ·
 5 after 2 confirms · 6 mesh-prep parallel (user) · 7 parallel (cluster) · 10 after 2+5 (or on
-afucm now) · 8 deferred · 9 last · 11 from now on · 12/13/14 on afucm in parallel (cluster).
+afucm now) · 8 deferred · 9 last · 11 from now on · 12/13/14/15 on afucm in parallel (cluster).
 Local agent starts items only on explicit user go.
 
 ### Maybe-look-later items (flagged at plan review, 2026-08-23 — not scheduled)
