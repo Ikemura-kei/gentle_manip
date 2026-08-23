@@ -278,7 +278,76 @@ Local agent starts items only on explicit user go.
 
 ---
 
+## Canonical results table (all runs, standard presentation — updated 2026-08-24)
+
+Format (user-mandated, use for ALL future results): run · log location · best checkpoint
+(by success; stress-weighted selection TBD) · success / ever_success / ever_in_band ·
+sustained stress (`stress_top20_ttop20_mean`, kPa) · peak stress (`stress_max_tmax_mean`,
+kPa; known to be pinned ~50-57 — sustained is the discriminating gentleness metric) ·
+remark (what the run was for). All numbers: canonical harness, 200 episodes. Mushroom
+yield reference: 40 kPa. jjjjy/jtzqc curves still filling; earlier campaign detail lives
+in the narrative sections + subpages.
+
+| run | log location (logs/dppo/dppo-pretrain/) | best ckpt | succ | ever | in-band | sustained kPa | peak kPa | remark |
+|---|---|---|---|---|---|---|---|---|
+| jfhlu | single_lift_mushroom_soft_abs_pcd_hwo/jfhlu | 200 | 0.880 | 0.890 | 0.895 | 28.8 | 52.8 | REFERENCE: 10d rot6d abs, recorded commanded, hwo demos/cloud |
+| eibno | single_lift_mushroom_soft_hwo_7d_cmd/eibno | 100 | 0.840 | 0.860 | 0.865 | 29.1 | 53.6 | Part C: 7d euler vs jfhlu — encoding cost ~0.04 |
+| khxdo | single_lift_mushroom_soft_hwo_repro_cmd/khxdo | 300 | 0.760 | 0.780 | 0.810 | 32.5 | 53.9 | R1: fresh hwo reproduction (recipe-not-luck control) |
+| vdmtb | single_lift_mushroom_soft_armfocus_firm_cmd/vdmtb | 200 | 0.760 | 0.800 | 0.805 | 24.1 | 51.4 | R2: armfocus cloud + v3 firm recipe (cloud cost ~0) |
+| wicfr | single_lift_mushroom_soft_hwo_armfocus_abs_cmd/wicfr | 100 | 0.700 | 0.780 | 0.795 | 29.7 | 53.8 | Part B abs s43 (xhk v2-recipe collection) |
+| igjmd | single_lift_mushroom_soft_hwo_armfocus_abs_cmd/igjmd | 300 | 0.620 | 0.625 | 0.635 | 26.4 | 52.2 | Part B abs s42 (commanded-derivation validation arm) |
+| hrqdm | single_lift_mushroom_soft_hwo_armfocus_delta/hrqdm | 100 | 0.745 | 0.770 | 0.775 | 31.2 | 54.2 | Part B delta s43 (epoch-collapse pathology) |
+| uzgjm | single_lift_mushroom_soft_hwo_armfocus_delta/uzgjm | 100 | 0.625 | 0.650 | 0.660 | 27.9 | 53.8 | Part B delta s42 (epoch-collapse pathology) |
+| wyigy | single_lift_mushroom_simreal_armfocus_noos_cmd/wyigy | 100 | 0.785 | 0.835 | 0.865 | 31.3 | 53.7 | co-train std box, 8% real, s42 |
+| zgwyi | single_lift_mushroom_simreal_armfocus_noos_cmd/zgwyi | 200 | 0.760 | 0.810 | 0.820 | 27.3 | 52.4 | co-train std box, 8% real, s43 |
+| fbeoe | single_lift_mushroom_simreal_armfocus_cmd/fbeoe | 200 | 0.745 | 0.805 | 0.825 | 27.8 | 52.2 | co-train std box, 25% real (x4), s42 |
+| gmxsx | single_lift_mushroom_simreal_armfocus_cmd/gmxsx | 300 | 0.650 | 0.730 | 0.770 | 22.3 | 51.3 | co-train std box, 25% real (x4), s43 |
+| nmbtz | single_lift_mushroom_soft_armfocus_realws_cmd/nmbtz | 500 | 0.710 | 0.720 | 0.730 | 30.8 | 53.4 | pure-sim REALWS box (N=0 endpoint) |
+| afucm | single_lift_mushroom_simreal_realws_noos_cmd/afucm | 400 | 0.685 | 0.720 | 0.740 | 24.0 | 51.5 | BASELINE: realws co-train 8% real (N=50); real-tested ~75% |
+| jbtmt | single_lift_mushroom_simreal_realws_noos_cmd/jbtmt | 400 | 0.585 | 0.720 | 0.765 | 21.2 | 50.4 | afucm seed twin (s43) |
+| yrwdd | single_lift_mushroom_simreal_realws_cmd/yrwdd | 200 | 0.650 | 0.735 | 0.755 | 25.7 | 51.7 | realws co-train 25% real (x4), s42 |
+| eswpt | single_lift_mushroom_simreal_realws_cmd/eswpt | 300 | 0.230 | 0.580 | 0.700 | 24.7 | 52.0 | realws co-train 25% real (x4), s43 — outlier seed |
+| qjzsf | single_lift_mushroom_real_abs_cmd/qjzsf | 1000_rw | 0.600 | 0.610 | 0.610 | 37.4 | 56.3 | Part A: real-only DPPO 7d abs (commanded+K4) |
+| sfpom | single_lift_mushroom_simreal_realws_n1_cmd/sfpom | 500 | 0.695 | 0.710 | 0.715 | 26.4 | 52.6 | realN ablation: 1 real demo |
+| wclac | single_lift_mushroom_simreal_realws_n5_cmd/wclac | 300 | 0.735 | 0.740 | 0.755 | 28.4 | 53.3 | realN ablation: 5 real demos |
+| luewz | single_lift_mushroom_simreal_realws_n10_cmd/luewz | 500 | 0.670 | 0.695 | 0.720 | 24.8 | 52.0 | realN ablation: 10 real demos |
+| ibkzr | single_lift_mushroom_simreal_realws_n20_cmd/ibkzr | 400 | 0.645 | 0.725 | 0.725 | 21.1 | 51.5 | realN ablation: 20 real demos |
+| ordtr | single_lift_mushroom_simreal_realws_n30_cmd/ordtr | 300 | 0.635 | 0.675 | 0.700 | 24.7 | 51.4 | realN ablation: 30 real demos |
+| alzey | single_lift_mushroom_simreal_realws_noos_cmd/alzey | 200 | 0.785 | 0.800 | 0.805 | 33.9 | 54.4 | item 16: paired-feature reg w=0.5 (+0.10 sim!) |
+| vexvd | single_lift_mushroom_simreal_realws_noos_cmd/vexvd | 300 | 0.715 | 0.755 | 0.795 | 23.5 | 51.2 | item 16: paired-feature reg w=0.1 |
+| uknld | single_lift_mushroom_simreal_realws_aux_cmd/uknld | 400 | 0.705 | 0.735 | 0.760 | 23.9 | 51.0 | item 13: masked aux (gentlest profile; seed check running) |
+| jtzqc | single_lift_mushroom_simreal_realws_noos_cmd/jtzqc | 100 | 0.500 | 0.515 | 0.545 | 40.8 | 56.4 | item 14: camera-pose DR (curve filling) |
+| jjjjy | single_lift_mushroom_simreal_realws_noos_cmd/jjjjy | 600 | 0.055 | 0.615 | 0.745 | 28.1 | 53.4 | item 15: h8/e4 — FAILED config (holds never complete; h8/e8 diagnostic running) |
+
+**OOD evals** (existing checkpoints on out-of-range geometry; not comparable to in-domain rows):
+
+| policy/ckpt | eval | succ | ever | in-band | sustained kPa | peak kPa | remark |
+|---|---|---|---|---|---|---|---|
+| afucm/400 | ood | 0.920 | 0.925 | 0.925 | 41.2 | 56.8 | BIG (scale 1.5-1.8, shape OOD) |
+| afucm/400 | ood_small | — | — | — | — | — | SMALL (scale 0.7-0.95, shape OOD) (running) |
+| nmbtz/500 | ood | 0.905 | 0.910 | 0.920 | 41.3 | 56.8 | BIG (scale 1.5-1.8, shape OOD) |
+| nmbtz/500 | ood_small | — | — | — | — | — | SMALL (scale 0.7-0.95, shape OOD) (running) |
+| qjzsf/1000 | ood | 0.750 | 0.805 | 0.815 | 45.2 | 56.8 | BIG (scale 1.5-1.8, shape OOD) |
+| qjzsf/1000 | ood_small | — | — | — | — | — | SMALL (scale 0.7-0.95, shape OOD) (running) |
+| vdmtb/200 | ood | — | — | — | — | — | BIG (scale 1.5-1.8, shape OOD) (running) |
+| vdmtb/200 | ood_small | — | — | — | — | — | SMALL (scale 0.7-0.95, shape OOD) (running) |
+
+
+---
+
 ## Log
+
+**2026-08-24 — Monitoring post-mortem (missed failed launch) + fixes.** The item-12
+training (gzjkf) died 59 s after submission (dataset-init ordering bug) and went UNNOTICED
+for hours despite the standing health monitor DETECTING it — root cause: the monitor ran
+as a background shell whose per-line alerts land in an output file that only notifies on
+process EXIT; detection worked, the delivery channel was broken. The retry then failed
+AGAIN at the first validation pass (val_dataset missed the new flag — overrides must be
+applied to BOTH train_dataset and val_dataset). Fixes adopted: (1) the SLURM
+failure-detector now runs through the notification-per-line channel (every
+FAILED/TIMEOUT/OOM emits an immediate alert); (2) every submission is verified to survive
+startup (~45 s in-queue check); (3) lesson recorded: a +train_dataset.X override almost
+always needs its +val_dataset.X twin. Item 12 attempt 3 running with both flags.
 
 **2026-08-23 — Allocation items 7/10/12/13/14/15/16 launched (cluster agent).**
 All on the afucm setup (realws sim+real co-train baseline 0.685@400) unless noted:
