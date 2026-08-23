@@ -18,11 +18,6 @@ If anything was installed for running the modules, please add them into `pyproje
 
 ## Experiment Discipline (HARD REQUIREMENTS — read before launching ANY run)
 
-0. **docs/DEVLOG.md is the cross-agent development log — read it BEFORE starting work,
-   write it AFTER finishing any experiment/finding.** Two agents (local + cluster) work this
-   repo in parallel and have independently re-derived the same root causes at hours of cost;
-   the devlog is where recipes, conclusions, gates and roadmap live. A finding that exists
-   only in a chat transcript does not exist.
 
 Non-negotiable for every experiment (training, eval, demo collection), and especially when
 running many in parallel on a cluster. Details live in the bracketed sections; this is the
@@ -62,7 +57,10 @@ checklist — do not skip an item because "it's just a quick run".
    (default 5570) and owns exactly ONE genesis child (single sim). When launching concurrently,
    give each its own `--port` and never share a server between two trainers. GPU memory is the
    limiter — check `nvidia-smi` headroom before stacking runs.
-9. **Document into `docs/DEVLOG.md` — always.** The devlog is the project's living memory
+9. **Document into `docs/DEVLOG.md` — always; and READ it before starting new work**
+   (two agents work this repo in parallel and have independently re-derived the same root
+   causes at hours of cost — a finding that exists only in a chat transcript does not
+   exist). The devlog is the project's living memory
    (mission, adopted foundation + repro recipe, conclusions, open questions, roadmap, dated
    log). WHENEVER you (a) conclude an experiment round or investigation, (b) change an
    adopted practice/recipe/config default, (c) discover a bug with a reusable lesson, or
