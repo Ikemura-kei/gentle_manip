@@ -291,8 +291,19 @@ All on the afucm setup (realws sim+real co-train baseline 0.685@400) unless note
   afucm on success AND sustained stress (item 11).
 - **14**: training-time camera-pose DR (per-sample rigid cloud perturbation ≤0.5 cm/axis,
   ≤5°, centroid pivot) — `cloud_pose_jitter_*` dataset knobs, training running.
-- **12**: first-frame context token (episode's first cloud through the shared PointNet as a
-  persistent memory feature; model/dataset/venv flag-gated) — training running.
+- **12**: first-frame context token — training running (`gzjkf`). DESIGN NOTE: the
+  episode's FIRST cloud is encoded by the SAME PointNet (shared weights) and its feature
+  concatenated into the conditioning: `[cur_cloud_feat ⊕ first_frame_feat ⊕ state]`.
+  Dataset looks up each sample's episode-first frame; the venv snapshots the reset cloud
+  and republishes it per step; the anchor frame is exempt from item-14 jitter. This is the
+  goal-image-conditioning PATTERN applied to the initial frame (a known lightweight trick,
+  not a named method) — a FIXED, non-evolving context. Unlike an RNN it has zero
+  recurrence (BC's random-window batching unchanged, no hidden-state management, no
+  forgetting/drift) but also cannot integrate information over time or refresh if the
+  object moves after frame 0. Escalation path if it shows signal: temporal transformer
+  over a longer obs window, RNN as comparison — the flag-gated plumbing (model
+  `use_first_frame_context`, dataset `first_frame_context`, venv `first_point_cloud`
+  modality) is reusable for both.
 - **13** (possible-now variant): masked aux losses — aux_valid mask lets sim rows supervise
   the object-pos head while real rows contribute zero aux gradient; aux-carrying merged
   dataset + training. Real GT labels can drop into the same mask later.
