@@ -169,6 +169,31 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
 
 ## Roadmap / TODO
 
+### Work allocation & sequencing (2026-08-23, user)
+
+| # | item | owner | status / sequencing |
+|---|---|---|---|
+| 1 | Real data: 3 cm cube placed right below the arm; analyze sim-vs-real data difference | **local agent** | FIRST (with 2). Sim-side counterpart partly staged: `cube4` task/experiment configs exist |
+| 2 | Real-vs-sim demo analysis (trajectory character, speed, grasp speed, grasp width, …); match the scripted demo to real properties → better co-training | **local agent** | FIRST (with 1). ⚠ tension with the dwell finding (conclusion 8): real teleop moves ±2.6 mm/step with pauses — matching it can re-introduce near-identical-action stalls; every recollect must pass the dwell gate |
+| 3 | afucm real-data-amount ablation {1, 5, 10, 20, 30 demos}, tested in real | cluster agent | RUNNING. Paper-grade ablation re-done on the finalized method later |
+| 4 | Sync colleague on the FIXED SETUP: native 7d euler action · arm-focus cloud · quat proprio · realws DR · DPPO codebase · ×3.5 big net (512 + [1024]³, 2.89 M EMA) | user | next working day. (Note: "native 7d" — recording native euler commands is bit-equivalent to the validated 10d-record + `--derive-source-action` path, ~1e-7; either satisfies the setup) |
+| 5 | Reduce demo occlusion (penalty or hard angle constraint) | **local agent** | mechanism ALREADY BUILT + validated (hard azimuth bound 45°, `v5c`; fully-hidden 24%→4%, soft penalty provably inert — conclusion 10); remaining work = integrate into the post-item-2 synthesis version once 2 is confirmed |
+| 6 | More mushroom variants closer to real shapes | user (mesh prep) | parallel; final step = rerun the good pipeline with more meshes |
+| 7 | OOD size+shape test scenario | cluster agent | parallel; test against previously trained policies |
+| 8 | Robustness to missed grasps | **local agent** | DEFERRED until everything else checks out. Partially exists: retry-on-slip (`--retry-max`, window 0.15–0.30, 5/5 recovery) is built + validated; open remainder = induced-failure coverage (idea 3) |
+| 9 | Promote to generalist (end-to-end) | cluster agent | LAST, after 8 is decided |
+| 10 | Gentler grasp test (small/no over-squeeze, + real co-train) | cluster agent | before 8, after 2+5 confirmed (or now on afucm). ⚠ prerequisite knowledge: honest (no-over-squeeze) widths SLIP in MPM (conclusion 11: 8/8→1/8; a 4× FEM hold margin does not rescue) — pair with FEM-vs-MPM margin calibration or expect demonstrator success to crater |
+| 11 | Gentleness-aware model selection | (either) | from now on; harness already records the 9 stress metrics per episode. Recommend ranking on sustained (`top20_ttop20`) not peak — peak is pinned 49–53 kPa across 9 demonstrator configs (likely contact/metric artifact, conclusion 11) |
+| 12 | Memory in the policy (RNN/GRU/temporal transformer or first-frame context token) | cluster agent | testable on the current afucm setup |
+| 13 | Aux objectives on the real-data co-train | cluster agent | testable on afucm |
+| 14 | Camera-pose DR (slight: ~0.5 cm/axis, 1–5°) | cluster agent | testable on afucm |
+
+Sequencing summary: **1+2 first (local)** · 3 ongoing · 4 immediately next working day (user) ·
+5 after 2 confirms · 6 mesh-prep parallel (user) · 7 parallel (cluster) · 10 after 2+5 (or on
+afucm now) · 8 deferred · 9 last · 11 from now on · 12/13/14 on afucm in parallel (cluster).
+Local agent starts items only on explicit user go.
+
+
 **Evaluation & analysis**
 - [ ] **OOD generalization test**: eval sets with out-of-training-range size/shape
   (scale > 1.5, bend > 25°, novel taper/axis combinations) — current tests are all
@@ -249,6 +274,13 @@ discipline) — diff the sim-server logs' `[scene_builder] GM overrides` line wh
 doubt; (2) real-demo-trained policies are evaluated with the `_realws` experiments (the
 real workspace box is their data's home turf), sim-trained policies with the experiment
 matching their collection's DR.
+**2026-08-23 — Work allocation & sequencing adopted** (user): items 1–14 above; local agent
+on real-vs-sim data analysis (cube probe + demo matching) first, occlusion integration and
+missed-grasp robustness later; cluster agent on the afucm ablation (running), OOD, gentler
+grasp, memory, aux-on-real, camera DR; generalist last. Cross-references into existing work
+noted in the table (azimuth bound and retry already built; dwell gate and FEM-margin
+calibration flagged as prerequisites for items 2 and 10).
+
 **2026-08-23 — REAL-ROBOT shortlist deployment (user-run).** afucm/state_400 ~75% success
 (best); qjzsf/state_1000 second; nmbtz/state_500 (sim-best) worst → co-training helps in
 real, pure sim still gapped, sim rankings invert across data regimes (conclusions 12; the
