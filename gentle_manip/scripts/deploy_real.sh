@@ -232,16 +232,52 @@
 #   --shard-size 10 \
 #   --max-steps 5000
 
-ckpt=/home/kei/kei/gentle_manip/downloaded_runs/eibno/checkpoint/state_100.pt
-normalization=/home/kei/kei/gentle_manip/downloaded_runs/eibno/normalization2.npz
-uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-  --ckpt ${ckpt} \
-  --normalization ${normalization} \
-  --obs-config gentle_manip/configs/obs/point_cloud_1cam_outlier.yaml \
-  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
-  --ft-denoising-steps 0 \
-  --smooth-alpha 1.0 \
-  --max-pos-step-m 0.015 \
-  --record dataset/real_deploy/tmp \
-  --shard-size 10 \
-  --max-steps 5000
+# ckpt=/home/kei/kei/gentle_manip/downloaded_runs/eibno/checkpoint/state_100.pt
+# normalization=/home/kei/kei/gentle_manip/downloaded_runs/eibno/normalization2.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} \
+#   --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_outlier.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --ft-denoising-steps 0 \
+#   --smooth-alpha 1.0 \
+#   --max-pos-step-m 0.015 \
+#   --record dataset/real_deploy/tmp \
+#   --shard-size 10 \
+#   --max-steps 5000
+
+# ── CLUSTER SHORTLIST: afucm/state_400 — 7d EULER abs, arm-focus cloud, realws + 8% real co-train ──
+# The action-space-ablation deployment candidate (docs/action_space_ablation_final_report.md:
+# realws sim success 0.685 @ state_400; curve 0.58/0.63/0.66/0.685/0.635/0.47 — 400 is the peak).
+# Trained: quat proprio (obs_dim 8) + ARM-FOCUS cloud + euler-7d COMMANDED actions (seam-fixed via
+# euler_frame_offset [180,0,0]) on the realws workspace box, co-trained with the 50 real demos
+# (plain concat, no oversampling — the winning co-train variant).
+#
+# Wiring notes (all verified 2026-08-23):
+#   * obs-config point_cloud_1cam_armfocus.yaml — REQUIRED: crop/1024/outlier identical to
+#     point_cloud_1cam_outlier PLUS the shared object_focus (arm-focus is sim+real-shared geometry;
+#     deploying without it feeds a cloud distribution the policy never saw).
+#   * action-config abs_pose_euler_abs_gripper.yaml — carries the euler frame offset AND
+#     rate_limit: the RealBackend clamps every executed step to the delta-fast_rot bounds
+#     (rotation x1.5), so a policy-emitted pose jump executes as a bounded walk, never a
+#     full-speed servo jump. (The training snapshot predates rate_limit; the clamp does not
+#     change the action decode, only bounds per-step motion.)
+#   * net arch (visual 512, mlp [1024]^3) auto-loads from downloaded_runs/afucm/.hydra.
+#   * checkout needs 76f5efa (euler offset) + 9938b40 (7d warmup/smoothing) — both in master.
+#   * REAL TABLE PLACEMENT: object inside x [0.29, 0.48], y [-0.11, 0.11] (robot-base frame)
+#     — the realws box this policy trained on.
+#
+# ckpt=downloaded_runs/afucm/checkpoint/state_400.pt
+# normalization=downloaded_runs/afucm/normalization.npz
+#
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} \
+#   --ft-denoising-steps 0 \
+#   --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --smooth-alpha 0.6 \
+#   --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/afucm400 \
+#   --shard-size 10 \
+#   --max-steps 5000
