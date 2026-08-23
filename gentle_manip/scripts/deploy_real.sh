@@ -255,8 +255,9 @@
 #
 # Wiring notes (all verified 2026-08-23):
 #   * obs-config point_cloud_1cam_armfocus.yaml — REQUIRED, and fully consistent: BOTH the sim
-#     demos AND the real co-train slice (26-08-20-cmh, recorded Aug 20 THROUGH this very config —
-#     see its config.yaml) are arm-focus clouds. (An earlier caveat here claimed the real slice
+#     demos AND the real co-train slice (single_lift_mushroom_real_merged: 55 eps = the 51-ep
+#     26-08-20-cmh session + a 4-ep top-up, all recorded THROUGH this very config; uniform cloud
+#     fingerprint verified across all 55) are arm-focus clouds. (An earlier caveat here claimed the real slice
 #     was unfocused — that looked at the obsolete July recordings, not cmh. Retracted.)
 #   * action-config abs_pose_euler_abs_gripper.yaml — carries the euler frame offset AND
 #     rate_limit: the RealBackend clamps every executed step to the delta-fast_rot bounds
@@ -316,7 +317,8 @@
 #
 # Wiring notes:
 #   * obs-config point_cloud_1cam_armfocus.yaml — the training clouds are ARM-FOCUS: the real
-#     demos (26-08-20-cmh) were RECORDED through point_cloud_1cam_armfocus (baked into the pkl;
+#     demos (single_lift_mushroom_real_merged, 55 eps incl. 26-08-20-cmh) were RECORDED through
+#     point_cloud_1cam_armfocus (baked into the pkl;
 #     conversion reads stored clouds), regardless of the superset_real yaml in the run's config
 #     snapshot (that describes the EXPERIMENT env, not the pkl's record-time processing).
 #     Deploying with plain outlier would mismatch what the policy trained on.

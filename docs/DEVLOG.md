@@ -140,8 +140,10 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
 
 - **Real-robot validation of the whole foundation** — nothing above is real-verified yet.
 - **Does real co-training help in real?** (sim says it's free; real says nothing yet).
-  Deploy-prep note (local agent, corrected): the co-train real slice is `26-08-20-cmh`
-  (51 demos, Aug 20), RECORDED through `point_cloud_1cam_armfocus` — so sim and real
+  Deploy-prep note (local agent, corrected): the co-train real slice is
+  `single_lift_mushroom_real_merged` (55 demos = the 51-ep `26-08-20-cmh` session + a 4-ep
+  top-up; uniform cloud fingerprint across all 55), RECORDED through
+  `point_cloud_1cam_armfocus` — so sim and real
   training clouds are consistent, and ALL THREE shortlist deploys use the armfocus obs
   config (qjzsf included: its pkl clouds are record-time armfocus even though the run's
   `superset_real` env snapshot has no focus block — the snapshot describes the experiment
