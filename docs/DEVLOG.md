@@ -193,6 +193,24 @@ Sequencing summary: **1+2 first (local)** · 3 ongoing · 4 immediately next wor
 afucm now) · 8 deferred · 9 last · 11 from now on · 12/13/14 on afucm in parallel (cluster).
 Local agent starts items only on explicit user go.
 
+### Maybe-look-later items (flagged at plan review, 2026-08-23 — not scheduled)
+
+- **Pre-flight dwell gate in a repo script**: fold the dwell-fraction check (frac(|ΔA|<0.01)
+  ≲ 10%, conclusion 8) into `verify_derived_dataset.py` alongside the existing seam + lead
+  gates. Near-mandatory once item 2 changes trajectory speeds toward slow real teleop.
+- **FEM-vs-MPM hold-margin calibration**: why do honest (no-over-squeeze) widths slip in MPM
+  when the FEM says holdable (conclusion 11)? Unowned; the enabler for item 10's "no
+  over-squeeze" goal — without it, expect demonstrator success to crater.
+- **Peak-stress investigation**: per-episode PEAK stress is pinned at 49–53 kPa across nine
+  demonstrator configs while sustained/bulk move ±30% — needs a per-step stress trace to
+  locate the worst instant; decides whether peak is a real signal or a contact/metric
+  artifact (i.e. whether item 11 may ever rank on it).
+- **Real-world gentleness validation**: every gentleness number is sim-measured; a real
+  bruising/quality check (could fold into item 10's real test) closes the loop on the
+  project's actual mission.
+- Bookkeeping: `single_lift_mushroom_real_abs_7d` experiment config (deploy-side leftover,
+  non-blocking — deploy composes from obs/action files directly).
+
 
 **Evaluation & analysis**
 - [ ] **OOD generalization test**: eval sets with out-of-training-range size/shape
