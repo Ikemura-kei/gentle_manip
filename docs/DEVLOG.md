@@ -372,6 +372,20 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-25 — SECOND OBJECT CATEGORY: 3 cm tofu block (item-9 groundwork).**
+New object `"tofu"` (registry): the item-1 3 cm cube geometry as a genuinely SOFT body —
+tofu material preset E=4 kPa / yield 20 kPa (vs mushroom 300/40) — subdivided cube mesh
+`assets/objects/tofu.obj` so shape DR + the CMA-ES SDF work unchanged. Task
+`single_lift_tofu_soft` mirrors the mushroom task exactly (band/hold/rewards/resolution;
+stress yield auto-injected from the material); experiments
+`single_lift_tofu_soft_abs_action_armfocus_{realws,7d_realws}` are the mushroom twins
+(same realws DR, scale [1.0,1.5] → 3-4.5 cm). Plan (user): 40-ep ALL-VIDEO smoke
+(job 1653283) → user verifies videos → 650-ep collection → two PURE-SIM trainings
+(afucm recipe + eqrth aux-width w=2.0 recipe). Watch-item: the adopted 5 mm
+grasp_extra_close was tuned on the stiff mushroom; on 4 kPa tofu the same squeeze
+deforms far more — the smoke videos are the check.
+
+
 **2026-08-24 (late) — width-at-grasp probes on the item-18 / fix arms (figure:
 `docs/figures/width_at_grasp_2026-08-24.png`, 5 policies side by side).**
 Metric: commanded width at the grasp→lift transition (EE-z min → first frame risen >2 cm;
