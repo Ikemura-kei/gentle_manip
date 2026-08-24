@@ -337,6 +337,13 @@ in the narrative sections + subpages.
 
 ## Log
 
+**2026-08-24 — Item 12 first verdict: first-frame context HURTS as implemented.**
+`ptpii` (attempt 3): 0.315/0.38/0.265/0.31/–/0.28 vs baseline 0.685 — success halved.
+Suspected: the constant 512-d context feature doubles the visual conditioning width
+(diluting the fixed-size MLP) or acts as a static distractor. Negative result recorded;
+possible follow-ups if revisited: smaller context projection (e.g. 64-d bottleneck),
+FiLM-style modulation instead of concat, or gating. Not pursued for now.
+
 **2026-08-24 — Hold-tail augmentation study launched (user request).** New repo transform
 `gentle_manip/dppo/augment_hold_tail.py`: +10 frames replicating the final state+command
 at every episode end — teaching "after reaching, keep commanding the same pose" (the
