@@ -385,6 +385,12 @@ check by the deform-dir prefix, cancelled, collector patched (same pool pick + a
 column), relaunched as 1643324. Any future scene-DR extension must touch BOTH paths
 (CLAUDE.md "keep the two in sync" applies to scene DR, not just privileged obs).
 Smoke recipe: adopted hwo/v3 recipe, N_EPISODES=150 N_ENVS=8, SCENE_DR_EVERY=1.
+**Second lesson from the same smoke (relaunch 1643324, FAILED batch 5):** a rare scene
+draw can NaN the rigid solver at reset-settle (`Invalid constraint forces` — precedent
+job 1300574, v2/nominal-mesh, so NOT mesh-pool-specific; batch 5 drew mushroom3 @ scale
+1.490). Fix (01d81ab): the v3 collector now retries reset/settle up to 3× with a freshly
+rebuilt scene (new DR draw) instead of dying; persistent failures still raise. All 4 pool
+meshes had collected fine in batches 1-4 before the crash. Third launch: job 1647974.
 
 **2026-08-24 (later) — 3 Hunyuan3D mushroom scans normalized into assets (item 6).**
 `obj_meshes/{mushroom1,mushroom2,mushroom3}/clean.obj` (~6 k verts each, unit-scale,
