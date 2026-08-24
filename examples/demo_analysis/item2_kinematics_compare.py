@@ -95,6 +95,14 @@ def ep_metrics(ep):
     if np.linalg.norm(v) > 1e-4:
         m["approach_angle_from_vertical_deg"] = float(
             np.rad2deg(np.arccos(np.clip(-v[2] / np.linalg.norm(v), -1, 1))))
+    # two-phase approach character (v3.2 target): when does xy first align (<1.5cm of the
+    # close-point xy), how high is the EE then, and what fraction of pre-close time elapsed?
+    xy_err = np.linalg.norm(p[:t0, :2] - p[t0, :2], axis=1)
+    ali = np.where(xy_err < 0.015)[0]
+    if len(ali) and t0 > 0:
+        ta = int(ali[0])
+        m["xy_align_frac"] = ta / t0
+        m["hover_z_at_align_mm"] = float((p[ta, 2] - p[t0, 2]) * 1e3)
     # hover before close: consecutive steps with |dp|<1mm immediately before onset
     h = 0
     for t in range(t0 - 1, 0, -1):
@@ -142,7 +150,8 @@ def main():
             "close_onset_frac", "close_dur_steps", "width_open_before_close_mm",
             "width_settle_mm", "z_at_close_mm", "z_min_mm",
             "rot_from_home_at_close_deg", "tilt_at_close_deg",
-            "approach_angle_from_vertical_deg", "hover_before_close_steps",
+            "approach_angle_from_vertical_deg", "xy_align_frac", "hover_z_at_align_mm",
+            "hover_before_close_steps",
             "lift_speed_mm_per_step", "longest_pause_steps"]
     summary = {}
     for k in keys:
