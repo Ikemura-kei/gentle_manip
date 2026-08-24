@@ -209,6 +209,7 @@ alerts went to an unread file, and a val-pass crash minutes after a clean startu
 | 15 | DP horizon ablation: predict 8 / execute 4 | cluster agent | SIM DONE — h8/e4 alone FAILS (jjjjy 0.05; e8 diagnostic 0.20), but hold-tail data RESCUES it (ymbve 0.68). Verdict: keep 4/4 default; h8 viable only with stay-still tails |
 | 16 | **Paired-feature encoder regularization**: add a consistency term to the BC loss pulling the encoder features of PAIRED real/sim steps together (e.g. L2/cosine between the PointNet features of real step t and its sim-twin step t), using the paired cube3 datasets below (and any future real recording — the twin generator works on any run). Hypothesis: aligning the visual representation across domains improves sim2real beyond raw co-training | cluster agent | SIM POSITIVE — w=0.5 (alzey) 0.785 @200 (+0.10 over baseline), w=0.1 (vexvd) 0.715; heavier alignment better. TOP real-test candidate: the hypothesis IS real transfer |
 | 17 | **Small-object failure investigation & fix**: failures are monotonically size-dependent (in-domain scale 1.0-1.125: 0.32-0.48 ever vs 0.80-0.90 at 1.25+; small-OOD 0.7-0.95 collapses to 0.13-0.22; thin/low-axis_scale worst) — determine whether the policy learned width adaptation (demos DO adapt: min-width spread 26-45 mm) via the width-probe correlation (commanded width vs obj_scale), then fix accordingly: weak correlation → data-side (extend scale DR below 1.0, oversample small); strong correlation but still failing → perception-side (small objects underrepresented in the 1024-pt cloud; consider object-region point budget) | cluster agent | VERDICT (width probes done): policies only PARTIALLY learn width adaptation — corr(cmd width, scale) 0.27 (afucm) / 0.44 (prmaw) vs 0.85 in the data; modulation range compressed to 3-5 mm vs the demos' 15 mm. Training-side failure (signal present, not learned). Fix candidates: extend scale DR below 1.0 + oversample small; strengthen size conditioning (the width cue may be diluted in the 512-d cloud feature — e.g. an explicit object-extent scalar in the obs, or aux width-prediction head). Probe artifacts: .agent_tmp/{prmaw,afucm}_width_ep*.npz + <run>/eval/width_probe/ |
+| 18 | **Aux grasp-width prediction head**: regression head (mirroring the aux_object_pos machinery) predicting the episode's GRASP WIDTH — defined as the min achieved gripper width of the episode (per-episode-constant label, computable from the dataset's own states at convert/merge time; no external join, and REAL demos carry it too, so no masking needed unlike aux_object_pos). Forces the encoder to extract object size from the cloud at every step — directly targeting item 17's finding that width adaptation is under-learned (0.27-0.44 vs 0.85). Alternative label if revisited: the demonstrator's CMA-ES-synthesized width (dr_params width_mm; cleaner intent signal but needs an attempt→episode join). Success metric: policy corr(cmd width, scale) recovers toward 0.85 AND small-object (1.0-1.125) ever-success rises from 0.32-0.48 | cluster agent | proposed 2026-08-24 (user), not yet run |
 
 Sequencing summary: **1+2 first (local)** · 3 ongoing · 4 immediately next working day (user) ·
 5 after 2 confirms · 6 mesh-prep parallel (user) · 7 parallel (cluster) · 10 after 2+5 (or on
@@ -356,6 +357,22 @@ in the narrative sections + subpages.
 ---
 
 ## Log
+
+**2026-08-24 — Item 17 width-probe results (full numbers).** Instrumented 60-episode evals
+(12 geometries each, per-step command dumps; artifacts: `.agent_tmp/{prmaw,afucm}_width_ep*.npz`,
+`<run>/eval/width_probe/`; slurm 1624552/1624553):
+
+| | corr(min cmd width, obj_scale) | width range small→big half | ever small/big half |
+|---|---|---|---|
+| training data (both realws collections) | **0.85** | 35.5 → 50.4 mm | demonstrator flat ~0.92 |
+| afucm/state_400 | 0.27 | 20.3 → 23.4 mm | 0.57 / 0.77 |
+| prmaw/state_200 | 0.44 | 16.7 → 21.6 mm | 0.47 / 0.83 |
+
+Supporting findings: training scale distribution only mildly thin at 1.0-1.1 (17% vs 20%
+uniform; same skew in both collections — same seed-0 scene sequence) and CANNOT explain
+the failure (the least-represented bin 1.2-1.3 at 11.5% performs BEST); demonstrator
+success flat across scale (no selection bias). Verdict + fixes in item 17; item 18
+(aux grasp-width head) proposed as the targeted remedy.
 
 **2026-08-24 — Currently running (post-campaign tail).** Width probes for item 17
 (widthprobe_prmaw / widthprobe_afucm — instrumented 60-ep evals, 12 geometries each,
