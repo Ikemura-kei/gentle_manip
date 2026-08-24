@@ -56,12 +56,17 @@ class DRConfig:
     object_taper: Optional[_Range] = None     # shape: end-to-end thickness change (fraction, e.g. (-0.2, 0.2))
     object_rbf: Optional[_Range] = None       # shape: organic bump magnitude (fraction of size, e.g. (0, 0.05))
     object_axis_scale: Optional[_Range] = None  # shape: anisotropic scale along ONE random x/y/z axis, e.g. (0.9, 1.1)
+    object_mesh_pool: Optional[tuple] = None    # per-scene BASE-MESH randomization: registry object
+                                                # names (e.g. [mushroom, mushroom1, ...]); each scene
+                                                # rebuild picks one uniformly as the nominal mesh that
+                                                # scale/shape DR then deforms. Entries must share the
+                                                # spawn/extent conventions of the task's object.
 
     seed: int = 0
 
     _SCENE_FIELDS = ("object_E", "object_nu", "object_rho", "object_yield", "coup_friction",
                      "object_scale", "object_bend_deg", "object_twist_deg", "object_taper",
-                     "object_rbf", "object_axis_scale")
+                     "object_rbf", "object_axis_scale", "object_mesh_pool")
     _SHAPE_FIELDS = ("object_bend_deg", "object_twist_deg", "object_taper", "object_rbf",
                      "object_axis_scale")
 
@@ -91,7 +96,10 @@ class DRConfig:
             k = "object_pos_xy" if k == "pose_dr_xy" else k     # back-compat alias
             if k not in names:
                 continue
-            kw[k] = tuple(float(x) for x in v) if isinstance(v, (list, tuple)) else v
+            if k == "object_mesh_pool":                          # names, not a numeric range
+                kw[k] = tuple(str(x) for x in v)
+            else:
+                kw[k] = tuple(float(x) for x in v) if isinstance(v, (list, tuple)) else v
         return cls(**kw)
 
     # ── sampling ──────────────────────────────────────────────────────────────
@@ -184,3 +192,10 @@ class DRConfig:
             out["axis_scale"] = float(rng.uniform(*self.object_axis_scale))
             out["axis_scale_ax"] = int(rng.integers(3))     # 0=x, 1=y, 2=z
         return out
+
+    def sample_mesh_variant(self, rng: np.random.Generator) -> Optional[str]:
+        """Pick the scene's base mesh from object_mesh_pool (uniform), or None if disabled.
+        Sampled once per scene build, same cadence as sample_shape_scale."""
+        if not self.object_mesh_pool:
+            return None
+        return self.object_mesh_pool[int(rng.integers(len(self.object_mesh_pool)))]

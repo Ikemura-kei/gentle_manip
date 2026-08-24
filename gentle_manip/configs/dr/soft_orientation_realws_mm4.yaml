@@ -1,0 +1,32 @@
+# [dr] soft_orientation_realws + per-scene BASE-MESH pool over the 4 mushroom variants.
+# Used by: experiments (dr:) single_lift_mushroom_soft_abs_action_armfocus_realws_mm4
+# Status: experimental (item 6: real-shape mushroom variants)
+#
+# IDENTICAL to soft_orientation_realws EXCEPT object_mesh_pool: each scene rebuild
+# (same cadence as size/shape DR) picks one of the 4 registry mushrooms uniformly as the
+# base mesh, then applies the usual scale/bend/twist/taper/axis_scale on top. mushroom1-3
+# are Hunyuan3D real-mushroom scans normalized to the nominal extent (~33 mm, same z-up
+# cap-up convention and origin height) — see docs/DEVLOG.md item 6, 2026-08-24.
+object_mesh_pool: [mushroom, mushroom1, mushroom2, mushroom3]
+
+object_pos_x: [0.29, 0.48]
+object_pos_y: [-0.11, 0.11]
+object_nominal_xy: [0.47, 0.0]
+robot_init_pos_xyz: 0.02      # per-env arm-home jitter (unchanged from sim_demo)
+object_yaw_deg: 180           # full 360° yaw (U(-180,180))
+object_pitch_roll_deg: 45     # ±45° pitch & roll — matches --pitch-roll-range 45 in data collection
+object_flip_prob: 0.25        # per-env prob of a big FLIP instead of the ±45° tilt: sets one of pitch/roll
+object_flip_deg: [160, 180]   # to ±U(160,180)° so the mushroom spawns flipped -> settles upright/upside-down
+
+# Per-scene SIZE + SHAPE DR — re-randomized per scene rebuild, applied to the pool pick.
+object_scale:      [1.0, 1.5]   # uniform object scale
+object_bend_deg:   [-25, 25]     # curvature along the long axis (deg)
+object_twist_deg:  [-20, 20]     # twist about the long axis (deg)
+object_taper:      [-0.15, 0.15] # end-to-end thickness change (fraction)
+object_axis_scale: [0.95, 1.15]    # anisotropic scale on ONE random x/y/z axis
+
+# ── per-scene material (rebuild) ─────────────────────────────────────────────
+object_E: [2.0e5, 3.0e5]     # Young's modulus (Pa)
+object_nu: [0.32, 0.38]      # Poisson ratio
+object_rho: [900, 1100]      # density (kg/m^3)
+coup_friction: [3.5, 4.5]    # rigid<->MPM coupling friction

@@ -185,8 +185,9 @@ class SimBackend:
         import numpy as _np
         mat = self._dr.sample_scene(self._rng)                   # E/nu/rho/yield/coup (absolute)
         shp = self._dr.sample_shape_scale(self._rng)             # scale + bend/twist/taper/rbf
+        variant = self._dr.sample_mesh_variant(self._rng)        # base-mesh pool pick (or None)
         self._applied_scene = {}
-        if (not mat and not shp) or not spec.objects:
+        if (not mat and not shp and variant is None) or not spec.objects:
             return spec, None
         from gentle_manip.assets.registry import get_object_def
         o = spec.objects[0]
@@ -200,6 +201,12 @@ class SimBackend:
         shape = {k: shp[k] for k in ("bend", "twist", "taper", "rbf", "axis_scale", "axis_scale_ax")
                  if k in shp}
         nominal_mesh = get_object_def(o.name).mesh_path          # from nominal (no chaining)
+        if variant is not None:                                  # pool pick replaces the base mesh;
+            nominal_mesh = get_object_def(variant).mesh_path     # shape DR deforms FROM the pick
+            applied["mesh_variant"] = variant
+            if nominal_mesh is not None:
+                updates["mesh_path"] = nominal_mesh              # takes effect even with no shape DR
+                applied["mesh_path"] = nominal_mesh
         if shape and nominal_mesh is not None:                   # mesh object only; boxes -> size only
             import tempfile
             from gentle_manip.assets import mesh_deform
