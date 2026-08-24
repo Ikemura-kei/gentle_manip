@@ -311,6 +311,35 @@ the next episode's video — this was the dominant desync (ghost contains real m
 videos from before the fixes align exactly by END-ANCHORING (the save side flushes at the save
 tick); the paired renderer does this automatically.
 
+**2026-08-24/25 — v3.2 synthesis + 200-demo quick verification (run `bsipf`; ROUGH PICTURE
+ONLY, user-curtailed at state_200).** v3.2 = v3.1 + real-style CONTINUOUS approach
+(`--approach-xy-finish 0.45 0.75`: xy smoothstep finishing early, z linear — no via-point,
+no stop; speed guard caps peak xy at 3.2 mm/step), azimuth 45→60 + jitter 20→30 (wider
+yaw/pitch/roll), 10 trailing stop frames (`--held-run-max 12 --held-run-keep 10`, the fleli
+hold-deficit fix), and the NEW pinch post-filter (`filter_pinch_episodes.py` — flags
+dangling/rim grasps via TCP-vs-object geometry at hold; the user-flagged pinch video was
+the top outlier; 9/200 = 4.5 % dropped). Collection `26-08-24-cvz` (200 eps, 90.5 %) →
+filtered 191 → kinematics vs real: hover-at-alignment 92 mm (real 84), xy-align frac 0.49
+(real 0.60), rot 33.5° (real 30). Trained afucm-twin arch, 1200 ep/save 200 on 191+55.
+
+| run | log location (…/dppo-pretrain/) | best ckpt | success | ever | in-band | sustained | peak | remark |
+|---|---|---|---|---|---|---|---|---|
+| bsipf | `single_lift_mushroom_simreal_realws_noos_cmd_v32/bsipf` | state_200 (only one evaluated) | 0.055 | 0.140 | 0.175 | 16.0 kPa | 49.4 kPa | v3.2, 191 demos; eval stopped after state_200 (user) — state_400–1200 UNevaluated |
+
+Honest read: weak but **not conclusive** — state_200/1200 is only 17 % through its cosine
+cycle (fleli's fraction-matched point is state_100: 0.00/0.41), and 191 demos vs 500. Still,
+ever-rate 0.14 vs fleli-state_100's 0.41 suggests slower take-off, not just less training.
+hold_failure_gap 0.035 (= fleli) — the stop-frame fix is NOT yet confirmed effective at this
+early checkpoint. Sustained stress 16 kPa is the lowest recorded (n=11 successes; likely
+weak-grasp artifact, not gentleness). Checkpoints exist for later eval; the real verdict
+belongs to the cluster-scale rerun (500+ demos, matched fractions). ALSO ADOPTED for that
+rerun (measured, user-prompted): **approach speed compensation** — fixed 77-step approach
+makes speed ∝ spawn distance (corr 0.91 in sim vs 0.29 in real; real moves at ~constant
+2.4 mm/step) → per-env `dur_i = dist_i / v_ref` (the per-env FSM supports it; not yet
+implemented). Gate lesson: the euler-seam pre-flight check must diff WITHIN episodes
+(traj_lengths) — concatenated diffs cross episode boundaries and false-trip on diverse end
+poses (v32 within-episode jump: 0.016 = seam-free; boundary: 1.131).
+
 **2026-08-24 — Offset-corrected paired real variant (`26-08-23-oso-offset`) validates the
 bias fix.** The cube3 real clouds shifted by the implemented `point_cloud_shift` [0.009,0,0]
 (proprio untouched, zero-pad preserved) → `dataset/demos/single_lift_cube3_real/26-08-23-oso-offset`,
