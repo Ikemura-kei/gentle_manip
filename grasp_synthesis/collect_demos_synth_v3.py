@@ -503,26 +503,42 @@ def execute_and_collect(
     # Per-env duration = distance / speed reproduces that, and makes the commanded lead
     # (the BC action magnitude) a near-deterministic function of the current state.
     _APPR_IDX = 0    # "approach" is always the first phase
-    if approach_speed is not None:
-        dist3d = np.linalg.norm(pos_b - home_pos, axis=1)
-        appr_dur = np.clip(np.round(dist3d / float(approach_speed)), 40, 130).astype(np.int64)
-    else:
-        appr_dur = np.full(num_envs, int(dict(PHASES)["approach"]), np.int64)
+
+    def _profile_path_len(xy_len, z_len, f):
+        """Arc length of the per-axis approach profile (xy smoothstep to f, z linear).
+        The path is LONGER than the straight 3D distance (xy finishes early -> curved);
+        duration must be path/speed, not dist/speed, for truly constant per-step speed."""
+        al = np.linspace(0.0, 1.0, 201)
+        x = np.minimum(al / f, 1.0)
+        s = x * x * (3.0 - 2.0 * x)
+        dsxy = np.gradient(s, al)
+        return float(np.trapz(np.sqrt((xy_len * dsxy) ** 2 + z_len ** 2), al))
 
     if approach_xy_finish is not None:
         _rng = approach_rng if approach_rng is not None else np.random.default_rng(0)
         xy_finish = _rng.uniform(approach_xy_finish[0], approach_xy_finish[1], num_envs)
-        # Speed guard: smoothstep peak xy speed = 1.5 * xy_dist / (f * dur). Compressing a
-        # far-corner spawn's xy path into a small f would exceed the real speed band (p95
-        # ~3.7 mm/step) AND the deploy-time rate clamp — floor f so peak xy speed stays
-        # <= XY_V_MAX. f floors above 1.0 degrade gracefully toward the straight line.
-        # (Per-env durations from --approach-speed enter through appr_dur.)
-        XY_V_MAX = 0.0032   # m/step, ~real p95 with margin
-        xy_dist = np.linalg.norm(pos_b[:, :2] - home_pos[:, :2], axis=1)
-        f_min = 1.5 * xy_dist / (XY_V_MAX * appr_dur.astype(np.float64))
-        xy_finish = np.minimum(np.maximum(xy_finish, f_min), 1.0)
     else:
         xy_finish = None
+
+    xy_len = np.linalg.norm(pos_b[:, :2] - home_pos[:, :2], axis=1)
+    z_len = np.abs(pos_b[:, 2] - home_pos[:, 2])
+    if approach_speed is not None:
+        if xy_finish is not None:
+            path = np.array([_profile_path_len(xy_len[i], z_len[i], xy_finish[i])
+                             for i in range(num_envs)])
+        else:
+            path = np.linalg.norm(pos_b - home_pos, axis=1)
+        appr_dur = np.clip(np.round(path / float(approach_speed)), 40, 130).astype(np.int64)
+    else:
+        appr_dur = np.full(num_envs, int(dict(PHASES)["approach"]), np.int64)
+
+    if xy_finish is not None:
+        # Speed guard: smoothstep peak xy speed = 1.5 * xy_len / (f * dur). Floor f so the
+        # peak stays <= XY_V_MAX (real p95 band + deploy rate clamp). Raising f only ever
+        # SHORTENS the path -> per-step speed after the guard is <= the target, never above.
+        XY_V_MAX = 0.0032   # m/step
+        f_min = 1.5 * xy_len / (XY_V_MAX * appr_dur.astype(np.float64))
+        xy_finish = np.minimum(np.maximum(xy_finish, f_min), 1.0)
 
     def _env_target(i: int, phase_idx: int, phase_step: int):
         """(pos, quat_wxyz, grip) for env i at its OWN (phase_idx, phase_step)."""
