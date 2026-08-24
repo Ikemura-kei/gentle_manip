@@ -311,20 +311,20 @@
 # own (its union stats cover only 5 real demos — do NOT reuse afucm's).
 # REAL TABLE PLACEMENT: object inside x [0.29, 0.48], y [-0.11, 0.11] (robot-base frame).
 #
-ckpt=downloaded_runs/wclac/checkpoint/state_300.pt
-normalization=downloaded_runs/wclac/normalization.npz
+# ckpt=downloaded_runs/wclac/checkpoint/state_300.pt
+# normalization=downloaded_runs/wclac/normalization.npz
 
-uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-  --ckpt ${ckpt} \
-  --ft-denoising-steps 0 \
-  --normalization ${normalization} \
-  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
-  --smooth-alpha 0.6 \
-  --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/wclac300 \
-  --shard-size 10 \
-  --max-steps 5000
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} \
+#   --ft-denoising-steps 0 \
+#   --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --smooth-alpha 0.6 \
+#   --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/wclac300 \
+#   --shard-size 10 \
+#   --max-steps 5000
 
 # ── CLUSTER: luewz/state_500 — ITEM 3: real-data-amount ablation, N=10 real demos (afucm recipe:
 # realws sim 585 eps + FIRST 10 real demos, plain concat, union norm; big net; standard model).
@@ -347,20 +347,20 @@ uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.p
 #   --shard-size 10 \
 #   --max-steps 5000
 
-# ckpt=downloaded_runs/alzey/checkpoint/state_200.pt
-# normalization=downloaded_runs/alzey/normalization.npz
+ckpt=downloaded_runs/alzey/checkpoint/state_200.pt
+normalization=downloaded_runs/alzey/normalization.npz
 
-# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-#   --ckpt ${ckpt} \
-#   --ft-denoising-steps 0 \
-#   --normalization ${normalization} \
-#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
-#   --smooth-alpha 0.6 \
-#   --max-pos-step-m 0.0065 \
-#   --record dataset/real_deploy/alzey200 \
-#   --shard-size 10 \
-#   --max-steps 5000
+uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+  --ckpt ${ckpt} \
+  --ft-denoising-steps 0 \
+  --normalization ${normalization} \
+  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+  --smooth-alpha 0.6 \
+  --max-pos-step-m 0.0065 \
+  --record dataset/real_deploy/alzey200 \
+  --shard-size 10 \
+  --max-steps 5000
 
 # ── CLUSTER SHORTLIST: nmbtz/state_500 — PURE-SIM realws, 7d euler abs, arm-focus cloud ──────────
 # REAL RESULT (2026-08-23): WORST of the shortlist despite the best sim score (0.71) — pure sim
