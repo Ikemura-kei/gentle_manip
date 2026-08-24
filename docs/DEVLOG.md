@@ -197,7 +197,7 @@ alerts went to an unread file, and a val-pass crash minutes after a clean startu
 | 3 | afucm real-data-amount ablation {1, 5, 10, 20, 30 demos}, tested in real | cluster agent | SIM DONE — flat across N (peaks 0.635-0.735, seed-noise range; sfpom/wclac/luewz/ibkzr/ordtr in the canonical table). Real ranking = user, today |
 | 4 | Sync colleague on the FIXED SETUP: native 7d euler action · arm-focus cloud · quat proprio · realws DR · DPPO codebase · ×3.5 big net (512 + [1024]³, 2.89 M EMA) | user | next working day. (Note: "native 7d" — recording native euler commands is bit-equivalent to the validated 10d-record + `--derive-source-action` path, ~1e-7; either satisfies the setup) |
 | 5 | Reduce demo occlusion (penalty or hard angle constraint) | **local agent** | mechanism ALREADY BUILT + validated (hard azimuth bound 45°, `v5c`; fully-hidden 24%→4%, soft penalty provably inert — conclusion 10); remaining work = integrate into the post-item-2 synthesis version once 2 is confirmed |
-| 6 | More mushroom variants closer to real shapes | user (mesh prep) | MESHES IN ASSETS (2026-08-24): 3 Hunyuan3D real-mushroom scans (`obj_meshes/mushroom{1,2,3}/clean.obj`) normalized to the nominal mushroom's convention — rotated y-up→z-up (cap +z, stem −z), uniformly scaled to the nominal mean extent (~33 mm), origin at xy bbox center / 42.7% above bottom — written to `gentle_manip/assets/objects/mushroom{1,2,3}.obj` + registered in `assets/registry.py` (same mushroom material/spawn, sizes 32.3×32.2×35.1 / 31.8×31.9×35.9 / 35.7×32.6×31.3 mm). Side-by-side check: `docs/figures/mushroom_variants_2026-08-24.png`. Remaining = rerun the collection pipeline over the variant set (multi-mesh DR or per-mesh tasks) |
+| 6 | More mushroom variants closer to real shapes | user (mesh prep) | MESHES IN ASSETS (2026-08-24): 3 TripoSG real-mushroom scans (`obj_meshes/mushroom{1,2,3}/clean.obj`) normalized to the nominal mushroom's convention — rotated y-up→z-up (cap +z, stem −z), uniformly scaled to the nominal mean extent (~33 mm), origin at xy bbox center / 42.7% above bottom — written to `gentle_manip/assets/objects/mushroom{1,2,3}.obj` + registered in `assets/registry.py` (same mushroom material/spawn, sizes 32.3×32.2×35.1 / 31.8×31.9×35.9 / 35.7×32.6×31.3 mm). Side-by-side check: `docs/figures/mushroom_variants_2026-08-24.png`. Remaining = rerun the collection pipeline over the variant set (multi-mesh DR or per-mesh tasks) |
 | 7 | OOD size+shape test scenario | cluster agent | SIM DONE — ASYMMETRIC: big-OOD (1.5-1.8×) easier than in-domain (0.75-0.92); small-OOD (0.7-0.95×) collapses (0.13-0.22) for every policy. ACTION: extend training scale DR downward if real mushrooms can be < nominal |
 | 8 | Robustness to missed grasps | **local agent** | DEFERRED until everything else checks out. Partially exists: retry-on-slip (`--retry-max`, window 0.15–0.30, 5/5 recovery) is built + validated; open remainder = induced-failure coverage (idea 3) |
 | 9 | Promote to generalist (end-to-end) | cluster agent | LAST, after 8 is decided |
@@ -433,7 +433,7 @@ mushroom3 (wide-flat cap) at ≥1.3× is the only unstable region; options if it
 for the full collection: per-mesh scale cap, or accept ~10% discarded batches.
 Partial dirs from the dead attempts (26-08-24-qjm, 26-08-24-ivq) left on disk, ignorable.
 
-**2026-08-24 (later) — 3 Hunyuan3D mushroom scans normalized into assets (item 6).**
+**2026-08-24 (later) — 3 TripoSG mushroom scans (MIT-licensed generator) normalized into assets (item 6).**
 `obj_meshes/{mushroom1,mushroom2,mushroom3}/clean.obj` (~6 k verts each, unit-scale,
 y-up with stem along +y) converted to the nominal `assets/objects/mushroom.obj`
 convention and added to the registry:
@@ -537,27 +537,28 @@ item-12 patch had leaked `use_first_frame_context` into PointNetDiffusionUNet.__
 logs/dppo/dppo-pretrain/single_lift_mushroom_simreal_realws_noos_cmd/<ids in monitor logs
 log_item18_*, log_fix2gripw3, log_fix5film>; slurm logs by job id.
 
-**2026-08-24 — Photo→mesh asset pipeline stood up (TripoSG, NOT Hunyuan3D).** New
+**2026-08-24 — Photo→mesh asset pipeline stood up (TripoSG).** New
 capability: photographs of a real object → clean watertight decimated mesh for
 `assets/objects/`. Scripts `scripts/mesh_from_photos/{prep_images,generate,postprocess,turntable}.py`,
 env `envs/triposg_arrhenius`, outputs `obj_meshes/<obj>/`. Full subpage:
-`docs/mesh_from_photos.md`. Spec it implements: `docs/hunyuan3d-mesh-pipeline.md`.
+`docs/mesh_from_photos.md`.
 
-**Practice change — do NOT use Hunyuan3D on this cluster (licence, not technical).**
-The Tencent Hunyuan 3D 2.0 Community Licence §1.l excludes the EU/UK/South Korea from
-its "Territory", and §5.c forbids using or displaying the model **or its Output**
-outside that Territory. Arrhenius is in Sweden. The restriction reaches the generated
-mesh, so it would contaminate `assets/objects/` and any paper figure derived from it.
+**Practice change — Tencent's Hunyuan 3D generator is BANNED on this cluster and in
+this project (licence, not technical): its community licence excludes the EU from its
+territory and the restriction reaches the model's OUTPUT.** Arrhenius is in Sweden, so
+any generated mesh would contaminate `assets/objects/` and every derived artifact
+(datasets, figures). Its checkout has been removed from `third_party/` (2026-08-25,
+user directive); never re-clone it or download its weights here.
 Adopted alternative: **TripoSG (VAST-AI), MIT for both code and weights.** TRELLIS
 (also MIT) was evaluated and rejected on aarch64 grounds — `spconv` (a hard dependency,
 used as the sparse tensor container itself) has no ARM wheel at any version, and
 neither does `xformers`; `flash-attn` is sdist-only.
 
 **Cost of that swap, recorded so it is not rediscovered:** TripoSG is SINGLE-IMAGE.
-It has no analogue of Hunyuan3D-2mv's `run_multi_image`, so multiple photos give
+It has no analogue of TripoSG2mv's `run_multi_image`, so multiple photos give
 multiple independent meshes to compare, not one fused reconstruction. If multi-view
 fusion becomes necessary, the options are (a) build `spconv`+`flash-attn` from source
-for aarch64/sm_90 for TRELLIS, or (b) run Hunyuan3D-2mv on non-EU hardware.
+for aarch64/sm_90 for TRELLIS, or (b) run TripoSG2mv on non-EU hardware.
 
 **aarch64 (GH200) wheel findings — reusable.**
 - `pymeshlab` has NO aarch64 Linux wheel at any version: <2025 is x86-only, 2025.x

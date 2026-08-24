@@ -1,4 +1,4 @@
-# mushroom3: Hunyuan3D scan, rotated y-up->z-up (cap +z), uniformly scaled to the
+# mushroom3: TripoSG scan (MIT-licensed generator), rotated y-up->z-up (cap +z), uniformly scaled to the
 # nominal mushroom's mean extent (33.2 mm; scale factor 0.01874),
 # origin at the nominal's convention (xy bbox center, 42.7% above bottom). METERS.
 v -0.017739 0.000366 0.007947

@@ -1,0 +1,87 @@
+# [env] TripoSG image-to-3D mesh generation — ARRHENIUS variant (aarch64 GH200).
+# Used by: scripts/mesh_from_photos/{generate.py,postprocess.py,turntable.py}
+# Status: active
+#
+# Turns object photographs into watertight triangle meshes for the assets/objects/
+# registry. Standalone: does NOT depend on gentle-manip (nothing here touches the
+# sim/real boundary — it is an offline asset-authoring tool).
+#
+# Setup:  uv sync --project envs/triposg_arrhenius     # MUST run on a GPU node (aarch64)
+# Run:    uv run --project envs/triposg_arrhenius python scripts/mesh_from_photos/generate.py ...
+#
+# >>> TARGET: NAISS Arrhenius GH200 GPU nodes — aarch64 (Grace) + Hopper sm_90.
+#     Build/run on a GPU compute node, NOT the x86_64 login node (wheels differ).
+#     Same torch triple as envs/sim_arrhenius: 2.9.1/0.24.1 cu126 aarch64 cp312.
+#     Arrhenius GPU nodes DO have outbound network, so HF weights download inside
+#     the job — no login-node pre-staging needed (unlike Alvis).
+#
+# WHY TripoSG AND NOT the banned EU-excluded generator: the the banned EU-excluded generatorcommunity licence excludes the
+# European Union from its "Territory" and forbids use of the model AND ITS OUTPUT
+# outside that Territory (LICENSE 5.c). Arrhenius is in Sweden. TripoSG is MIT for
+# both code and weights. See docs/mesh_from_photos.md.
+#
+# NOT INSTALLED ON PURPOSE:
+#   diso    — only needed by TripoSG's optional `flash_extract_geometry`; the default
+#             `hierarchical_extract_geometry` path uses skimage marching cubes. diso is
+#             an sdist-only CUDA extension and the only CUDA module here is 13.0, so
+#             skipping it avoids a source build. triposg/inference_utils.py is patched
+#             to import it lazily (see docs/mesh_from_photos.md).
+#   pymeshlab — no aarch64 linux wheel exists at any version (see note beside
+#             fast-simplification below). TripoSG only uses it for face reduction,
+#             which fast-simplification does equally well.
+#   briaai/RMBG-1.4 — TripoSG's default matting net is non-commercial licensed; we use
+#             rembg (u2net) instead to keep the whole chain permissive.
+
+[project]
+name = "gentle-manip-triposg-arrhenius"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # NOTE: TripoSG itself ships no setup.py/pyproject, so it is NOT installed as a
+    # package. The scripts put third_party/TripoSG on sys.path, exactly as its own
+    # scripts/inference_triposg.py does.
+    # --- TripoSG runtime ---
+    "diffusers>=0.31",
+    "transformers>=4.44,<5",   # TripoSG targets the 4.x Dinov2 API; 5.x renamed pieces
+    "accelerate",
+    "huggingface-hub",
+    "safetensors",
+    "einops",
+    "omegaconf",
+    "peft",
+    "jaxtyping",
+    "typeguard",
+    "numpy<2",              # TripoSG pins 1.22.3; <2 is the compatible relaxation
+    "scikit-image",         # marching cubes for the default extraction path
+    "scipy",
+    "opencv-python-headless",
+    # --- mesh cleanup / IO ---
+    "trimesh",
+    "fast-simplification",  # quadric decimation backend for trimesh.simplify_quadric_decimation
+                            # (pymeshlab has NO aarch64 linux wheels: <2025 is x86-only,
+                            #  2025.x needs manylinux_2_35 and Arrhenius glibc is 2.34)
+    "pygltflib",
+    "networkx",             # trimesh connected-component splitting
+    "manifold3d",           # watertight repair + boolean fallback
+    # --- background removal (doc §3 preprocessing) ---
+    "rembg",
+    "onnxruntime",
+    "pillow",
+    # --- turntable visualisation ---
+    "imageio",
+    "imageio-ffmpeg",
+    "matplotlib",
+    # --- torch: cu126 aarch64 (GH200); see header note to change for your HW ---
+    "torch==2.9.1",
+    "torchvision==0.24.1",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+torchvision = { index = "pytorch-cu126" }
+

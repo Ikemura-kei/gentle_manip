@@ -5,7 +5,7 @@
 # IDENTICAL to soft_orientation_realws EXCEPT object_mesh_pool: each scene rebuild
 # (same cadence as size/shape DR) picks one of the 4 registry mushrooms uniformly as the
 # base mesh, then applies the usual scale/bend/twist/taper/axis_scale on top. mushroom1-3
-# are Hunyuan3D real-mushroom scans normalized to the nominal extent (~33 mm, same z-up
+# are TripoSG real-mushroom scans (MIT) normalized to the nominal extent (~33 mm, same z-up
 # cap-up convention and origin height) — see docs/DEVLOG.md item 6, 2026-08-24.
 object_mesh_pool: [mushroom, mushroom1, mushroom2, mushroom3]
 

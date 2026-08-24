@@ -52,7 +52,7 @@ OBJECT_MAP: dict[str, ObjectDef] = {
     "mushroom": ObjectDef("mushroom", MATERIALS["mushroom"], object_type="soft",
                           size=(0.033, 0.032, 0.035), default_pos=(0.47, 0.0, 0.016),
                           mesh_path=str(_OBJ_DIR / "mushroom.obj")),
-    # Hunyuan3D-scanned real-mushroom variants (item 6): rotated to the same z-up/cap-up
+    # TripoSG-scanned real-mushroom variants (MIT-licensed generator) (item 6): rotated to the same z-up/cap-up
     # convention and uniformly scaled to the nominal mushroom's mean extent (~33 mm); same
     # material/spawn conventions, so they drop into any mushroom task via object name.
     "mushroom1": ObjectDef("mushroom1", MATERIALS["mushroom"], object_type="soft",
