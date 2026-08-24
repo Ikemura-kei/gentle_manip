@@ -954,6 +954,7 @@ def main() -> None:
     fem_mesh: Optional[str] = None            # v3: cache the FEM (obj+pad_geo) keyed on actual_mesh —
     fem_obj = fem_pad_geo = fem_meta = None   #     rebuild only when a scene-DR relaunch changes the mesh
     t0 = time.time()
+    consec_batch_aborts = 0        # unstable-scene batch discards (see execute_and_collect guard)
 
     while total_saved < args.n_episodes:
         batch_idx += 1
@@ -1084,11 +1085,28 @@ def main() -> None:
         # once N saved, stop RENDERING (no per-step RGB cost/disk for the rest of the run).
         rec_this_batch = args.record_video > 0 and total_saved < args.record_video
         print(f"  Executing …")
-        obs_bufs, act_bufs, rew_bufs, success, frame_bufs = execute_and_collect(
-            worker, all_best_x, init_obs_batch, perception, action_config,
-            record_video=rec_this_batch, priv_cfg=priv_cfg, dr_vec=dr_vec,
-            extra_close=args.grasp_extra_close,
-        )
+        try:
+            obs_bufs, act_bufs, rew_bufs, success, frame_bufs = execute_and_collect(
+                worker, all_best_x, init_obs_batch, perception, action_config,
+                record_video=rec_this_batch, priv_cfg=priv_cfg, dr_vec=dr_vec,
+                extra_close=args.grasp_extra_close,
+            )
+            consec_batch_aborts = 0
+        except Exception as e:
+            # Some scene draws are systematically unstable (solver NaN mid-episode even after a
+            # clean settle — e.g. mushroom3 @ scale 1.49, jobs 1643324/1647974, GPU nondeterminism
+            # only moves WHERE it blows). Discard the batch, rebuild with a fresh DR draw, continue.
+            consec_batch_aborts += 1
+            print(f"  !! batch aborted mid-execution ({type(e).__name__}: {e}) — discarding and "
+                  f"rebuilding with a fresh scene draw ({consec_batch_aborts} consecutive abort(s))")
+            if consec_batch_aborts >= 5:
+                raise
+            try:
+                worker.close()
+            except Exception:
+                pass
+            worker, scene_dr, actual_mesh = _make_worker()
+            continue
         print(f"  Success: {success.tolist()}")
 
         # ── Log per-env DR + grasp params for this batch (CSV row per env) ──
