@@ -209,15 +209,7 @@ alerts went to an unread file, and a val-pass crash minutes after a clean startu
 | 15 | DP horizon ablation: predict 8 / execute 4 | cluster agent | SIM DONE — h8/e4 alone FAILS (jjjjy 0.05; e8 diagnostic 0.20), but hold-tail data RESCUES it (ymbve 0.68). Verdict: keep 4/4 default; h8 viable only with stay-still tails |
 | 16 | **Paired-feature encoder regularization**: add a consistency term to the BC loss pulling the encoder features of PAIRED real/sim steps together (e.g. L2/cosine between the PointNet features of real step t and its sim-twin step t), using the paired cube3 datasets below (and any future real recording — the twin generator works on any run). Hypothesis: aligning the visual representation across domains improves sim2real beyond raw co-training | cluster agent | SIM POSITIVE — w=0.5 (alzey) 0.785 @200 (+0.10 over baseline), w=0.1 (vexvd) 0.715; heavier alignment better. TOP real-test candidate: the hypothesis IS real transfer |
 | 17 | **Small-object failure investigation & fix**: failures are monotonically size-dependent (in-domain scale 1.0-1.125: 0.32-0.48 ever vs 0.80-0.90 at 1.25+; small-OOD 0.7-0.95 collapses to 0.13-0.22; thin/low-axis_scale worst) — determine whether the policy learned width adaptation (demos DO adapt: min-width spread 26-45 mm) via the width-probe correlation (commanded width vs obj_scale), then fix accordingly: weak correlation → data-side (extend scale DR below 1.0, oversample small); strong correlation but still failing → perception-side (small objects underrepresented in the 1024-pt cloud; consider object-region point budget) | cluster agent | VERDICT (refined after per-bin analysis): on SUCCESSFUL episodes the policy grips a NEAR-CONSTANT ~27-29 mm at every scale (= the data's small-object commanded width; data range 26-42 mm adaptive) — width adaptation essentially not learned. Small-object FAILURES show commanded width collapsing to 11-15 mm = closing on air after a POSITIONING miss (symptom, not cause). Root cause leans APPROACH/CENTERING PRECISION on small targets (less margin, fewer of the 1024 cloud points), width mis-adaptation secondary. Fixes reranked: (1) small-scale DR extension + oversampling, (2) object-region point budget / perception, (3) item-18 width head (still useful: forces size-awareness into the encoder, aiding centering too). Full per-bin numbers in the 2026-08-24 width-probe Log entry. METRIC REFINED (2026-08-24, user): episode-MIN commanded width is inflated by closing-on-air after misses (small scales get artificially tiny mins → spurious positive corr); the honest metric is width AT the grasp→lift transition (EE-z min, first frame risen >2 cm — scratchpad width_at_grasp.py). At-grasp corr: afucm −0.04 (vs 0.27 min-based), prmaw 0.24 (vs 0.44) — baseline width adaptation is ABSENT, not weak |
-| 18 | **Aux grasp-width prediction head**: regression head (mirroring the aux_object_pos machinery) predicting the episode's GRASP WIDTH — defined as the min achieved gripper width of the episode (per-episode-constant label, computable from the dataset's own states at convert/merge time; no external join, and REAL demos carry it too, so no masking needed unlike aux_object_pos). Forces the encoder to extract object size from the cloud at every step — directly targeting item 17's finding that width adaptation is under-learned (0.27-0.44 vs 0.85). Alternative label if revisited: the demonstrator's CMA-ES-synthesized width (dr_params width_mm; cleaner intent signal but needs an attempt→episode join). Success metric: policy corr(cmd width, scale) recovers toward 0.85 AND small-object (1.0-1.125) ever-success rises from 0.32-0.48 | cluster agent | SIM DONE — NO success gain: w=0.5 (dgvmu) 0.610 @100, w=2.0 (eqrth) 0.555 @200 and degrading with epochs, vs afucm 0.685. The head itself CONVERGES (loss_grasp_width 0.0061) — encoder can extract size, but the aux loss alone doesn't alter the executor → 18b (feed the prediction into conditioning) launched as iteration 2. WIDTH-PROBE RERUN DONE (at-grasp metric, figure
-`docs/figures/width_at_grasp_2026-08-24.png`): dgvmu at-grasp corr −0.02 (constant ~30 mm) —
-the executor completely ignores the size the head provably encodes, the cleanest possible
-motivation for 18b; eqrth (w=2.0) +0.30 overall / **+0.51 success-only** — heavy aux weight DOES
-push adaptation into behavior, but at the 0.13 success cost; pyzpl +0.04 (loss weighting creates
-no signal, as expected). Notable: dgvmu small-half ever-success 0.67 vs afucm's 0.57 on the
-identical probe (+0.10) — the aux head helps small objects WITHOUT width adaptation, consistent
-with the encoder-size-awareness-aids-centering hypothesis. References: data 0.85, afucm −0.04,
-prmaw +0.24 (at-grasp) |
+| 18 | **Aux grasp-width prediction head**: regression head (mirroring the aux_object_pos machinery) predicting the episode's GRASP WIDTH — defined as the min achieved gripper width of the episode (per-episode-constant label, computable from the dataset's own states at convert/merge time; no external join, and REAL demos carry it too, so no masking needed unlike aux_object_pos). Forces the encoder to extract object size from the cloud at every step — directly targeting item 17's finding that width adaptation is under-learned (0.27-0.44 vs 0.85). Alternative label if revisited: the demonstrator's CMA-ES-synthesized width (dr_params width_mm; cleaner intent signal but needs an attempt→episode join). Success metric: policy corr(cmd width, scale) recovers toward 0.85 AND small-object (1.0-1.125) ever-success rises from 0.32-0.48 | cluster agent | SIM DONE — NO success gain: w=0.5 (dgvmu) 0.610 @100, w=2.0 (eqrth) 0.555 @200 and degrading with epochs, vs afucm 0.685. The head itself CONVERGES (loss_grasp_width 0.0061) — encoder can extract size, but the aux loss alone doesn't alter the executor → 18b (feed the prediction into conditioning) launched as iteration 2. Width-probe rerun DONE: dgvmu at-grasp corr −0.02, eqrth +0.30 (+0.51 succ-only), pyzpl +0.04; dgvmu small-half ever 0.67 vs afucm 0.57 — full read in the 2026-08-24 width-at-grasp Log entry + `docs/figures/width_at_grasp_2026-08-24.png` |
 | 18b | **Planned-width feed-forward** (user proposal): the width head's own DETACHED prediction appended to the denoiser conditioning — a learned grasp-width planner feeding a conditioned executor (prediction fed in training too: no exposure bias; stop-grad: head calibrated only by its aux loss; object visible from step 0 → plan committed pre-occlusion, delivering what item 12 attempted). IMPLEMENTED flag-gated (`+model.network.feed_width_pred=true`, requires aux_grasp_width) | cluster agent | LAUNCHED 2026-08-24 (job 1650036, w0.5 recipe + feed_width_pred) — gate met: dgvmu's head converged (loss_grasp_width 0.0061) while success stayed flat/lower → the aux loss alone doesn't change the executor; 18b feeds the prediction in explicitly. Eval watcher armed |
 
 Sequencing summary: **1+2 first (local)** · 3 ongoing · 4 immediately next working day (user) ·
@@ -379,6 +371,29 @@ running" — replacing any whose experiments have since finished.**
 ---
 
 ## Log
+
+**2026-08-24 (late) — width-at-grasp probes on the item-18 / fix arms (figure:
+`docs/figures/width_at_grasp_2026-08-24.png`, 5 policies side by side).**
+Metric: commanded width at the grasp→lift transition (EE-z min → first frame risen >2 cm;
+onset found in 300/300 episodes) — replaces episode-min width, which miss-closures inflate.
+References: demo data r=0.85 · afucm −0.04 · prmaw +0.24.
+
+| policy | at-grasp corr | succ-only | small/big-half width | ever small/big |
+|---|---|---|---|---|
+| dgvmu (aux w0.5) | −0.02 | 0.05 | 30.4 / 30.1 mm | 0.67 / 0.77 |
+| eqrth (aux w2.0) | +0.30 | **+0.51** | 33.5 / 35.0 mm | 0.63 / 0.80 |
+| pyzpl (grip-loss ×3) | +0.04 | 0.14 | 32.5 / 32.5 mm | 0.57 / 0.80 |
+
+Reads: (1) dgvmu — the executor completely ignores the size the head provably encodes
+(converged aux loss, flat ~30 mm commands): the cleanest possible motivation for 18b.
+(2) eqrth — heavy aux weight DOES push adaptation into behavior (+0.51 succ-only, the
+highest policy corr measured yet) but at the 0.13 success cost; 18b aims for this
+adaptation without the gradient-pressure cost. (3) pyzpl — loss re-weighting creates no
+signal, as expected. (4) Notable: dgvmu small-half ever-success 0.67 vs afucm's 0.57 on
+the identical probe — the aux head helps small objects WITHOUT width adaptation,
+consistent with encoder size-awareness aiding approach/centering (item 17's dominant
+failure mode). Next: same probe on 18b (bcvrt) best checkpoint when its curve lands.
+
 
 **2026-08-24 (later) — mesh-pool DR (`object_mesh_pool`) + 4-mushroom smoke collection;
 lesson: the v3 collector MIRRORS SimBackend's scene DR.**
