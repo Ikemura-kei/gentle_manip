@@ -394,7 +394,21 @@ draw can NaN the rigid solver at reset-settle (`Invalid constraint forces` — p
 job 1300574, v2/nominal-mesh, so NOT mesh-pool-specific; batch 5 drew mushroom3 @ scale
 1.490). Fix (01d81ab): the v3 collector now retries reset/settle up to 3× with a freshly
 rebuilt scene (new DR draw) instead of dying; persistent failures still raise. All 4 pool
-meshes had collected fine in batches 1-4 before the crash. Third launch: job 1647974.
+meshes had collected fine in batches 1-4 before the crash. Third launch (1647974) died the same way at the SAME batch-5 scene (seed-identical DR
+stream: mushroom3 @ scale 1.490) but mid-episode AFTER a clean settle — the scene is
+systematically unstable, GPU nondeterminism only moves where it blows. Fix 2 (b272928):
+batch-level guard — on any mid-execution solver NaN, discard the batch, rebuild with a
+fresh DR draw, continue (5 consecutive aborts still raise).
+**Fourth launch COMPLETED (1649397): 150/150 episodes, demonstrator success 91.5%
+(matches the nominal-only recipe's 91-94% — the 4-mesh pool costs nothing), 111 min.**
+Dataset: `dataset/demos/single_lift_mushroom_soft/26-08-24-rnh/` (dr_params.csv has the
+mesh_variant column). Per-mesh demonstrator success: mushroom 0.938 (n=48) ·
+mushroom1 0.896 (48) · mushroom2 0.950 (40) · mushroom3 0.875 (32). The guard fired
+2×/21 batches, BOTH on mushroom3 at scale ≥1.3 (1.308, 1.360; plus the pre-guard
+1.490×2) while mushroom3 ≤1.27 and every other mesh at any scale never blew up —
+mushroom3 (wide-flat cap) at ≥1.3× is the only unstable region; options if it matters
+for the full collection: per-mesh scale cap, or accept ~10% discarded batches.
+Partial dirs from the dead attempts (26-08-24-qjm, 26-08-24-ivq) left on disk, ignorable.
 
 **2026-08-24 (later) — 3 Hunyuan3D mushroom scans normalized into assets (item 6).**
 `obj_meshes/{mushroom1,mushroom2,mushroom3}/clean.obj` (~6 k verts each, unit-scale,
