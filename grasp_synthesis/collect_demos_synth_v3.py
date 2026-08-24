@@ -970,22 +970,41 @@ def main() -> None:
                  if do_scene_dr else "") + " ──")
 
         # ── Reset with per-env pose DR (ranges from experiment DR config) ──
-        object_dxy   = dr_cfg.sample_object_dxy(rng, n)
-        object_euler = dr_cfg.sample_object_euler(rng, n)
-        home_offset  = dr_cfg.sample_home_offset(rng, n)   # per-env arm-home jitter (sim-only DR)
-        worker.reset(object_dxy=object_dxy, object_euler=object_euler, home_offset=home_offset)
+        # Bounded resilience: a rare scene draw (pose × scale × shape) can NaN the solver at
+        # settle ("Invalid constraint forces" — seen 1300574, 1643324, both nominal-recipe-
+        # reachable). Rebuild the scene with a FRESH DR draw and retry instead of dying;
+        # persistent failures still raise after the retry budget.
+        for _settle_try in range(4):
+            object_dxy   = dr_cfg.sample_object_dxy(rng, n)
+            object_euler = dr_cfg.sample_object_euler(rng, n)
+            home_offset  = dr_cfg.sample_home_offset(rng, n)   # per-env arm-home jitter (sim-only DR)
+            try:
+                worker.reset(object_dxy=object_dxy, object_euler=object_euler, home_offset=home_offset)
 
-        # Extra settling. Rigid objects roll → settle until velocity is small; soft MPM objects have no
-        # rigid get_vel/get_ang (and are placed resting, not dropped) → a brief fixed settle suffices.
-        obj = worker.handle.objects[0]
-        if hasattr(obj, "get_vel"):
-            for _ in range(600):
-                worker.handle.scene.step()
-                if np.abs(_np(obj.get_vel())).max() < 0.003 and np.abs(_np(obj.get_ang())).max() < 0.01:
-                    break
-        else:                                          # soft MPM
-            for _ in range(30):
-                worker.handle.scene.step()
+                # Extra settling. Rigid objects roll → settle until velocity is small; soft MPM objects have no
+                # rigid get_vel/get_ang (and are placed resting, not dropped) → a brief fixed settle suffices.
+                obj = worker.handle.objects[0]
+                if hasattr(obj, "get_vel"):
+                    for _ in range(600):
+                        worker.handle.scene.step()
+                        if np.abs(_np(obj.get_vel())).max() < 0.003 and np.abs(_np(obj.get_ang())).max() < 0.01:
+                            break
+                else:                                          # soft MPM
+                    for _ in range(30):
+                        worker.handle.scene.step()
+                break
+            except Exception as e:
+                if _settle_try == 3:
+                    raise
+                print(f"  !! reset/settle blew up ({type(e).__name__}: {e}) — rebuilding scene "
+                      f"with a fresh DR draw (retry {_settle_try + 1}/3)")
+                try:
+                    worker.close()
+                except Exception:
+                    pass
+                worker, scene_dr, actual_mesh = _make_worker()
+                print(f"   retry scene: scale={scene_dr['scale']:.3f} bend={scene_dr['bend_deg']:+.1f}°"
+                      f" mesh={scene_dr.get('mesh_variant', '-')}")
 
         # Read initial state (depth rendered; this is obs_0 for every env)
         init_state     = worker.read_state()
