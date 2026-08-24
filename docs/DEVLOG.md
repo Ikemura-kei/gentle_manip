@@ -169,6 +169,25 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
 
 ## Roadmap / TODO
 
+### Standing rule: rigorous monitoring on EVERYTHING launched (2026-08-24, user)
+
+Anything launched (training, eval, collection, chain, probe) MUST carry a rigorous health
+monitor, and problems MUST be solved as they appear — detection or after-the-fact
+reporting alone is a failure. The full stack, at launch time (not retrofitted):
+1. per-line SLURM failure alerts (FAILED/TIMEOUT/OOM) with immediate handling —
+   root-cause from `logs/slumr_logs/<jid>.{out,err}`, then resubmit the same recipe;
+2. startup-survival check (~45 s) after every sbatch — and vigilance for delayed failure
+   modes (first validation pass, first checkpoint);
+3. periodic progress sweep: trainings emit new epoch lines, chains pass each stage
+   (ABORT/WARNING markers in their logs), eval sweeps produce summaries;
+4. follow-up automations (eval-sweep monitors, timeout-retry watchers) armed together
+   with the launch;
+5. the acknowledgement of any failure already contains the fix (retry job id or
+   root-cause commit).
+Context: two escapes motivated this — a training that died at init while its detector's
+alerts went to an unread file, and a val-pass crash minutes after a clean startup (see the
+2026-08-24 monitoring post-mortem in the Log).
+
 ### Work allocation & sequencing (2026-08-23, user)
 
 | # | item | owner | status / sequencing |
