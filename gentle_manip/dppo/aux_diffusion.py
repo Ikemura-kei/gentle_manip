@@ -25,17 +25,20 @@ from model.diffusion.diffusion import DiffusionModel
 
 class AuxDiffusionModel(DiffusionModel):
     def __init__(self, *args, aux_contact_weight: float = 0.0,
-                 aux_object_pos_weight: float = 0.0, **kwargs):
+                 aux_object_pos_weight: float = 0.0,
+                 aux_grasp_width_weight: float = 0.0, **kwargs):
         super().__init__(*args, **kwargs)
         self.aux_contact_weight = float(aux_contact_weight)
         self.aux_object_pos_weight = float(aux_object_pos_weight)
+        self.aux_grasp_width_weight = float(aux_grasp_width_weight)
         self._aux_log: dict = {}   # last-step loss components, for optional wandb logging
 
     def p_losses(self, x_start, cond: dict, t):
         diff_loss = super().p_losses(x_start, cond, t)     # standard denoising loss (unchanged)
         total = diff_loss
         self._aux_log = {"loss_diffusion": float(diff_loss.detach())}
-        if self.aux_contact_weight > 0.0 or self.aux_object_pos_weight > 0.0:
+        if (self.aux_contact_weight > 0.0 or self.aux_object_pos_weight > 0.0
+                or self.aux_grasp_width_weight > 0.0):
             aux = self.network.aux_predict(cond)           # one extra pointnet encode (training only)
             # aux_valid (B,1): 1 = labeled (sim) row, 0 = unlabeled (e.g. real co-train rows,
             # which have no privileged labels — DEVLOG item 13). Missing key = all valid.
@@ -52,4 +55,8 @@ class AuxDiffusionModel(DiffusionModel):
                       else se.mean()
                 total = total + self.aux_object_pos_weight * mse
                 self._aux_log["loss_object_pos"] = float(mse.detach())
+            if self.aux_grasp_width_weight > 0.0 and "grasp_width" in aux:
+                wmse = F.mse_loss(aux["grasp_width"], cond["aux_grasp_width"])
+                total = total + self.aux_grasp_width_weight * wmse
+                self._aux_log["loss_grasp_width"] = float(wmse.detach())
         return total

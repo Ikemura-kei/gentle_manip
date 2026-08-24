@@ -20,7 +20,7 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
     def __init__(self, dataset_path, horizon_steps=64, cond_steps=1, pc_cond_steps=1,
                  max_n_episodes=10000, device="cuda:0",
                  cloud_pose_jitter_trans=0.0, cloud_pose_jitter_rot_deg=0.0,
-                 first_frame_context=False):
+                 first_frame_context=False, aux_grasp_width=False):
         assert pc_cond_steps <= cond_steps, "pc_cond_steps must be <= cond_steps"
         super().__init__(dataset_path, horizon_steps=horizon_steps, cond_steps=cond_steps,
                          img_cond_steps=1, max_n_episodes=max_n_episodes, use_img=False,
@@ -57,6 +57,16 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
                                if "aux_object_pos" in data.files else None)
         self.aux_valid = (torch.from_numpy(data["aux_valid"][:total]).float().to(device)
                           if "aux_valid" in data.files else None)   # (T,1) 1=labeled row
+        # item 18: per-episode GRASP WIDTH label = min normalized gripper width (states dim
+        # -1) over the episode — computed here, no dataset rebuild; real rows carry it too.
+        self.aux_grasp_width = None
+        if aux_grasp_width:
+            st = data["states"][:total]
+            tl2 = data["traj_lengths"][:max_n_episodes]
+            starts = np.concatenate([[0], np.cumsum(tl2)[:-1]])
+            per_ep = np.array([st[s0:s0+l, -1].min() for s0, l in zip(starts, tl2)], np.float32)
+            lab = np.repeat(per_ep, tl2)[:total]
+            self.aux_grasp_width = torch.from_numpy(lab[:, None]).float().to(device)  # (T,1)
 
     def __getitem__(self, idx):
         batch = super().__getitem__(idx)             # {"state": (cond_steps, Do)}, actions
@@ -76,6 +86,8 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
             conditions["aux_object_pos"] = self.aux_object_pos[start]  # (3,) normalized
         if self.aux_valid is not None:
             conditions["aux_valid"] = self.aux_valid[start]            # (1,) mask
+        if self.aux_grasp_width is not None:
+            conditions["aux_grasp_width"] = self.aux_grasp_width[start]  # (1,) episode min width
         return Batch(batch.actions, conditions)
 
     def _jitter_pose(self, pc: torch.Tensor) -> torch.Tensor:

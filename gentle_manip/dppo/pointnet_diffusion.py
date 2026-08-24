@@ -76,7 +76,8 @@ class PointNetDiffusionMLP(nn.Module):
                  pointnet=None, pc_cond_steps=1, visual_feature_dim=256,
                  time_dim=16, mlp_dims=(512, 512, 512), activation_type="ReLU",
                  out_activation_type="Identity", use_layernorm=False, residual_style=True,
-                 aux_contact=False, aux_object_pos=False, aux_hidden=128,
+                 aux_contact=False, aux_object_pos=False, aux_grasp_width=False,
+                 aux_hidden=128,
                  use_first_frame_context=False):
         super().__init__()
         pn = dict(pointnet or {})
@@ -109,6 +110,11 @@ class PointNetDiffusionMLP(nn.Module):
                                            nn.Linear(aux_hidden, 1)) if aux_contact else None)
         self.pos_head = (nn.Sequential(nn.Linear(self._aux_dim, aux_hidden), nn.ReLU(),
                                        nn.Linear(aux_hidden, 3)) if aux_object_pos else None)
+        # item 18: predict the episode's grasp width (min normalized gripper width) from every
+        # step's conditioning feature — forces object SIZE into the shared encoder (the width
+        # probe showed adaptation r=0.27-0.44 vs 0.85 in data; successes grip a constant ~28mm).
+        self.width_head = (nn.Sequential(nn.Linear(self._aux_dim, aux_hidden), nn.ReLU(),
+                                         nn.Linear(aux_hidden, 1)) if aux_grasp_width else None)
 
     def _cond_encoded(self, cond: Dict[str, torch.Tensor]) -> torch.Tensor:
         """[pointnet_feat ⊕ flattened proprio] — the shared conditioning feature."""
@@ -129,6 +135,8 @@ class PointNetDiffusionMLP(nn.Module):
             out["contact_logit"] = self.contact_head(ce)
         if self.pos_head is not None:
             out["object_pos"] = self.pos_head(ce)
+        if self.width_head is not None:
+            out["grasp_width"] = self.width_head(ce)
         return out
 
     def forward(self, x, time, cond: Dict[str, torch.Tensor], **kwargs):
