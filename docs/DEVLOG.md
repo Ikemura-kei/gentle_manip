@@ -367,6 +367,57 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-24 — Photo→mesh asset pipeline stood up (TripoSG, NOT Hunyuan3D).** New
+capability: photographs of a real object → clean watertight decimated mesh for
+`assets/objects/`. Scripts `scripts/mesh_from_photos/{prep_images,generate,postprocess,turntable}.py`,
+env `envs/triposg_arrhenius`, outputs `obj_meshes/<obj>/`. Full subpage:
+`docs/mesh_from_photos.md`. Spec it implements: `docs/hunyuan3d-mesh-pipeline.md`.
+
+**Practice change — do NOT use Hunyuan3D on this cluster (licence, not technical).**
+The Tencent Hunyuan 3D 2.0 Community Licence §1.l excludes the EU/UK/South Korea from
+its "Territory", and §5.c forbids using or displaying the model **or its Output**
+outside that Territory. Arrhenius is in Sweden. The restriction reaches the generated
+mesh, so it would contaminate `assets/objects/` and any paper figure derived from it.
+Adopted alternative: **TripoSG (VAST-AI), MIT for both code and weights.** TRELLIS
+(also MIT) was evaluated and rejected on aarch64 grounds — `spconv` (a hard dependency,
+used as the sparse tensor container itself) has no ARM wheel at any version, and
+neither does `xformers`; `flash-attn` is sdist-only.
+
+**Cost of that swap, recorded so it is not rediscovered:** TripoSG is SINGLE-IMAGE.
+It has no analogue of Hunyuan3D-2mv's `run_multi_image`, so multiple photos give
+multiple independent meshes to compare, not one fused reconstruction. If multi-view
+fusion becomes necessary, the options are (a) build `spconv`+`flash-attn` from source
+for aarch64/sm_90 for TRELLIS, or (b) run Hunyuan3D-2mv on non-EU hardware.
+
+**aarch64 (GH200) wheel findings — reusable.**
+- `pymeshlab` has NO aarch64 Linux wheel at any version: <2025 is x86-only, 2025.x
+  requires `manylinux_2_35` and Arrhenius glibc is 2.34. (The `pymeshlab<2025`
+  constraint in `envs/sim_arrhenius` therefore does not actually make it installable
+  there either.) Use `fast-simplification` (quadric decimation) + `manifold3d`
+  (watertight repair) instead — both have aarch64 wheels.
+- `open3d`, `spconv*`, `xformers`: no aarch64 Linux wheels. `vtk`, `rtree`,
+  `pymeshfix`, `manifold3d`, `fast-simplification`, `pyfqmr`: yes.
+- **Arrhenius GPU nodes DO have outbound network** (unlike Alvis). HF weights can be
+  downloaded inside the job; no login-node pre-staging step is needed.
+
+**Two traps that each cost a job.**
+1. `TripoSGPipeline.__call__` has `use_flash_decoder=True` by DEFAULT, and that path
+   imports `diso` (sdist-only CUDA ext, no aarch64 wheel). `flash_extract_geometry`
+   swallows the ImportError in a bare `except`, returns `(None, None)`, and the
+   failure surfaces minutes later as `AttributeError: 'NoneType' has no attribute
+   'astype'`. Pass `use_flash_decoder=False` → `hierarchical_extract_geometry` +
+   skimage marching cubes. No CUDA build needed anywhere in this pipeline.
+2. **The login node kills mesh-scale work** (exit 144, no output, no traceback).
+   A 1.9M-face `trimesh` load + connected-components trips it. All postprocessing
+   must go through SLURM even though it needs no GPU — and this account can only
+   submit to the `gpu` partition.
+
+**Perf note:** `trimesh.split()` on a ~2M-face marching-cubes mesh builds one full
+`Trimesh` per component (~200 of them) and is minutes-slow; a single
+`scipy.sparse.csgraph.connected_components` pass over the vertex graph replaces it.
+Also decimate BEFORE hole-filling/manifold repair — those cost minutes at 2M faces
+and milliseconds at 12k.
+
 **2026-08-24 — Item 17 width-probe results (full numbers).** Instrumented 60-episode evals
 (12 geometries each, per-step command dumps; artifacts: `.agent_tmp/{prmaw,afucm}_width_ep*.npz`,
 `<run>/eval/width_probe/`; slurm 1624552/1624553):
@@ -386,7 +437,12 @@ demos move 15 mm.)
 Supporting findings: training scale distribution only mildly thin at 1.0-1.1 (17% vs 20%
 uniform; same skew in both collections — same seed-0 scene sequence) and CANNOT explain
 the failure (the least-represented bin 1.2-1.3 at 11.5% performs BEST); demonstrator
-success flat across scale (no selection bias). REFINEMENT (per-bin): success-only widths are NEAR-CONSTANT ~27-29 mm at every scale
+success flat across scale (no selection bias). FIGURES: `docs/figures/width_probe_2026-08-24/{width_vs_scale_scatter,width_histograms,success_vs_scale}.png`
+— the scatter shows demos (gray, r=0.85 trend) vs policy successes (green: wide 22-36 mm
+spread at every scale, mild lower-envelope trend, systematically BELOW the demo line) and
+failures (red ×, clustered at near-closed widths = closed-on-air). Caveat: the probe's
+seeded geometry draw covered scales 1.0-1.33 only — 1.4-1.5 behavior unmeasured.
+REFINEMENT (per-bin): success-only widths are NEAR-CONSTANT ~27-29 mm at every scale
 (afucm 27.3/29.1/28.0); the low small-bin means came from FAILED episodes closing on air
 (11-15 mm) — a positioning-miss symptom. Verdict + reranked fixes in item 17; item 18
 (aux grasp-width head) remains proposed as an encoder size-awareness aid.
