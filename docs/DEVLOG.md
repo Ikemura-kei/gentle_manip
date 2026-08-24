@@ -372,6 +372,24 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-25 — PRACTICE CHANGE: MPM sampler `regular` is now the GLOBAL default
+(user directive), incl. demo collection; tofu E 4e3→5e4.** The first tofu smoke
+(1653283, cancelled) collapsed into a particle pile — two compounding causes:
+(1) collections never pinned `GM_MPM_SAMPLER`, so on aarch64 they ran genesis's
+`random` sampler (under-connected particles) while evals were pinned `regular` — a
+silent train/eval sampler mismatch that existed for ALL prior collections (tolerated
+by the stiff mushroom, fatal for soft tofu); `scene_builder` now defaults to
+`regular` everywhere (env override still possible). (2) tofu E=4 kPa is too soft at
+our grid resolution — raised to 50 kPa (firm/momen tofu; still 6× softer than the
+mushroom), yield 20 kPa unchanged. Also: collections apply NO material DR (registry
+values verbatim — only SimBackend servers sample object_E), and the tofu experiments
+initially inherited the mushroom's E range [2e5,3e5] for eval servers → new
+`dr/soft_orientation_realws_tofu.yaml` (E [3e4,8e4], ν [0.28,0.38]). Smoke relaunched
+(1653451). NOTE: the running s08 smallband collection (1651703) still uses the
+pre-change random sampler — CONSISTENT with the afucm base dataset it complements;
+the first regular-sampler mushroom collection will need a comparability check.
+
+
 **2026-08-25 — SECOND OBJECT CATEGORY: 3 cm tofu block (item-9 groundwork).**
 New object `"tofu"` (registry): the item-1 3 cm cube geometry as a genuinely SOFT body —
 tofu material preset E=4 kPa / yield 20 kPa (vs mushroom 300/40) — subdivided cube mesh
