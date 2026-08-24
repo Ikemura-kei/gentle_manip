@@ -170,7 +170,8 @@ class PointNetDiffusionUNet(nn.Module):
                  pointnet=None, pc_cond_steps=1, visual_feature_dim=256,
                  diffusion_step_embed_dim=32, dim=40, dim_mults=(1, 2),
                  kernel_size=5, n_groups=8, cond_predict_scale=True,
-                 activation_type="Mish", cond_mlp_dims=None, smaller_encoder=False, **kwargs):
+                 activation_type="Mish", cond_mlp_dims=None, smaller_encoder=False,
+                 use_first_frame_context=False, **kwargs):
         super().__init__()
         pn = dict(pointnet or {})
         pn.setdefault("out_channels", visual_feature_dim)
@@ -181,6 +182,8 @@ class PointNetDiffusionUNet(nn.Module):
         # feature — a persistent context token carrying object shape/size/grasp-width
         # information through later gripper occlusion. Off (default) = bit-identical.
         self.use_first_frame_context = bool(use_first_frame_context)
+        assert not self.use_first_frame_context, \
+            "first-frame context is only wired on PointNetDiffusionMLP"
         # Unet1D FiLM-conditions on cond["state"]; we feed it the fused [pointnet_feat ⊕ proprio],
         # so its cond_dim is the concatenated width (visual_feature_dim + flattened proprio dim).
         self.unet = Unet1D(

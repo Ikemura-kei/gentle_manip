@@ -60,3 +60,47 @@ class AuxDiffusionModel(DiffusionModel):
                 total = total + self.aux_grasp_width_weight * wmse
                 self._aux_log["loss_grasp_width"] = float(wmse.detach())
         return total
+
+
+class WeightedAuxDiffusionModel(AuxDiffusionModel):
+    """AuxDiffusionModel + per-action-dim weighting of the denoising loss (item-17 fix #2).
+
+    The gripper dim is 1 of 7 and mostly constant (open) outside the closing phase, so its
+    share of the epsilon-MSE gradient is tiny — one suspected reason width adaptation is
+    under-learned. `action_dim_weights` (len action_dim) reweights the per-dim epsilon MSE;
+    all-ones = bit-identical to the base loss.
+    """
+
+    def __init__(self, *args, action_dim_weights=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._dim_w = None
+        if action_dim_weights is not None:
+            w = torch.tensor([float(x) for x in action_dim_weights], dtype=torch.float32)
+            self._dim_w = (w / w.mean()).to(self.device)     # mean-1 so the loss scale is unchanged
+
+    def p_losses(self, x_start, cond: dict, t):
+        if self._dim_w is None:
+            return super().p_losses(x_start, cond, t)
+        device = x_start.device
+        noise = torch.randn_like(x_start, device=device)
+        x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
+        x_recon = self.network(x_noisy, t, cond=cond)
+        target = noise if self.predict_epsilon else x_start
+        per = (x_recon - target) ** 2                        # (B, Ta, Da)
+        diff_loss = (per * self._dim_w.view(1, 1, -1)).mean()
+        total = diff_loss
+        self._aux_log = {"loss_diffusion": float(diff_loss.detach())}
+        # aux heads identical to the parent (duplicated small block to keep one loss pass)
+        if (self.aux_contact_weight > 0.0 or self.aux_object_pos_weight > 0.0
+                or self.aux_grasp_width_weight > 0.0):
+            aux = self.network.aux_predict(cond)
+            mask = cond.get("aux_valid")
+            if self.aux_object_pos_weight > 0.0 and "object_pos" in aux:
+                se = (aux["object_pos"] - cond["aux_object_pos"]) ** 2
+                mse = ((se * mask).sum() / (mask.sum() * se.shape[-1] + 1e-6)) if mask is not None else se.mean()
+                total = total + self.aux_object_pos_weight * mse
+            if self.aux_grasp_width_weight > 0.0 and "grasp_width" in aux:
+                wmse = F.mse_loss(aux["grasp_width"], cond["aux_grasp_width"])
+                total = total + self.aux_grasp_width_weight * wmse
+                self._aux_log["loss_grasp_width"] = float(wmse.detach())
+        return total
