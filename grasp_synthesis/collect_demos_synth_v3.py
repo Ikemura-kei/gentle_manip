@@ -512,7 +512,7 @@ def execute_and_collect(
         x = np.minimum(al / f, 1.0)
         s = x * x * (3.0 - 2.0 * x)
         dsxy = np.gradient(s, al)
-        return float(np.trapz(np.sqrt((xy_len * dsxy) ** 2 + z_len ** 2), al))
+        return float(np.trapezoid(np.sqrt((xy_len * dsxy) ** 2 + z_len ** 2), al))
 
     if approach_xy_finish is not None:
         _rng = approach_rng if approach_rng is not None else np.random.default_rng(0)
@@ -894,6 +894,16 @@ def main() -> None:
                         "uniform [F_LO, F_HI] (real median 0.60; recipe 0.45 0.75). xy converges "
                         "early (smoothstep) while z descends linearly — continuous, no stopping. "
                         "Default None = straight-line approach (bit-identical to v3/v3.1).")
+    p.add_argument("--grasp-area-min-mm2", type=float, default=0.0,
+                   help="v3.3 anti-stem/pinch HARD floor: reject grasps whose WORST pad grips less "
+                        "than this many mm^2 of object surface (v4 anti-pinch floor in the FEM "
+                        "planner; auto-scaled by scene scale^2). Measured: stem grasp 8 mm^2 vs "
+                        "cap grasp 49 mm^2; suggest 15. 0 (default) = off.")
+    p.add_argument("--grasp-w-press", type=float, default=0.0,
+                   help="v3.3 soft worst-pad PRESSURE penalty (score -= w_press * grip/min_pad_area) "
+                        "— the smooth gradient companion of the area floor (stem grasp pressure "
+                        "114 kPa vs cap 37 kPa). Suggest ~0.05 (score is in Pa; pressure ~1e5). "
+                        "0 (default) = off.")
     p.add_argument("--approach-speed", type=float, default=None,
                    help="v3.3 speed compensation: approach duration per env = distance/speed "
                         "(m/step; real teleop ~0.0024), clipped [40,130] steps. Fixes the fixed-"
@@ -979,6 +989,8 @@ def main() -> None:
                         "approach_speed": args.approach_speed,
                         "held_run_max": args.held_run_max, "held_run_keep": args.held_run_keep,
                         "grasp_jitter_deg": args.grasp_jitter_deg,
+                        "grasp_area_min_mm2": args.grasp_area_min_mm2,
+                        "grasp_w_press": args.grasp_w_press,
                         "grasp_extra_close": args.grasp_extra_close},
         "dr": exp.dr,
     }
@@ -1149,14 +1161,18 @@ def main() -> None:
                                     diversity_tol=args.grasp_diversity_tol, jitter_deg=args.grasp_jitter_deg,
                                     jitter_pos=args.grasp_jitter_pos, w_align=args.grasp_align,
                                     pitch_seed_deg=args.grasp_pitch_seed_deg,
-                                    cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg)
+                                    cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg,
+                                    area_min=args.grasp_area_min_mm2 * 1e-6 * float(scene_dr['scale']) ** 2,
+                                    w_press=(args.grasp_w_press or None))
             if r.get("x") is None or r.get("stress_top10") is None:   # diversity found no feasible grasp;
                 print(f"  Env {i}: no feasible diverse grasp -> retry WITHOUT diversity")  # retry reliably
                 r = fg.synthesize_grasp(fem_obj, fem_pad_geo, obj_pos_all[i], obj_quat_all[i],
                                         E=args.grasp_E, density=args.grasp_density, mu=args.grasp_mu,
                                         table_z=args.table_z, maxfevals=args.maxfevals,
                                         n_starts=args.grasp_n_starts, seed=cma_seed + 7, accel=args.grasp_accel,
-                                        cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg)
+                                        cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg,
+                                        area_min=args.grasp_area_min_mm2 * 1e-6 * float(scene_dr['scale']) ** 2,
+                                        w_press=(args.grasp_w_press or None))
             best_x = r["x"]
             if best_x is None or r.get("stress_top10") is None:       # extremely rare: still nothing ->
                 # default straight-down grasp at the object xy so the FSM never sees None (this episode may
