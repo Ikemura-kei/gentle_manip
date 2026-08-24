@@ -7,7 +7,7 @@
 # its ActionPipeline from this action, so the 7d arm-focus ABS policy must be evaluated with THIS experiment.
 task: single_lift_tofu_soft
 action: abs_pose_euler_abs_gripper
-dr: soft_orientation_realws   # REAL-workspace object spawn box (x 0.29-0.48, y ±0.11)
+dr: soft_orientation_realws_tofu   # realws spawn box + TOFU material range
 augmentation: l515_noise
 
 obs: superset_soft_armfocus

@@ -26,7 +26,10 @@ class Material:
 # Named presets. "tofu" is the soft, easily-bruised baseline validated in the dev
 # prototype (deforms visibly under the gripper, lifts intact).
 MATERIALS: dict[str, Material] = {
-    "tofu":    Material(youngs_modulus=4e3, poisson_ratio=0.3, density=1050.0, von_mises_yield_stress=2e4),
+    # tofu E 4e3 -> 5e4 (2026-08-25): at 4 kPa a 3cm MPM block collapses into a pile under
+    # gravity at our grid resolution; 50 kPa = firm (momen) tofu, still 6x softer than the
+    # mushroom. Yield 20 kPa (bruises/breaks easily) unchanged; density ~water unchanged.
+    "tofu":    Material(youngs_modulus=5e4, poisson_ratio=0.3, density=1050.0, von_mises_yield_stress=2e4),
     "gelatin": Material(youngs_modulus=8e3, poisson_ratio=0.35, density=1100.0, von_mises_yield_stress=3e4),
     "sponge":  Material(youngs_modulus=2e3, poisson_ratio=0.2, density=300.0, von_mises_yield_stress=1e4),
     # Firm, near-rigid block to stand in for a real red cube (stiff + high yield so

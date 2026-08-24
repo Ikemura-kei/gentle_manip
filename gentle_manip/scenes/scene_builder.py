@@ -104,10 +104,13 @@ def build_scene(
 
     # Opt-in env overrides for cluster experiments (unset -> shared config unchanged):
     #   GM_SIM_SUBSTEPS  -> MPM/rigid substeps (stability sweeps, per-run without editing YAML)
-    #   GM_MPM_SAMPLER   -> MPM particle sampler ('regular'|'random'|'pbs'); default is
-    #                       platform-dependent (pbs on x86, random on aarch64) — see materials.
+    #   GM_MPM_SAMPLER   -> MPM particle sampler ('regular'|'random'|'pbs'). Default is now
+    #                       'regular' EVERYWHERE (2026-08-25, user): genesis's platform default
+    #                       (random on aarch64) under-connects particles — a very soft body
+    #                       (tofu E~5e4) collapses into a pile — and evals were already pinned
+    #                       to regular, so collections had a silent train/eval sampler mismatch.
     _substeps = int(os.environ.get("GM_SIM_SUBSTEPS") or spec.sim_substeps)
-    _mpm_sampler = os.environ.get("GM_MPM_SAMPLER") or None
+    _mpm_sampler = os.environ.get("GM_MPM_SAMPLER") or "regular"
     if os.environ.get("GM_SIM_SUBSTEPS") or _mpm_sampler:   # audit trail when overrides are active
         print(f"[scene_builder] GM overrides ACTIVE: substeps={_substeps} "
               f"(scene_spec={spec.sim_substeps}) sampler={_mpm_sampler or 'genesis-default'}", flush=True)

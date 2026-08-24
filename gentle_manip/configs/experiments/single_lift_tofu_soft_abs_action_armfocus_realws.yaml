@@ -8,7 +8,7 @@
 # proxy). Quat student (obs_dim 8), abs action (action_dim 10). Collect with FEM (v3) + 2.5mm squeeze.
 task: single_lift_tofu_soft
 action: abs_pose_abs_gripper
-dr: soft_orientation_realws   # REAL-workspace object spawn box (x 0.29-0.48, y ±0.11)
+dr: soft_orientation_realws_tofu   # realws spawn box + TOFU material range
 augmentation: l515_noise
 
 obs: superset_soft_armfocus   # quat + arm-focus cloud + privileged aux labels
