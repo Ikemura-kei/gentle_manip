@@ -311,20 +311,20 @@
 # own (its union stats cover only 5 real demos — do NOT reuse afucm's).
 # REAL TABLE PLACEMENT: object inside x [0.29, 0.48], y [-0.11, 0.11] (robot-base frame).
 #
-# ckpt=downloaded_runs/wclac/checkpoint/state_300.pt
-# normalization=downloaded_runs/wclac/normalization.npz
+ckpt=downloaded_runs/wclac/checkpoint/state_300.pt
+normalization=downloaded_runs/wclac/normalization.npz
 
-# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-#   --ckpt ${ckpt} \
-#   --ft-denoising-steps 0 \
-#   --normalization ${normalization} \
-#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
-#   --smooth-alpha 0.6 \
-#   --max-pos-step-m 0.0065 \
-#   --record dataset/real_deploy/wclac300 \
-#   --shard-size 10 \
-#   --max-steps 5000
+uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+  --ckpt ${ckpt} \
+  --ft-denoising-steps 0 \
+  --normalization ${normalization} \
+  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+  --smooth-alpha 0.6 \
+  --max-pos-step-m 0.0065 \
+  --record dataset/real_deploy/wclac300 \
+  --shard-size 10 \
+  --max-steps 5000
 
 # ckpt=downloaded_runs/alzey/checkpoint/state_200.pt
 # normalization=downloaded_runs/alzey/normalization.npz
@@ -352,20 +352,20 @@
 # Wiring identical to afucm (armfocus obs REQUIRED; rate-limit clamp active; big net auto-loads
 # from downloaded_runs/nmbtz/.hydra). REAL TABLE PLACEMENT: x [0.29, 0.48], y [-0.11, 0.11].
 #
-ckpt=downloaded_runs/nmbtz/checkpoint/state_500.pt
-normalization=downloaded_runs/nmbtz/normalization.npz
+# ckpt=downloaded_runs/nmbtz/checkpoint/state_500.pt
+# normalization=downloaded_runs/nmbtz/normalization.npz
 
-uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-  --ckpt ${ckpt} \
-  --ft-denoising-steps 0 \
-  --normalization ${normalization} \
-  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
-  --smooth-alpha 0.6 \
-  --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/nmbtz500 \
-  --shard-size 10 \
-  --max-steps 5000
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} \
+#   --ft-denoising-steps 0 \
+#   --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --smooth-alpha 0.6 \
+#   --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/nmbtz500 \
+#   --shard-size 10 \
+#   --max-steps 5000
 
 # ── CLUSTER SHORTLIST: qjzsf/state_1000 — REAL-ONLY (55 demos), 7d euler abs (commanded + K4) ────
 # REAL RESULT (2026-08-23): second — behind afucm (co-train), ahead of nmbtz (pure sim).

@@ -311,6 +311,15 @@ the next episode's video — this was the dominant desync (ghost contains real m
 videos from before the fixes align exactly by END-ANCHORING (the save side flushes at the save
 tick); the paired renderer does this automatically.
 
+**2026-08-24 — real_lab.yaml `point_cloud_shift` set to the measured bias [0.009, 0, 0].**
+The item-1 arm-segment bias (~9 mm −x in every real cloud) is now cancelled at the source
+for all future real recording AND deployment (applied to the static cam_ext extrinsic).
+Deploy note: sim-trained/co-trained policies should benefit (deploy clouds now align with
+the sim training distribution); the real demo slices recorded BEFORE this (merged 55,
+cube3 probe) keep their baked-in unshifted clouds — a ~9 mm intra-dataset inconsistency in
+mixed training, negligible vs the noise but worth remembering. Cheap real A/B if in doubt:
+toggle the shift to 0 in real_lab.yaml and compare a few afucm episodes.
+
 **2026-08-24 — Item 2 kinematics analysis + the v3.1 synthesis update (overnight campaign,
 in progress).** Full report: [item2_demo_kinematics.md](item2_demo_kinematics.md). Real
 merged 55 vs hwo 650, pose-space at 30 Hz: the hwo recipe already MATCHES human speed

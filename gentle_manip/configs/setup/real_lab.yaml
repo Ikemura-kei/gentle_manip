@@ -38,11 +38,11 @@ cameras:
 #   tactile_left:  {serial: "..."}
 #   tactile_right: {serial: "..."}
 
-# TEMPORARY diagnostic override (2026-07-30): testing an x-offset-alignment hypothesis
-# between real (L515) and sim-rendered point clouds (see examples/sim2real_diagnose/
-# replay_deploy_in_sim.py --sim-pc-shift-x). Shifts every camera's world_T_cam translation
-# by this vector, so every backprojected point comes out shifted the same way — a quick
-# real-side test without touching the calibrated world_T_cam constants. REMOVE once the
-# real offset is confirmed/ruled out (either fold it into a recalibration, or delete this).
-# point_cloud_shift: [0.014, -0.011, 0.0]
-point_cloud_shift: [0.0, -0.0, 0.0]
+# MEASURED perception-bias correction (2026-08-24, item-1 paired cube3 probe —
+# docs/item1_cube3_simreal_gap.md): the PROPRIO-PINNED arm segment of the real cloud sits
+# systematically at -9 mm x vs the sim twin (8.0-10.8 mm across all 5 episodes; y/z <= 2 mm
+# = noise), i.e. an L515 depth over-read / extrinsic residual along the viewing ray.
+# +0.009 x here cancels it (verified: one rigid shift cuts full-cloud chamfer 14.8 -> 8.4 mm).
+# Supersedes the 2026-07-30 diagnostic guess [0.014, -0.011, 0]. A proper xy extrinsic
+# recalibration can replace this; until then this IS the calibrated value.
+point_cloud_shift: [0.009, 0.0, 0.0]
