@@ -1,0 +1,23 @@
+# [experiment] armfocus_realws with the 4-mushroom pool AND the extended [0.8,1.5] size band (v3.3).
+# Used by: collect_demos_synth_v3 (item 6 multi-mesh collection) / DPPO training + eval
+# Status: experimental (item 6: real-shape mushroom variants)
+#
+# IDENTICAL to single_lift_mushroom_soft_abs_action_armfocus_realws EXCEPT dr -> _mm4, which
+# adds object_mesh_pool [mushroom, mushroom1, mushroom2, mushroom3]: each scene rebuild picks
+# a random base mesh (same cadence as size/shape DR) before the usual scale/shape deform.
+task: single_lift_mushroom_soft
+action: abs_pose_abs_gripper
+dr: soft_orientation_realws_mm4_s08   # 4-mushroom pool + scale [0.8, 1.5]
+augmentation: l515_noise
+
+obs: superset_soft_armfocus   # quat + arm-focus cloud + privileged aux labels
+views:
+  teacher: [privileged]
+  student: [point_cloud]       # ee_pos + ee_quat + gripper + point_cloud (obs_dim 8)
+
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400

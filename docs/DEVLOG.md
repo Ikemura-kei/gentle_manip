@@ -803,6 +803,21 @@ the next episode's video — this was the dominant desync (ghost contains real m
 videos from before the fixes align exactly by END-ANCHORING (the save side flushes at the save
 tick); the paired renderer does this automatically.
 
+**2026-08-25 — v3.3 synthesis READY FOR CLUSTER (recipe + handoff: [v3.3_synth.md](v3.3_synth.md)).**
+v3.3 = v3.2 with settle rolled back 6→1 (user), + **approach speed compensation** (per-env
+duration = profile arc-length / 0.0024 m/step; speed band 2.73–3.48 → 2.42–2.55 mm/step,
+real median 2.37 — the fixed-duration speed∝distance artifact is gone), + **anti-stem/pinch
+planner terms** (`--grasp-area-min-mm2 15` worst-pad area floor scaled by scale², +
+`--grasp-w-press 0.05`): the FEM metric PREFERS stem grasps (5.4 vs 10.0 kPa — more CMA-ES
+would worsen them); the stem grasp was a 96th-pct outlier on min-pad-area (8 vs 49 mm²) and
+pressure (114 vs 37 kPa), and enabling the dormant v4 terms removed stem grasps entirely
+(min pad 3.6→17.7 mm², 16/16 success, visual check clean on fully-flipped mushrooms).
+New DR/experiment `_mm4_s08` (4-mushroom pool × scale [0.8,1.5], items 6+18): per-mesh
+success 75–92 %, small scales 100 %. Pinch filter criterion refined to vert-primary (the
+absolute width rule misflagged a whole 0.9-scale slim-mushroom2 batch of correct envelops).
+Fixes en route: np.trapz→trapezoid (NumPy 2); seam gate must diff WITHIN episodes.
+Smokes: 26-08-25-zrg (50 ep, 86.2 %), -uix (16, speed verify), -vqg (16, full v3.3, 100 %).
+
 **2026-08-24/25 — v3.2 synthesis + 200-demo quick verification (run `bsipf`; ROUGH PICTURE
 ONLY, user-curtailed at state_200).** v3.2 = v3.1 + real-style CONTINUOUS approach
 (`--approach-xy-finish 0.45 0.75`: xy smoothstep finishing early, z linear — no via-point,

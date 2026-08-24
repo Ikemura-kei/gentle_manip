@@ -7,9 +7,12 @@ horizontal offset) with a nearly-closed gripper. Measured on a v3.2 collection (
 the two populations separate cleanly; the user-flagged pinch video was the top outlier.
 
 Flags an episode when, averaged over the last HOLD_WIN recorded steps:
-    vert  = TCP_z - obj_z  >  0 mm            (object centre below the fingertips)
- OR width < 25 mm                             (rim pinch: fingers nearly closed)
- OR (vert > -5 mm AND horiz > 15 mm)          (high + off-axis: top/edge pinch)
+    vert  = TCP_z - obj_z  >  0 mm                       (object centre below the fingertips)
+ OR (vert > -5 mm AND (width < 25 mm OR horiz > 15 mm))  (high + narrow/off-axis: top/edge pinch)
+The width/horiz cues are CONDITIONAL on a high TCP: an absolute width threshold alone
+misfires on small-scale / slim mesh variants whose caps are genuinely ~20 mm (measured:
+a 0.9-scale mushroom2 batch enveloped correctly at width 18-21 mm with vert -6..-12 mm).
+vert (from priv_object_pos) is the physically meaningful dangling signal and stays primary.
 
 Requires `priv_object_pos` in the recorded obs (any superset collection has it).
 Writes a NEW run dir `<run>-filt/` (source untouched): filtered data.pkl + config.yaml
@@ -60,7 +63,7 @@ def episode_metrics(ep):
 
 
 def is_pinch(vert, horiz, width):
-    return (vert > VERT_PINCH) or (width < WIDTH_PINCH) or (vert > VERT_SOFT and horiz > HORIZ_SOFT)
+    return (vert > VERT_PINCH) or (vert > VERT_SOFT and (width < WIDTH_PINCH or horiz > HORIZ_SOFT))
 
 
 def main():

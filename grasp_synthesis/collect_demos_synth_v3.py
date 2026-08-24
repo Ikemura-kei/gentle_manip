@@ -430,6 +430,8 @@ def execute_and_collect(
     dr_vec=None,                   # (2,) [scale, bend_deg] for priv_object_dr_params
     extra_close: float = 0.0,      # squeeze this many meters TIGHTER than the synthesized width (all grasps)
     approach_xy_finish=None,       # v3.2: (lo, hi) per-env xy-progress finish fraction; None = straight line
+    approach_speed=None,           # v3.3: m/step — per-env approach DURATION = dist/speed (constant
+                                   # speed like real teleop; None = fixed shared duration)
     approach_rng=None,             # rng for the per-env f_i draw (reproducibility)
     trim_max_run: int = HELD_RUN_MAX,   # v3.2: held-run trim knobs (end-of-episode stop supervision)
     trim_keep: int = HELD_RUN_KEEP,
@@ -495,25 +497,54 @@ def execute_and_collect(
     # ~84mm above the grasp) while z descends ~linearly throughout — captured here as
     # per-AXIS progress profiles over the same phase (CONTINUOUS: no via-point, no corner,
     # the trajectory never stops; xy eases in with a smoothstep while z keeps moving).
+    # v3.3 approach speed compensation: with a FIXED duration, per-episode speed is
+    # proportional to spawn distance (measured corr 0.91 in sim vs 0.29 in real — humans
+    # move at a ~constant preferred speed and just take longer for farther objects).
+    # Per-env duration = distance / speed reproduces that, and makes the commanded lead
+    # (the BC action magnitude) a near-deterministic function of the current state.
+    _APPR_IDX = 0    # "approach" is always the first phase
+
+    def _profile_path_len(xy_len, z_len, f):
+        """Arc length of the per-axis approach profile (xy smoothstep to f, z linear).
+        The path is LONGER than the straight 3D distance (xy finishes early -> curved);
+        duration must be path/speed, not dist/speed, for truly constant per-step speed."""
+        al = np.linspace(0.0, 1.0, 201)
+        x = np.minimum(al / f, 1.0)
+        s = x * x * (3.0 - 2.0 * x)
+        dsxy = np.gradient(s, al)
+        return float(np.trapezoid(np.sqrt((xy_len * dsxy) ** 2 + z_len ** 2), al))
+
     if approach_xy_finish is not None:
         _rng = approach_rng if approach_rng is not None else np.random.default_rng(0)
         xy_finish = _rng.uniform(approach_xy_finish[0], approach_xy_finish[1], num_envs)
-        # Speed guard: smoothstep peak xy speed = 1.5 * xy_dist / (f * dur). Compressing a
-        # far-corner spawn's xy path into a small f would exceed the real speed band (p95
-        # ~3.7 mm/step) AND the deploy-time rate clamp — floor f so peak xy speed stays
-        # <= XY_V_MAX. f floors above 1.0 degrade gracefully toward the straight line.
-        XY_V_MAX = 0.0032   # m/step, ~real p95 with margin
-        dur_appr = float(dict(PHASES)["approach"])
-        xy_dist = np.linalg.norm(pos_b[:, :2] - home_pos[:, :2], axis=1)
-        f_min = 1.5 * xy_dist / (XY_V_MAX * dur_appr)
-        xy_finish = np.minimum(np.maximum(xy_finish, f_min), 1.0)
     else:
         xy_finish = None
+
+    xy_len = np.linalg.norm(pos_b[:, :2] - home_pos[:, :2], axis=1)
+    z_len = np.abs(pos_b[:, 2] - home_pos[:, 2])
+    if approach_speed is not None:
+        if xy_finish is not None:
+            path = np.array([_profile_path_len(xy_len[i], z_len[i], xy_finish[i])
+                             for i in range(num_envs)])
+        else:
+            path = np.linalg.norm(pos_b - home_pos, axis=1)
+        appr_dur = np.clip(np.round(path / float(approach_speed)), 40, 130).astype(np.int64)
+    else:
+        appr_dur = np.full(num_envs, int(dict(PHASES)["approach"]), np.int64)
+
+    if xy_finish is not None:
+        # Speed guard: smoothstep peak xy speed = 1.5 * xy_len / (f * dur). Floor f so the
+        # peak stays <= XY_V_MAX (real p95 band + deploy rate clamp). Raising f only ever
+        # SHORTENS the path -> per-step speed after the guard is <= the target, never above.
+        XY_V_MAX = 0.0032   # m/step
+        f_min = 1.5 * xy_len / (XY_V_MAX * appr_dur.astype(np.float64))
+        xy_finish = np.minimum(np.maximum(xy_finish, f_min), 1.0)
 
     def _env_target(i: int, phase_idx: int, phase_step: int):
         """(pos, quat_wxyz, grip) for env i at its OWN (phase_idx, phase_step)."""
         name, dur = PHASES[phase_idx]
         if name == "approach":
+            dur = int(appr_dur[i])                    # per-env duration (v3.3 speed compensation)
             alpha = (phase_step + 1) / dur
             if xy_finish is None:
                 pos = home_pos[i] + alpha * (pos_b[i] - home_pos[i])
@@ -658,6 +689,8 @@ def execute_and_collect(
         # phase_idx may already be N_PHASES (done envs) — clip before indexing PHASES;
         # those entries are masked out by `active` anyway so the clipped value is unused.
         durations = np.array([PHASES[min(int(p), N_PHASES - 1)][1] for p in phase_idx])
+        in_appr = (phase_idx == _APPR_IDX)
+        durations[in_appr] = appr_dur[in_appr]        # per-env approach duration (v3.3)
         rolled_over = active & (phase_step >= durations)
 
         # Idea #1: force-based grasp firming. Check ONCE, exactly at the moment an
@@ -861,6 +894,21 @@ def main() -> None:
                         "uniform [F_LO, F_HI] (real median 0.60; recipe 0.45 0.75). xy converges "
                         "early (smoothstep) while z descends linearly — continuous, no stopping. "
                         "Default None = straight-line approach (bit-identical to v3/v3.1).")
+    p.add_argument("--grasp-area-min-mm2", type=float, default=0.0,
+                   help="v3.3 anti-stem/pinch HARD floor: reject grasps whose WORST pad grips less "
+                        "than this many mm^2 of object surface (v4 anti-pinch floor in the FEM "
+                        "planner; auto-scaled by scene scale^2). Measured: stem grasp 8 mm^2 vs "
+                        "cap grasp 49 mm^2; suggest 15. 0 (default) = off.")
+    p.add_argument("--grasp-w-press", type=float, default=0.0,
+                   help="v3.3 soft worst-pad PRESSURE penalty (score -= w_press * grip/min_pad_area) "
+                        "— the smooth gradient companion of the area floor (stem grasp pressure "
+                        "114 kPa vs cap 37 kPa). Suggest ~0.05 (score is in Pa; pressure ~1e5). "
+                        "0 (default) = off.")
+    p.add_argument("--approach-speed", type=float, default=None,
+                   help="v3.3 speed compensation: approach duration per env = distance/speed "
+                        "(m/step; real teleop ~0.0024), clipped [40,130] steps. Fixes the fixed-"
+                        "duration artifact where speed is proportional to spawn distance (sim "
+                        "corr 0.91 vs real 0.29). Default None = fixed --n-home-to-pre steps.")
     p.add_argument("--held-run-max", type=int, default=HELD_RUN_MAX,
                    help=f"trim held-command runs LONGER than this (default {HELD_RUN_MAX}); "
                         "v3.2 recipe 12 (with --held-run-keep 10) preserves ~10 stop frames at "
@@ -938,8 +986,11 @@ def main() -> None:
                         "n_settle": args.n_settle,
                         "cam_azimuth_max_deg": args.cam_azimuth_max_deg,
                         "approach_xy_finish": list(args.approach_xy_finish) if args.approach_xy_finish else None,
+                        "approach_speed": args.approach_speed,
                         "held_run_max": args.held_run_max, "held_run_keep": args.held_run_keep,
                         "grasp_jitter_deg": args.grasp_jitter_deg,
+                        "grasp_area_min_mm2": args.grasp_area_min_mm2,
+                        "grasp_w_press": args.grasp_w_press,
                         "grasp_extra_close": args.grasp_extra_close},
         "dr": exp.dr,
     }
@@ -1110,14 +1161,18 @@ def main() -> None:
                                     diversity_tol=args.grasp_diversity_tol, jitter_deg=args.grasp_jitter_deg,
                                     jitter_pos=args.grasp_jitter_pos, w_align=args.grasp_align,
                                     pitch_seed_deg=args.grasp_pitch_seed_deg,
-                                    cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg)
+                                    cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg,
+                                    area_min=args.grasp_area_min_mm2 * 1e-6 * float(scene_dr['scale']) ** 2,
+                                    w_press=(args.grasp_w_press or None))
             if r.get("x") is None or r.get("stress_top10") is None:   # diversity found no feasible grasp;
                 print(f"  Env {i}: no feasible diverse grasp -> retry WITHOUT diversity")  # retry reliably
                 r = fg.synthesize_grasp(fem_obj, fem_pad_geo, obj_pos_all[i], obj_quat_all[i],
                                         E=args.grasp_E, density=args.grasp_density, mu=args.grasp_mu,
                                         table_z=args.table_z, maxfevals=args.maxfevals,
                                         n_starts=args.grasp_n_starts, seed=cma_seed + 7, accel=args.grasp_accel,
-                                        cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg)
+                                        cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg,
+                                        area_min=args.grasp_area_min_mm2 * 1e-6 * float(scene_dr['scale']) ** 2,
+                                        w_press=(args.grasp_w_press or None))
             best_x = r["x"]
             if best_x is None or r.get("stress_top10") is None:       # extremely rare: still nothing ->
                 # default straight-down grasp at the object xy so the FSM never sees None (this episode may
@@ -1156,6 +1211,7 @@ def main() -> None:
                 record_video=rec_this_batch, priv_cfg=priv_cfg, dr_vec=dr_vec,
                 extra_close=args.grasp_extra_close,
                 approach_xy_finish=args.approach_xy_finish, approach_rng=approach_rng,
+            approach_speed=args.approach_speed,
                 trim_max_run=args.held_run_max, trim_keep=args.held_run_keep,
             )
             consec_batch_aborts = 0
