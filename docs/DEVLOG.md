@@ -175,19 +175,19 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
 |---|---|---|---|
 | 1 | Real data: 3 cm cube placed right below the arm; analyze sim-vs-real data difference | **local agent** | FIRST (with 2). Sim-side counterpart partly staged: `cube4` task/experiment configs exist |
 | 2 | Real-vs-sim demo analysis (trajectory character, speed, grasp speed, grasp width, …); match the scripted demo to real properties → better co-training | **local agent** | FIRST (with 1). Slow/pausing trajectories are fine when the derivation carries lead — qjzsf (real-only, slow teleop, K=4 lookahead) works in real; the v6 stall was K=1 with near-zero lead. Just derive slowed sim demos with lookahead (or verify the lead/dwell gates) as done for teleop |
-| 3 | afucm real-data-amount ablation {1, 5, 10, 20, 30 demos}, tested in real | cluster agent | RUNNING. Paper-grade ablation re-done on the finalized method later |
+| 3 | afucm real-data-amount ablation {1, 5, 10, 20, 30 demos}, tested in real | cluster agent | SIM DONE — flat across N (peaks 0.635-0.735, seed-noise range; sfpom/wclac/luewz/ibkzr/ordtr in the canonical table). Real ranking = user, today |
 | 4 | Sync colleague on the FIXED SETUP: native 7d euler action · arm-focus cloud · quat proprio · realws DR · DPPO codebase · ×3.5 big net (512 + [1024]³, 2.89 M EMA) | user | next working day. (Note: "native 7d" — recording native euler commands is bit-equivalent to the validated 10d-record + `--derive-source-action` path, ~1e-7; either satisfies the setup) |
 | 5 | Reduce demo occlusion (penalty or hard angle constraint) | **local agent** | mechanism ALREADY BUILT + validated (hard azimuth bound 45°, `v5c`; fully-hidden 24%→4%, soft penalty provably inert — conclusion 10); remaining work = integrate into the post-item-2 synthesis version once 2 is confirmed |
 | 6 | More mushroom variants closer to real shapes | user (mesh prep) | parallel; final step = rerun the good pipeline with more meshes |
-| 7 | OOD size+shape test scenario | cluster agent | parallel; test against previously trained policies |
+| 7 | OOD size+shape test scenario | cluster agent | SIM DONE — ASYMMETRIC: big-OOD (1.5-1.8×) easier than in-domain (0.75-0.92); small-OOD (0.7-0.95×) collapses (0.13-0.22) for every policy. ACTION: extend training scale DR downward if real mushrooms can be < nominal |
 | 8 | Robustness to missed grasps | **local agent** | DEFERRED until everything else checks out. Partially exists: retry-on-slip (`--retry-max`, window 0.15–0.30, 5/5 recovery) is built + validated; open remainder = induced-failure coverage (idea 3) |
 | 9 | Promote to generalist (end-to-end) | cluster agent | LAST, after 8 is decided |
 | 10 | Gentler grasp test (small/no over-squeeze, + real co-train) | cluster agent | before 8, after 2+5 confirmed (or now on afucm). ⚠ prerequisite knowledge: honest (no-over-squeeze) widths SLIP in MPM (conclusion 11: 8/8→1/8; a 4× FEM hold margin does not rescue) — pair with FEM-vs-MPM margin calibration or expect demonstrator success to crater |
 | 11 | Gentleness-aware model selection | (either) | from now on; harness already records the 9 stress metrics per episode. Recommend ranking on sustained (`top20_ttop20`) not peak — peak is pinned 49–53 kPa across 9 demonstrator configs (likely contact/metric artifact, conclusion 11) |
-| 12 | Memory in the policy (RNN/GRU/temporal transformer or first-frame context token) | cluster agent | testable on the current afucm setup |
-| 13 | Aux objectives on the real-data co-train | cluster agent | testable on afucm |
-| 14 | Camera-pose DR (slight: ~0.5 cm/axis, 1–5°) | cluster agent | testable on afucm |
-| 15 | DP horizon ablation: predict 8 / execute 4 (current: 4/4; re-planning at half-horizon is the standard diffusion-policy sweet spot) | cluster agent | testable on afucm |
+| 12 | Memory in the policy (first-frame context token variant) | cluster agent | SIM NEGATIVE (ptpii 0.38 peak vs 0.685 baseline — success halved). NOT taken to real. Follow-ups if revisited: bottlenecked context, FiLM, gating; RNN/transformer untested |
+| 13 | Aux objectives on the real-data co-train | cluster agent | SIM: no reliable success gain — seed spread 0.55/0.60/0.70 (dfyqx/wffpe/uknld); uknld's gentle profile was partly seed luck. Not adopted; gentleness-vs-seed check via stress columns pending |
+| 14 | Camera-pose DR (slight: ~0.5 cm/axis, 1–5°) | cluster agent | SIM DONE (jtzqc 0.57 @400 vs 0.685 — mild expected robustness cost). REAL-TEST CANDIDATE (its whole point is extrinsics drift) |
+| 15 | DP horizon ablation: predict 8 / execute 4 | cluster agent | SIM DONE — h8/e4 alone FAILS (jjjjy 0.05; e8 diagnostic 0.20), but hold-tail data RESCUES it (ymbve 0.68). Verdict: keep 4/4 default; h8 viable only with stay-still tails |
 | 16 | **Paired-feature encoder regularization**: add a consistency term to the BC loss pulling the encoder features of PAIRED real/sim steps together (e.g. L2/cosine between the PointNet features of real step t and its sim-twin step t), using the paired cube3 datasets below (and any future real recording — the twin generator works on any run). Hypothesis: aligning the visual representation across domains improves sim2real beyond raw co-training | cluster agent | data ready (see 2026-08-23 paired-twin log entry); testable on the afucm setup |
 
 Sequencing summary: **1+2 first (local)** · 3 ongoing · 4 immediately next working day (user) ·
@@ -216,10 +216,10 @@ Local agent starts items only on explicit user go.
 
 
 **Evaluation & analysis**
-- [ ] **OOD generalization test**: eval sets with out-of-training-range size/shape
-  (scale > 1.5, bend > 25°, novel taper/axis combinations) — current tests are all
-  in-domain. Also zero-shot other categories (tofu block, fruit meshes) as a generalist
-  preview.
+- [x] **OOD generalization test** — DONE (sim): big-OOD easy (0.75-0.92), small-OOD
+  collapses (0.13-0.22) → generalization is asymmetric in object size. NEW ACTION ITEM:
+  extend training scale DR below 1.0 (e.g. [0.8, 1.5]) before real deployment on small
+  specimens. Zero-shot other categories (tofu/fruit) still open (generalist preview).
 - [ ] **Real-vs-sim demo trajectory analysis**: compare the scripted demonstrator's
   kinematics (speeds, pauses, approach angles, grasp-close timing) against the real human
   teleop demos; match the scripted trajectory properties to human execution where they
@@ -240,20 +240,20 @@ Local agent starts items only on explicit user go.
 - [ ] (deprioritized: DPPO chosen) **DP horizon ablation**: prediction horizon 8 with execution steps 4 (current DPPO:
   4/4; DP3 default: 16 predict / 8 execute) — re-planning at half-horizon is the standard
   diffusion-policy sweet spot.
-- [ ] **Memory in the policy** (RNN/GRU or temporal transformer over obs history): retain
-  information from early frames where the object is fully visible — through later
-  occlusion by the gripper, and for committing to a grasp width from the first clear
-  view. Alternative lightweight version: append the FIRST frame's cloud (or its encoding)
-  as a persistent context token.
-- [ ] Aux objectives on the real data too (object-pos head currently sim-only — a real
-  object-detector label could supervise it).
+- [x] **Memory in the policy** — first-frame context token variant TESTED, NEGATIVE in
+  sim (0.38 vs 0.685; not taken to real). RNN/temporal-transformer variants remain
+  untested; if revisited, try a bottlenecked context or FiLM modulation first.
+- [x] Aux objectives through co-training (masked to sim rows) — TESTED, no reliable
+  success gain (seed spread 0.55-0.70); not adopted. Real object-pos labels feeding the
+  same mask remain an option if gentleness analysis favors the aux head.
 
 **Scaling toward the generalist**
 - [ ] Multi-category collections (tofu/fruit meshes + per-category material presets from
   `assets/materials.py`); category-mixed training; measure specialist-vs-generalist gap.
 - [ ] Data-scale study (650 → 2k episodes; collection is cheap at ~6 h/650 and
   deterministic).
-- [ ] Camera-pose DR (real extrinsics drift between calibrations).
+- [x] Camera-pose DR — TESTED in sim (jtzqc, 0.57 vs 0.685 mild cost); real-test
+  candidate — its value only shows under real extrinsics drift.
 - [ ] **Real-recording cloud provenance**: record-time processing is BAKED into real pkls
   (only the final 1024-pt cloud is stored) — a run's experiment/env obs snapshot does NOT
   describe it, which nearly caused a wrong deploy obs config for qjzsf. Store the pre-
