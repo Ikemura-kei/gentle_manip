@@ -23,11 +23,13 @@ object_flip_deg: [160, 180]   # to ±U(160,180)° so the mushroom spawns flipped
 # (collect_demos_synth.py --scene-dr-every) each rebuild deforms+scales the mushroom mesh; in eval
 # the harness drives it deterministically per scene group. Recorded into priv_object_dr_params
 # ([scale, bend_deg]). Ranges match configs/dr/food_shape.yaml (the earlier sim demo collection).
-object_scale:      [1.0, 1.5]   # uniform object scale
-object_bend_deg:   [-25, 25]     # curvature along the long axis (deg)
-object_twist_deg:  [-20, 20]     # twist about the long axis (deg)
-object_taper:      [-0.15, 0.15] # end-to-end thickness change (fraction)
-object_axis_scale: [0.95, 1.15]    # anisotropic scale on ONE random x/y/z axis
+# Tofu is CUT — near-perfect cuboid. Shape DR reduced to TINY imperfection-level
+# deformation only (user, 2026-08-25); size range widened downward instead.
+object_scale:      [0.8, 1.4]    # uniform object scale (2.4-4.2 cm blocks)
+object_bend_deg:   [-3, 3]       # tiny: real cut-face imperfection, not organic curvature
+object_twist_deg:  [-3, 3]       # tiny
+object_taper:      [-0.03, 0.03] # tiny
+object_axis_scale: [0.95, 1.05]  # near-cubic aspect only
 
 # ── per-scene material (rebuild) ─────────────────────────────────────────────
 # Bounded for MPM stability at the tuned substeps (210): stable substeps ∝ √E, so we keep E on
