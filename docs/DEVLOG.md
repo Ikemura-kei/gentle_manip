@@ -371,11 +371,17 @@ running" — replacing any whose experiments have since finished.**
 (12 geometries each, per-step command dumps; artifacts: `.agent_tmp/{prmaw,afucm}_width_ep*.npz`,
 `<run>/eval/width_probe/`; slurm 1624552/1624553):
 
-| | corr(min cmd width, obj_scale) | width range small→big half | ever small/big half |
+| | corr(min cmd width, obj_scale) | mean MIN COMMANDED width: below-median-scale eps → above-median (policy rows); small vs large scale bins (data row) | ever_success: below- vs above-median scale |
 |---|---|---|---|
 | training data (both realws collections) | **0.85** | 35.5 → 50.4 mm | demonstrator flat ~0.92 |
 | afucm/state_400 | 0.27 | 20.3 → 23.4 mm | 0.57 / 0.77 |
 | prmaw/state_200 | 0.44 | 16.7 → 21.6 mm | 0.47 / 0.83 |
+
+(Reading: episodes split at the MEDIAN object scale; each half's value = mean of the
+policy's minimum commanded gripper width per episode — its chosen grip. Commanded widths
+sit below achieved ones because absolute commands squeeze past the surface; the
+DIFFERENCES carry the adaptation signal: policies move 3-5 mm across sizes where the
+demos move 15 mm.)
 
 Supporting findings: training scale distribution only mildly thin at 1.0-1.1 (17% vs 20%
 uniform; same skew in both collections — same seed-0 scene sequence) and CANNOT explain
