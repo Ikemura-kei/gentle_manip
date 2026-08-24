@@ -367,6 +367,22 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-24 — Item-17 fix arms launched in parallel (user directive: fixes #2 and #5
+alongside item 18; all on the afucm base; 1-2 iterations allowed).**
+- **item 18** aux grasp-width head: `item18_w0p5` (1626204) / `item18_w2p0` (1626209) —
+  per-episode min-width label computed at dataset load, head on the shared cond feature.
+- **fix #2** gripper-dim loss upweight: `fix2_gripw3` (1626293) —
+  `WeightedAuxDiffusionModel`, epsilon-MSE dim weights [1,1,1,1,1,1,3] (mean-normalized).
+- **fix #5** FiLM conditioning: `fix5_film` (1626309) — `PointNetDiffusionUNet` head
+  (Unet1D FiLM-conditions each residual block on the fused feature) replacing concat-MLP.
+Acceptance test for all: canonical sweep + width-probe re-run on each best checkpoint
+(target: corr(cmd width, scale) → 0.85; small-bin ever-success up from 0.32-0.48;
+figures pattern as in docs/figures/width_probe_2026-08-24/). Bug found en route: the
+item-12 patch had leaked `use_first_frame_context` into PointNetDiffusionUNet.__init__
+(shared anchor string) — UNet was unconstructible; fixed. Run dirs:
+logs/dppo/dppo-pretrain/single_lift_mushroom_simreal_realws_noos_cmd/<ids in monitor logs
+log_item18_*, log_fix2gripw3, log_fix5film>; slurm logs by job id.
+
 **2026-08-24 — Photo→mesh asset pipeline stood up (TripoSG, NOT Hunyuan3D).** New
 capability: photographs of a real object → clean watertight decimated mesh for
 `assets/objects/`. Scripts `scripts/mesh_from_photos/{prep_images,generate,postprocess,turntable}.py`,
@@ -416,7 +432,29 @@ for aarch64/sm_90 for TRELLIS, or (b) run Hunyuan3D-2mv on non-EU hardware.
 `Trimesh` per component (~200 of them) and is minutes-slow; a single
 `scipy.sparse.csgraph.connected_components` pass over the vertex graph replaces it.
 Also decimate BEFORE hole-filling/manifold repair — those cost minutes at 2M faces
-and milliseconds at 12k.
+and milliseconds at 12k. And decimate in STAGES (<=10x per pass): a single
+155:1 jump from 1.9M to 12k tears the surface — results came back non-watertight with
+handles (euler -8) and a second component shed. Staged [186k, 18.6k, 12k] + a second
+floater pass gives euler 2.
+
+**First object done — `mushroom1`, 12 candidates (4 views x 3 seeds), 6-13 s each on one
+GH200.** Selected `back_seed0`: 11994 faces, watertight, euler 2, genus 0, single
+component. Delivered unscaled (no `measurements.json`; longest axis = 1.903129 in
+TripoSG's normalised frame). Two results worth keeping:
+- **Seed variance is TOPOLOGICAL.** 3 of 12 came back watertight but with genuine
+  handles (genus 2-5) and were rejected by the euler gate. The spec's "three seeds per
+  object" is load-bearing, not ceremony.
+- **The four views disagreed on volume by 2.3x** (back 2.12 vs right 0.93) — and the
+  cause was SEGMENTATION, not the model. Each mesh reproduced its own input silhouette
+  faithfully; the skewer's white tape flag survived `rembg` in front/left/right and got
+  reconstructed as a protruding fin, stretching the silhouette and squashing the object.
+  Only `back` had a clean matte. **Practice: the §3 matte review gate is mandatory, and
+  rig hardware must be occluded at capture time.**
+- **Underside confirmed invented** (`obj_meshes/mushroom1/_underside_check.png`): smooth
+  featureless dome, no gills/annulus/rim, because all four views are equatorial. This is
+  the region that sets the grasp contact patch, so treat the lower hemisphere as fiction.
+  **Requested from user: a photo from below** (obtainable — the object hangs from a
+  skewer), plus a top view and two 45-degree obliques.
 
 **2026-08-24 — Item 17 width-probe results (full numbers).** Instrumented 60-episode evals
 (12 geometries each, per-step command dumps; artifacts: `.agent_tmp/{prmaw,afucm}_width_ep*.npz`,
