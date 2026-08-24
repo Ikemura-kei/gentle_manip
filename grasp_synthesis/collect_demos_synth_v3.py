@@ -430,6 +430,8 @@ def execute_and_collect(
     dr_vec=None,                   # (2,) [scale, bend_deg] for priv_object_dr_params
     extra_close: float = 0.0,      # squeeze this many meters TIGHTER than the synthesized width (all grasps)
     approach_xy_finish=None,       # v3.2: (lo, hi) per-env xy-progress finish fraction; None = straight line
+    approach_speed=None,           # v3.3: m/step — per-env approach DURATION = dist/speed (constant
+                                   # speed like real teleop; None = fixed shared duration)
     approach_rng=None,             # rng for the per-env f_i draw (reproducibility)
     trim_max_run: int = HELD_RUN_MAX,   # v3.2: held-run trim knobs (end-of-episode stop supervision)
     trim_keep: int = HELD_RUN_KEEP,
@@ -495,6 +497,18 @@ def execute_and_collect(
     # ~84mm above the grasp) while z descends ~linearly throughout — captured here as
     # per-AXIS progress profiles over the same phase (CONTINUOUS: no via-point, no corner,
     # the trajectory never stops; xy eases in with a smoothstep while z keeps moving).
+    # v3.3 approach speed compensation: with a FIXED duration, per-episode speed is
+    # proportional to spawn distance (measured corr 0.91 in sim vs 0.29 in real — humans
+    # move at a ~constant preferred speed and just take longer for farther objects).
+    # Per-env duration = distance / speed reproduces that, and makes the commanded lead
+    # (the BC action magnitude) a near-deterministic function of the current state.
+    _APPR_IDX = 0    # "approach" is always the first phase
+    if approach_speed is not None:
+        dist3d = np.linalg.norm(pos_b - home_pos, axis=1)
+        appr_dur = np.clip(np.round(dist3d / float(approach_speed)), 40, 130).astype(np.int64)
+    else:
+        appr_dur = np.full(num_envs, int(dict(PHASES)["approach"]), np.int64)
+
     if approach_xy_finish is not None:
         _rng = approach_rng if approach_rng is not None else np.random.default_rng(0)
         xy_finish = _rng.uniform(approach_xy_finish[0], approach_xy_finish[1], num_envs)
@@ -502,10 +516,10 @@ def execute_and_collect(
         # far-corner spawn's xy path into a small f would exceed the real speed band (p95
         # ~3.7 mm/step) AND the deploy-time rate clamp — floor f so peak xy speed stays
         # <= XY_V_MAX. f floors above 1.0 degrade gracefully toward the straight line.
+        # (Per-env durations from --approach-speed enter through appr_dur.)
         XY_V_MAX = 0.0032   # m/step, ~real p95 with margin
-        dur_appr = float(dict(PHASES)["approach"])
         xy_dist = np.linalg.norm(pos_b[:, :2] - home_pos[:, :2], axis=1)
-        f_min = 1.5 * xy_dist / (XY_V_MAX * dur_appr)
+        f_min = 1.5 * xy_dist / (XY_V_MAX * appr_dur.astype(np.float64))
         xy_finish = np.minimum(np.maximum(xy_finish, f_min), 1.0)
     else:
         xy_finish = None
@@ -514,6 +528,7 @@ def execute_and_collect(
         """(pos, quat_wxyz, grip) for env i at its OWN (phase_idx, phase_step)."""
         name, dur = PHASES[phase_idx]
         if name == "approach":
+            dur = int(appr_dur[i])                    # per-env duration (v3.3 speed compensation)
             alpha = (phase_step + 1) / dur
             if xy_finish is None:
                 pos = home_pos[i] + alpha * (pos_b[i] - home_pos[i])
@@ -658,6 +673,8 @@ def execute_and_collect(
         # phase_idx may already be N_PHASES (done envs) — clip before indexing PHASES;
         # those entries are masked out by `active` anyway so the clipped value is unused.
         durations = np.array([PHASES[min(int(p), N_PHASES - 1)][1] for p in phase_idx])
+        in_appr = (phase_idx == _APPR_IDX)
+        durations[in_appr] = appr_dur[in_appr]        # per-env approach duration (v3.3)
         rolled_over = active & (phase_step >= durations)
 
         # Idea #1: force-based grasp firming. Check ONCE, exactly at the moment an
@@ -861,6 +878,11 @@ def main() -> None:
                         "uniform [F_LO, F_HI] (real median 0.60; recipe 0.45 0.75). xy converges "
                         "early (smoothstep) while z descends linearly — continuous, no stopping. "
                         "Default None = straight-line approach (bit-identical to v3/v3.1).")
+    p.add_argument("--approach-speed", type=float, default=None,
+                   help="v3.3 speed compensation: approach duration per env = distance/speed "
+                        "(m/step; real teleop ~0.0024), clipped [40,130] steps. Fixes the fixed-"
+                        "duration artifact where speed is proportional to spawn distance (sim "
+                        "corr 0.91 vs real 0.29). Default None = fixed --n-home-to-pre steps.")
     p.add_argument("--held-run-max", type=int, default=HELD_RUN_MAX,
                    help=f"trim held-command runs LONGER than this (default {HELD_RUN_MAX}); "
                         "v3.2 recipe 12 (with --held-run-keep 10) preserves ~10 stop frames at "
@@ -938,6 +960,7 @@ def main() -> None:
                         "n_settle": args.n_settle,
                         "cam_azimuth_max_deg": args.cam_azimuth_max_deg,
                         "approach_xy_finish": list(args.approach_xy_finish) if args.approach_xy_finish else None,
+                        "approach_speed": args.approach_speed,
                         "held_run_max": args.held_run_max, "held_run_keep": args.held_run_keep,
                         "grasp_jitter_deg": args.grasp_jitter_deg,
                         "grasp_extra_close": args.grasp_extra_close},
@@ -1156,6 +1179,7 @@ def main() -> None:
                 record_video=rec_this_batch, priv_cfg=priv_cfg, dr_vec=dr_vec,
                 extra_close=args.grasp_extra_close,
                 approach_xy_finish=args.approach_xy_finish, approach_rng=approach_rng,
+            approach_speed=args.approach_speed,
                 trim_max_run=args.held_run_max, trim_keep=args.held_run_keep,
             )
             consec_batch_aborts = 0
