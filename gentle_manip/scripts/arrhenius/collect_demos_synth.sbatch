@@ -57,6 +57,9 @@ ARGS=(--experiment "$EXPERIMENT" --n-episodes "$N_EPISODES" --n-envs "$N_ENVS" -
 [ -n "$N_GRASP" ] && ARGS+=(--n-grasp "$N_GRASP")
 [ -n "$GRASP_EXTRA_CLOSE" ] && ARGS+=(--grasp-extra-close "$GRASP_EXTRA_CLOSE")
 [ -n "$DESCRIPTION" ] && ARGS+=(--description "$DESCRIPTION")
+# EXTRA_ARGS: free-form passthrough for newer collector flags (e.g. the v3.3 recipe's
+# --approach-speed / --cam-azimuth-max-deg / --grasp-area-min-mm2 ...). Space-split.
+[ -n "${EXTRA_ARGS:-}" ] && ARGS+=($EXTRA_ARGS)
 
 unset PYTHONPATH ROS_DISTRO 2>/dev/null || true
 export MUJOCO_GL=egl
