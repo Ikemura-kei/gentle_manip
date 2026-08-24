@@ -372,6 +372,17 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-25 (night) — OVERNIGHT PLAN (user, before sleep): v3.3 synth campaign on upstream
+arrival.** The local agent is finishing an improved grasp synth (v3.3). Standing order for the
+cluster agent: (1) periodic watcher on origin/master (armed); (2) on push: merge properly,
+READ `docs/v3.3_synth.md` (documents the new-synth collection + training procedure);
+(3) collect 650 demos with the new synth using ALL 4 mushrooms (mm4 mesh pool), the NEW
+size range ([0.8, 1.5] — needs an mm4+s08 DR variant), and train with the width-aux
+supervision at MULTIPLE weights (informed by attempt-1/2: w=0.5 healthy, w=2.0 harmful,
+18b feed-forward @0.5 matched baseline 0.675 — so likely 0.5 / 1.5 [+ feed variant]).
+Tofu 650+training remains GATED on the user's video OK (smoke v3 1653490 in flight).
+
+
 **2026-08-25 — PRACTICE CHANGE: MPM sampler `regular` is now the GLOBAL default
 (user directive), incl. demo collection; tofu E 4e3→5e4.** The first tofu smoke
 (1653283, cancelled) collapsed into a particle pile — two compounding causes:
