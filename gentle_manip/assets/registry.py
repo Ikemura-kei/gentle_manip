@@ -32,7 +32,11 @@ class ObjectDef:
 # The validated baseline matches examples/gs_sim_backend_dev.py: a 4 cm tofu cube
 # resting at (0.50, 0, 0.03), within reach and the MPM bounds.
 OBJECT_MAP: dict[str, ObjectDef] = {
-    "tofu":    ObjectDef("tofu", MATERIALS["tofu"]),
+    # 3 cm tofu block (2026-08-25): the item-1 cube geometry as a SOFT object — the second
+    # category for the generalist push. Subdivided cube mesh so shape DR / CMA-ES SDF work.
+    "tofu":    ObjectDef("tofu", MATERIALS["tofu"], object_type="soft",
+                         size=(0.03, 0.03, 0.03), default_pos=(0.47, 0.0, 0.016),
+                         mesh_path=str(_OBJ_DIR / "tofu.obj")),
     "gelatin": ObjectDef("gelatin", MATERIALS["gelatin"]),
     "sponge":  ObjectDef("sponge", MATERIALS["sponge"]),
     # 3 cm cube matching the real red cube the DP3 policy was trained on; rests on

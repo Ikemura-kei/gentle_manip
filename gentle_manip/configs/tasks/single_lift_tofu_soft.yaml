@@ -1,0 +1,37 @@
+# [task] Soft-MPM 3cm TOFU BLOCK single-lift: second object category (generalist push).
+# Used by: experiments (task:) -> demo collection (v3 synth) + DPPO training/eval
+# Status: experimental (item 9 groundwork: multi-category)
+#
+# The item-1 3cm cube geometry as a genuinely SOFT body: tofu material preset
+# (E=4 kPa, yield 20 kPa — validated in the dev prototype; far softer than the
+# mushroom's 300 kPa, so CFL headroom at the shared substeps is large). Success
+# band / hold / rewards mirror single_lift_mushroom_soft exactly — only the object
+# differs — so results are comparable across categories. Stress-reward yield is
+# auto-injected from the material (20 kPa), cap stays a fraction of yield.
+success_z_min: 0.175
+success_z_max: 0.275
+hold_steps: 30
+object_name: "tofu"
+object_type: "soft"
+
+# Same sim resolution as the mushroom (shared Config C): 3cm at 4mm cells = 7.5 cells,
+# same regime as the 3.3cm mushroom. substeps 235 is tuned for E=3e5; tofu's E=4e3
+# needs ~8.7x less, so stability margin is large.
+sim_substeps: 235
+mpm_grid_density: 250
+
+success_scale: 0.2
+
+rewards:
+  stress:
+    scale: 0.2
+    cap: 1.5
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 0.1
+    decay: 8.0
+  lift:
+    scale: 0.1
+    grasp_gate_dist: 0.079
+    lift_target: 0.16
