@@ -47,11 +47,14 @@ def main() -> None:
         parts = [p for p in (_load(d, split) for d in args.datasets) if p is not None]
         if not parts:
             continue
-        keys = set(parts[0])
-        for p in parts:
-            if set(p) != keys:
-                raise SystemExit(f"key mismatch in {split}: {set(p) ^ keys} "
-                                 f"(all sources must carry the same arrays, e.g. point_cloud)")
+        keys = set.intersection(*(set(p) for p in parts))
+        dropped = set.union(*(set(p) for p in parts)) - keys
+        if dropped:
+            # e.g. sim-only aux labels (aux_contact/aux_object_pos) that real rows can't carry —
+            # unusable in mixed training, so they are dropped rather than fatal.
+            print(f"WARNING {split}: dropping non-common arrays {sorted(dropped)}")
+        if not {"states", "actions", "traj_lengths"} <= keys:
+            raise SystemExit(f"core arrays missing from the common set in {split}: {keys}")
         splits[split] = {k: np.concatenate([p[k] for p in parts], axis=0) for k in keys}
         print(f"{split}: " + " + ".join(str(len(p['traj_lengths'])) for p in parts)
               + f" trajs, {len(splits[split]['states'])} steps")

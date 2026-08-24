@@ -232,25 +232,27 @@ def _figures(out, ep_idx, re_ee, re_quat, re_gw, re_pc, rec, stride):
     fig.savefig(out / f"ep_{ep_idx + 1:03d}_match.png", dpi=110, bbox_inches="tight")
     plt.close(fig)
 
-    # 2 rows (real | sim) x 3 views: camera-side, low side (along -y), top-down
+    # OVERLAY paired video: real (blue) + sim (red) in the SAME axes, 3 views side by side
+    # (camera-side, low side, top-down) — the direct visual of the sim2real cloud gap.
     views = [("cam view", 30, -60), ("side view", 8, -150), ("top-down", 78, -90)]
-    figv = plt.figure(figsize=(16, 9))
-    axes3d = [[figv.add_subplot(2, 3, r * 3 + c + 1, projection="3d") for c in range(3)]
-              for r in range(2)]
+    figv = plt.figure(figsize=(16.5, 5.6))
+    axes3d = [figv.add_subplot(1, 3, c + 1, projection="3d") for c in range(3)]
     frames = []
     for t in range(0, T, stride):
-        for r, (tag, pc) in enumerate([("real (L515)", re_pc[t]),
-                                       ("sim (paired twin)", rec["point_cloud"][t])]):
-            v = _valid(pc)
-            for c, (vname, elev, azim) in enumerate(views):
-                ax = axes3d[r][c]
-                ax.clear()
-                ax.scatter(v[:, 0], v[:, 1], v[:, 2], s=2, c=v[:, 2], cmap="viridis",
-                           vmin=0.0, vmax=0.45, alpha=0.5)
-                ax.set_xlim(0.2, 0.71); ax.set_ylim(-0.215, 0.215); ax.set_zlim(0, 0.45)
-                ax.view_init(elev, azim)
-                ax.set_title(f"{tag} — {vname}  t={t}", fontsize=9)
-        figv.suptitle(f"paired clouds — episode {ep_idx + 1}")
+        vr = _valid(re_pc[t])
+        vs = _valid(rec["point_cloud"][t])
+        for ax, (vname, elev, azim) in zip(axes3d, views):
+            ax.clear()
+            ax.scatter(vr[:, 0], vr[:, 1], vr[:, 2], s=2, c="tab:blue", alpha=0.45,
+                       label=f"real ({len(vr)})")
+            ax.scatter(vs[:, 0], vs[:, 1], vs[:, 2], s=2, c="tab:red", alpha=0.45,
+                       label=f"sim ({len(vs)})")
+            ax.set_xlim(0.2, 0.71); ax.set_ylim(-0.215, 0.215); ax.set_zlim(0, 0.45)
+            ax.view_init(elev, azim)
+            ax.set_title(f"{vname}  t={t}", fontsize=10)
+            if ax is axes3d[0]:
+                ax.legend(fontsize=8, loc="upper right")
+        figv.suptitle(f"paired clouds OVERLAY (real=blue, sim=red) — episode {ep_idx + 1}")
         figv.canvas.draw()
         frames.append(np.asarray(figv.canvas.buffer_rgba())[..., :3].copy())
     plt.close(figv)
