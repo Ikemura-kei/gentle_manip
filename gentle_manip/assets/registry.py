@@ -52,6 +52,18 @@ OBJECT_MAP: dict[str, ObjectDef] = {
     "mushroom": ObjectDef("mushroom", MATERIALS["mushroom"], object_type="soft",
                           size=(0.033, 0.032, 0.035), default_pos=(0.47, 0.0, 0.016),
                           mesh_path=str(_OBJ_DIR / "mushroom.obj")),
+    # Hunyuan3D-scanned real-mushroom variants (item 6): rotated to the same z-up/cap-up
+    # convention and uniformly scaled to the nominal mushroom's mean extent (~33 mm); same
+    # material/spawn conventions, so they drop into any mushroom task via object name.
+    "mushroom1": ObjectDef("mushroom1", MATERIALS["mushroom"], object_type="soft",
+                           size=(0.0323, 0.0322, 0.0351), default_pos=(0.47, 0.0, 0.016),
+                           mesh_path=str(_OBJ_DIR / "mushroom1.obj")),
+    "mushroom2": ObjectDef("mushroom2", MATERIALS["mushroom"], object_type="soft",
+                           size=(0.0318, 0.0319, 0.0359), default_pos=(0.47, 0.0, 0.016),
+                           mesh_path=str(_OBJ_DIR / "mushroom2.obj")),
+    "mushroom3": ObjectDef("mushroom3", MATERIALS["mushroom"], object_type="soft",
+                           size=(0.0357, 0.0326, 0.0313), default_pos=(0.47, 0.0, 0.016),
+                           mesh_path=str(_OBJ_DIR / "mushroom3.obj")),
 
     # ── Grasp-benchmark shape set ────────────────────────────────────────────────────────────────
     # Three extra soft objects that bracket the geometry axis the mushroom alone cannot test.

@@ -197,7 +197,7 @@ alerts went to an unread file, and a val-pass crash minutes after a clean startu
 | 3 | afucm real-data-amount ablation {1, 5, 10, 20, 30 demos}, tested in real | cluster agent | SIM DONE — flat across N (peaks 0.635-0.735, seed-noise range; sfpom/wclac/luewz/ibkzr/ordtr in the canonical table). Real ranking = user, today |
 | 4 | Sync colleague on the FIXED SETUP: native 7d euler action · arm-focus cloud · quat proprio · realws DR · DPPO codebase · ×3.5 big net (512 + [1024]³, 2.89 M EMA) | user | next working day. (Note: "native 7d" — recording native euler commands is bit-equivalent to the validated 10d-record + `--derive-source-action` path, ~1e-7; either satisfies the setup) |
 | 5 | Reduce demo occlusion (penalty or hard angle constraint) | **local agent** | mechanism ALREADY BUILT + validated (hard azimuth bound 45°, `v5c`; fully-hidden 24%→4%, soft penalty provably inert — conclusion 10); remaining work = integrate into the post-item-2 synthesis version once 2 is confirmed |
-| 6 | More mushroom variants closer to real shapes | user (mesh prep) | parallel; final step = rerun the good pipeline with more meshes |
+| 6 | More mushroom variants closer to real shapes | user (mesh prep) | MESHES IN ASSETS (2026-08-24): 3 Hunyuan3D real-mushroom scans (`obj_meshes/mushroom{1,2,3}/clean.obj`) normalized to the nominal mushroom's convention — rotated y-up→z-up (cap +z, stem −z), uniformly scaled to the nominal mean extent (~33 mm), origin at xy bbox center / 42.7% above bottom — written to `gentle_manip/assets/objects/mushroom{1,2,3}.obj` + registered in `assets/registry.py` (same mushroom material/spawn, sizes 32.3×32.2×35.1 / 31.8×31.9×35.9 / 35.7×32.6×31.3 mm). Side-by-side check: `docs/figures/mushroom_variants_2026-08-24.png`. Remaining = rerun the collection pipeline over the variant set (multi-mesh DR or per-mesh tasks) |
 | 7 | OOD size+shape test scenario | cluster agent | SIM DONE — ASYMMETRIC: big-OOD (1.5-1.8×) easier than in-domain (0.75-0.92); small-OOD (0.7-0.95×) collapses (0.13-0.22) for every policy. ACTION: extend training scale DR downward if real mushrooms can be < nominal |
 | 8 | Robustness to missed grasps | **local agent** | DEFERRED until everything else checks out. Partially exists: retry-on-slip (`--retry-max`, window 0.15–0.30, 5/5 recovery) is built + validated; open remainder = induced-failure coverage (idea 3) |
 | 9 | Promote to generalist (end-to-end) | cluster agent | LAST, after 8 is decided |
@@ -368,6 +368,94 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-24 (later) — 3 Hunyuan3D mushroom scans normalized into assets (item 6).**
+`obj_meshes/{mushroom1,mushroom2,mushroom3}/clean.obj` (~6 k verts each, unit-scale,
+y-up with stem along +y) converted to the nominal `assets/objects/mushroom.obj`
+convention and added to the registry:
+
+- rotation (x,y,z)→(x,z,−y): stem +y → −z, so cap-up at +z like the nominal (both
+  orientations verified by 3-view point projections before and after);
+- uniform scale to the nominal's MEAN extent 33.2 mm (per-mesh factors ≈0.0177-0.0189);
+- origin convention matched: xy bbox center at 0, z origin 42.7 % above the bbox bottom
+  (nominal z-span −14.8..+19.9 mm; variants land −13.4..−15.3 .. +17.9..+20.5 mm);
+- faces copied verbatim (no vn/vt in the sources), METERS, headers document the transform.
+
+Written: `gentle_manip/assets/objects/mushroom{1,2,3}.obj`; registry entries
+`"mushroom1"/"mushroom2"/"mushroom3"` (mushroom material, `object_type="soft"`,
+`default_pos=(0.47,0,0.016)`, sizes 32.3×32.2×35.1 / 31.8×31.9×35.9 / 35.7×32.6×31.3 mm
+from measured extents; m3 is a genuinely wide-flat specimen). Verification figure:
+`docs/figures/mushroom_variants_2026-08-24.png` (x-z projection, nominal + all three,
+same mm axes). Registry import + mesh-path existence checked. Next step for item 6:
+run collection/eval over the variant set (spawn-z sanity per mesh first — same check
+that caught the 1.8× OOD floor clip).
+
+**2026-08-24 (later) — banana1 / strawberry1: the euler gate's real failure mode is
+THIN APPENDAGES, and the handles are GENERATED, not a cleanup artifact.**
+Pass rates: mushroom1 9/12, banana1 **1/6**, strawberry1 **0/3**.
+
+`scripts/mesh_from_photos/genus_trace.py` (new) walks euler through every cleanup
+stage and sweeps decimation ratios. Measured on the LARGEST COMPONENT, before any
+decimation:
+
+| mesh | pre-decimation | after decimation (2x-10x staging, 12k or 20k) |
+|---|---|---|
+| strawberry photo_seed0 | watertight, **genus 36** | genus 13-15 |
+| banana ..5616_seed0 | watertight, **genus 1** | genus 1, identical at every setting |
+| mushroom1 back_seed0 (control) | **genus 0** | genus 0 |
+
+**Conclusions:**
+1. TripoSG GENERATES the handles. Decimation does not add them — for the strawberry it
+   REMOVES them (36 -> 14). Decimation ratio/target has no measurable effect on genus.
+   No amount of cleanup tuning will fix this; do not go looking again.
+2. The handles live in **thin appendages** at the ~512^3 occupancy-grid limit: the
+   strawberry's curling calyx sepals and the banana's thin stalk. Two thin surfaces
+   passing within a voxel fuse into a tunnel. The mushroom is chunky with no thin
+   parts, which is exactly why it scores 9/12. Predicted (and to be checked) that
+   mushroom3, whose stem is torn into a thin sheet/fin, fails more than mushroom2.
+   NOT the achenes — the strawberry's seed pits survive decimation as clean dimples.
+3. **CORRECTION to the earlier entry: "staged decimation" is probably NOT what fixed
+   mushroom1.** Staging shows zero effect on genus in all three traces. The original
+   failure was `euler=4, comps=2` (two closed components), and the operative fix was
+   the **post-decimation floater pass** added in the same patch. Staging is harmless
+   but appears to do no work; do not credit it.
+4. **genus > 0 does NOT block FEM.** tetgen needs closed + manifold +
+   self-intersection-free; a genus-11 watertight manifold tetrahedralises fine. The
+   spec's "a fruit should be genus 0" is a PLAUSIBILITY check for spotting artifacts
+   (and it works — it caught real ones), not a solver requirement. Options for these
+   objects: crop the calyx/stalk (the part that is not grasped) to reach genus 0, or
+   downgrade euler to a warning and gate on self-intersections instead.
+   **Known gap:** `self_intersections` is in the spec's section 6 report schema but is
+   NOT yet computed by `postprocess.py` (no pymeshlab on aarch64; would need an
+   rtree broadphase + exact tri-tri test).
+
+**Also: `rembg` handles a hand-held object far better than expected** — the operator's
+hand was removed cleanly from both banana frames. Residue is a small grey smudge at the
+grip point (soft-alpha 0.113 vs mushroom's ~0.05). Where the hand OCCLUDES the object
+(banana view 1's stem) the geometry is simply invented, same class of problem as the
+mushroom underside. `u2net_human_seg` is available in the installed rembg if explicit
+hand subtraction is ever needed.
+
+**2026-08-24 (later still) — mushroom2/mushroom3 CONFIRM the thin-structure diagnosis.**
+Pass rates across five objects: mushroom2 **9/9**, mushroom1 9/12, mushroom3 **3/9**,
+banana1 1/6, strawberry1 0/3. mushroom2 vs mushroom3 is a near-controlled comparison
+(same species, same rig, minutes apart, both clean mattes); the only material difference
+is mushroom3's stem being torn into a thin fin, and yield drops 9/9 -> 3/9. Within
+mushroom3 it degrades by view with stem thinness: U-notch 2/3, thin spike 1/3, broad fin
+0/3. The prediction made before running was correct. Selected meshes: mushroom2
+`IMG20260824150816_seed0`, mushroom3 `IMG20260824150710_seed0` (its cap is clean in every
+candidate — only the stem carries handles). New: `scripts/mesh_from_photos/write_readme.py`
+generates a per-object README + promotes the chosen candidate; `mesh_from_photos_object.sbatch`
+runs any object end-to-end. **Also found: an ODD euler (mushroom3 ..0710_seed1, euler=1)
+means non-orientable / not-truly-manifold, NOT handles — trimesh's `is_watertight` only
+checks 2-faces-per-edge. The `genus` field assumes orientability and is meaningless for
+odd euler; use `is_winding_consistent`.** And the SKEWER is reconstructed as a rod in all
+three mushroom2 view-3 seeds — occlude rig hardware at capture time.
+
+**Heuristic gap worth knowing:** `_prep_report.json` called all of banana/strawberry
+"clean". A hand attached to the fruit is ONE connected component, does not touch the
+border, and barely moves the soft-alpha fraction, so no automated check fires. The
+section 3 matte review must stay a human visual gate.
+
 **2026-08-24 — Item-17 fix arms launched in parallel (user directive: fixes #2 and #5
 alongside item 18; all on the afucm base; 1-2 iterations allowed).**
 - **item 18** aux grasp-width head: `item18_w0p5` (1626204) / `item18_w2p0` (1626209) —
@@ -424,16 +512,25 @@ for aarch64/sm_90 for TRELLIS, or (b) run Hunyuan3D-2mv on non-EU hardware.
    failure surfaces minutes later as `AttributeError: 'NoneType' has no attribute
    'astype'`. Pass `use_flash_decoder=False` → `hierarchical_extract_geometry` +
    skimage marching cubes. No CUDA build needed anywhere in this pipeline.
-2. **The login node kills mesh-scale work** (exit 144, no output, no traceback).
-   A 1.9M-face `trimesh` load + connected-components trips it. All postprocessing
-   must go through SLURM even though it needs no GPU — and this account can only
-   submit to the `gpu` partition.
+2. **CORRECTED (was wrong in the first version of this entry): there is NO
+   login-node kill.** The `exit 144, no output` I attributed to a login-node limit
+   was self-inflicted: `pkill -f "<pattern>"` matches the *pkill command's own shell
+   cmdline*, so it kills the shell that runs it. Reproduced deliberately:
+   `bash -c 'pkill -f "zzz_unique_marker"; echo SURVIVED'` → exit 144, no output.
+   Never `pkill -f` a pattern that appears in your own command line.
+   The real login-node issue is CONTENTION, not a limit: loading a 2.1M-face GLB
+   there did not finish in 110 s, while a GH200 node does load+split in 2.3 s. So
+   still run postprocessing through SLURM — but for throughput, not because it is
+   killed. (This account can only submit to the `gpu` partition.)
 
-**Perf note:** `trimesh.split()` on a ~2M-face marching-cubes mesh builds one full
-`Trimesh` per component (~200 of them) and is minutes-slow; a single
-`scipy.sparse.csgraph.connected_components` pass over the vertex graph replaces it.
-Also decimate BEFORE hole-filling/manifold repair — those cost minutes at 2M faces
-and milliseconds at 12k. And decimate in STAGES (<=10x per pass): a single
+**Perf note — CORRECTED.** An earlier version of this entry claimed
+`trimesh.split()` is minutes-slow at 2M faces and had been replaced with a
+`scipy.sparse.csgraph.connected_components` pass. Both halves were wrong: the scipy
+patch never actually applied (the editing command was killed by the `pkill` bug
+above, so the file kept the original `split()`), and the original `split()` measures
+**2.3 s** at 1.87M faces on a GH200 node. No optimisation was needed or made.
+What IS verified: decimate BEFORE hole-filling/manifold repair — repair costs
+minutes at 2M faces and milliseconds at 12k. And decimate in STAGES (<=10x per pass): a single
 155:1 jump from 1.9M to 12k tears the surface — results came back non-watertight with
 handles (euler -8) and a second component shed. Staged [186k, 18.6k, 12k] + a second
 floater pass gives euler 2.
