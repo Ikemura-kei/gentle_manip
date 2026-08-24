@@ -611,10 +611,12 @@ REFINEMENT (per-bin): success-only widths are NEAR-CONSTANT ~27-29 mm at every s
 (11-15 mm) — a positioning-miss symptom. Verdict + reranked fixes in item 17; item 18
 (aux grasp-width head) remains proposed as an encoder size-awareness aid.
 
-**2026-08-24 — Currently running (post-campaign tail).** Width probes for item 17
+**2026-08-24 — Post-campaign tail (all concluded).** Width probes for item 17
 (widthprobe_prmaw / widthprobe_afucm — instrumented 60-ep evals, 12 geometries each,
-per-step command dumps → commanded-width-vs-scale correlation); prmaw state_600 (last
-canonical-sweep eval). Everything else concluded; latest verdicts: item 10 gentle = NEGATIVE
+per-step command dumps → commanded-width-vs-scale correlation) DONE, results in the item-17
+verdict. prmaw state_600 eval DONE (retried after an 8h hang/TIMEOUT on n58, job 1645708):
+0.410 / 0.445 ever / 0.465 in-band, sustained 18.7 kPa, peak 49.8 — curve declines after
+the 200 peak (0.54), best ckpt unchanged; prmaw row final. Everything else concluded; latest verdicts: item 10 gentle = NEGATIVE
 (0.54 peak @200, sustained 25.1 kPa — 0.15 success cost, no stress benefit vs afucm's
 0.685/24.0); hold-tail = rescues h8 across seeds (ymbve 0.68, udvpq 0.67 vs jjjjy 0.04)
 but mildly hurts healthy configs (ht_afucm 0.49-0.53 vs 0.685); ptpii (item 12) curve
