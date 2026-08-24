@@ -368,6 +368,24 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-24 (later) — mesh-pool DR (`object_mesh_pool`) + 4-mushroom smoke collection;
+lesson: the v3 collector MIRRORS SimBackend's scene DR.**
+New DR knob `object_mesh_pool` (dr_config.py): per-scene-rebuild uniform pick of the base
+mesh from a list of registry names, same cadence as size/shape DR, deform applied ON TOP of
+the pick; audited as `mesh_variant` (scene_params + dr_params.csv column). Configs:
+`dr/soft_orientation_realws_mm4.yaml` + experiment `..._armfocus_realws_mm4` (= adopted
+realws setup + pool [mushroom, mushroom1, mushroom2, mushroom3]). No-op guarantee for all
+existing configs verified (pool defaults None → identical control flow).
+**LESSON (bug caught at launch):** patching `SimBackend._apply_scene_dr` alone is NOT
+enough for collections — `collect_demos_synth_v3.py` has its own mirrored `_apply_scene_dr`
+(bakes scale into the exported mesh for the CMA-ES SDF; deform dir `gm_synth_deform_*` vs
+SimBackend's `gm_deform_*` — the prefixes in the Genesis spawn log are the tell). First
+smoke launch (1639566) was collecting nominal-mushroom-only; caught in the ~45 s startup
+check by the deform-dir prefix, cancelled, collector patched (same pool pick + audit
+column), relaunched as 1643324. Any future scene-DR extension must touch BOTH paths
+(CLAUDE.md "keep the two in sync" applies to scene DR, not just privileged obs).
+Smoke recipe: adopted hwo/v3 recipe, N_EPISODES=150 N_ENVS=8, SCENE_DR_EVERY=1.
+
 **2026-08-24 (later) — 3 Hunyuan3D mushroom scans normalized into assets (item 6).**
 `obj_meshes/{mushroom1,mushroom2,mushroom3}/clean.obj` (~6 k verts each, unit-scale,
 y-up with stem along +y) converted to the nominal `assets/objects/mushroom.obj`
