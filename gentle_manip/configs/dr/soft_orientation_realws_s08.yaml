@@ -1,0 +1,39 @@
+# [dr] soft_orientation_realws with object_scale [0.8, 1.5] (item 18 size-support extension).
+# Used by: experiments single_lift_mushroom_soft_abs_action_armfocus_{realws_smallband (collect), 7d_realws_s08 (eval)}
+# Status: experimental (item 18: small-size data complement)
+#
+# Matches the CMA-ES demo collection parameters (collect_demos_synth.py defaults):
+#   xy_range=0.04, pitch_roll_range_deg=45, full yaw (360°).
+# Use this for both BC pretraining (via sim server) and eval so the policy sees the
+# same distribution it was trained on.  The wider pitch/roll (45° vs sim_demo's 15°)
+# is the whole point of the rigid orientation experiment.
+# ABSOLUTE spawn region matching the REAL workspace (2026-08-22, user-specified):
+# x in [0.29, 0.48], y in [-0.11, 0.11] (robot-base frame). Overrides the old ±4.5cm
+# box around the registry pose (0.47, 0). nominal_xy converts to the internal offset.
+object_pos_x: [0.29, 0.48]
+object_pos_y: [-0.11, 0.11]
+object_nominal_xy: [0.47, 0.0]
+robot_init_pos_xyz: 0.02      # per-env arm-home jitter (unchanged from sim_demo)
+object_yaw_deg: 180           # full 360° yaw (U(-180,180))
+object_pitch_roll_deg: 45     # ±45° pitch & roll — matches --pitch-roll-range 45 in data collection
+object_flip_prob: 0.25        # per-env prob of a big FLIP instead of the ±45° tilt: sets one of pitch/roll
+object_flip_deg: [160, 180]   # to ±U(160,180)° so the mushroom spawns flipped -> settles upright/upside-down
+
+# Per-scene SIZE + SHAPE DR (object geometry) — re-randomized per scene rebuild. In collection
+# (collect_demos_synth.py --scene-dr-every) each rebuild deforms+scales the mushroom mesh; in eval
+# the harness drives it deterministically per scene group. Recorded into priv_object_dr_params
+# ([scale, bend_deg]). Ranges match configs/dr/food_shape.yaml (the earlier sim demo collection).
+object_scale:      [0.8, 1.5]
+object_bend_deg:   [-25, 25]     # curvature along the long axis (deg)
+object_twist_deg:  [-20, 20]     # twist about the long axis (deg)
+object_taper:      [-0.15, 0.15] # end-to-end thickness change (fraction)
+object_axis_scale: [0.95, 1.15]    # anisotropic scale on ONE random x/y/z axis
+
+# ── per-scene material (rebuild) ─────────────────────────────────────────────
+# Bounded for MPM stability at the tuned substeps (210): stable substeps ∝ √E, so we keep E on
+# the SOFT side of the tuned 3e5 (softer = fewer substeps needed = always stable). yield stays
+# from the registry material.
+object_E: [2.0e5, 3.0e5]     # Young's modulus (Pa)
+object_nu: [0.32, 0.38]      # Poisson ratio
+object_rho: [900, 1100]      # density (kg/m^3)
+coup_friction: [3.5, 4.5]    # rigid<->MPM coupling friction

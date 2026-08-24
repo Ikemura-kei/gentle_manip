@@ -1,0 +1,23 @@
+# [experiment] armfocus_7d_realws with the WIDENED size range [0.8, 1.5] (item 18 in-domain eval).
+# Used by: canonical eval of the s08-trained runs (sim server + harness)
+# Status: experimental (item 18: small-size data complement)
+#
+# IDENTICAL to single_lift_mushroom_soft_abs_action_armfocus EXCEPT the action is abs_pose_euler_abs_gripper
+# (7d: 3 pos + 3 euler + 1 grip) instead of abs_pose_abs_gripper (10d rot6d). The eval sim server derives
+# its ActionPipeline from this action, so the 7d arm-focus ABS policy must be evaluated with THIS experiment.
+task: single_lift_mushroom_soft
+action: abs_pose_euler_abs_gripper
+dr: soft_orientation_realws_s08   # scale [0.8, 1.5] — widened in-domain range
+augmentation: l515_noise
+
+obs: superset_soft_armfocus
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400
