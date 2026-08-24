@@ -311,6 +311,29 @@ the next episode's video — this was the dominant desync (ghost contains real m
 videos from before the fixes align exactly by END-ANCHORING (the save side flushes at the save
 tick); the paired renderer does this automatically.
 
+**2026-08-24 — v3.1 overnight campaign RESULTS (items 2+5 test, run `fleli`) + the missing
+STOP-signal finding.** Training-results table (local protocol: 200 eps, seed 42, realws
+experiment, scene_group 4, per-episode video; best ckpt = best EVER success; both rows
+evaluated on THIS machine for apples-to-apples — afucm's cluster number was 0.685):
+
+| run | log location (…/dppo-pretrain/) | best ckpt | success | ever | in-band | sustained | peak | remark |
+|---|---|---|---|---|---|---|---|---|
+| afucm | (cluster) `single_lift_mushroom_simreal_realws_noos_cmd/afucm` — local re-eval `downloaded_runs/afucm/eval/2026-08-24_10-11-08` | state_400 | 0.575 | 0.650 | 0.66 | 24.7 kPa | 50.9 kPa | baseline: foundation co-train (hwo-recipe sim + 55 real noos) |
+| fleli | `single_lift_mushroom_simreal_realws_noos_cmd_v31/fleli` | state_200 | 0.265 | 0.610 | 0.65 | 30.1 kPa | 53.0 kPa | v3.1 demos (item-2 human-matched grasp event + item-5 azimuth-45); state_100: 0.00/0.41; **evals stopped after state_200 (user call)** — 300–600 unevaluated |
+
+Reading: by state_200 (of 600) the v3.1 policy REACHES the band on par with afucm (ever
+0.61 vs 0.65, in-band 0.65 vs 0.66) but does not HOLD: success lags ever by 0.345 (afucm:
+0.075), hold_failure_gap 0.035 vs 0.010 (state_100: 0.10). The failure is at the STOP, not
+the grasp. **Stop-signal audit** (user hypothesis confirmed): every sim episode ends with
+EXACTLY 4 held stop frames — `_trim_long_holds` keep=4 collapses the whole hold phase —
+vs 6 in the real demos; one action-chunk of "stop at lift height" supervision. hwo carries
+the same 4 (and afucm still holds), so thin stop supervision alone isn't sufficient as an
+explanation, but it is the obvious deficit to fix first. **Adopted next step (user):**
+increase kept stop frames (e.g. `HELD_RUN_KEEP` 4 → ~10, or exempt the final hold from
+trimming), augment the policy, retrain. Secondary observation: v31 sustained stress is
+HIGHER than afucm (30.1 vs 24.7 kPa) despite identical squeeze parameters — worth a look
+when the stop fix re-runs. Campaign details: [item2_demo_kinematics.md](item2_demo_kinematics.md).
+
 **2026-08-24 — real_lab.yaml `point_cloud_shift` set to the measured bias [0.009, 0, 0].**
 The item-1 arm-segment bias (~9 mm −x in every real cloud) is now cancelled at the source
 for all future real recording AND deployment (applied to the static cam_ext extrinsic).
