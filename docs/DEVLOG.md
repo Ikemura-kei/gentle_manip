@@ -311,6 +311,18 @@ the next episode's video — this was the dominant desync (ghost contains real m
 videos from before the fixes align exactly by END-ANCHORING (the save side flushes at the save
 tick); the paired renderer does this automatically.
 
+**2026-08-24 — Offset-corrected paired real variant (`26-08-23-oso-offset`) validates the
+bias fix.** The cube3 real clouds shifted by the implemented `point_cloud_shift` [0.009,0,0]
+(proprio untouched, zero-pad preserved) → `dataset/demos/single_lift_cube3_real/26-08-23-oso-offset`,
+re-compared against the same sim twin: full-cloud chamfer **14.8 → 8.7 mm**, arm segment
+13 → 6.5–10.4 mm, object region 25 → ~16.6 mm (= the physical placement offset, correctly
+untouched by a perception fix). Residual arm bias +3.9 mm x: the NN-displacement estimator
+attenuates under shape noise, so the TRUE bias is likely ~12–13 mm — if the shift is ever
+recalibrated, try ~0.012–0.013 (one more measure-shift iteration would pin it). Multi-view
+paired videos (offset real | sim): `dataset/demos/single_lift_cube3_rigid/26-08-23-oso-offset/`.
+For item 16: the cluster agent can build a second paired npz from the offset variant if they
+want the consistency loss to see bias-corrected real clouds.
+
 **2026-08-24 — v3.1 overnight campaign RESULTS (items 2+5 test, run `fleli`) + the missing
 STOP-signal finding.** Training-results table (local protocol: 200 eps, seed 42, realws
 experiment, scene_group 4, per-episode video; best ckpt = best EVER success; both rows
