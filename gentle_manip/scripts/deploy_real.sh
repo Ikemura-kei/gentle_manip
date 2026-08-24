@@ -285,6 +285,83 @@
 #   --shard-size 10 \
 #   --max-steps 5000
 
+# ── CLUSTER: alzey/state_200 — ITEM 16: paired-feature encoder regularization (w=0.5) on the
+# afucm setup. Same data as afucm (realws sim + 55 real noos, 7d euler commanded, armfocus cloud,
+# big net 512+[1024]^3) PLUS a cosine consistency loss pulling PointNet features of the 4,148
+# paired real/sim cube3 steps together (dataset/dppo/paired_cube3_clouds.npz). Hypothesis: encoder
+# domain alignment improves real transfer beyond raw co-training. Direct A/B vs afucm/state_400.
+#
+# Wiring identical to afucm (all reverified):
+#   * obs point_cloud_1cam_armfocus.yaml; action abs_pose_euler_abs_gripper (7d euler commanded);
+#     rate-limit clamp active at RealBackend.
+#   * net arch auto-loads from downloaded_runs/alzey/.hydra (visual 512, mlp [1024]^3). The
+#     paired-reg model class (cluster commit 20b0082, not yet on master) is TRAINING-only — the
+#     EMA checkpoint is a plain PointNetDiffusionMLP state_dict (verified: no extra keys), so the
+#     standard deploy loader works.
+#   * normalization MUST be alzey's own (same data as afucm but stats are the dataset's).
+#   * REAL TABLE PLACEMENT: object inside x [0.29, 0.48], y [-0.11, 0.11] (robot-base frame).
+#
+# ── CLUSTER: wclac/state_300 — ITEM 3: real-data-amount ablation, N=5 real demos (afucm recipe:
+# realws sim 585 eps + FIRST 5 real demos, plain concat, union norm; big net; standard model).
+# Curve context: nmbtz N=0 (sim 0.71, real WORST) · wclac N=5 · afucm N=50 (real ~75%, BEST).
+# The real-robot ranking over N is the deliverable — sim success is expected flat (~0.65-0.71).
+#
+# Wiring identical to afucm (armfocus obs; 7d euler commanded; net arch auto-loads from
+# downloaded_runs/wclac/.hydra; rate-limit clamp at RealBackend). normalization MUST be wclac's
+# own (its union stats cover only 5 real demos — do NOT reuse afucm's).
+# REAL TABLE PLACEMENT: object inside x [0.29, 0.48], y [-0.11, 0.11] (robot-base frame).
+#
+# ckpt=downloaded_runs/wclac/checkpoint/state_300.pt
+# normalization=downloaded_runs/wclac/normalization.npz
+
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} \
+#   --ft-denoising-steps 0 \
+#   --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --smooth-alpha 0.6 \
+#   --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/wclac300 \
+#   --shard-size 10 \
+#   --max-steps 5000
+
+# ── CLUSTER: luewz/state_500 — ITEM 3: real-data-amount ablation, N=10 real demos (afucm recipe:
+# realws sim 585 eps + FIRST 10 real demos, plain concat, union norm; big net; standard model).
+# Curve: nmbtz N=0 (real worst) · wclac N=5 · luewz N=10 · afucm N=50 (real ~75%, best).
+# Wiring identical to wclac/afucm; normalization MUST be luewz's own (N=10 union stats).
+# REAL TABLE PLACEMENT: object inside x [0.29, 0.48], y [-0.11, 0.11] (robot-base frame).
+#
+# ckpt=downloaded_runs/luewz/checkpoint/state_500.pt
+# normalization=downloaded_runs/luewz/normalization.npz
+
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} \
+#   --ft-denoising-steps 0 \
+#   --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --smooth-alpha 0.6 \
+#   --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/luewz500 \
+#   --shard-size 10 \
+#   --max-steps 5000
+
+ckpt=downloaded_runs/alzey/checkpoint/state_200.pt
+normalization=downloaded_runs/alzey/normalization.npz
+
+uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+  --ckpt ${ckpt} \
+  --ft-denoising-steps 0 \
+  --normalization ${normalization} \
+  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+  --smooth-alpha 0.6 \
+  --max-pos-step-m 0.0065 \
+  --record dataset/real_deploy/alzey200 \
+  --shard-size 10 \
+  --max-steps 5000
+
 # ── CLUSTER SHORTLIST: nmbtz/state_500 — PURE-SIM realws, 7d euler abs, arm-focus cloud ──────────
 # REAL RESULT (2026-08-23): WORST of the shortlist despite the best sim score (0.71) — pure sim
 # still carries a sim2real gap; sim rankings do not transfer across data regimes.
@@ -296,20 +373,20 @@
 # Wiring identical to afucm (armfocus obs REQUIRED; rate-limit clamp active; big net auto-loads
 # from downloaded_runs/nmbtz/.hydra). REAL TABLE PLACEMENT: x [0.29, 0.48], y [-0.11, 0.11].
 #
-ckpt=downloaded_runs/nmbtz/checkpoint/state_500.pt
-normalization=downloaded_runs/nmbtz/normalization.npz
+# ckpt=downloaded_runs/nmbtz/checkpoint/state_500.pt
+# normalization=downloaded_runs/nmbtz/normalization.npz
 
-uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-  --ckpt ${ckpt} \
-  --ft-denoising-steps 0 \
-  --normalization ${normalization} \
-  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
-  --smooth-alpha 0.6 \
-  --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/nmbtz500 \
-  --shard-size 10 \
-  --max-steps 5000
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} \
+#   --ft-denoising-steps 0 \
+#   --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --smooth-alpha 0.6 \
+#   --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/nmbtz500 \
+#   --shard-size 10 \
+#   --max-steps 5000
 
 # ── CLUSTER SHORTLIST: qjzsf/state_1000 — REAL-ONLY (55 demos), 7d euler abs (commanded + K4) ────
 # REAL RESULT (2026-08-23): second — behind afucm (co-train), ahead of nmbtz (pure sim).

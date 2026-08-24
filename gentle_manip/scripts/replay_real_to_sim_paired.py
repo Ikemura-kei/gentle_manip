@@ -68,6 +68,9 @@ def main():
                     help="output dataset dir; default dataset/demos/<task-name>/<real leaf>")
     ap.add_argument("--episodes", default="", help="comma-sep episode indices (default: all)")
     ap.add_argument("--video-stride", type=int, default=2)
+    ap.add_argument("--render-only", action="store_true",
+                    help="skip the sim replay; re-render figures/videos from the existing "
+                         "paired data.pkl in --out (e.g. after changing the video views)")
     args = ap.parse_args()
 
     from gentle_manip.actions.action_config import ActionConfig
@@ -95,6 +98,19 @@ def main():
     out = args.out or (REPO / "dataset/demos" / args.task_name / args.real_run.name)
     out.mkdir(parents=True, exist_ok=True)
     print(f"real run: {args.real_run}\nout:      {out}\nepisodes: {picks}", flush=True)
+
+    if args.render_only:
+        paired = pickle.load(open(out / "data.pkl", "rb"))
+        for ep_idx, sep in zip(picks, paired["episodes"]):
+            ep = eps[ep_idx]
+            _figures(out, ep_idx,
+                     np.asarray(ep["observations"]["ee_pos"]),
+                     np.asarray(ep["observations"]["ee_quat"]),
+                     np.asarray(ep["observations"]["gripper_width"])[:, 0],
+                     np.asarray(ep["observations"]["point_cloud"]),
+                     {k: np.asarray(v) for k, v in sep["observations"].items()},
+                     args.video_stride)
+        return
 
     backend = SimBackend(task.scene_spec, 1, config={"sim": {"settle_steps": 20}},
                          use_subprocess=False)
@@ -216,21 +232,27 @@ def _figures(out, ep_idx, re_ee, re_quat, re_gw, re_pc, rec, stride):
     fig.savefig(out / f"ep_{ep_idx + 1:03d}_match.png", dpi=110, bbox_inches="tight")
     plt.close(fig)
 
-    figv = plt.figure(figsize=(12, 5.5))
-    axr = figv.add_subplot(1, 2, 1, projection="3d")
-    axs = figv.add_subplot(1, 2, 2, projection="3d")
+    # OVERLAY paired video: real (blue) + sim (red) in the SAME axes, 3 views side by side
+    # (camera-side, low side, top-down) — the direct visual of the sim2real cloud gap.
+    views = [("cam view", 30, -60), ("side view", 8, -150), ("top-down", 78, -90)]
+    figv = plt.figure(figsize=(16.5, 5.6))
+    axes3d = [figv.add_subplot(1, 3, c + 1, projection="3d") for c in range(3)]
     frames = []
     for t in range(0, T, stride):
-        for ax, tag, pc in [(axr, "real (L515)", re_pc[t]),
-                            (axs, "sim (paired twin)", rec["point_cloud"][t])]:
+        vr = _valid(re_pc[t])
+        vs = _valid(rec["point_cloud"][t])
+        for ax, (vname, elev, azim) in zip(axes3d, views):
             ax.clear()
-            v = _valid(pc)
-            ax.scatter(v[:, 0], v[:, 1], v[:, 2], s=2, c=v[:, 2], cmap="viridis",
-                       vmin=0.0, vmax=0.45, alpha=0.5)
+            ax.scatter(vr[:, 0], vr[:, 1], vr[:, 2], s=2, c="tab:blue", alpha=0.45,
+                       label=f"real ({len(vr)})")
+            ax.scatter(vs[:, 0], vs[:, 1], vs[:, 2], s=2, c="tab:red", alpha=0.45,
+                       label=f"sim ({len(vs)})")
             ax.set_xlim(0.2, 0.71); ax.set_ylim(-0.215, 0.215); ax.set_zlim(0, 0.45)
-            ax.view_init(30, -60)
-            ax.set_title(f"{tag}  t={t}  ({len(v)} pts)")
-        figv.suptitle(f"paired clouds — episode {ep_idx + 1}")
+            ax.view_init(elev, azim)
+            ax.set_title(f"{vname}  t={t}", fontsize=10)
+            if ax is axes3d[0]:
+                ax.legend(fontsize=8, loc="upper right")
+        figv.suptitle(f"paired clouds OVERLAY (real=blue, sim=red) — episode {ep_idx + 1}")
         figv.canvas.draw()
         frames.append(np.asarray(figv.canvas.buffer_rgba())[..., :3].copy())
     plt.close(figv)

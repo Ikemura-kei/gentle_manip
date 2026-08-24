@@ -192,7 +192,7 @@ alerts went to an unread file, and a val-pass crash minutes after a clean startu
 
 | # | item | owner | status / sequencing |
 |---|---|---|---|
-| 1 | Real data: 3 cm cube placed right below the arm; analyze sim-vs-real data difference | **local agent** | FIRST (with 2). Sim-side counterpart partly staged: `cube4` task/experiment configs exist |
+| 1 | Real data: 3 cm cube placed right below the arm; analyze sim-vs-real data difference | **local agent** | **DONE** — probe recorded, sim twin generated, gap decomposed (~9 mm perception x-bias + placement offset; [report](item1_cube3_simreal_gap.md)) |
 | 2 | Real-vs-sim demo analysis (trajectory character, speed, grasp speed, grasp width, …); match the scripted demo to real properties → better co-training | **local agent** | FIRST (with 1). Slow/pausing trajectories are fine when the derivation carries lead — qjzsf (real-only, slow teleop, K=4 lookahead) works in real; the v6 stall was K=1 with near-zero lead. Just derive slowed sim demos with lookahead (or verify the lead/dwell gates) as done for teleop |
 | 3 | afucm real-data-amount ablation {1, 5, 10, 20, 30 demos}, tested in real | cluster agent | SIM DONE — flat across N (peaks 0.635-0.735, seed-noise range; sfpom/wclac/luewz/ibkzr/ordtr in the canonical table). Real ranking = user, today |
 | 4 | Sync colleague on the FIXED SETUP: native 7d euler action · arm-focus cloud · quat proprio · realws DR · DPPO codebase · ×3.5 big net (512 + [1024]³, 2.89 M EMA) | user | next working day. (Note: "native 7d" — recording native euler commands is bit-equivalent to the validated 10d-record + `--derive-source-action` path, ~1e-7; either satisfies the setup) |
@@ -759,6 +759,121 @@ wherever the operator paused); (2) a DISCARDED episode's frames leaked as a ghos
 the next episode's video — this was the dominant desync (ghost contains real motion). Legacy
 videos from before the fixes align exactly by END-ANCHORING (the save side flushes at the save
 tick); the paired renderer does this automatically.
+
+**2026-08-24/25 — v3.2 synthesis + 200-demo quick verification (run `bsipf`; ROUGH PICTURE
+ONLY, user-curtailed at state_200).** v3.2 = v3.1 + real-style CONTINUOUS approach
+(`--approach-xy-finish 0.45 0.75`: xy smoothstep finishing early, z linear — no via-point,
+no stop; speed guard caps peak xy at 3.2 mm/step), azimuth 45→60 + jitter 20→30 (wider
+yaw/pitch/roll), 10 trailing stop frames (`--held-run-max 12 --held-run-keep 10`, the fleli
+hold-deficit fix), and the NEW pinch post-filter (`filter_pinch_episodes.py` — flags
+dangling/rim grasps via TCP-vs-object geometry at hold; the user-flagged pinch video was
+the top outlier; 9/200 = 4.5 % dropped). Collection `26-08-24-cvz` (200 eps, 90.5 %) →
+filtered 191 → kinematics vs real: hover-at-alignment 92 mm (real 84), xy-align frac 0.49
+(real 0.60), rot 33.5° (real 30). Trained afucm-twin arch, 1200 ep/save 200 on 191+55.
+
+| run | log location (…/dppo-pretrain/) | best ckpt | success | ever | in-band | sustained | peak | remark |
+|---|---|---|---|---|---|---|---|---|
+| bsipf | `single_lift_mushroom_simreal_realws_noos_cmd_v32/bsipf` | state_200 (only one evaluated) | 0.055 | 0.140 | 0.175 | 16.0 kPa | 49.4 kPa | v3.2, 191 demos; eval stopped after state_200 (user) — state_400–1200 UNevaluated |
+
+Honest read: weak but **not conclusive** — state_200/1200 is only 17 % through its cosine
+cycle (fleli's fraction-matched point is state_100: 0.00/0.41), and 191 demos vs 500. Still,
+ever-rate 0.14 vs fleli-state_100's 0.41 suggests slower take-off, not just less training.
+hold_failure_gap 0.035 (= fleli) — the stop-frame fix is NOT yet confirmed effective at this
+early checkpoint. Sustained stress 16 kPa is the lowest recorded (n=11 successes; likely
+weak-grasp artifact, not gentleness). Checkpoints exist for later eval; the real verdict
+belongs to the cluster-scale rerun (500+ demos, matched fractions). ALSO ADOPTED for that
+rerun (measured, user-prompted): **approach speed compensation** — fixed 77-step approach
+makes speed ∝ spawn distance (corr 0.91 in sim vs 0.29 in real; real moves at ~constant
+2.4 mm/step) → per-env `dur_i = dist_i / v_ref` (the per-env FSM supports it; not yet
+implemented). Gate lesson: the euler-seam pre-flight check must diff WITHIN episodes
+(traj_lengths) — concatenated diffs cross episode boundaries and false-trip on diverse end
+poses (v32 within-episode jump: 0.016 = seam-free; boundary: 1.131).
+
+**2026-08-24 — Offset-corrected paired real variant (`26-08-23-oso-offset`) validates the
+bias fix.** The cube3 real clouds shifted by the implemented `point_cloud_shift` [0.009,0,0]
+(proprio untouched, zero-pad preserved) → `dataset/demos/single_lift_cube3_real/26-08-23-oso-offset`,
+re-compared against the same sim twin: full-cloud chamfer **14.8 → 8.7 mm**, arm segment
+13 → 6.5–10.4 mm, object region 25 → ~16.6 mm (= the physical placement offset, correctly
+untouched by a perception fix). Residual arm bias +3.9 mm x: the NN-displacement estimator
+attenuates under shape noise, so the TRUE bias is likely ~12–13 mm — if the shift is ever
+recalibrated, try ~0.012–0.013 (one more measure-shift iteration would pin it). Multi-view
+paired videos (offset real | sim): `dataset/demos/single_lift_cube3_rigid/26-08-23-oso-offset/`.
+For item 16: the cluster agent can build a second paired npz from the offset variant if they
+want the consistency loss to see bias-corrected real clouds.
+
+**2026-08-24 — v3.1 overnight campaign RESULTS (items 2+5 test, run `fleli`) + the missing
+STOP-signal finding.** Training-results table (local protocol: 200 eps, seed 42, realws
+experiment, scene_group 4, per-episode video; best ckpt = best EVER success; both rows
+evaluated on THIS machine for apples-to-apples — afucm's cluster number was 0.685):
+
+| run | log location (…/dppo-pretrain/) | best ckpt | success | ever | in-band | sustained | peak | remark |
+|---|---|---|---|---|---|---|---|---|
+| afucm | (cluster) `single_lift_mushroom_simreal_realws_noos_cmd/afucm` — local re-eval `downloaded_runs/afucm/eval/2026-08-24_10-11-08` | state_400 | 0.575 | 0.650 | 0.66 | 24.7 kPa | 50.9 kPa | baseline: foundation co-train (hwo-recipe sim + 55 real noos) |
+| fleli | `single_lift_mushroom_simreal_realws_noos_cmd_v31/fleli` | state_200 | 0.265 | 0.610 | 0.65 | 30.1 kPa | 53.0 kPa | v3.1 demos (item-2 human-matched grasp event + item-5 azimuth-45); state_100: 0.00/0.41; **evals stopped after state_200 (user call)** — 300–600 unevaluated |
+
+Reading: by state_200 (of 600) the v3.1 policy REACHES the band on par with afucm (ever
+0.61 vs 0.65, in-band 0.65 vs 0.66) but does not HOLD: success lags ever by 0.345 (afucm:
+0.075), hold_failure_gap 0.035 vs 0.010 (state_100: 0.10). The failure is at the STOP, not
+the grasp. **Stop-signal audit** (user hypothesis confirmed): every sim episode ends with
+EXACTLY 4 held stop frames — `_trim_long_holds` keep=4 collapses the whole hold phase —
+vs 6 in the real demos; one action-chunk of "stop at lift height" supervision. hwo carries
+the same 4 (and afucm still holds), so thin stop supervision alone isn't sufficient as an
+explanation, but it is the obvious deficit to fix first. **Adopted next step (user):**
+increase kept stop frames (e.g. `HELD_RUN_KEEP` 4 → ~10, or exempt the final hold from
+trimming), augment the policy, retrain. Secondary observation: v31 sustained stress is
+HIGHER than afucm (30.1 vs 24.7 kPa) despite identical squeeze parameters — worth a look
+when the stop fix re-runs. Campaign details: [item2_demo_kinematics.md](item2_demo_kinematics.md).
+
+**2026-08-24 — real_lab.yaml `point_cloud_shift` set to the measured bias [0.009, 0, 0].**
+The item-1 arm-segment bias (~9 mm −x in every real cloud) is now cancelled at the source
+for all future real recording AND deployment (applied to the static cam_ext extrinsic).
+Deploy note: sim-trained/co-trained policies should benefit (deploy clouds now align with
+the sim training distribution); the real demo slices recorded BEFORE this (merged 55,
+cube3 probe) keep their baked-in unshifted clouds — a ~9 mm intra-dataset inconsistency in
+mixed training, negligible vs the noise but worth remembering. Cheap real A/B if in doubt:
+toggle the shift to 0 in real_lab.yaml and compare a few afucm episodes.
+
+**2026-08-24 — Item 2 kinematics analysis + the v3.1 synthesis update (overnight campaign,
+in progress).** Full report: [item2_demo_kinematics.md](item2_demo_kinematics.md). Real
+merged 55 vs hwo 650, pose-space at 30 Hz: the hwo recipe already MATCHES human speed
+almost exactly (translation 2.20 vs 2.22 mm/step; rotation, approach depth, close-from-
+full-open, lift speed all matched) — speed is NOT the remaining data-side lever. The real
+differences cluster at the GRASP EVENT: humans hover 6 steps before closing (scripted 2),
+close 40 % faster (21 vs 34 steps), rotate less (30° vs 50° from home), stay vertical
+(tilt 2.0° vs 7.4°), and squeeze ~4 mm deeper (settle 30.9 vs 35.3 mm — deliberately NOT
+copied: fights gentleness + would confound vs afucm; recorded as a slip-robustness lever).
+**v3.1 implemented** (`collect_demos_synth_v3.py`, defaults inert): `--n-settle` (hover)
+and `--cam-azimuth-max-deg` (item-5 occlusion bound via the FEM planner's shaped azimuth
+penalty + camera-perp seed fan — one knob serves occlusion AND the rotation match).
+v3.1 recipe = hwo + `--n-settle 6 --n-grasp 20 --cam-azimuth-max-deg 45`; smoke-verified
+(hover 6, close 25, rot 43°). New npz-level merge tool `gentle_manip/dppo/merge_npz_datasets.py`
+(per-source denorm → concat → joint renorm) builds mixed sim+real datasets whose sources
+need different derivations. Overnight run: 500-ep realws collection (`26-08-24-ndr`) →
+7d-euler commanded conversion → +55 real (noos, afucm setup: big net 600 ep) → checkpoint
+sweep vs afucm under the same local protocol. Results table to follow.
+
+**2026-08-23 — Item 1 gap analysis: the real-sim cloud difference decomposes into a ~9 mm
+perception bias + placement offset.** Full report: [item1_cube3_simreal_gap.md](item1_cube3_simreal_gap.md).
+On the paired cube3 datasets (below): full-cloud chamfer 14–18 mm/frame. The proprio-pinned
+ARM segment shows a systematic real→sim displacement of **+9 mm in x** (8.0–10.8 across all
+5 eps, y/z ≤2 mm) = the real rig's perception bias along the cam_ext ray (L515 depth
+over-read / extrinsic xy residual — actionable via the existing `point_cloud_shift` knob or
+recalibration). The OBJECT segment is displaced +25 mm x: the 9 mm bias plus ~16 mm of
+by-eye placement offset (protocol fix: register the cube by jogging the TCP onto it). One
+rigid translation explains 43 % of the whole gap (14.8 → 8.4 mm); the residual is diffuse
+(L515 noise; real cube renders 58–70 pts vs sim 92 — grazing-angle dropout). Object-point
+detail: the real top face is thin (9–16 pts vs sim 27) and reads ~2 mm lower (both domains
+read the 31 mm top low at the L515's near-edge-on elevation); the real x-extent flutters
+28–51 mm between episodes where sim is a constant 51 mm (unstable silhouette); after
+removing the 25 mm translation the object chamfer drops to roughly the noise floor — the
+difference is POSITION + SPARSITY, not shape, i.e. exactly the nuisance variation item 16's
+paired feature-consistency loss should absorb. z is healthy
+(top face within ~2 mm; the historical 6–11 mm table-z offset is absent here). Bonus
+findings: armfocus clouds are ~93 % arm with NO far-field table in either domain; rigid sim
+replayed an accidental 7 cm cube push to 3 mm (ep1); the real servo's ROTATION tracking lags
+(ep4 drifts to ~8–15° during fast yaw) — an execution-side gap already mitigated by the
+rate-limit bounds. Paired videos now render 3 views per side (`--render-only` re-render;
+RGB|cloud renderer likewise upgraded).
 
 **2026-08-23 — Paired real–sim twin of the cube3 probe (for item 1 analysis + item 16
 regularization).** New committed generator `gentle_manip/scripts/replay_real_to_sim_paired.py`:

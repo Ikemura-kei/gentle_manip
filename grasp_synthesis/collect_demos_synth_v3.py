@@ -429,6 +429,10 @@ def execute_and_collect(
     priv_cfg=None,                 # PrivilegedConfig or None — sim-only state-teacher fields
     dr_vec=None,                   # (2,) [scale, bend_deg] for priv_object_dr_params
     extra_close: float = 0.0,      # squeeze this many meters TIGHTER than the synthesized width (all grasps)
+    approach_xy_finish=None,       # v3.2: (lo, hi) per-env xy-progress finish fraction; None = straight line
+    approach_rng=None,             # rng for the per-env f_i draw (reproducibility)
+    trim_max_run: int = HELD_RUN_MAX,   # v3.2: held-run trim knobs (end-of-episode stop supervision)
+    trim_keep: int = HELD_RUN_KEEP,
 ) -> Tuple[List[List[dict]], List[List[np.ndarray]], List[List[float]], np.ndarray, List[List]]:
     """Execute the scripted grasp trajectory with DECOUPLED per-env phase control;
     record (obs, action, reward) per env.
@@ -486,12 +490,39 @@ def execute_and_collect(
     slerps = [Slerp([0., 1.], Rot.concatenate([home_r, _wxyz_to_rot(quat_b[i])]))
               for i in range(num_envs)]
 
+    # v3.2 real-style approach: per-env xy-progress finish fraction f_i. The real teleop
+    # approach converges xy EARLY (median: xy aligned at 60% of the pre-close time, still
+    # ~84mm above the grasp) while z descends ~linearly throughout — captured here as
+    # per-AXIS progress profiles over the same phase (CONTINUOUS: no via-point, no corner,
+    # the trajectory never stops; xy eases in with a smoothstep while z keeps moving).
+    if approach_xy_finish is not None:
+        _rng = approach_rng if approach_rng is not None else np.random.default_rng(0)
+        xy_finish = _rng.uniform(approach_xy_finish[0], approach_xy_finish[1], num_envs)
+        # Speed guard: smoothstep peak xy speed = 1.5 * xy_dist / (f * dur). Compressing a
+        # far-corner spawn's xy path into a small f would exceed the real speed band (p95
+        # ~3.7 mm/step) AND the deploy-time rate clamp — floor f so peak xy speed stays
+        # <= XY_V_MAX. f floors above 1.0 degrade gracefully toward the straight line.
+        XY_V_MAX = 0.0032   # m/step, ~real p95 with margin
+        dur_appr = float(dict(PHASES)["approach"])
+        xy_dist = np.linalg.norm(pos_b[:, :2] - home_pos[:, :2], axis=1)
+        f_min = 1.5 * xy_dist / (XY_V_MAX * dur_appr)
+        xy_finish = np.minimum(np.maximum(xy_finish, f_min), 1.0)
+    else:
+        xy_finish = None
+
     def _env_target(i: int, phase_idx: int, phase_step: int):
         """(pos, quat_wxyz, grip) for env i at its OWN (phase_idx, phase_step)."""
         name, dur = PHASES[phase_idx]
         if name == "approach":
             alpha = (phase_step + 1) / dur
-            pos = home_pos[i] + alpha * (pos_b[i] - home_pos[i])
+            if xy_finish is None:
+                pos = home_pos[i] + alpha * (pos_b[i] - home_pos[i])
+            else:
+                x = min(alpha / xy_finish[i], 1.0)
+                s_xy = x * x * (3.0 - 2.0 * x)          # smoothstep: zero xy-velocity only at ITS arrival
+                pos = np.empty(3, np.float32)
+                pos[:2] = home_pos[i, :2] + s_xy * (pos_b[i, :2] - home_pos[i, :2])
+                pos[2] = home_pos[i, 2] + alpha * (pos_b[i, 2] - home_pos[i, 2])   # z: linear, never pauses
             xyzw = slerps[i](alpha).as_quat()
             quat = np.array([xyzw[3], xyzw[0], xyzw[1], xyzw[2]], np.float32)
             grip = width_open[i]
@@ -673,7 +704,8 @@ def execute_and_collect(
     if action_config.mode == "absolute":
         for i in range(num_envs):
             act_bufs[i], obs_bufs[i], rew_bufs[i], frame_bufs[i] = _trim_long_holds(
-                act_bufs[i], obs_bufs[i], rew_bufs[i], frame_bufs[i])
+                act_bufs[i], obs_bufs[i], rew_bufs[i], frame_bufs[i],
+                max_run=trim_max_run, keep=trim_keep)
 
     return obs_bufs, act_bufs, rew_bufs, success, frame_bufs
 
@@ -820,6 +852,27 @@ def main() -> None:
     p.add_argument("--n-grasp", type=int, default=N_GRASP,
                    help=f"gripper-close steps (the 'grasp' phase length); default {N_GRASP}. A shorter "
                         "close reaches the target width sooner (less dwell before the lift).")
+    p.add_argument("--n-settle", type=int, default=N_SETTLE,
+                   help=f"hold-at-grasp-pose steps before closing; default {N_SETTLE}. Item-2 finding: "
+                        "real teleop hovers ~6 steps at the grasp pose before closing (scripted ~2).")
+    p.add_argument("--approach-xy-finish", type=float, nargs=2, default=None,
+                   metavar=("F_LO", "F_HI"),
+                   help="v3.2 real-style approach: per-env xy-progress finish fraction sampled "
+                        "uniform [F_LO, F_HI] (real median 0.60; recipe 0.45 0.75). xy converges "
+                        "early (smoothstep) while z descends linearly — continuous, no stopping. "
+                        "Default None = straight-line approach (bit-identical to v3/v3.1).")
+    p.add_argument("--held-run-max", type=int, default=HELD_RUN_MAX,
+                   help=f"trim held-command runs LONGER than this (default {HELD_RUN_MAX}); "
+                        "v3.2 recipe 12 (with --held-run-keep 10) preserves ~10 stop frames at "
+                        "the episode end — the 'stop at lift height' supervision the 4-frame "
+                        "floor was starving (fleli hold deficit).")
+    p.add_argument("--held-run-keep", type=int, default=HELD_RUN_KEEP,
+                   help=f"frames kept from a trimmed run (default {HELD_RUN_KEEP}); v3.2 recipe 10.")
+    p.add_argument("--cam-azimuth-max-deg", type=float, default=None,
+                   help="item-5 occlusion bound: shaped penalty on grasp yaw beyond this azimuth from "
+                        "the camera-perpendicular direction (deg; None = off). Passed to the FEM "
+                        "planner with the task camera's position; also centres the CMA seed fan. "
+                        "45 validated in the v5c profile (fully-hidden episodes 24%% -> 4%%).")
     p.add_argument("--n-lift", type=int, default=N_LIFT,
                    help=f"lift-phase steps; default {N_LIFT}.")
     p.add_argument("--n-firm", type=int, default=N_FIRM,
@@ -838,7 +891,7 @@ def main() -> None:
     global PHASES, N_PHASES, _GRASP_IDX
     PHASES = [
         ("approach", args.n_home_to_pre),
-        ("settle",   N_SETTLE),
+        ("settle",   args.n_settle),
         ("grasp",    args.n_grasp),
     ]
     if args.n_firm > 0:                    # --n-firm 0 drops the firm phase entirely (cho/v1 behaviour)
@@ -854,6 +907,10 @@ def main() -> None:
     exp        = Experiment.load(args.experiment)
     task       = SingleLiftTask(exp.task_cfg)
     spec       = task.scene_spec
+    # item-5 occlusion bound: the task camera's world position, only when the knob is on
+    # (None keeps the planner call byte-identical to the baseline recipe).
+    cam_pos = (np.asarray(spec.cameras[0].pos, float)
+               if args.cam_azimuth_max_deg is not None else None)
     obs_config = exp.collection_obs()
     priv_cfg   = obs_config.privileged        # sim-only state-teacher fields (None if not requested)
     action_config = exp.action_config
@@ -878,6 +935,11 @@ def main() -> None:
                         "n_episodes": args.n_episodes, "scene_dr_every": args.scene_dr_every,
                         "seed": args.seed, "n_home_to_pre": args.n_home_to_pre,
                         "n_grasp": args.n_grasp, "n_lift": args.n_lift, "n_firm": args.n_firm,
+                        "n_settle": args.n_settle,
+                        "cam_azimuth_max_deg": args.cam_azimuth_max_deg,
+                        "approach_xy_finish": list(args.approach_xy_finish) if args.approach_xy_finish else None,
+                        "held_run_max": args.held_run_max, "held_run_keep": args.held_run_keep,
+                        "grasp_jitter_deg": args.grasp_jitter_deg,
                         "grasp_extra_close": args.grasp_extra_close},
         "dr": exp.dr,
     }
@@ -894,6 +956,7 @@ def main() -> None:
     # (previously every _synth_worker call used run_cmaes's hardcoded default seed=2567, so
     # ALL envs/batches shared the identical internal search sequence regardless of --seed).
     cma_seed_rng = np.random.default_rng(args.seed + 1_000_000)
+    approach_rng = np.random.default_rng(args.seed + 2_000_000)   # v3.2 per-env xy-finish draws
 
     # ── Build scene + worker (with per-scene SIZE+SHAPE DR) ──
     # Scene DR re-randomizes object geometry by REBUILDING the worker every N batches (GenesisWorker
@@ -1046,13 +1109,15 @@ def main() -> None:
                                     n_starts=args.grasp_n_starts, seed=cma_seed, accel=args.grasp_accel,
                                     diversity_tol=args.grasp_diversity_tol, jitter_deg=args.grasp_jitter_deg,
                                     jitter_pos=args.grasp_jitter_pos, w_align=args.grasp_align,
-                                    pitch_seed_deg=args.grasp_pitch_seed_deg)
+                                    pitch_seed_deg=args.grasp_pitch_seed_deg,
+                                    cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg)
             if r.get("x") is None or r.get("stress_top10") is None:   # diversity found no feasible grasp;
                 print(f"  Env {i}: no feasible diverse grasp -> retry WITHOUT diversity")  # retry reliably
                 r = fg.synthesize_grasp(fem_obj, fem_pad_geo, obj_pos_all[i], obj_quat_all[i],
                                         E=args.grasp_E, density=args.grasp_density, mu=args.grasp_mu,
                                         table_z=args.table_z, maxfevals=args.maxfevals,
-                                        n_starts=args.grasp_n_starts, seed=cma_seed + 7, accel=args.grasp_accel)
+                                        n_starts=args.grasp_n_starts, seed=cma_seed + 7, accel=args.grasp_accel,
+                                        cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg)
             best_x = r["x"]
             if best_x is None or r.get("stress_top10") is None:       # extremely rare: still nothing ->
                 # default straight-down grasp at the object xy so the FSM never sees None (this episode may
@@ -1090,6 +1155,8 @@ def main() -> None:
                 worker, all_best_x, init_obs_batch, perception, action_config,
                 record_video=rec_this_batch, priv_cfg=priv_cfg, dr_vec=dr_vec,
                 extra_close=args.grasp_extra_close,
+                approach_xy_finish=args.approach_xy_finish, approach_rng=approach_rng,
+                trim_max_run=args.held_run_max, trim_keep=args.held_run_keep,
             )
             consec_batch_aborts = 0
         except Exception as e:

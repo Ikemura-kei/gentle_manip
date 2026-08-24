@@ -28,22 +28,26 @@ def render_episode(rgb_frames, clouds, ee, out_path: Path, fps: float, stride: i
     allpts = np.concatenate([clouds[t] for t in range(0, T, max(T // 20, 1))])
     lo, hi = allpts.min(0) - 0.02, allpts.max(0) + 0.02
 
+    # RGB + three cloud viewpoints (≈cam_ext direction, oblique side, top-down)
+    views = [("cam view", 22, -170), ("oblique", 30, -60), ("top-down", 78, -90)]
     frames = []
-    fig = plt.figure(figsize=(12.8, 4.8), dpi=100)
-    axr = fig.add_subplot(1, 2, 1)
-    axc = fig.add_subplot(1, 2, 2, projection="3d")
+    fig = plt.figure(figsize=(16, 4.4), dpi=100)
+    axr = fig.add_subplot(1, 4, 1)
+    axcs = [fig.add_subplot(1, 4, i + 2, projection="3d") for i in range(3)]
     for t in range(0, T, stride):
-        axr.clear(); axc.clear()
+        axr.clear()
         axr.imshow(rgb_frames[t]); axr.axis("off")
         axr.set_title(f"RGB (cam_ext)  t={t}", fontsize=10)
         pc = clouds[t]
-        # color by height — makes the object pop from the table without any labels
-        axc.scatter(pc[:, 0], pc[:, 1], pc[:, 2], s=1.5, c=pc[:, 2], cmap="viridis")
-        axc.scatter(*ee[t], c="red", s=45, marker="*")
-        axc.set_xlim(lo[0], hi[0]); axc.set_ylim(lo[1], hi[1]); axc.set_zlim(lo[2], hi[2])
-        axc.set_title("point cloud (policy input) + EE", fontsize=10)
-        axc.view_init(elev=22, azim=-170)          # ≈ the cam_ext direction (looking -x)
-        axc.set_box_aspect((hi - lo))
+        for axc, (vname, elev, azim) in zip(axcs, views):
+            axc.clear()
+            # color by height — makes the object pop from the table without any labels
+            axc.scatter(pc[:, 0], pc[:, 1], pc[:, 2], s=1.5, c=pc[:, 2], cmap="viridis")
+            axc.scatter(*ee[t], c="red", s=45, marker="*")
+            axc.set_xlim(lo[0], hi[0]); axc.set_ylim(lo[1], hi[1]); axc.set_zlim(lo[2], hi[2])
+            axc.set_title(f"cloud + EE — {vname}", fontsize=9)
+            axc.view_init(elev=elev, azim=azim)
+            axc.set_box_aspect((hi - lo))
         fig.canvas.draw()
         img = np.asarray(fig.canvas.buffer_rgba())[:, :, :3]
         frames.append(img.copy())
