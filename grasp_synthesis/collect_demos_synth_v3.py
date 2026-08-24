@@ -247,10 +247,15 @@ def _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir):
     o = nominal_spec.objects[0]
     nominal_scale = float(o.scale or 1.0)
     shp = dr_cfg.sample_shape_scale(rng)                     # {} if no shape/scale fields set
-    if not shp:
-        return nominal_spec, {"scale": nominal_scale, "bend_deg": 0.0}
+    variant = dr_cfg.sample_mesh_variant(rng)                # base-mesh pool pick (or None);
+                                                             # same cadence as size/shape DR
+    if not shp and variant is None:
+        return nominal_spec, {"scale": nominal_scale, "bend_deg": 0.0, "mesh_variant": o.name}
 
-    nominal_mesh = o.mesh_path or get_object_def(o.name).mesh_path
+    if variant is not None:                                  # pool pick replaces the base mesh;
+        nominal_mesh = get_object_def(variant).mesh_path     # shape DR deforms FROM the pick
+    else:
+        nominal_mesh = o.mesh_path or get_object_def(o.name).mesh_path
     mesh = trimesh.load(str(nominal_mesh), process=False, force="mesh")
     shape = {k: shp[k] for k in ("bend", "twist", "taper", "rbf", "axis_scale", "axis_scale_ax")
              if k in shp}
@@ -263,7 +268,8 @@ def _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir):
     new_obj  = dataclasses.replace(o, mesh_path=str(dst), scale=1.0)
     new_spec = dataclasses.replace(nominal_spec, objects=[new_obj, *nominal_spec.objects[1:]])
     scene_dr = {"scale": float(shp.get("scale", 1.0)),
-                "bend_deg": float(np.rad2deg(shp.get("bend", 0.0)))}
+                "bend_deg": float(np.rad2deg(shp.get("bend", 0.0))),
+                "mesh_variant": variant if variant is not None else o.name}
     return new_spec, scene_dr
 
 
@@ -937,6 +943,7 @@ def main() -> None:
     dr_writer.writerow(["batch", "env", "success", "obj_dx", "obj_dy",
                         "roll_deg", "pitch_deg", "yaw_deg", "flipped",
                         "home_dx", "home_dy", "home_dz", "scene_scale", "scene_bend_deg",
+                        "mesh_variant",
                         "stress_Pa", "grip_N", "align", "pressure_Pa", "min_pad_mm2", "width_mm"])
 
     total_saved  = 0
@@ -959,6 +966,7 @@ def main() -> None:
 
         print(f"\n── Batch {batch_idx}  [{total_saved}/{args.n_episodes} saved]"
               + (f"  scale={scene_dr['scale']:.3f} bend={scene_dr['bend_deg']:+.1f}°"
+                   f" mesh={scene_dr.get('mesh_variant', '-')}"
                  if do_scene_dr else "") + " ──")
 
         # ── Reset with per-env pose DR (ranges from experiment DR config) ──
@@ -1078,6 +1086,7 @@ def main() -> None:
                                 round(float(ho[0]), 5), round(float(ho[1]), 5), round(float(ho[2]), 5),
                                 round(float(scene_dr.get("scale", 1.0)), 4),
                                 round(float(scene_dr.get("bend_deg", 0.0)), 2),
+                                scene_dr.get("mesh_variant", ""),
                                 round(float(g.get("stress_top10") or 0), 1), round(float(g.get("grip") or 0), 4),
                                 round(float(g.get("align") or 0), 4), round(float(g.get("pressure") or 0), 1),
                                 round(float((g.get("min_pad_area") or 0) * 1e6), 2),
