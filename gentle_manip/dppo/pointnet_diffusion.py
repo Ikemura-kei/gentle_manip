@@ -77,7 +77,7 @@ class PointNetDiffusionMLP(nn.Module):
                  time_dim=16, mlp_dims=(512, 512, 512), activation_type="ReLU",
                  out_activation_type="Identity", use_layernorm=False, residual_style=True,
                  aux_contact=False, aux_object_pos=False, aux_grasp_width=False,
-                 aux_hidden=128,
+                 feed_width_pred=False, aux_hidden=128,
                  use_first_frame_context=False):
         super().__init__()
         pn = dict(pointnet or {})
@@ -94,7 +94,15 @@ class PointNetDiffusionMLP(nn.Module):
             SinusoidalPosEmb(time_dim), nn.Linear(time_dim, time_dim * 2), nn.Mish(),
             nn.Linear(time_dim * 2, time_dim))
         ctx_dim = visual_feature_dim if self.use_first_frame_context else 0
-        input_dim = time_dim + action_dim * horizon_steps + visual_feature_dim + ctx_dim + cond_dim
+        # item 18b (planner-executor): append the width head's own DETACHED prediction to the
+        # conditioning — an explicit 1-d planned-grasp-width input for the denoiser. Prediction
+        # (not label) is fed in training too (no exposure bias); stop-grad keeps the head
+        # trained purely by its aux loss. Requires aux_grasp_width=True.
+        self.feed_width_pred = bool(feed_width_pred)
+        if self.feed_width_pred:
+            assert aux_grasp_width, "feed_width_pred requires aux_grasp_width"
+        wdim = 1 if self.feed_width_pred else 0
+        input_dim = time_dim + action_dim * horizon_steps + visual_feature_dim + ctx_dim + cond_dim + wdim
         output_dim = action_dim * horizon_steps
         model = ResidualMLP if residual_style else MLP
         self.mlp_mean = model([input_dim] + list(mlp_dims) + [output_dim],
@@ -122,8 +130,7 @@ class PointNetDiffusionMLP(nn.Module):
         state = cond["state"].view(B, -1)
         feat = _encode_clouds(self.backbone, cond["point_cloud"], self.pc_cond_steps)
         if self.use_first_frame_context:
-            ctx = _encode_clouds(self.backbone, cond["first_point_cloud"], 1)
-            return torch.cat([feat, ctx, state], dim=-1)
+            feat = torch.cat([feat, _encode_clouds(self.backbone, cond["first_point_cloud"], 1)], dim=-1)
         return torch.cat([feat, state], dim=-1)
 
     def aux_predict(self, cond: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
@@ -144,6 +151,9 @@ class PointNetDiffusionMLP(nn.Module):
         B, Ta, Da = x.shape
         x = x.view(B, -1)
         cond_encoded = self._cond_encoded(cond)
+        if self.feed_width_pred:   # 18b: append the DETACHED planned width (denoiser path only;
+            # aux_predict keeps the base feature, so head input dims are unchanged)
+            cond_encoded = torch.cat([cond_encoded, self.width_head(cond_encoded).detach()], dim=-1)
         time_emb = self.time_embedding(time.view(B, 1)).view(B, self.time_dim)
         x = torch.cat([x, time_emb, cond_encoded], dim=-1)
         return self.mlp_mean(x).view(B, Ta, Da)
