@@ -189,6 +189,7 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
 | 14 | Camera-pose DR (slight: ~0.5 cm/axis, 1–5°) | cluster agent | SIM DONE (jtzqc 0.57 @400 vs 0.685 — mild expected robustness cost). REAL-TEST CANDIDATE (its whole point is extrinsics drift) |
 | 15 | DP horizon ablation: predict 8 / execute 4 | cluster agent | SIM DONE — h8/e4 alone FAILS (jjjjy 0.05; e8 diagnostic 0.20), but hold-tail data RESCUES it (ymbve 0.68). Verdict: keep 4/4 default; h8 viable only with stay-still tails |
 | 16 | **Paired-feature encoder regularization**: add a consistency term to the BC loss pulling the encoder features of PAIRED real/sim steps together (e.g. L2/cosine between the PointNet features of real step t and its sim-twin step t), using the paired cube3 datasets below (and any future real recording — the twin generator works on any run). Hypothesis: aligning the visual representation across domains improves sim2real beyond raw co-training | cluster agent | SIM POSITIVE — w=0.5 (alzey) 0.785 @200 (+0.10 over baseline), w=0.1 (vexvd) 0.715; heavier alignment better. TOP real-test candidate: the hypothesis IS real transfer |
+| 17 | **Small-object failure investigation & fix**: failures are monotonically size-dependent (in-domain scale 1.0-1.125: 0.32-0.48 ever vs 0.80-0.90 at 1.25+; small-OOD 0.7-0.95 collapses to 0.13-0.22; thin/low-axis_scale worst) — determine whether the policy learned width adaptation (demos DO adapt: min-width spread 26-45 mm) via the width-probe correlation (commanded width vs obj_scale), then fix accordingly: weak correlation → data-side (extend scale DR below 1.0, oversample small); strong correlation but still failing → perception-side (small objects underrepresented in the 1024-pt cloud; consider object-region point budget) | cluster agent | width probes RUNNING (widthprobe_prmaw/afucm, instrumented 60-ep evals); verdict pending |
 
 Sequencing summary: **1+2 first (local)** · 3 ongoing · 4 immediately next working day (user) ·
 5 after 2 confirms · 6 mesh-prep parallel (user) · 7 parallel (cluster) · 10 after 2+5 (or on
@@ -336,6 +337,15 @@ in the narrative sections + subpages.
 ---
 
 ## Log
+
+**2026-08-24 — Currently running (post-campaign tail).** Width probes for item 17
+(widthprobe_prmaw / widthprobe_afucm — instrumented 60-ep evals, 12 geometries each,
+per-step command dumps → commanded-width-vs-scale correlation); prmaw state_600 (last
+canonical-sweep eval). Everything else concluded; latest verdicts: item 10 gentle = NEGATIVE
+(0.54 peak @200, sustained 25.1 kPa — 0.15 success cost, no stress benefit vs afucm's
+0.685/24.0); hold-tail = rescues h8 across seeds (ymbve 0.68, udvpq 0.67 vs jjjjy 0.04)
+but mildly hurts healthy configs (ht_afucm 0.49-0.53 vs 0.685); ptpii (item 12) curve
+complete, negative stands. User is real-testing the sim shortlist today.
 
 **2026-08-24 — Item 12 first verdict: first-frame context HURTS as implemented.**
 `ptpii` (attempt 3): 0.315/0.38/0.265/0.31/–/0.28 vs baseline 0.685 — success halved.
