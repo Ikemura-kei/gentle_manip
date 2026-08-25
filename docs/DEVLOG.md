@@ -405,6 +405,7 @@ The campaign's best sim policy (0.805/0.820 @300, sust 28.1; real-obs probe PASS
    [1024]^3), 600 ep, save/100, `action_dim=7 seed=42
    experiment=single_lift_mushroom_soft_abs_action_armfocus_7d_realws`, PLAIN DiffusionModel.
 7. DEPLOY PAIRING: point_cloud_shift [0.009,0,0] ACTIVE (mandatory).
+8. PROBES (complete): real-obs PASS @200+@300; width probe @300: at-grasp corr 0.083 (flat ~31.6 mm, plain model as expected) BUT small-half ever-success **0.80** (big 0.97) — the best small-object result of any probed policy (afucm 0.57, dgvmu 0.67): small objects need positioning/data quality, not width adaptation — the campaign lesson in one number.
 NJHBZ vs ALZEY (beyond the 9mm shift): sim slice hwo-v3 (1 mesh, [1.0,1.5], lerp
 approach, close 30, no azimuth/anti-stem/stop-frames, unfiltered, 585) vs v3.3 (4-mesh,
 [0.8,1.5], real-speed approach, close 20, azimuth 60, anti-stem, 10 stop frames,
