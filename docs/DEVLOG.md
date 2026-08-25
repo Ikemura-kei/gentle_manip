@@ -374,6 +374,24 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-26 — rztss probe: FLAT (0.095) — root-caused to a UNITS BUG in my residual
+transform; v2 (fixed) relaunched as s08_resw2.** The probe (residual add verified ACTIVE
+in-log) measured commanded width flat at 27 mm. Forensics: the v1 relabeling subtracted a
+DERIVE-space anchor from NPZ-normalized actions — round-trip consistent (training and eval
+mirror the same wrong transform, so success was preserved) but the anchor never de-scened
+the labels: training residual-at-closure stayed corr **1.000** with episode width (also
+revealing: in sim the position-controlled gripper achieves its command exactly, so
+commanded-at-closure is an affine of achieved width). rztss therefore learned its usual
+scene-tracking-free constant — nothing structural ever happened. FIX (1500c44): two-stage
+anchor (phys → derive-space → npz units, both sides); validated offline: residual-at-closure
+std 0.004 npz-units (~0.1 mm), corr 0.032 — a pure constant, so commanded = const +
+head(scene) now inherits the head's r≈0.8 GENUINELY by construction. Relaunched:
+s08_resw2 (job 1689133, watcher with GM_RESIDUAL_WIDTH). Sibling probes: xqmxw (18b+small)
+at-grasp 0.209 — feed-forward stays marginal. qrbtr (window ×8) curve filling (0.435/0.470
+@100/200 — mild success tax). LESSON: any relabel/anchor transform needs an offline
+label-statistics gate (corr(residual, scene) ≈ 0) BEFORE training — now part of the recipe.
+
+
 **2026-08-26 — tofu v11 COMPLETE: 97.6% (97.9% per-attempt), tilt bounded (mean 3.8°,
 p90 12°); recipe ready for the user's 650 gate.** v11 (`26-08-25-yhn`, 48 attempts) ==
 v10 statistically (success/align/grip identical); its real additions are the w_tilt
