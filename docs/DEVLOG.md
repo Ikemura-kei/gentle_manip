@@ -374,6 +374,47 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-27 — ANCHOR RUN DOCUMENTATION: njhbz (v33b_shift9) — full pipeline + args.**
+The campaign's best sim policy (0.805/0.820 @300, sust 28.1; real-obs probe PASS @200/300).
+1. COLLECT (job 1653982 → `dataset/demos/single_lift_mushroom_soft/26-08-25-clq`, 650 eps,
+   93.8%, 3 NaN-guard discards): `collect_demos_synth_v3.py --experiment
+   single_lift_mushroom_soft_abs_action_armfocus_realws_mm4_s08` (task
+   single_lift_mushroom_soft · obs superset_soft_armfocus · action abs_pose_abs_gripper 10d
+   · dr soft_orientation_realws_mm4_s08 = realws box x[0.29,0.48] y[±0.11] + 4-mesh pool
+   [mushroom,1,2,3] + scale [0.8,1.5] + organic shape DR ±25°/±20°/±0.15/[0.95,1.15] + yaw
+   180 / pitch-roll 45 / flips 0.25) with `--n-episodes 650 --n-envs 8 --scene-dr-every 1
+   --maxfevals 1145 --seed 0 --n-home-to-pre 77 --n-grasp 20 --n-settle 1
+   --grasp-extra-close 0.005 --cam-azimuth-max-deg 60 --grasp-jitter-deg 30
+   --approach-xy-finish 0.45 0.75 --approach-speed 0.0024 --held-run-max 12
+   --held-run-keep 10 --grasp-area-min-mm2 15 --grasp-w-press 0.05 --record-video 20`.
+   NOTE: diversity selection ON (tol 0.3 default), w_align 2000 default, w_peak
+   effectively 0 (legacy bug), no w_tilt — the tofu v11 strict-synthesis knobs are NOT in
+   this anchor.
+2. PINCH FILTER: `filter_pinch_episodes 26-08-25-clq` → `-filt`, 51/650 dropped → 599.
+3. CONVERT: `convert_demos <clq>-filt/data.pkl --out dataset/dppo/single_lift_mushroom_soft_v33_7d
+   --obs-keys ee_pos ee_quat gripper_width --point-cloud --derive-action
+   abs_pose_euler_abs_gripper --derive-source-action abs_pose_abs_gripper` (gates: seam 0,
+   dwell 0.193).
+4. REAL SLICE: `shift_demo_clouds real_merged --shift 0.009 0 0` → `real_merged_shift9mm`;
+   `convert_demos ... --derive-source-action delta_pose_delta_gripper_fast_rot
+   --derive-lookahead 4` → `single_lift_mushroom_real_7d_cmd_shift9` (gate: t0 grip 79.8mm,
+   z-lead 10.7mm=K4 design, grip tracking 0.1mm).
+5. MERGE: `merge_npz_datasets soft_v33_7d real_7d_cmd_shift9 --out
+   single_lift_mushroom_simreal_realws_noos_cmd_v33b_shift9` (654 eps, joint renorm).
+6. TRAIN (job 1680274): dppo_pretrain hwo cfg pre_diffusion_pointnet (visual 512, mlp
+   [1024]^3), 600 ep, save/100, `action_dim=7 seed=42
+   experiment=single_lift_mushroom_soft_abs_action_armfocus_7d_realws`, PLAIN DiffusionModel.
+7. DEPLOY PAIRING: point_cloud_shift [0.009,0,0] ACTIVE (mandatory).
+NJHBZ vs ALZEY (beyond the 9mm shift): sim slice hwo-v3 (1 mesh, [1.0,1.5], lerp
+approach, close 30, no azimuth/anti-stem/stop-frames, unfiltered, 585) vs v3.3 (4-mesh,
+[0.8,1.5], real-speed approach, close 20, azimuth 60, anti-stem, 10 stop frames,
+pinch-filtered, 599); model PairedReg(w0.5, cube3 pairs) vs PLAIN — one-mechanism-each
+siblings; their union = the shift9_preg_s{42,27,43} family now training. Deploy shift OFF
+(alzey) vs ON (njhbz). TOFU v11 synth vs this anchor: argmax (tol/jitter 0) + w_align 3e4
++ w_peak 0.3 + w_tilt 1.5e5 + area 35 + no pinch filter — a much stricter flush synthesis;
+do NOT port blindly to mushrooms (diversity is wanted on curved geometry).
+
+
 **2026-08-27 — paired-reg families launched (user): tofu(v11 smoke, pure sim) ×3 seeds +
 njhbz(shift9)+pairing ×3 seeds; verifier dwell gate shown NORMALIZATION-SENSITIVE.**
 Six trainings (jobs 1692481-86, seeds 42/27/43 — cfg-default IS 42 so the requested
