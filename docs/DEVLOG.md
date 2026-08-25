@@ -374,6 +374,24 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-26 — tofu v10: 97.6% (from 70.3%) — burial was the dominant failure driver;
+v11 adds the approach-tilt penalty for grasp QUALITY.** v10 (1680342's predecessor
+1678043, dataset `26-08-25-xhj`, 40 eps all-video, 0 aborts): spawn z 42 mm + `w_peak 0.3`
++ area floor 35 mm² → demonstrator success 63-70% → **97.6%**. User video review: no more
+buried corners; remaining issue is QUALITY — some successes are tilted-gripper EDGE
+contacts scoring nearly identically to flush grasps (edge 5682 Pa / align 0.919 vs nice
+flush 5718 Pa / align 0.994). Why the metric can't see them: (a) the displayed/objective
+stress is the contact-MASKED top10 — the visible red edge-stress stripes are exactly the
+masked elements; (b) the FEM contact model presses a ROUNDED parabolic pad — a sharp pad
+edge digging in is outside its vocabulary, so even unmasked p98 underestimates;
+(c) `align` is orthogonal to approach PITCH (contacted faces still ⟂ closing axis).
+CMA budget would NOT help — v10 is argmax, the metric's true optimum. Fix: wired
+`--grasp-w-tilt` (scorer's existing `w_tilt·(1−cos_t)` — prices exactly the visible
+approach tilt) + `tilt_deg` audit column in dr_params.csv (6a6fcd3). **v11 (1680342) =
+v10 + w_tilt 1.5e5** (15° ≈ 5 kPa-equiv). User-flagged exemplars of the target family:
+`26-08-25-xhj/videos/ep0020_env4, ep0035_env3, ep0036_env4` (near-vertical, align ≥0.99).
+
+
 **2026-08-25/26 — ⛔ v33 DATASET POISONED (real slice un-derived) — local agent's real
 deploy caught it; fix chain running.** The v3.3 doc's §3 merge command named
 `dataset/dppo/single_lift_mushroom_real` — a real slice whose recorded DELTA actions were
