@@ -426,6 +426,12 @@ supervision at MULTIPLE weights (informed by attempt-1/2: w=0.5 healthy, w=2.0 h
 18b feed-forward @0.5 matched baseline 0.675 — so likely 0.5 / 1.5 [+ feed variant]).
 Tofu 650+training remains GATED on the user's video OK (smoke v3 1653490 in flight).
 EXECUTED: v3.3 push merged clean (8abfeb6); campaign chain LAUNCHED per doc §1-5 — 650-ep mm4_s08 collection (v3.3 recipe verbatim incl. anti-stem + pinch filter), convert with the CORRECTED gates (within-episode seam; dwell <0.20 by design), merge_npz_datasets with the real 55 → `..._noos_cmd_v33`, then 3 arms: v33_plain / v33_aux0p5 / v33_aux1p5 (width-aux weights per the user's overnight ask), eval on the standard `_7d_realws` experiment vs afucm. Collect sbatch gained EXTRA_ARGS passthrough for the new flags.
+**COMPLETED (2026-08-26 early):** collection 26-08-25-clq 650 eps / 93.8% demonstrator
+(per-mesh 0.90-0.98, scale<1.0 at 0.947, 3 NaN-guard discards / 87 batches); pinch filter
+dropped 51 (7.8%, above the 2-5% expectation — wide-cap variants add rim-grasp chances) →
+599 kept; gates PASSED (0 within-episode seam jumps, dwell 0.193 < 0.20); merged with the
+real 55 → `noos_cmd_v33`. Trainings RUNNING: orkam (v33_plain, 1663145) · engcz
+(v33_aux0p5, 1663146) · kjljs (v33_aux1p5, 1663147), eval watchers armed.
 
 
 **2026-08-25 — PRACTICE CHANGE: MPM sampler `regular` is now the GLOBAL default
