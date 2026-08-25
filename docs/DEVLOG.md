@@ -411,6 +411,29 @@ Fix-slice verification: my chain gate PASSED (t0 gripper 79.8 mm vs poisoned 44;
 `..._noos_cmd_v33b` → retrain v33b_plain / v33b_aux0p5 / v33b_aux1p5. **orkam / engcz / kjljs are DEPRECATED** (2026-08-26, user): remaining eval jobs cancelled, experiments.csv statuses set `deprecated-poisoned-real-slice`; their checkpoints are UNSALVAGEABLE for real deployment — the broken real-branch mapping is learned into the weights (a visual-conditional behavior, not a decode issue) AND the merged normalization itself is contaminated (real-slice ranges compress every sim channel), so no inference-time patch exists; retraining (v33b) is the only fix. Their partial sim curves (orkam 0.715 @200 etc.) are kept ONLY as v3.3-recipe sim evidence, clearly marked deprecated.
 
 
+**2026-08-26 — local-agent response to the v33 post-mortem: the handoff doc was the origin;
+both cluster findings actioned.** Owning the first cause plainly: **`v3.3_synth.md` §3 named
+`dataset/dppo/single_lift_mushroom_real` in the merge command** — a stale prebuilt npz that had
+never been derived. The cluster agent followed the handoff as written, so the poisoning
+originates in my doc, not in their execution. §3 is now **corrected in place** with a visible
+banner: it builds the real slice **from the demo pkl with `--derive-source-action` + K4 every
+time** (never reuse a prebuilt real npz), points at the shift9mm variant for the corrected
+build, and adopts the cluster's rule that **every slice of a merge is gated, reused or not**,
+plus the merged file (its action ranges are a cheap tell — v33's z max read 0.438 m where no
+sim collection exceeds 0.235 m).
+Second finding accepted: **the dwell gate false-positived on correctly-derived real data**
+(0.429 vs my sim-calibrated 0.20). `verify_derived_dataset.py` now takes `--source
+sim|real|mixed` with ceilings 0.20 / none / 0.35 — under `--source real` dwell is REPORTED, not
+failed, because human teleop legitimately pauses AND it does not discriminate there (poisoned
+0.51 vs correct 0.43); the discriminating checks for a real slice are derivation and lead
+(poisoned gripper 44 mm / lead 249 mm vs correct 79.8 mm / ~11 mm). Re-verified: the poisoned
+slice still fails on derivation+lead under `--source real`. A gate that cries wolf on every
+valid real dataset is how the next real defect gets waved through, so this mattered.
+Agreed with the rest of the post-mortem: deprecating orkam/engcz/kjljs is right — the broken
+mapping is learned into the weights as a visual-conditional behaviour AND the merged
+normalization is contaminated, so there is no inference-time patch. The v33b + v33b_shift9
+pairing A/B is exactly the §4.1 experiment.
+
 **2026-08-26 — item-18 iter 4 LAUNCHED (residual width + grasp-window weighting) + tofu
 v9→v10.** Following the predictability study (heads corr≈0.8 → policy-learning problem),
 two mechanisms implemented (519e973) and launched on the s08 dataset, afucm recipe +

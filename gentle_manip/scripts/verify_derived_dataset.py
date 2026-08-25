@@ -18,10 +18,20 @@ train+deploy cycle at least once:
               point (perfect loss, 0% success).
   dwell       consecutive actions must rarely be near-identical, for the same reason. A small
               number of held frames at the END of an episode is intended (stop supervision) and
-              is excluded from the statistic.
+              is excluded from the statistic. SOURCE-DEPENDENT: the 0.20 threshold is calibrated
+              on scripted simulated demonstrations (v3.2 0.098, v3.3 0.129). REAL teleoperation
+              legitimately sits near 0.43 because operators pause, and a real slice at 0.42 has
+              trained a working policy — so under `--source real` dwell is REPORTED, not failed.
+              It also does not discriminate there: the poisoned real slice read 0.51 and the
+              correctly derived one 0.43. For real slices the discriminating checks are
+              **derivation** and **lead** (poisoned: gripper 44 mm, lead 249 mm; correct:
+              gripper 79.8 mm, lead ~11 mm).
+
+Gate EVERY slice of a merge, reused or freshly built, and the merged file too — the v33
+poisoning lived in a reused npz that no gate ever looked at.
 
     uv run --project envs/dppo python -m gentle_manip.scripts.verify_derived_dataset \
-        dataset/dppo/<name> --demos dataset/demos/<task>/<run>
+        dataset/dppo/<name> --demos dataset/demos/<task>/<run> --source sim|real|mixed
 """
 from __future__ import annotations
 
@@ -34,7 +44,11 @@ import numpy as np
 MID_TOL = 0.05          # |median - range midpoint| below this (fraction of range) = suspicious
 LEAD_MIN_MM = 5.0       # p75 commanded-vs-achieved lead
 DWELL_EPS = 0.01        # normalized action difference counted as "no change"
-DWELL_MAX = 0.20        # allowed fraction (stop frames push this up by design)
+# Dwell ceilings by data source. sim: scripted demos are dense in distinct commands (v3.2
+# 0.098, v3.3 0.129). real: human teleop pauses -> ~0.43 is normal and has trained working
+# policies, so it is reported rather than failed (and does not discriminate: poisoned 0.51 vs
+# correct 0.43). mixed: a merged sim+real file sits between, dominated by the sim majority.
+DWELL_MAX = {"sim": 0.20, "mixed": 0.35, "real": None}
 SEAM_MAX = 1.0          # max within-episode jump on the euler dim
 
 
@@ -53,6 +67,9 @@ def main() -> None:
     ap.add_argument("dataset", type=Path, help="dppo dataset dir (train.npz + normalization.npz)")
     ap.add_argument("--demos", type=Path, default=None,
                     help="source demo run dir (data.pkl) — enables the DERIVATION gate")
+    ap.add_argument("--source", choices=("sim", "real", "mixed"), default="sim",
+                    help="data source — sets the dwell ceiling (real: reported, not failed; "
+                         "see the module docstring for why)")
     ap.add_argument("--action-config", type=Path,
                     default=Path("gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml"))
     args = ap.parse_args()
@@ -116,8 +133,13 @@ def main() -> None:
         if len(seg) > 1:
             fr.append(np.abs(np.diff(seg, axis=0)).max(1) < DWELL_EPS)
     d = float(np.concatenate(fr).mean())
-    print(f"  dwell: frac(|dA|<{DWELL_EPS}) interior {d:.3f} -> {'FAIL' if d > DWELL_MAX else 'ok'}")
-    if d > DWELL_MAX:
+    ceil = DWELL_MAX[args.source]
+    if ceil is None:
+        verdict = "reported (real teleop pauses; not a discriminator here)"
+    else:
+        verdict = "FAIL" if d > ceil else "ok"
+    print(f"  dwell[{args.source}]: frac(|dA|<{DWELL_EPS}) interior {d:.3f} -> {verdict}")
+    if ceil is not None and d > ceil:
         fails.append("dwell")
 
     print("\nRESULT:", "PASS" if not fails else f"FAIL ({', '.join(fails)})")
