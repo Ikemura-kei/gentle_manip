@@ -347,20 +347,20 @@
 #   --shard-size 10 \
 #   --max-steps 5000
 
-ckpt=downloaded_runs/alzey/checkpoint/state_200.pt
-normalization=downloaded_runs/alzey/normalization.npz
+# ckpt=downloaded_runs/alzey/checkpoint/state_200.pt
+# normalization=downloaded_runs/alzey/normalization.npz
 
-uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-  --ckpt ${ckpt} \
-  --ft-denoising-steps 0 \
-  --normalization ${normalization} \
-  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
-  --smooth-alpha 0.6 \
-  --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/alzey200 \
-  --shard-size 10 \
-  --max-steps 5000
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} \
+#   --ft-denoising-steps 0 \
+#   --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --smooth-alpha 0.6 \
+#   --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/alzey200 \
+#   --shard-size 10 \
+#   --max-steps 5000
 
 # ── CLUSTER SHORTLIST: nmbtz/state_500 — PURE-SIM realws, 7d euler abs, arm-focus cloud ──────────
 # REAL RESULT (2026-08-23): WORST of the shortlist despite the best sim score (0.71) — pure sim
@@ -421,3 +421,70 @@ uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.p
 #   --record dataset/real_deploy/qjzsf1000 \
 #   --shard-size 10 \
 #   --max-steps 5000
+
+# ══════════════════════════════════════════════════════════════════════════════════════════
+# ⛔ DO NOT DEPLOY any v33 policy (orkam, kjljs, …) UNTIL THE REAL SLICE IS RE-CONVERTED.
+# Root cause (2026-08-25, diagnosed from dataset/real_deploy/orkam200 + offline probes):
+# the real 7d slice merged into `single_lift_mushroom_simreal_realws_noos_cmd_v33`
+# (dataset/dppo/single_lift_mushroom_real) was NOT derived — the recorded DELTA actions were
+# written through as if they were ABSOLUTE. A delta of ~0 decodes to the MIDDLE of each
+# absolute range, so that slice teaches, on every real-looking cloud:
+#     dz  ~ 0  ->  absolute z    = 0.252 m   (median commanded z; achieved is 0.096 m)
+#     dgw ~ 0  ->  absolute grip = 44 mm     (median+max commanded; demos actually hold 80 mm)
+# Deployed orkam did exactly that: climbed toward z 0.25 with the gripper at 44 mm.
+# Confirmed: v33's merged normalization (downloaded_runs/orkam/normalization.npz) carries the
+# broken slice's ranges (action z max 0.75 -> 0.438 m; no sim collection exceeds 0.235 m).
+# afucm is UNAFFECTED (its merged z max 0.072 -> 0.239 m) — its real slice was derived properly.
+# Offline probe reproduces it with no robot: real cloud -> 44 mm + z up; sim cloud -> correct;
+# proprio irrelevant; fails even on the real demos in its OWN training set. ckpt 200 and 400 alike.
+# FIX: re-convert the real demos WITH derivation, then re-merge + retrain:
+#   convert_demos dataset/demos/single_lift_mushroom_real_merged --out <real_7d> \
+#     --obs-keys ee_pos ee_quat gripper_width --point-cloud \
+#     --derive-action  gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#     --derive-source-action gentle_manip/configs/action/delta_pose_delta_gripper_fast_rot.yaml \
+#     --derive-lookahead 4
+# GATE before any co-train deploy: derived commanded gripper must match the demos' achieved
+# gripper (~80 mm open at t0), and commanded z must track achieved z within ~1 cm — not 15 cm.
+# ══════════════════════════════════════════════════════════════════════════════════════════
+
+# ── CLUSTER: kjljs/state_100 — v3.3 co-train + AUX GRASP-WIDTH head (aux_grasp_width_weight 1.5,
+# AuxDiffusionModel). Sibling of orkam on the SAME v33 dataset, so it inherits the broken real
+# slice above — offline probe: real cloud -> grip 44-55 mm + z 0.23-0.24, sim cloud -> correct.
+# ⛔ blocked on the re-convert; entry kept ready for the rerun.
+# Wiring notes: the checkpoint carries 4 EXTRA `network.width_head.*` keys (the aux head lives
+# inside the network). They load without error and are unused at deploy — the action path is the
+# standard PointNetDiffusionMLP — so no adapter change is needed. Big net auto-loads from .hydra;
+# normalization MUST be kjljs's own. REAL TABLE PLACEMENT: x [0.29, 0.48], y [-0.11, 0.11].
+#
+# ckpt=downloaded_runs/kjljs/checkpoint/state_100.pt
+# normalization=downloaded_runs/kjljs/normalization.npz
+
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} \
+#   --ft-denoising-steps 0 \
+#   --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --smooth-alpha 0.6 \
+#   --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/kjljs100 \
+#   --shard-size 10 \
+#   --max-steps 5000
+
+# ── CLUSTER: orkam/state_200 — v3.3 RECIPE co-train (item 2+5+6+18 combined; sim 0.715 > afucm 0.685).
+# ⛔ SEE THE BLOCK ABOVE — broken real slice; deployed run climbed to z 0.25 with grip 44 mm.
+# Data: 599 v3.3 sim eps (4-mushroom pool, scale [0.8,1.5], real-matched kinematics, pinch-filtered)
+# + the same 55 real demos (plain concat, union norm). Wiring identical to afucm: armfocus obs,
+# 7d euler commanded actions, rate-limit clamp active, big net auto-loads from .hydra.
+# Pull first:  bash gentle_manip/scripts/pull_run.sh logs/dppo/dppo-pretrain/single_lift_mushroom_simreal_realws_noos_cmd_v33/orkam downloaded_runs/orkam
+# normalization MUST be orkam's own (v33 union stats — new collection, NOT afucm's).
+# REAL TABLE PLACEMENT: x [0.29, 0.48], y [-0.11, 0.11] (robot-base frame).
+#
+ckpt=downloaded_runs/orkam/checkpoint/state_400.pt
+normalization=downloaded_runs/orkam/normalization.npz
+uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+  --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+  --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+  --record dataset/real_deploy/orkam400 --shard-size 10 --max-steps 5000
