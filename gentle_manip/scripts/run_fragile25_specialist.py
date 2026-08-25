@@ -62,8 +62,12 @@ obs_dim: 8
 action_dim: 7
 denoising_steps: 20
 horizon_steps: 4
-cond_steps: 2
-pc_cond_steps: 1
+cond_steps: 8  # was 2 (2026-08-24 smoke test): retry rollouts hover/jitter at the
+  # regrasp decision point -- with only 2 steps of proprio history the policy can't
+  # tell "gripper settled on the object" from "gripper closing on nothing" as a TREND,
+  # only an instant. More history should let it condition on the settling behavior.
+pc_cond_steps: 4  # was 1 -- single-frame point cloud can't show object motion (e.g.
+  # falling away after a slip); multi-frame gives the policy a chance to see that.
 n_points: 1024
 visual_feature_dim: 256
 
@@ -93,8 +97,15 @@ train:
     min_lr: 1e-5
   epoch_start_ema: 10
   update_ema_freq: 5
-  save_model_freq: 100
+  save_model_freq: 25
   val_freq: 10
+  # Auto early-stop on a val-loss plateau (2026-08-24, replaces manually picking
+  # a fixed n_epochs from one observed example -- see the n_epochs note above).
+  # Patience is in VAL CHECKS (every val_freq=10 epochs), so patience=20 -> stop
+  # after 200 epochs with no improvement > min_delta. The n_epochs=1000 cap above
+  # stays as a hard ceiling in case a category never plateaus.
+  early_stop_patience: 20
+  early_stop_min_delta: 1e-4
 
 model:
   _target_: model.diffusion.diffusion.DiffusionModel
@@ -162,8 +173,12 @@ obs_dim: 8
 action_dim: 7
 denoising_steps: 20
 ft_denoising_steps: 0
-cond_steps: 2
-pc_cond_steps: 1
+cond_steps: 8  # was 2 (2026-08-24 smoke test): retry rollouts hover/jitter at the
+  # regrasp decision point -- with only 2 steps of proprio history the policy can't
+  # tell "gripper settled on the object" from "gripper closing on nothing" as a TREND,
+  # only an instant. More history should let it condition on the settling behavior.
+pc_cond_steps: 4  # was 1 -- single-frame point cloud can't show object motion (e.g.
+  # falling away after a slip); multi-frame gives the policy a chance to see that.
 n_points: 1024
 visual_feature_dim: 256
 horizon_steps: 4
@@ -174,14 +189,24 @@ ddim_steps: ${{ft_denoising_steps}}
 n_episodes: 100
 scene_group_size: 4
 record_batches: null
-n_steps: 75
+early_stop_on_success: true  # (2026-08-24) once an env succeeds, freeze it (no-op action)
+  # instead of continuing to act on an already-solved episode -- matches the retry-tolerant
+  # demos' own early-termination policy (see fast-reattempt in collect_demos_synth_v3.py).
+  # Opt-in at the EvalSpec level (default False elsewhere) -- only this retry-specialist
+  # experiment's eval config enables it.
+n_steps: 150  # (2026-08-25) 2/3 of the retry-tolerant 225 -- full eval was taking
+  # ~7-8min/batch (render-rgb heavy), user asked to speed it up. Was 75 (300 raw steps,
+  # too short for even one retry) then 225 (900 raw steps, retry-tolerant but slow).
+  # 150*act_steps(4)=600 raw steps still covers >=1 full retry cycle with margin.
+  # Makes SR NOT directly comparable to the 225-step or 75-step specialists -- always
+  # report the horizon alongside any SR here.
 render_num: 5
 
 env:
   n_envs: 5
   name: ${{env_name}}
   env_type: genesis
-  max_episode_steps: 300
+  max_episode_steps: 600  # (2026-08-25) 2/3 of 900, see n_steps note above
   reset_at_iteration: False
   save_video: True
   use_image_obs: True
@@ -258,8 +283,12 @@ obs_dim: 8
 action_dim: 7
 denoising_steps: 20
 ft_denoising_steps: 0
-cond_steps: 2
-pc_cond_steps: 1
+cond_steps: 8  # was 2 (2026-08-24 smoke test): retry rollouts hover/jitter at the
+  # regrasp decision point -- with only 2 steps of proprio history the policy can't
+  # tell "gripper settled on the object" from "gripper closing on nothing" as a TREND,
+  # only an instant. More history should let it condition on the settling behavior.
+pc_cond_steps: 4  # was 1 -- single-frame point cloud can't show object motion (e.g.
+  # falling away after a slip); multi-frame gives the policy a chance to see that.
 n_points: 1024
 visual_feature_dim: 256
 horizon_steps: 4
@@ -270,7 +299,10 @@ ddim_steps: ${{ft_denoising_steps}}
 target_episodes: 150
 max_batches: 80
 scene_group_size: 0
-n_steps: 75
+n_steps: 225  # retry-tolerant horizon (2026-08-24): was 75 (300 raw steps) -- too short for
+  # even one retry (min 444 raw steps for a 2-attempt recovery, up to 888 for 4). 225*act_steps
+  # (4)=900 covers the observed max with margin. Makes SR NOT directly comparable to the
+  # original 300-step-horizon specialists -- always report the horizon alongside any SR here.
 render_num: 1
 out_dir: null
 
@@ -278,7 +310,7 @@ env:
   n_envs: 5
   name: ${{env_name}}
   env_type: genesis
-  max_episode_steps: 300
+  max_episode_steps: 900  # retry-tolerant (2026-08-24): was 300, see n_steps note above
   reset_at_iteration: False
   save_video: True
   use_image_obs: True

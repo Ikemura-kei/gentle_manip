@@ -52,12 +52,20 @@ TRACK_ELEV_DEG = 14.0
 TRACK_AZIM_DEG = 50.0
 TRACK_DIST_MULT = 2.75   # ~= 1/tan(fov/2) for fov=40, so the object's half_extent
                         # fills the frame similarly to the plot's tight ±half_extent axes
+TRACK_MIN_DIST_M = 0.22  # floor on camera distance -- Genesis cameras default to
+                        # near=0.05m clip (third_party/genesis/genesis/vis/camera.py);
+                        # half_extent*TRACK_DIST_MULT alone put small objects (mushroom
+                        # half_extent~0.02m -> r~0.055m) INSIDE the near plane, so the
+                        # object (and often the whole robot) rendered as pure background
+                        # (caught live 2026-08-20: mushroom/tomato/raspberry RGB clips
+                        # showed nothing). 0.22m keeps >=0.15m clearance from the near
+                        # plane for every category's object+gripper.
 TRACK_FOV = 40.0
 TRACK_EMA_ALPHA = 0.15  # must match _render_category_video's alpha
 
 
 def _spherical_offset(half_extent: float) -> np.ndarray:
-    r = half_extent * TRACK_DIST_MULT
+    r = max(half_extent * TRACK_DIST_MULT, TRACK_MIN_DIST_M)
     elev = np.deg2rad(TRACK_ELEV_DEG)
     azim = np.deg2rad(TRACK_AZIM_DEG)
     return np.array([r * np.cos(elev) * np.cos(azim),
@@ -172,15 +180,24 @@ def _replay_one(worker, ep, dr, n_frames_cap, capture_rgb: bool = False, track_c
     return frames_pos, frames_stress, frames_rgb
 
 
-def _replay_and_capture(category: str, n_frames_cap: int = 260, max_tries: int = 8):
+def _replay_and_capture(category: str, n_frames_cap: int = 260, max_tries: int = 40):
     """Search candidates WITHOUT rgb capture (cheaper), then re-replay the winner
     ONCE MORE with capture_rgb=True -- avoids paying the render cost on every
     rejected candidate. MPM replay is deterministic given the same actions/reset,
     so the confirmation replay reproduces the same frames_pos/frames_stress
-    (only used for the printed peak-stress line, not re-validated)."""
+    (only used for the printed peak-stress line, not re-validated).
+
+    n_candidates is capped at len(dr_rows), NOT just len(episodes): dr_params.csv
+    only logs a PREFIX of attempts (see _find_episodes_and_dr's docstring), so for
+    episode index i >= len(dr_rows) the old `dr_rows[min(i, len(dr_rows)-1)]`
+    clamp silently REUSED the last logged row -- pairing episode i's actions with
+    a DIFFERENT episode's object pose/orientation. That's a guaranteed miss, not
+    a fair trial. Capping at len(dr_rows) only ever tries genuinely-matched
+    (episode, dr row) pairs (caught live 2026-08-20 investigating gelatin's 8/8
+    rejected replays)."""
     episodes, dr_csv, run_dir = _find_episodes_and_dr(category)
     dr_rows = _read_dr_rows(dr_csv)
-    n_candidates = min(len(episodes), max_tries)
+    n_candidates = min(len(episodes), len(dr_rows), max_tries)
 
     exp = Experiment.load(f"single_lift_{category}_soft_easy")
     task = SingleLiftTask(exp.task_cfg)
@@ -197,11 +214,23 @@ def _replay_and_capture(category: str, n_frames_cap: int = 260, max_tries: int =
                            settle_vel_thresh=0.002, render_obs_cameras=True)
     track_cam = worker.handle.cameras["cam_track"][0]
     try:
+        # Two-tier fallback, both ranked separately by rise: `lifted` = the
+        # object genuinely rose (rise >= min_rise_m) regardless of stress --
+        # preferred over `fallback` (best-rise overall, may be a near-zero or
+        # negative "lift") because a real lift that happens to exceed yield
+        # stress (an over-squeeze) is a far more honest showcase clip than a
+        # replay where the object never left the table. Plain best-rise is
+        # the last resort only when NOTHING in the search ever lifted the
+        # object at all (caught live 2026-08-20: mushroom's true successes
+        # all replayed at 106-138% yield -- a firm/crushing grasp, not the
+        # gentle grasp collected originally, but still a real lift, unlike
+        # falling back on a candidate that never left the table).
         fallback = None
+        lifted = None
         winner = None
         for i in range(n_candidates):
             ep = episodes[i]
-            dr = dr_rows[min(i, len(dr_rows) - 1)]
+            dr = dr_rows[i]
             print(f"[{category}] trying episode {i}/{n_candidates-1} from {run_dir.name}, "
                  f"{len(ep['actions'])} steps", flush=True)
             frames_pos, frames_stress, _ = _replay_one(worker, ep, dr, n_frames_cap)
@@ -212,14 +241,21 @@ def _replay_and_capture(category: str, n_frames_cap: int = 260, max_tries: int =
                  f"-> {'OK' if ok else 'reject'}", flush=True)
             if fallback is None or rise > fallback[2]:
                 fallback = (frames_pos, frames_stress, rise, ep, dr)
+            if rise >= 0.04 and (lifted is None or rise > lifted[2]):
+                lifted = (frames_pos, frames_stress, rise, ep, dr)
             if ok:
                 print(f"[{category}] episode {i} replayed as a successful lift -- using it",
                      flush=True)
                 winner = (ep, dr)
                 break
-        if winner is None:
-            print(f"[{category}] WARNING: none of the first {n_candidates} episodes replayed as "
-                 f"a clean successful lift -- using the best-rise candidate "
+        if winner is None and lifted is not None:
+            print(f"[{category}] WARNING: none of the {n_candidates} episodes replayed as a "
+                 f"CLEAN (gentle) successful lift -- using the best real lift "
+                 f"({lifted[2]*100:.1f}cm, may exceed yield stress) instead", flush=True)
+            winner = (lifted[3], lifted[4])
+        elif winner is None:
+            print(f"[{category}] WARNING: none of the {n_candidates} episodes ever lifted the "
+                 f"object at all -- using the best-rise candidate "
                  f"({fallback[2]*100:.1f}cm) instead", flush=True)
             winner = (fallback[3], fallback[4])
 

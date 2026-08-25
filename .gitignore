@@ -53,7 +53,14 @@ logs/
 # Scratch/smoke-test collection dirs + unrelated large local data (not campaign deliverables)
 dataset/demos_smoketest*/
 dataset/demos_merged*_TEMP/
+dataset/demos_retry/
+dataset/demos_retry_v2/
+dataset/demos_retry_earlyabort_test/
+dataset/demos_retry_video_samples/
 dataset/tactile_dp3/
+# DPPO-converted npz for the retry-specialist campaign (dppo_data_retry/) — same
+# derived-data role as dataset/dppo/ above, just a separate dir for this campaign
+dppo_data_retry/
 # tetgen tet-mesher scratch output (written to cwd during FEM build_grasp_fem)
 _skipped.face
 _skipped.node

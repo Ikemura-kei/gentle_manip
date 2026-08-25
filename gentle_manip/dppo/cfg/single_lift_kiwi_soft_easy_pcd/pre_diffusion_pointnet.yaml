@@ -55,8 +55,15 @@ train:
     min_lr: 1e-5
   epoch_start_ema: 10
   update_ema_freq: 5
-  save_model_freq: 100
+  save_model_freq: 25
   val_freq: 10
+  # Auto early-stop on a val-loss plateau (2026-08-24, replaces manually picking
+  # a fixed n_epochs from one observed example -- see the n_epochs note above).
+  # Patience is in VAL CHECKS (every val_freq=10 epochs), so patience=20 -> stop
+  # after 200 epochs with no improvement > min_delta. The n_epochs=1000 cap above
+  # stays as a hard ceiling in case a category never plateaus.
+  early_stop_patience: 20
+  early_stop_min_delta: 1e-4
 
 model:
   _target_: model.diffusion.diffusion.DiffusionModel

@@ -24,8 +24,12 @@ obs_dim: 8
 action_dim: 7
 denoising_steps: 20
 horizon_steps: 4
-cond_steps: 2
-pc_cond_steps: 1
+cond_steps: 8  # was 2 (2026-08-24 smoke test): retry rollouts hover/jitter at the
+  # regrasp decision point -- with only 2 steps of proprio history the policy can't
+  # tell "gripper settled on the object" from "gripper closing on nothing" as a TREND,
+  # only an instant. More history should let it condition on the settling behavior.
+pc_cond_steps: 4  # was 1 -- single-frame point cloud can't show object motion (e.g.
+  # falling away after a slip); multi-frame gives the policy a chance to see that.
 n_points: 1024
 visual_feature_dim: 256
 
@@ -55,8 +59,15 @@ train:
     min_lr: 1e-5
   epoch_start_ema: 10
   update_ema_freq: 5
-  save_model_freq: 100
+  save_model_freq: 25
   val_freq: 10
+  # Auto early-stop on a val-loss plateau (2026-08-24, replaces manually picking
+  # a fixed n_epochs from one observed example -- see the n_epochs note above).
+  # Patience is in VAL CHECKS (every val_freq=10 epochs), so patience=20 -> stop
+  # after 200 epochs with no improvement > min_delta. The n_epochs=1000 cap above
+  # stays as a hard ceiling in case a category never plateaus.
+  early_stop_patience: 20
+  early_stop_min_delta: 1e-4
 
 model:
   _target_: model.diffusion.diffusion.DiffusionModel

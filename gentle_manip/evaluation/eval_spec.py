@@ -22,6 +22,13 @@ class EvalSpec:
     max_policy_steps: int = 75   # task horizon in POLICY steps (sim max_episode_steps / act_steps)
     scene_group_size: int = 0    # rebuild the object geometry (size/shape/material) every K
                                  # batches — 0 = fixed nominal geometry (only pose/orientation vary)
+    early_stop_on_success: bool = False  # opt-in (2026-08-24, retry-specialist experiment): once an
+                                 # env's `success` first fires, freeze its action to a no-op (zero
+                                 # delta) for the rest of the batch instead of continuing to act on
+                                 # an already-solved episode. Matches a real "task done, stop" policy
+                                 # and shortens per-episode wall-clock for early-succeeding envs.
+                                 # Default OFF — every existing eval (canonical harness comparisons
+                                 # across specialist/generalist/direct-generalist) is unaffected.
 
     def __post_init__(self):
         if self.n_episodes % self.num_envs != 0:

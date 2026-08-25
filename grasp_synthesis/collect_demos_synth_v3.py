@@ -391,7 +391,90 @@ PHASES = [
     ("hold",     N_HOLD),          # hold at lift height (success eval window)
 ]
 N_PHASES  = len(PHASES)
-_GRASP_IDX = [name for name, _ in PHASES].index("grasp")   # boundary the firm-check fires at
+_GRASP_IDX    = [name for name, _ in PHASES].index("grasp")     # boundary the firm-check fires at
+_APPROACH_IDX = [name for name, _ in PHASES].index("approach")  # regrasp rewind target (smooth re-descent)
+_FIRM_IDX     = [name for name, _ in PHASES].index("firm")      # object-height baseline captured leaving here
+_LIFT_IDX   = [name for name, _ in PHASES].index("lift")
+_HOLD_IDX   = [name for name, _ in PHASES].index("hold")    # slip check fires leaving here (episode end)
+
+# ── Robustness idea #2: lift-phase slip detection + in-place regrasp ──────────
+# Opt-in (--retry-on-slip): at the very end of the episode (leaving "hold", the
+# same moment the FINAL success check reads object height), compare the
+# object's height rise since the grasp closed against the commanded lift
+# height. A grasp that never really held (missed / slipped out under gravity)
+# rises far less than a real lift. On detection, rewind that env's OWN phase
+# state back to "settle" (reopen -> reclose -> refirm -> relift) using the SAME
+# synthesized grasp pose ("regrasp in place" -- the cheap option from the
+# brainstorm in grasp_synthesis/CLAUDE.md and the repo CLAUDE.md's
+# retry-brainstorm section; a full re-plan is the fallback idea, not
+# implemented here). Bounded to MAX_REGRASP_RETRIES per env so one bad env
+# can't stall the batch or produce an unbounded episode.
+#
+# IMPORTANT: this check must fire at "hold" end, NOT "lift" end -- checking
+# right as "lift" ends (before the "hold" settle window even runs) is TOO
+# EARLY: servo/MPM tracking lag means the object hasn't caught up to the
+# gripper's lift target yet at that instant even for grasps that DO
+# eventually succeed by the real end-of-episode check. Caught live
+# 2026-08-20: checking at "lift" end produced a ~5/6-8 "slip" rate on
+# mushroom across 4 different CLI configs (default/production maxfevals, two
+# seeds, induced/natural) that never recovered even after regrasp -- rewinding
+# and re-running the exact same (fine) grasp pose predictably reproduced the
+# same "still not caught up yet" reading. Checking at "hold" end (this
+# episode's actual completion point, matching the real success formula
+# `obj_z > grasp_pos_z + LIFT_HEIGHT*0.5` below) eliminates the false
+# positives from grasps that were never actually failing.
+SLIP_RISE_FRAC_THRESH = 0.5    # matches the real success threshold (LIFT_HEIGHT*0.5) below
+MAX_REGRASP_RETRIES   = 3   # up to 4 attempts total (1 original + 3 retries), per user request
+RETRY_EXTRA_CLOSE_M   = 0.003  # extra permanent tightening of width_cls[i] applied on a regrasp --
+                               # without this, "regrasp in place" just re-runs the SAME grasp width
+                               # through the SAME weak-grasp firm-check, which re-applies the SAME
+                               # base+extra firm close and reproduces the identical (still-weak)
+                               # stress reading -- observed live 2026-08-20 (mushroom smoketest:
+                               # attempt 2's firm stress rise was -217/-8/53 Pa, essentially
+                               # identical to attempt 1's -191/-9/54 Pa). This makes attempt 2
+                               # meaningfully tighter than attempt 1, not a bit-for-bit repeat.
+
+# ── Idea #4 (opt-in --early-abort): confident-stall early exit within "lift" ──
+# User request (2026-08-23): a failed attempt shouldn't have to run the full lift+
+# hold before regrasping -- cut it short once it's UNAMBIGUOUSLY stalled. Compares
+# object rise at two checkpoints within "lift" (not lift-end -- see idea #2's own
+# false-positive history above) so a merely-lagging-but-succeeding grasp (still
+# rising between the checkpoints) is never mistaken for a stall.
+EARLY_ABORT_FRAC_A        = 0.4   # first checkpoint (fraction of lift-phase duration)
+EARLY_ABORT_FRAC_B        = 0.7   # second checkpoint -- abort decision made here
+EARLY_ABORT_RISE_FRAC     = 0.15  # rise_B / LIFT_HEIGHT must be below this to even consider aborting
+EARLY_ABORT_PROGRESS_FRAC = 0.05  # (rise_B - rise_A) / LIFT_HEIGHT below this = "no progress" (stalled)
+
+# ── Idea #5 (opt-in --fast-reattempt): height-threshold judged attempts, low
+# regrasp height, early success termination ──────────────────────────────────
+# User request (2026-08-24): idea #4's checkpoints (fractions of the full lift
+# phase) still let a failed attempt rise most of the way to LIFT_HEIGHT before
+# regrasping -- visually indistinguishable from a deliberate release, which is
+# EXACTLY the ambiguous-state BC-training problem this campaign is fighting.
+# This mode replaces that with a fixed, LOW absolute height check: judge
+# pass/fail the moment the gripper has risen just FAST_RETRY_CHECK_HEIGHT (a
+# real, minor lift -- not a deliberate high release), regrasp IMMEDIATELY if
+# the object didn't come along (freeze_pos = current LOW position, so the next
+# attempt starts right there, no big up-then-down motion). Also replaces the
+# fixed-duration "hold" phase's success check with a genuine early-terminating
+# one: once the object has held FAST_SUCCESS_HEIGHT for FAST_SUCCESS_HOLD_STEPS
+# consecutive steps, the episode ends THERE (no extra padding to hold_steps=12
+# at LIFT_HEIGHT) -- matches the same policy the eval harness now applies
+# (--early-stop-on-success), so demo and eval/deployment behavior line up.
+FAST_RETRY_CHECK_HEIGHT  = 0.05   # metres above grasp_z_ref -- judge THIS attempt here
+FAST_RETRY_PASS_FRAC     = 0.5    # object must have risen >= this frac of the check height
+FAST_SUCCESS_HEIGHT      = 0.15   # metres above grasp_z_ref -- final task success threshold
+FAST_SUCCESS_HOLD_STEPS  = 10     # consecutive steps object must stay >= FAST_SUCCESS_HEIGHT
+
+# ── Deliberate induced slip (testing/demo only, --induce-slip-envs) ───────────
+# Brainstorm idea #3: force a genuine, visually-clear slip on specific envs by
+# briefly commanding the gripper OPEN partway through "lift" (a real physical
+# release, not a stress/width perturbation) -- guarantees at least one slip +
+# regrasp + recovery trajectory to inspect/showcase, since the FEM-synthesized
+# grasps are already tuned to rarely slip on their own. Only active on the
+# FIRST attempt (retry_count==0) so the regrasp itself is a genuine reattempt.
+INDUCE_SLIP_STEP_LO = 6
+INDUCE_SLIP_STEP_HI = 14
 
 # ── Robustness idea #1: force/stress-based grasp firming ──────────────────────
 # At the moment an env finishes "grasp" (checked ONCE, per env, at the grasp->firm
@@ -479,7 +562,11 @@ def execute_and_collect(
     dr_vec=None,                   # (2,) [scale, bend_deg] for priv_object_dr_params
     yield_stress: Optional[float] = None,      # soft-body material yield (Pa); None = no crush gate
     crush_frac_threshold: float = 1.35,        # stress/yield_stress above this = "crushed"
-) -> Tuple[List[List[dict]], List[List[np.ndarray]], List[List[float]], np.ndarray, List[List]]:
+    retry_on_slip: bool = False,               # idea #2: detect a slipped lift, regrasp in place
+    induce_slip_envs: Optional[set] = None,    # idea #3 (testing only): force a slip on these envs
+    early_abort: bool = False,                 # idea #4: cut a stalled attempt short during "lift"
+    fast_reattempt: bool = False,               # idea #5: low-height judge + early success termination
+) -> Tuple[List[List[dict]], List[List[np.ndarray]], List[List[float]], np.ndarray, List[List], np.ndarray]:
     """Execute the scripted grasp trajectory with DECOUPLED per-env phase control;
     record (obs, action, reward) per env.
 
@@ -506,6 +593,10 @@ def execute_and_collect(
         rew_bufs:    list[N] of float rewards (0.0 throughout)
         success:     (N,) bool — True if final object z > grasp_z + 0.5*LIFT_HEIGHT
         frame_bufs:  list[N] of (H,W,3) uint8 frame lists; empty lists if record_video=False
+        recovered:   (N,) bool — True if this env's grasp was ever rewound to "settle" by the
+                     slip-detection/regrasp path (retry_on_slip) or the induced-slip test hook,
+                     i.e. this episode's trajectory contains a genuine slip + regrasp. All False
+                     when retry_on_slip=False and induce_slip_envs=None (unchanged behavior).
     """
     scales = (np.asarray(action_config.scales, dtype=np.float64)
               if action_config.mode != "absolute" else None)
@@ -517,7 +608,19 @@ def execute_and_collect(
     lift_b   = grasp_pos.copy(); lift_b[:, 2] += LIFT_HEIGHT
 
     width_open = np.full(num_envs, 0.08, np.float32)
-    width_cls  = np.array([p[2] - 0.0025 for p in poses], np.float32)
+    # raw_width_cls: the FEM planner's own synthesized width, with NO extra safety
+    # margin -- kept separate so the retry escalation below can rebuild a properly
+    # tightened width from scratch each retry (see the "idea #2" block).
+    raw_width_cls = np.array([p[2] for p in poses], np.float32)
+    # First-attempt looseness (retry-data collection only, retry_on_slip=True): skip
+    # the baked-in 2.5mm margin on attempt 1 so the grasp is exactly the planner's own
+    # minimal holdable width -- a genuine, unpadded first attempt (never an artificial/
+    # scripted failure) that sometimes doesn't survive the real dynamic lift, since the
+    # planner's holdability check is only quasi-static (see smgrasp CLAUDE.md §11.5).
+    # Retries (below) always restore the full margin + escalate further -- only the
+    # FIRST attempt is loosened. When retry_on_slip=False this is bit-identical to the
+    # old unconditional `p[2] - 0.0025`.
+    width_cls  = raw_width_cls - (0.0 if retry_on_slip else 0.0025)
     # Mutable — "firm" phase tightens this once per env (idea #1); "lift"/"hold"/
     # a frozen (DONE) env all read the FINAL width, which is width_cls unless firmed.
     grip_target = width_cls.copy()
@@ -534,14 +637,28 @@ def execute_and_collect(
     slerps = [Slerp([0., 1.], Rot.concatenate([home_r, _wxyz_to_rot(quat_b[i])]))
               for i in range(num_envs)]
 
+    # Re-approach origin for a regrasp retry: defaults to home_pos (the normal first
+    # approach); a retry overwrites this to wherever the EE actually was when the slip
+    # was detected (lift_b[i], since "hold" freezes the target there) so the SAME
+    # N_HOME_TO_PRE-step ramp reused for "approach" produces a smooth re-descent at the
+    # ORIGINAL approach speed, instead of the abrupt near-instant snap that resulted
+    # from rewinding straight to "settle" (a 1-step phase) -- caught live 2026-08-21
+    # (user: regrasp re-approach was "so fast" compared to the first approach).
+    approach_from_pos = home_pos.copy()
+
     def _env_target(i: int, phase_idx: int, phase_step: int):
         """(pos, quat_wxyz, grip) for env i at its OWN (phase_idx, phase_step)."""
         name, dur = PHASES[phase_idx]
         if name == "approach":
             alpha = (phase_step + 1) / dur
-            pos = home_pos[i] + alpha * (pos_b[i] - home_pos[i])
-            xyzw = slerps[i](alpha).as_quat()
-            quat = np.array([xyzw[3], xyzw[0], xyzw[1], xyzw[2]], np.float32)
+            pos = approach_from_pos[i] + alpha * (pos_b[i] - approach_from_pos[i])
+            if retry_count[i] == 0:
+                xyzw = slerps[i](alpha).as_quat()
+                quat = np.array([xyzw[3], xyzw[0], xyzw[1], xyzw[2]], np.float32)
+            else:
+                # Orientation never changed since the original grasp (lift/hold hold it
+                # fixed at quat_b[i]) -- nothing to slerp on a re-approach.
+                quat = quat_b[i]
             grip = width_open[i]
         elif name == "settle":
             pos, quat, grip = pos_b[i], quat_b[i], width_open[i]
@@ -560,7 +677,13 @@ def execute_and_collect(
         elif name == "lift":
             alpha = (phase_step + 1) / dur
             pos = pos_b[i] + alpha * (lift_b[i] - pos_b[i])
-            quat, grip = quat_b[i], grip_target[i]
+            quat = quat_b[i]
+            if (induce_slip_envs is not None and i in induce_slip_envs
+                    and retry_count[i] == 0
+                    and INDUCE_SLIP_STEP_LO <= phase_step < INDUCE_SLIP_STEP_HI):
+                grip = width_open[i]   # deliberately release -- forces a real, physical slip
+            else:
+                grip = grip_target[i]
         else:  # "hold"
             pos, quat, grip = lift_b[i], quat_b[i], grip_target[i]
         return pos, quat, grip
@@ -600,6 +723,64 @@ def execute_and_collect(
     # just at the final success check, since damage doesn't heal and a transient mid-episode
     # crush should still fail the episode even if the object recovers height afterward.
     crushed_mask = np.zeros(num_envs, dtype=bool)
+
+    # Idea #2 state: per-env retry count (bounded by MAX_REGRASP_RETRIES), whether
+    # this episode was ever rewound (natural slip OR the induced-slip test hook),
+    # and the object's height baseline captured leaving "firm" (right before
+    # "lift" starts) -- the reference the lift->hold slip check rises against.
+    retry_count         = np.zeros(num_envs, dtype=np.int64)
+    recovered_from_slip = np.zeros(num_envs, dtype=bool)
+    grasp_z_ref          = np.full(num_envs, np.nan, np.float32)
+    grasp_xy_ref         = np.full((num_envs, 2), np.nan, np.float32)
+    # Idea #4 (--early-abort) state: object rise captured at the first checkpoint
+    # within "lift" (EARLY_ABORT_FRAC_A); NaN = not yet in this attempt's lift phase.
+    # Reset at "firm"->"lift" transition (leaving_firm block) each attempt.
+    rise_at_checkpoint_a = np.full(num_envs, np.nan, np.float32)
+    # Idea #5 (--fast-reattempt) state: has THIS attempt's low pass/fail check
+    # already fired (latched, like rise_at_checkpoint_a); consecutive steps the
+    # object has held >= FAST_SUCCESS_HEIGHT (for early success termination).
+    # Both reset at "firm"->"lift" transition / episode start respectively.
+    low_check_done       = np.zeros(num_envs, dtype=bool)
+    success_hold_counter = np.zeros(num_envs, dtype=np.int64)
+
+    def _object_pos(state) -> Optional[np.ndarray]:
+        """Full (N,3) object centroid -- used both for the slip-check Z and (on a
+        retry) to re-center the regrasp XY onto where the object actually IS now,
+        not where it was originally synthesized for."""
+        oc = state.get("object_center")
+        if oc is not None:
+            return np.asarray(oc)
+        _o = worker.handle.objects[0]
+        return _np(_o.get_pos()) if hasattr(_o, "get_pos") else None
+
+    def _trigger_regrasp(i: int, rise: float, rise_threshold_m: float,
+                         freeze_pos: np.ndarray, xy_now: np.ndarray, reason: str,
+                         advance: np.ndarray) -> None:
+        """Shared rewind action for BOTH slip-detection paths (hold-end idea #2,
+        early-abort idea #4): rewind env i's phase FSM to 'approach', escalate its
+        close width, re-center XY onto the object's current position. `freeze_pos`
+        is where the EE currently is (the re-approach start point) -- lift_b[i] for
+        a hold-end trigger (EE already at full lift height), or the just-commanded
+        cur_pos_arr[i] for an early-abort trigger (EE only partway through lift).
+        Mutates advance[i] (caller is responsible for folding i into `rolled_over`
+        so `phase_idx[rolled_over] += advance[rolled_over]` picks it up)."""
+        nonlocal width_cls, grip_target, firm_close, approach_from_pos, pos_b, lift_b
+        retry_count[i]         += 1
+        recovered_from_slip[i]  = True
+        advance[i]              = _APPROACH_IDX - int(phase_idx[i])  # full rewind
+        approach_from_pos[i]    = freeze_pos.copy()
+        width_cls[i]            = max(0.0, raw_width_cls[i] - 0.0025
+                                       - RETRY_EXTRA_CLOSE_M * retry_count[i])
+        grip_target[i]           = width_cls[i]          # undo any firm tightening
+        firm_close[i]            = FIRM_EXTRA_CLOSE_M    # idea #1 re-evaluates fresh
+        xy_shift = xy_now - grasp_xy_ref[i]
+        pos_b[i, :2]  += xy_shift
+        lift_b[i, :2] += xy_shift
+        print(f"    [retry] env {i}: {reason} (rose {rise*100:.1f}cm < "
+              f"{rise_threshold_m*100:.1f}cm target) -- regrasping with "
+              f"{RETRY_EXTRA_CLOSE_M*1000:.1f}mm extra close, re-centered "
+              f"{np.linalg.norm(xy_shift)*1000:.1f}mm onto the object's current pos "
+              f"(attempt {retry_count[i]}/{MAX_REGRASP_RETRIES})")
 
     def _step(cur_pos, cur_quat, cur_grip, record_mask):
         nonlocal prev_pos, prev_quat, prev_grip, crushed_mask
@@ -704,26 +885,163 @@ def execute_and_collect(
         leaving_grasp = rolled_over & (phase_idx == _GRASP_IDX)
         if np.any(leaving_grasp):
             cf = state.get("contact_force")
-            if cf is not None:                        # RIGID: contact force (N). ALWAYS firm base;
-                for i in np.where(leaving_grasp)[0]:  # weak grip (force < thresh) firms base+extra.
+            if cf is not None:                        # RIGID: contact force (N).
+                for i in np.where(leaving_grasp)[0]:
+                    # Loosened first attempt (retry_on_slip only): no unconditional base
+                    # firm -- a genuinely weak grip still gets the safety-net extra close
+                    # below (that's a real physics-based response, not padding). Retries
+                    # (retry_count>0) always get the full base, same as non-loose mode.
+                    base = 0.0 if (retry_on_slip and retry_count[i] == 0) else FIRM_EXTRA_CLOSE_M
                     if cf[i] < FIRM_FORCE_THRESH_N:
-                        firm_close[i] = FIRM_EXTRA_CLOSE_M + FIRM_WEAK_EXTRA_CLOSE_M
+                        firm_close[i] = base + FIRM_WEAK_EXTRA_CLOSE_M
                         print(f"    [firm] env {i}: weak grip force {cf[i]:.2f}N < "
                               f"{FIRM_FORCE_THRESH_N}N -> closing {firm_close[i]*1000:.1f}mm (base+extra)")
-                    # else: base firm close (never skip)
+                    else:
+                        firm_close[i] = base
             else:                                     # SOFT: von-Mises stress rise (Pa)
-                # Soft ALWAYS firms by the base amount (never skip — dropping it cost ~15% success:
-                # skip-firm fails 39% vs firm 24%). A WEAK grasp (low stress rise) firms MORE.
+                # Soft firms by the base amount (never skip when not loosened — dropping it
+                # cost ~15% success: skip-firm fails 39% vs firm 24%). A WEAK grasp (low
+                # stress rise) firms MORE regardless of looseness (real safety net, not padding).
                 vm = state.get("von_mises_stress")
                 if vm is not None:
                     cur = _stress_top10(vm)
                     for i in np.where(leaving_grasp)[0]:
                         rise = float(cur[i] - rest_stress[i])
+                        base = 0.0 if (retry_on_slip and retry_count[i] == 0) else FIRM_EXTRA_CLOSE_M
                         if rise < FIRM_STRESS_THRESH_PA:
-                            firm_close[i] = FIRM_EXTRA_CLOSE_M + FIRM_WEAK_EXTRA_CLOSE_M
+                            firm_close[i] = base + FIRM_WEAK_EXTRA_CLOSE_M
                             print(f"    [firm] env {i}: weak stress rise {rise:.0f}Pa < "
                                   f"{FIRM_STRESS_THRESH_PA:.0f}Pa -> closing {firm_close[i]*1000:.1f}mm (base+extra)")
-                        # else: firm_close stays at base -> still firms, just not extra
+                        else:
+                            firm_close[i] = base
+
+        # Baseline for the slip check: object position right before "lift" starts.
+        leaving_firm = rolled_over & (phase_idx == _FIRM_IDX)
+        if np.any(leaving_firm):
+            op = _object_pos(state)
+            if op is not None:
+                for i in np.where(leaving_firm)[0]:
+                    grasp_z_ref[i]  = op[i, 2]
+                    grasp_xy_ref[i] = op[i, :2]
+                    rise_at_checkpoint_a[i] = np.nan   # reset idea #4 latch for this fresh attempt
+                    low_check_done[i]       = False    # reset idea #5 latch for this fresh attempt
+                    success_hold_counter[i] = 0
+
+        # Idea #2: slip detection at "hold" end (episode completion) + in-place regrasp.
+        leaving_hold = rolled_over & (phase_idx == _HOLD_IDX)
+        if retry_on_slip and np.any(leaving_hold):
+            op = _object_pos(state)
+            if op is not None:
+                for i in np.where(leaving_hold)[0]:
+                    if not np.isfinite(grasp_z_ref[i]):
+                        continue   # never captured a baseline (shouldn't happen) -- skip the check
+                    rise = float(op[i, 2] - grasp_z_ref[i])
+                    if rise < SLIP_RISE_FRAC_THRESH * LIFT_HEIGHT and retry_count[i] < MAX_REGRASP_RETRIES:
+                        # Re-approach smoothly from wherever the EE currently is (lift_b[i] --
+                        # "hold" freezes the target there) at the SAME N_HOME_TO_PRE-step speed
+                        # as the original approach, instead of snapping straight to pos_b[i] via
+                        # the 1-step "settle" phase (abrupt, confirmed live 2026-08-21).
+                        _trigger_regrasp(i, rise, SLIP_RISE_FRAC_THRESH * LIFT_HEIGHT,
+                                         freeze_pos=lift_b[i], xy_now=op[i, :2],
+                                         reason="slipped lift", advance=advance)
+
+        # Idea #4 (opt-in --early-abort): confident-stall early exit DURING "lift"
+        # (not lift-end -- checking right as "lift" completes reproduces idea #2's
+        # own documented false-positive mode, servo/MPM lag). Instead this compares
+        # TWO checkpoints within "lift" (EARLY_ABORT_FRAC_A -> _B): a genuinely
+        # successful-but-lagging grasp still shows clear upward PROGRESS between
+        # them; a stalled/dropped grasp shows ~zero net rise across the whole
+        # window. Only fires when a retry is still available, so a wrong call
+        # costs one extra (cheap) retry -- the LAST allowed attempt always runs
+        # the full lift+hold unmodified, so the final success reading is never
+        # affected by this heuristic. Saves the untraveled tail of "lift" + all of
+        # "hold" on every attempt that gets cut short.
+        if early_abort and retry_on_slip:
+            in_lift = active & (phase_idx == _LIFT_IDX)
+            if np.any(in_lift):
+                lift_dur = PHASES[_LIFT_IDX][1]
+                frac = (phase_step[in_lift] + 1) / lift_dur
+                op = None
+                idxs = np.where(in_lift)[0]
+                # Checkpoint A: latch the rise-so-far once frac crosses FRAC_A.
+                need_a = idxs[(frac >= EARLY_ABORT_FRAC_A) & np.isnan(rise_at_checkpoint_a[idxs])]
+                if len(need_a):
+                    op = _object_pos(state)
+                    if op is not None:
+                        for i in need_a:
+                            if np.isfinite(grasp_z_ref[i]):
+                                rise_at_checkpoint_a[i] = float(op[i, 2] - grasp_z_ref[i])
+                # Checkpoint B: decide, once per attempt (checkpoint A already latched,
+                # frac has now crossed FRAC_B -- gate on advance[i]==1 so a B-triggered
+                # rewind this same step doesn't get evaluated twice).
+                need_b = idxs[(frac >= EARLY_ABORT_FRAC_B)
+                              & np.isfinite(rise_at_checkpoint_a[idxs])
+                              & (retry_count[idxs] < MAX_REGRASP_RETRIES)
+                              & (advance[idxs] == 1)]
+                if len(need_b):
+                    if op is None:
+                        op = _object_pos(state)
+                    if op is not None:
+                        for i in need_b:
+                            rise_b = float(op[i, 2] - grasp_z_ref[i])
+                            progress = rise_b - rise_at_checkpoint_a[i]
+                            stalled = (rise_b < EARLY_ABORT_RISE_FRAC * LIFT_HEIGHT
+                                      and progress < EARLY_ABORT_PROGRESS_FRAC * LIFT_HEIGHT)
+                            if stalled:
+                                _trigger_regrasp(i, rise_b, EARLY_ABORT_RISE_FRAC * LIFT_HEIGHT,
+                                                 freeze_pos=cur_pos_arr[i], xy_now=op[i, :2],
+                                                 reason="early-abort stall", advance=advance)
+                                rolled_over[i] = True   # force this mid-phase env into the rewind below
+
+        # Idea #5 (opt-in --fast-reattempt): low-height pass/fail judgment + early
+        # success termination. Two INDEPENDENT checks, both only meaningful once an
+        # env is actually lifting (phase_idx in {LIFT, HOLD}):
+        if fast_reattempt and retry_on_slip:
+            lifting = active & ((phase_idx == _LIFT_IDX) | (phase_idx == _HOLD_IDX))
+            if np.any(lifting):
+                idxs = np.where(lifting)[0]
+                op = _object_pos(state)
+                if op is not None:
+                    obj_rise = op[idxs, 2] - grasp_z_ref[idxs]
+
+                    # (a) Low pass/fail check -- fires ONCE per attempt, the moment the
+                    # commanded EE height has risen FAST_RETRY_CHECK_HEIGHT. Judge by
+                    # whether the OBJECT came along; if not (and a retry remains),
+                    # regrasp IMMEDIATELY from this low position -- no big up-then-
+                    # down motion, the next attempt starts right here.
+                    ee_rise = np.array([cur_pos_arr[i, 2] - grasp_z_ref[i] for i in idxs])
+                    need_check = idxs[(ee_rise >= FAST_RETRY_CHECK_HEIGHT) & ~low_check_done[idxs]
+                                      & (advance[idxs] == 1)]
+                    for i in need_check:
+                        low_check_done[i] = True
+                        rise = float(op[np.where(idxs == i)[0][0], 2] - grasp_z_ref[i])
+                        passed = rise >= FAST_RETRY_CHECK_HEIGHT * FAST_RETRY_PASS_FRAC
+                        if not passed and retry_count[i] < MAX_REGRASP_RETRIES:
+                            _trigger_regrasp(i, rise, FAST_RETRY_CHECK_HEIGHT * FAST_RETRY_PASS_FRAC,
+                                             freeze_pos=cur_pos_arr[i], xy_now=op[np.where(idxs == i)[0][0], :2],
+                                             reason="fast-reattempt low check failed", advance=advance)
+                            rolled_over[i] = True   # force this mid-phase env into the rewind below
+                        elif passed:
+                            print(f"    [fast-reattempt] env {i}: low check PASSED "
+                                  f"(rose {rise*1000:.1f}mm >= {FAST_RETRY_CHECK_HEIGHT*FAST_RETRY_PASS_FRAC*1000:.1f}mm) "
+                                  f"-- continuing to lift (attempt {retry_count[i] + 1})")
+
+                    # (b) Early success termination -- once the object has held
+                    # FAST_SUCCESS_HEIGHT for FAST_SUCCESS_HOLD_STEPS consecutive
+                    # steps, end the episode HERE (no padding to the fixed hold
+                    # phase's full duration). Independent of (a) -- only envs that
+                    # already passed the low check (or never needed to fail it) can
+                    # realistically reach this height, but no explicit gate needed
+                    # since a failed env gets rewound (phase_idx leaves LIFT/HOLD)
+                    # before it could accumulate a false hold streak.
+                    at_height = obj_rise >= FAST_SUCCESS_HEIGHT
+                    for k, i in enumerate(idxs):
+                        success_hold_counter[i] = success_hold_counter[i] + 1 if at_height[k] else 0
+                        if success_hold_counter[i] >= FAST_SUCCESS_HOLD_STEPS:
+                            phase_idx[i] = N_PHASES   # done NOW -- next iteration freezes/stops recording it
+                            print(f"    [fast-reattempt] env {i}: EARLY SUCCESS -- held "
+                                  f"{FAST_SUCCESS_HEIGHT*100:.0f}cm for {FAST_SUCCESS_HOLD_STEPS} steps, "
+                                  f"ending episode now (attempt {retry_count[i] + 1})")
 
         phase_idx[rolled_over]  += advance[rolled_over]
         phase_step[rolled_over]  = 0
@@ -749,7 +1067,7 @@ def execute_and_collect(
             act_bufs[i], obs_bufs[i], rew_bufs[i], frame_bufs[i] = _trim_long_holds(
                 act_bufs[i], obs_bufs[i], rew_bufs[i], frame_bufs[i])
 
-    return obs_bufs, act_bufs, rew_bufs, success, frame_bufs
+    return obs_bufs, act_bufs, rew_bufs, success, frame_bufs, recovered_from_slip
 
 
 # ── Output helpers ────────────────────────────────────────────────────────────
@@ -953,7 +1271,49 @@ def main() -> None:
                    help="record per-episode mp4 videos + grasp-pose PNGs to <out-dir>/videos/ (slower). "
                         "Bare `--record-video` = ALL episodes; `--record-video N` = only the FIRST N saved "
                         "episodes (rendering stops after N -> no extra cost/disk on a long run). Off by default.")
+    p.add_argument("--retry-on-slip", action="store_true",
+                   help="robustness idea #2 (opt-in): if an env's object hasn't meaningfully risen by "
+                        "the lift->hold boundary (a slipped/missed grasp), rewind that env's phase FSM "
+                        "back to 'settle' and regrasp in place (bounded to MAX_REGRASP_RETRIES). Off by "
+                        "default -- does not change existing collection runs unless passed explicitly.")
+    p.add_argument("--induce-slip-envs", type=str, default=None,
+                   help="TESTING ONLY: comma-separated env indices (within each batch) to force a real, "
+                        "physical slip on (briefly commands the gripper open mid-'lift'), to guarantee at "
+                        "least one genuine slip+regrasp trajectory to inspect. Requires --retry-on-slip to "
+                        "actually recover from the induced slip. E.g. --induce-slip-envs 0,2")
+    p.add_argument("--only-recovered", action="store_true",
+                   help="discard successful episodes whose grasp succeeded on the FIRST attempt -- only "
+                        "save episodes where recovered_from_slip=True (a genuine, unprompted first-attempt "
+                        "failure that the FSM regrasped and recovered from). Requires --retry-on-slip. Use "
+                        "this to collect a pure regrasp-behavior training set; the collection loop keeps "
+                        "running batches until n_episodes genuinely-recovered episodes are banked.")
+    p.add_argument("--early-abort", action="store_true",
+                   help="idea #4 (opt-in): cut a failing attempt short DURING 'lift' instead of always "
+                        "running the full lift+hold before regrasping -- once object rise is confidently "
+                        "stalled (near-zero progress between two checkpoints within 'lift', see "
+                        "EARLY_ABORT_* constants), rewind to 'approach' immediately, skipping the "
+                        "untraveled tail of 'lift' + all of 'hold'. Only fires when a retry is still "
+                        "available, so a wrong call costs one extra retry, never the final success "
+                        "reading (the LAST allowed attempt always runs unmodified). Requires --retry-on-slip.")
+    p.add_argument("--fast-reattempt", action="store_true",
+                   help="idea #5 (opt-in): judge each attempt pass/fail at a fixed LOW height "
+                        "(FAST_RETRY_CHECK_HEIGHT, default 5cm above the grasp point) instead of "
+                        "idea #4's fraction-of-full-lift checkpoints -- a failed attempt never rises "
+                        "far, so the regrasp looks like a genuine minor slip-and-recover, not a "
+                        "deliberate high release (the ambiguous pattern BC training struggled with). "
+                        "Also replaces the fixed-duration hold phase's success check with a real "
+                        "early-terminating one: episode ends as soon as the object holds "
+                        "FAST_SUCCESS_HEIGHT (15cm) for FAST_SUCCESS_HOLD_STEPS (10) consecutive "
+                        "steps, no padding. Requires --retry-on-slip.")
     args = p.parse_args()
+    if args.only_recovered and not args.retry_on_slip:
+        p.error("--only-recovered requires --retry-on-slip")
+    if args.early_abort and not args.retry_on_slip:
+        p.error("--early-abort requires --retry-on-slip")
+    if args.fast_reattempt and not args.retry_on_slip:
+        p.error("--fast-reattempt requires --retry-on-slip")
+    induce_slip_envs = (set(int(x) for x in args.induce_slip_envs.split(","))
+                        if args.induce_slip_envs else None)
 
     # ── Load everything from the experiment config (same as training / eval) ──
     exp        = Experiment.load(args.experiment)
@@ -1172,12 +1532,16 @@ def main() -> None:
         # once N saved, stop RENDERING (no per-step RGB cost/disk for the rest of the run).
         rec_this_batch = args.record_video > 0 and total_saved < args.record_video
         print(f"  Executing …")
-        obs_bufs, act_bufs, rew_bufs, success, frame_bufs = execute_and_collect(
+        obs_bufs, act_bufs, rew_bufs, success, frame_bufs, recovered_from_slip = execute_and_collect(
             worker, all_best_x, init_obs_batch, perception, action_config,
             record_video=rec_this_batch, priv_cfg=priv_cfg, dr_vec=dr_vec,
             yield_stress=task.object_yield_stress, crush_frac_threshold=args.crush_frac_threshold,
+            retry_on_slip=args.retry_on_slip, induce_slip_envs=induce_slip_envs,
+            early_abort=args.early_abort, fast_reattempt=args.fast_reattempt,
         )
         print(f"  Success: {success.tolist()}")
+        if np.any(recovered_from_slip):
+            print(f"  Recovered from slip: {np.where(recovered_from_slip)[0].tolist()}")
 
         # ── Log per-env DR + grasp params for this batch (CSV row per env) ──
         eul_deg = np.degrees(object_euler) if object_euler is not None else np.zeros((n, 3))
@@ -1214,6 +1578,11 @@ def main() -> None:
                 if not args.keep_failures:
                     continue
 
+            if args.only_recovered and not recovered_from_slip[i]:
+                # First-attempt success (no genuine slip+regrasp) -- not what this
+                # collection run wants; discard without counting toward n_episodes.
+                continue
+
             obs_list = obs_bufs[i]
             if not obs_list:
                 continue
@@ -1222,16 +1591,22 @@ def main() -> None:
                 "observations": {k: np.stack([o[k] for o in obs_list]) for k in keys},
                 "actions":      np.stack(act_bufs[i]),
                 "rewards":      np.asarray(rew_bufs[i], np.float32),
+                "recovered_from_slip": bool(recovered_from_slip[i]),
             }
             shard_buf.append(episode)
             total_saved += 1
-            print(f"    ep {total_saved}: env {i}  {'✓' if success[i] else '✗'}  "
+            tag = " [REGRASP]" if recovered_from_slip[i] else ""
+            print(f"    ep {total_saved}: env {i}  {'✓' if success[i] else '✗'}{tag}  "
                   f"T={episode['actions'].shape[0]}")
 
             if frame_bufs[i] and total_saved <= args.record_video:   # first-N cap (precise)
                 vid_dir = run_dir / "videos"
                 vid_dir.mkdir(exist_ok=True)
-                vid_path = vid_dir / f"ep{total_saved:04d}_env{i}_success.mp4"
+                if recovered_from_slip[i]:
+                    suffix = "_regrasp_recovered" if success[i] else "_regrasp_stillfailed"
+                else:
+                    suffix = "_success" if success[i] else "_fail"
+                vid_path = vid_dir / f"ep{total_saved:04d}_env{i}{suffix}.mp4"
                 imageio.mimwrite(str(vid_path), frame_bufs[i], fps=round(rate_hz), quality=8)
                 _save_grasp_pose(vid_dir, vid_path.stem, i)
                 print(f"    video → {vid_path.name}")

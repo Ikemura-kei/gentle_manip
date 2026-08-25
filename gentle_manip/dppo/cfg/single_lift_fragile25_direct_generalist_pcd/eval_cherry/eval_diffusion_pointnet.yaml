@@ -1,4 +1,4 @@
-# [dppo-eval] Canonical eval of the banana solo specialist (fragile-food 25-category campaign).
+# [dppo-eval] Fragile-25 combined RLDG+VLM generalist -- direct-generalist eval on cherry.
 defaults:
   - _self_
 hydra:
@@ -7,24 +7,21 @@ hydra:
 _target_: gentle_manip.dppo.eval_agent.EvalHarnessAgent
 
 name: ${env_name}_eval_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
-logdir: ${eval_base:${base_policy_path}}/eval/${now:%Y-%m-%d}_${now:%H-%M-%S}
+logdir: ${eval_base:${base_policy_path}}/eval_cherry/${now:%Y-%m-%d}_${now:%H-%M-%S}
 base_policy_path: ???
-normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_banana_soft_easy_pcd/normalization.npz
-experiment: single_lift_banana_soft_easy
+normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_fragile25_direct_generalist_pcd/normalization.npz
+experiment: single_lift_cherry_soft_easy
 
 seed: 42
 device: cuda:0
-env_name: single_lift_banana_soft_easy_pcd
+env_name: single_lift_cherry_soft_easy_pcd
 obs_dim: 8
 action_dim: 7
+category_embed_dim: 24
 denoising_steps: 20
 ft_denoising_steps: 0
-cond_steps: 8  # was 2 (2026-08-24 smoke test): retry rollouts hover/jitter at the
-  # regrasp decision point -- with only 2 steps of proprio history the policy can't
-  # tell "gripper settled on the object" from "gripper closing on nothing" as a TREND,
-  # only an instant. More history should let it condition on the settling behavior.
-pc_cond_steps: 4  # was 1 -- single-frame point cloud can't show object motion (e.g.
-  # falling away after a slip); multi-frame gives the policy a chance to see that.
+cond_steps: 2
+pc_cond_steps: 1
 n_points: 1024
 visual_feature_dim: 256
 horizon_steps: 4
@@ -35,24 +32,14 @@ ddim_steps: ${ft_denoising_steps}
 n_episodes: 100
 scene_group_size: 4
 record_batches: null
-early_stop_on_success: true  # (2026-08-24) once an env succeeds, freeze it (no-op action)
-  # instead of continuing to act on an already-solved episode -- matches the retry-tolerant
-  # demos' own early-termination policy (see fast-reattempt in collect_demos_synth_v3.py).
-  # Opt-in at the EvalSpec level (default False elsewhere) -- only this retry-specialist
-  # experiment's eval config enables it.
-n_steps: 150  # (2026-08-25) 2/3 of the retry-tolerant 225 -- full eval was taking
-  # ~7-8min/batch (render-rgb heavy), user asked to speed it up. Was 75 (300 raw steps,
-  # too short for even one retry) then 225 (900 raw steps, retry-tolerant but slow).
-  # 150*act_steps(4)=600 raw steps still covers >=1 full retry cycle with margin.
-  # Makes SR NOT directly comparable to the 225-step or 75-step specialists -- always
-  # report the horizon alongside any SR here.
+n_steps: 75
 render_num: 5
 
 env:
   n_envs: 5
   name: ${env_name}
   env_type: genesis
-  max_episode_steps: 600  # (2026-08-25) 2/3 of 900, see n_steps note above
+  max_episode_steps: 300
   reset_at_iteration: False
   save_video: True
   use_image_obs: True
@@ -61,9 +48,11 @@ env:
     obs_steps: ${cond_steps}
     act_steps: ${act_steps}
     normalization_path: ${normalization_path}
-    port: 5571
+    port: 5581
     obs_keys: [ee_pos, ee_quat, gripper_width]
     pointcloud_key: point_cloud
+    category: cherry
+    category_embed_source: vlm
 
 shape_meta:
   obs:
@@ -71,6 +60,8 @@ shape_meta:
       shape: [8]
     point_cloud:
       shape: [1024, 3]
+    category_embed:
+      shape: [24]
   action:
     shape: [7]
 
@@ -92,6 +83,7 @@ model:
     cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
     pc_cond_steps: ${pc_cond_steps}
     visual_feature_dim: ${visual_feature_dim}
+    category_embed_dim: ${category_embed_dim}
     time_dim: 16
     mlp_dims: [512, 512, 512]
     activation_type: ReLU

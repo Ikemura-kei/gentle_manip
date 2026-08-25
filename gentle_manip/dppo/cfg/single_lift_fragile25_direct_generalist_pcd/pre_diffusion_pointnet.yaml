@@ -1,6 +1,7 @@
-# [dppo-pretrain] BC-pretrain a PointNet diffusion policy on SOFT cherry lift demos.
-# Used by: third_party/dppo/script/run.py (TrainDiffusionAgent) via gentle_manip.dppo.train
-# Status: experimental (fragile-food 25-category campaign, 2026-08-13)
+# [dppo-pretrain] Combined RLDG + VLM generalist -- fragile-food 25-category campaign.
+# First time these two levers (validated SEPARATELY this session: RLDG rollout-
+# distillation fixed held-in performance 39->62% etc; VLM conditioning enabled
+# non-zero zero-shot generalization) are combined together, at 25-category scale.
 defaults:
   - _self_
 hydra:
@@ -13,15 +14,16 @@ _target_: agent.pretrain.train_diffusion_agent.TrainDiffusionAgent
 
 name: ${env}_pre_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
 logdir: ${oc.env:DPPO_LOG_DIR}/dppo-pretrain/${env}/${exp_id:}
-train_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/train.npz
-val_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/val.npz
-experiment: single_lift_cherry_soft_easy
+train_dataset_path: ${oc.env:DPPO_DATA_DIR}/single_lift_fragile25_direct_generalist_pcd/train.npz
+val_dataset_path: ${oc.env:DPPO_DATA_DIR}/single_lift_fragile25_direct_generalist_pcd/val.npz
+experiment: single_lift_mushroom_soft_easy   # any train-category experiment -- obs schema only
 
 seed: 42
 device: cuda:0
-env: single_lift_cherry_soft_easy_pcd
+env: single_lift_fragile25_direct_generalist_pcd
 obs_dim: 8
 action_dim: 7
+category_embed_dim: 24
 denoising_steps: 20
 horizon_steps: 4
 cond_steps: 2
@@ -31,21 +33,12 @@ visual_feature_dim: 256
 
 wandb:
   entity: ${oc.env:DPPO_WANDB_ENTITY,null}
-  project: gentle-manip-${env}
+  project: gentle-manip-fragile25-generalist
   run: ${exp_id:}
   group: dppo-pretrain
 
 train:
-  # gentle_manip 25-category speed pass (2026-08-13): was 3000 -- mushroom's
-  # val loss (a 50-episode, single-object BC-pretrain, representative of
-  # every per-category specialist here) clearly plateaued by epoch ~500-600
-  # (bounced 0.030-0.040 with no further downward trend all the way to 700,
-  # while train loss kept creeping down -- the classic converged/overfitting
-  # signature) and find_best_checkpoint() already picks the lowest-val-loss
-  # checkpoint regardless of total run length, so training past the plateau
-  # is pure wasted wall-clock, not a quality risk either way. 1000 gives
-  # ~1.6x margin over the observed plateau point across ~18 more specialists.
-  n_epochs: 1000
+  n_epochs: 3000
   batch_size: 128
   learning_rate: 1e-4
   weight_decay: 1e-6
@@ -55,15 +48,8 @@ train:
     min_lr: 1e-5
   epoch_start_ema: 10
   update_ema_freq: 5
-  save_model_freq: 25
+  save_model_freq: 15
   val_freq: 10
-  # Auto early-stop on a val-loss plateau (2026-08-24, replaces manually picking
-  # a fixed n_epochs from one observed example -- see the n_epochs note above).
-  # Patience is in VAL CHECKS (every val_freq=10 epochs), so patience=20 -> stop
-  # after 200 epochs with no improvement > min_delta. The n_epochs=1000 cap above
-  # stays as a hard ceiling in case a category never plateaus.
-  early_stop_patience: 20
-  early_stop_min_delta: 1e-4
 
 model:
   _target_: model.diffusion.diffusion.DiffusionModel
@@ -76,6 +62,7 @@ model:
     cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
     pc_cond_steps: ${pc_cond_steps}
     visual_feature_dim: ${visual_feature_dim}
+    category_embed_dim: ${category_embed_dim}
     time_dim: 16
     mlp_dims: [512, 512, 512]
     activation_type: ReLU
@@ -94,7 +81,14 @@ ema:
   decay: 0.995
 
 train_dataset:
-  _target_: gentle_manip.dppo.pointcloud_dataset.StitchedSequencePointCloudDataset
+  # gentle_manip 25-category speed pass (2026-08-14): MUST be the
+  # ...Category subclass, not the plain point-cloud dataset -- the plain
+  # class never sets conditions["category_embed"], which the model
+  # (category_embed_dim=24, PointNetDiffusionMLP) unconditionally reads in
+  # its forward pass. Caught via a real crash: 5 identical KeyError retries
+  # (train_with_resume kept relaunching a deterministic failure, since this
+  # isn't a transient crash) before tracing it to this line.
+  _target_: gentle_manip.dppo.pointcloud_dataset.StitchedSequencePointCloudCategoryDataset
   dataset_path: ${train_dataset_path}
   horizon_steps: ${horizon_steps}
   cond_steps: ${cond_steps}
@@ -102,7 +96,7 @@ train_dataset:
   device: ${device}
 
 val_dataset:
-  _target_: gentle_manip.dppo.pointcloud_dataset.StitchedSequencePointCloudDataset
+  _target_: gentle_manip.dppo.pointcloud_dataset.StitchedSequencePointCloudCategoryDataset
   dataset_path: ${val_dataset_path}
   horizon_steps: ${horizon_steps}
   cond_steps: ${cond_steps}

@@ -153,7 +153,8 @@ def collect_one(category: str, n_episodes: int, n_envs: int, maxfevals: int,
                 enable_regrasp_retry: bool = False,
                 max_regrasp_retries: int = 1,
                 experiment_template: str = "single_lift_{category}_rigid",
-                scene_dr_every: int = 1, grasp_n_starts: Optional[int] = None) -> dict:
+                scene_dr_every: int = 1, grasp_n_starts: Optional[int] = None,
+                retry_on_slip: bool = False, only_recovered: bool = False) -> dict:
     exp = experiment_template.format(category=category)
     # collect_demos_synth_v2.py's own _make_run_dir() appends the experiment
     # config's TASK name (which can differ from the experiment name itself,
@@ -208,6 +209,14 @@ def collect_one(category: str, n_episodes: int, n_envs: int, maxfevals: int,
             cmd += ["--disturbance-phase", *disturbance_phase]
     if enable_regrasp_retry:
         cmd += ["--enable-regrasp-retry", "--max-regrasp-retries", str(max_regrasp_retries)]
+    # v3's actual regrasp-recovery flags (distinct from the v2-era enable_regrasp_retry
+    # above, which v3 doesn't implement -- see MAX_REGRASP_RETRIES module constant instead).
+    # --only-recovered filters to genuinely-recovered episodes only (natural first-attempt
+    # slip -> regrasp, never an artificial/induced failure -- per explicit user correction).
+    if retry_on_slip:
+        cmd.append("--retry-on-slip")
+    if only_recovered:
+        cmd.append("--only-recovered")
     if record_video:
         cmd.append("--record-video")
 
@@ -317,6 +326,15 @@ def main() -> None:
                     help="passthrough to collect_demos_synth_v2.py (default 1, its own default). "
                          "MPM categories may want a higher value to amortize the slower "
                          "scene-rebuild+settle cost across more episodes per rebuild.")
+    ap.add_argument("--retry-on-slip", action="store_true",
+                    help="v3 passthrough: rewind+regrasp on a genuine (unprompted) first-attempt "
+                         "slip, bounded to MAX_REGRASP_RETRIES (module constant in v3, currently 3 "
+                         "-> up to 4 attempts total). Never induces an artificial failure.")
+    ap.add_argument("--only-recovered", action="store_true",
+                    help="v3 passthrough: keep ONLY episodes that recovered from a genuine slip "
+                         "(discard first-attempt successes). Requires --retry-on-slip. Use this to "
+                         "collect a pure regrasp-behavior training set -- the per-category loop runs "
+                         "extra batches until n_episodes genuinely-recovered episodes are banked.")
     ap.add_argument("--grasp-n-starts", type=int, default=None,
                     help="v3 passthrough: CMA-ES multi-start count (v3's own default is 6). "
                          "Diagnosed 2026-08-15: chicken_breast's default-6 search converged to "
@@ -356,7 +374,9 @@ def main() -> None:
                         max_regrasp_retries=args.max_regrasp_retries,
                         experiment_template=args.experiment_template,
                         scene_dr_every=args.scene_dr_every,
-                        grasp_n_starts=args.grasp_n_starts)
+                        grasp_n_starts=args.grasp_n_starts,
+                        retry_on_slip=args.retry_on_slip,
+                        only_recovered=args.only_recovered)
         results.append(r)
         print(f"[orchestrator] {cat}: ok={r['ok']} saved={r['saved']}/{r['attempted']} "
              f"success_rate={r['success_rate']} elapsed={r['elapsed_s']:.0f}s attempts={r['attempts']}",
