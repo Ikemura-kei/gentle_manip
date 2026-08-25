@@ -197,10 +197,10 @@ alerts went to an unread file, and a val-pass crash minutes after a clean startu
 | 3 | afucm real-data-amount ablation {1, 5, 10, 20, 30 demos}, tested in real | cluster agent | SIM DONE — flat across N (peaks 0.635-0.735, seed-noise range; sfpom/wclac/luewz/ibkzr/ordtr in the canonical table). Real ranking = user, today |
 | 4 | Sync colleague on the FIXED SETUP: native 7d euler action · arm-focus cloud · quat proprio · realws DR · DPPO codebase · ×3.5 big net (512 + [1024]³, 2.89 M EMA) | user | next working day. (Note: "native 7d" — recording native euler commands is bit-equivalent to the validated 10d-record + `--derive-source-action` path, ~1e-7; either satisfies the setup) |
 | 5 | Reduce demo occlusion (penalty or hard angle constraint) | **local agent** | mechanism ALREADY BUILT + validated (hard azimuth bound 45°, `v5c`; fully-hidden 24%→4%, soft penalty provably inert — conclusion 10); remaining work = integrate into the post-item-2 synthesis version once 2 is confirmed |
-| 6 | More mushroom variants closer to real shapes | user (mesh prep) | MESHES IN ASSETS (2026-08-24): 3 TripoSG real-mushroom scans (`obj_meshes/mushroom{1,2,3}/clean.obj`) normalized to the nominal mushroom's convention — rotated y-up→z-up (cap +z, stem −z), uniformly scaled to the nominal mean extent (~33 mm), origin at xy bbox center / 42.7% above bottom — written to `gentle_manip/assets/objects/mushroom{1,2,3}.obj` + registered in `assets/registry.py` (same mushroom material/spawn, sizes 32.3×32.2×35.1 / 31.8×31.9×35.9 / 35.7×32.6×31.3 mm). Side-by-side check: `docs/figures/mushroom_variants_2026-08-24.png`. Remaining = rerun the collection pipeline over the variant set (multi-mesh DR or per-mesh tasks) |
+| 6 | More mushroom variants closer to real shapes | user (mesh prep) | DONE — in production (v3.3 campaign collects on the 4-mesh pool). MESHES IN ASSETS (2026-08-24): 3 TripoSG real-mushroom scans (`obj_meshes/mushroom{1,2,3}/clean.obj`) normalized to the nominal mushroom's convention — rotated y-up→z-up (cap +z, stem −z), uniformly scaled to the nominal mean extent (~33 mm), origin at xy bbox center / 42.7% above bottom — written to `gentle_manip/assets/objects/mushroom{1,2,3}.obj` + registered in `assets/registry.py` (same mushroom material/spawn, sizes 32.3×32.2×35.1 / 31.8×31.9×35.9 / 35.7×32.6×31.3 mm). Side-by-side check: `docs/figures/mushroom_variants_2026-08-24.png`. Remaining = rerun the collection pipeline over the variant set (multi-mesh DR or per-mesh tasks) |
 | 7 | OOD size+shape test scenario | cluster agent | SIM DONE — ASYMMETRIC: big-OOD (1.5-1.8×) easier than in-domain (0.75-0.92); small-OOD (0.7-0.95×) collapses (0.13-0.22) for every policy. ACTION: extend training scale DR downward if real mushrooms can be < nominal |
 | 8 | Robustness to missed grasps | **local agent** | DEFERRED until everything else checks out. Partially exists: retry-on-slip (`--retry-max`, window 0.15–0.30, 5/5 recovery) is built + validated; open remainder = induced-failure coverage (idea 3) |
-| 9 | Promote to generalist (end-to-end) | cluster agent | LAST, after 8 is decided |
+| 9 | Promote to generalist (end-to-end) | cluster agent | STARTED (2026-08-25/26): SECOND CATEGORY = 3cm tofu block — task/experiments live, smoke series v3→v10 drove demonstrator 63.5%→97.6% (spawn-z, anti-pinch, peak+tilt terms); v11 (grasp-quality polish) in queue; 650+trainings gated on user video OK |
 | 10 | Gentler grasp test (small/no over-squeeze, + real co-train) | cluster agent | collection DONE (26-08-23-mfa, 2.5mm extra squeeze, 91.55% demonstrator — squeeze dose-response: 2.5mm→84.9%, 5mm→91.6%, 7.5mm+→94.2%); co-train prmaw DONE — NEGATIVE: 0.54 peak @200, sustained 25.1 kPa (0.15 success cost, NO stress benefit vs afucm 0.685/24.0). Gentler demos do not yield a gentler policy at this margin |
 | 11 | Gentleness-aware model selection | (either) | from now on; harness already records the 9 stress metrics per episode. Recommend ranking on sustained (`top20_ttop20`) not peak — peak is pinned 49–53 kPa across 9 demonstrator configs (likely contact/metric artifact, conclusion 11) |
 | 12 | Memory in the policy (first-frame context token variant) | cluster agent | SIM NEGATIVE (ptpii 0.38 peak vs 0.685 baseline — success halved). NOT taken to real. Follow-ups if revisited: bottlenecked context, FiLM, gating; RNN/transformer untested |
@@ -373,6 +373,38 @@ running" — replacing any whose experiments have since finished.**
 ---
 
 ## Log
+
+**2026-08-26 — ROADMAP CONSOLIDATION (user request): what is concluded, abandoned, ongoing, new.**
+CONCLUDED & ADOPTED: v3.3 synthesis recipe (sim-validated; real trial via v33b after the
+poisoning fix) · 4-mushroom mesh pool + scale [0.8,1.5] (items 6+18) · small-size data
+coverage (2× small-scale success — the one width-related intervention that works) ·
+regular MPM sampler everywhere · 10 stop frames (supersedes hold-tail aug) · anti-stem/
+pinch + peak + tilt synthesis terms (tofu-driven, mushroom-applicable) · dataset+policy
+gates (verify_derived_dataset, probe_policy_real_obs) as standing pre-train/pre-deploy
+practice · gentleness ranking on sustained kPa.
+CONCLUDED NEGATIVE (abandoned): gentle demos (item 10) · first-frame memory (item 12) ·
+aux contact/pos heads (item 13) · h8/e4 alone (item 15; stop frames make h8 moot) ·
+global gripper-dim loss ×3 (fix 2) · FiLM UNet head (fix 5, collapse) · width-aux head at
+ALL weights 0.5-2.5 (no success gain; adaptation only via harmful gradient pressure) ·
+18b feed-forward AS an adaptation mechanism (keeps success, width still flat) · episode-min
+width as a probe metric (miss-closure artifact).
+CONCLUDED SCIENCE: width IS predictable from the cloud (heads corr≈0.8 vs data 0.85,
+OOD-generalizes with coverage) → the adaptation failure is PURELY policy learning ·
+small-object failures are approach/centering precision, not width (item 17) · OOD is
+asymmetric (big easy, small collapses without data) · sim eval is structurally blind to a
+co-trained policy's real branch (v33 incident).
+ONGOING: iter-4 width mechanisms — rztss (RESIDUAL width, the live bet: adaptation by
+construction) + qrbtr (grasp-window loss ×8) training, xqmxw (18b+small data, peak
+0.565@100 ≈ neutral so far) · v33b recovery ×4 (plain/aux0.5/aux1.5/shift9-plain — the
+shift9 arm doubles as the perception-bias pairing A/B) · tofu v11 (tilt penalty) →
+user 650 gate · REAL tests pending on user/local: alzey (item 16, top candidate), jtzqc
+(camera DR), peikp (small-mushroom A/B), v33b winners after probe_policy_real_obs ·
+bias-magnitude iteration (9 vs 12-13 mm, local agent).
+NEW SINCE THE ORIGINAL ROADMAP: second object category (tofu, item 9 started) ·
+perception-bias-corrected dataset family + deploy-pairing rule · residual-action
+mechanism family (if rztss works, extendable beyond width) · per-object synthesis-knob
+calibration as an explicit practice (area floor 15→35, w_tilt for flat faces).
+
 
 **2026-08-26 — tofu v10: 97.6% (from 70.3%) — burial was the dominant failure driver;
 v11 adds the approach-tilt penalty for grasp QUALITY.** v10 (1680342's predecessor
