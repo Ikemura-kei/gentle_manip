@@ -372,6 +372,26 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-26 — width-adaptation probes COMPLETE across all 9 policies (figure:
+`docs/figures/width_at_grasp_all_2026-08-26.png`); the mechanism question is answered.**
+New probes (s08 arms on [0.8,1.5]; bcvrt on the standard range): bcvrt (18b feed-forward)
+at-grasp corr **0.09** — flat ~33 mm at every scale: even FEEDING the width prediction into
+the denoiser conditioning does not create adaptation (it only avoids the aux-pressure
+success cost). peikp (plain+small-data) **0.01** — zero adaptation, yet the best success of
+its cohort. rturn (aux1.5) 0.07; dxrxd (aux2.5) 0.19 (succ-only 0.36 — heavy gradient
+pressure bends behavior slightly, echoing eqrth).
+**CONSOLIDATED CONCLUSION (9 policies, 2 data regimes, 4 mechanisms):** diffusion policies
+here do NOT imitate the demonstrator's width adaptation (data r=0.85) under ANY tested
+mechanism (aux loss 0.5-2.5, loss reweighting, FiLM, feed-forward conditioning). They pick
+ONE data-appropriate operating width (s08-trained arms ~27 mm vs [1.0,1.5]-trained ~33 mm —
+the constant tracks the data distribution) and rely on positioning; success gains come from
+DATA COVERAGE (small-scale complement: 0.13-0.22 → 0.45), and the residual size gradient is
+approach/centering precision (item 17). Width adaptation as a target is hereby DEPRIORITIZED;
+the open levers for small objects are perception (object-region point budget) and centering.
+s08_18b (aux0.5+feed on the s08 data, job 1664288) still trains — tests whether 18b's
+no-cost property + small data stack; prediction: ≈peikp success, flat width.
+
+
 **2026-08-25 (night) — tofu smoke v3 (1653490): 63.5% demonstrator success; diagnosed as
 EDGE-PINCH grasps; v4 relaunched on the full v3.3 recipe.** 40/40 episodes + all videos at
 `dataset/demos/single_lift_tofu_soft/26-08-25-zeo/videos/`. Failure signature from
