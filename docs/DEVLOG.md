@@ -374,6 +374,20 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-26/27 — v33b curves: shift9 WINS (njhbz 0.725 > afucm 0.685); the deprecated
+orkam "recipe win" does NOT reproduce on clean data (lciml 0.595) — claim retracted.**
+Standard-eval bests (vs afucm 0.685/24.0): njhbz (v33b+shift9 clouds) 0.725/0.740 @100
+sust 38.0 (2/6 evals, curve filling) · gvqwa (aux0.5) 0.670/0.730 @100 · ezdzu (aux1.5)
+0.660/0.735 @100 (stable curve) · lciml (plain) 0.595/0.675 @100. READS: (1) the poisoned
+orkam's 0.715 was an artifact of the broken merge (its compressed normalization); v3.3
+data alone does NOT beat afucm — RETRACTED; (2) the 9 mm cloud-bias correction (§4.1) is
+what pushes past afucm (njhbz) — corrected real rows stop fighting sim rows in training;
+(3) first dataset where aux width heads ≥ plain (gvqwa/ezdzu > lciml). njhbz@100 = TOP
+new real candidate — REQUIRES probe_policy_real_obs + deploy with point_cloud_shift
+ACTIVE. Also: qrbtr (window ×8) best 0.470 @200 — verdict mild NEGATIVE; resw2 (residual
+v2, fixed units) training. Caveat on all: single seed, @100 peaks, noisy curves.
+
+
 **2026-08-26 — rztss probe: FLAT (0.095) — root-caused to a UNITS BUG in my residual
 transform; v2 (fixed) relaunched as s08_resw2.** The probe (residual add verified ACTIVE
 in-log) measured commanded width flat at 27 mm. Forensics: the v1 relabeling subtracted a
