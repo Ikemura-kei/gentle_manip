@@ -374,6 +374,18 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-26 — argmax+peak mushroom probe collection (user ask): pinch rate 7.8% → 2.0%
+at equal success; width diversity survives argmax.** 100 eps, all-video
+(`26-08-26-cze`), = the njhbz anchor recipe with EXACTLY two changes: diversity/jitter
+OFF (pure argmax) + w_peak 0.3. Results: success 92.9% (anchor 93.8%); PINCH RATE 2/100 =
+2.0% vs anchor 51/650 = 7.8% (4×); align 0.916 (p10 0.889), tilt 9.3° (p90 21.7° —
+natural range on curved geometry); CMA width 41.9±9.6 mm — the width SPREAD is
+scene-DR-driven, not jitter-driven, so argmax preserves it. Per-mesh: mushroom/m3 1.00,
+m1 0.906, m2 0.792 (n=24, likely noise — watch). READ: the diversity machinery's main
+output on mushrooms was pinches; argmax+peak is a candidate straight upgrade for the next
+full mushroom collection (user to confirm from videos).
+
+
 **2026-08-27 — ANCHOR RUN DOCUMENTATION: njhbz (v33b_shift9) — full pipeline + args.**
 The campaign's best sim policy (0.805/0.820 @300, sust 28.1; real-obs probe PASS @200/300).
 1. COLLECT (job 1653982 → `dataset/demos/single_lift_mushroom_soft/26-08-25-clq`, 650 eps,
