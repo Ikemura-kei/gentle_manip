@@ -391,8 +391,18 @@ block, align 0.74-0.79. dr_params align-vs-success on v4: align≥0.9 → 100% (
 <0.85 → 26%. Cause: the collector's `--grasp-align` default 2000 (deliberately lowered
 from the metric's 3e4 for mushroom pose diversity) lets the flat-faced cube's degenerate
 tilted-optima family through — §11.7's cube pathology exactly. v6 smoke (1655383): v4
-recipe + `--grasp-align 30000`. Prediction: ≥85%. Lesson: per-OBJECT synthesis knobs —
-alignment weight must scale with face flatness. Note: seed-0's 8 scene draws
+recipe + `--grasp-align 30000` → 64.5%, align distribution UNCHANGED (prediction ≥85%
+FALSIFIED — the knob didn't bite). v7 (1655807, jitter 30°→8°): 67.8%, align STILL
+unchanged (p10 0.685 vs cos8°≈0.99 expected) — jitter isn't the tilt source either.
+Remaining mechanism: `--grasp-diversity-tol 0.3` picks RANDOMLY among all grasps within
+30% of best score, and the cube's genuinely-tilted CMA-ES optima sit inside that window
+(diagonal grasps score decent FEM stress, offsetting the align penalty). v8 (1655995):
+diversity-tol 0 + jitter 0 → pure argmax with w_align 3e4 — align p10 must approach 1.0
+BY CONSTRUCTION; if success still ~68%, align was a confound and iteration stops.
+Standing observation across v3-v8: align≥0.9 → 100% success in EVERY variant (n=25/27/29);
+the entire failure mass is align<0.85. Lesson stands: per-OBJECT synthesis knobs — and
+the diversity machinery (tol+jitter), not the objective weights, is what controls the
+achieved-pose distribution. Note: seed-0's 8 scene draws
 all landed ≥1.0 scale (4% chance, verified the [0.8,1.4] range IS active — batch-1 draw
 1.182 matches the new range's transform of the old 1.318 draw).
 
