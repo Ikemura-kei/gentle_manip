@@ -374,6 +374,24 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-26 — REAL RESULTS (user): alzey ≈70%+ (item 16 POSITIVE in real) but
+over-squeezes; qjzsf weak at workspace edge + crushes more.**
+- alzey/state_200 (paired-feature encoder reg): ≥70% real success (not rigorously
+  counted) — encoder domain-alignment survives the robot; at least afucm-class.
+  OVER-SQUEEZE observed — and the sim gentleness metric PREDICTED it: state_200 is the
+  harshest post-100 checkpoint (sustained 33.9 kPa, near the 40 kPa yield) vs 300
+  (0.730/27.9) and 400 (0.675/22.9). RECOMMENDED: real-test state_300/400 for the
+  squeeze trade — the first real validation of item 11 (rank on sustained, not success
+  alone).
+- qjzsf (real-only, 55 demos): edge-of-workspace weakness (teleop demos under-cover the
+  box boundary; sim collections sample it uniformly) + more crushing (55 demos too few to
+  learn the operator's width adaptation). Both are DATA-COVERAGE failures — consistent
+  with the campaign-wide data-beats-architecture pattern.
+- The over-squeeze is plausibly the real-world manifestation of the constant-width
+  strategy (flat ~30 mm command → small mushrooms over-squeezed) — strengthens the
+  rztss residual-width bet.
+
+
 **2026-08-26 — ROADMAP CONSOLIDATION (user request): what is concluded, abandoned, ongoing, new.**
 CONCLUDED & ADOPTED: v3.3 synthesis recipe (sim-validated; real trial via v33b after the
 poisoning fix) · 4-mushroom mesh pool + scale [0.8,1.5] (items 6+18) · small-size data
