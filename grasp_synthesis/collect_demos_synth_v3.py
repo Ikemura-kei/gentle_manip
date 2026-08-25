@@ -927,6 +927,16 @@ def main() -> None:
                    help=f"'firm' phase steps (post-grasp extra squeeze idea #1); default {N_FIRM}. "
                         "0 = NO firm phase at all — the grasp goes straight to lift at width_cls "
                         "(matches the pre-firm v1 collector, e.g. the cho dataset).")
+    p.add_argument("--grasp-w-peak", type=float, default=None,
+                   help="peak-aware stress weight: score -= w_peak * E * UNMASKED p98 stress. The "
+                        "masked top10 objective HIDES contact spikes (corner/edge grasps score low "
+                        "bulk stress while spiking locally, sect 11.7); metric default 0.3, but the "
+                        "legacy collector path forwards 0 — pass 0.3 to opt in. None (default) = "
+                        "legacy off.")
+    p.add_argument("--grasp-w-area", type=float, default=None,
+                   help="whole-grasp contact-area REWARD (score += w_area * area) — continuous "
+                        "flush-contact promotion beyond the --grasp-area-min-mm2 floor. None "
+                        "(default) = legacy off.")
     p.add_argument("--grasp-extra-close", type=float, default=0.0,
                    help="squeeze FURTHER IN than the synthesized width by this many meters (tighter grip) "
                         "for EVERY grasp — e.g. 0.005 = close 5mm tighter. 0 (default) = no change. Use to "
@@ -1163,7 +1173,9 @@ def main() -> None:
                                     pitch_seed_deg=args.grasp_pitch_seed_deg,
                                     cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg,
                                     area_min=args.grasp_area_min_mm2 * 1e-6 * float(scene_dr['scale']) ** 2,
-                                    w_press=(args.grasp_w_press or None))
+                                    w_press=(args.grasp_w_press or None),
+                                    **({"w_peak": args.grasp_w_peak} if args.grasp_w_peak is not None else {}),
+                                    **({"w_area": args.grasp_w_area} if args.grasp_w_area is not None else {}))
             if r.get("x") is None or r.get("stress_top10") is None:   # diversity found no feasible grasp;
                 print(f"  Env {i}: no feasible diverse grasp -> retry WITHOUT diversity")  # retry reliably
                 r = fg.synthesize_grasp(fem_obj, fem_pad_geo, obj_pos_all[i], obj_quat_all[i],
@@ -1172,7 +1184,9 @@ def main() -> None:
                                         n_starts=args.grasp_n_starts, seed=cma_seed + 7, accel=args.grasp_accel,
                                         cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg,
                                         area_min=args.grasp_area_min_mm2 * 1e-6 * float(scene_dr['scale']) ** 2,
-                                        w_press=(args.grasp_w_press or None))
+                                        w_press=(args.grasp_w_press or None),
+                                        **({"w_peak": args.grasp_w_peak} if args.grasp_w_peak is not None else {}),
+                                        **({"w_area": args.grasp_w_area} if args.grasp_w_area is not None else {}))
             best_x = r["x"]
             if best_x is None or r.get("stress_top10") is None:       # extremely rare: still nothing ->
                 # default straight-down grasp at the object xy so the FSM never sees None (this episode may
