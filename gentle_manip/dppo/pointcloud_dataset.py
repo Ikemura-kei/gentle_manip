@@ -86,7 +86,14 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
             s_lo, s_hi = float(nz["obs_min"][-1]), float(nz["obs_max"][-1])
             a_lo, a_hi = float(nz["action_min"][-1]), float(nz["action_max"][-1])
             w_phys = (per_ep + 1) / 2 * (s_hi - s_lo + 1e-6) + s_lo          # episode width (m)
-            w_act = 2 * (w_phys - a_lo) / (a_hi - a_lo + 1e-6) - 1           # action units
+            # two-stage into the SAME space as stored actions: phys -> derive-space u
+            # (action-config gripper bounds) -> npz-normalized (dataset action stats).
+            # (v1 subtracted derive-space units from npz-space actions: round-trip
+            # consistent but the anchor never de-scened the labels — residual stayed
+            # corr 1.0 with episode width; rztss learned nothing new.)
+            G_LO, G_HI = 0.0, 0.088                                          # abs_pose_euler gripper bounds
+            u = 2 * (w_phys - G_LO) / (G_HI - G_LO + 1e-6) - 1               # derive space
+            w_act = 2 * (u - a_lo) / (a_hi - a_lo + 1e-6) - 1                # npz-normalized units
             if residual_width:
                 w_step = np.repeat(w_act, tl2)[:total].astype(np.float32)
                 self.actions[:, -1] = self.actions[:, -1] - torch.from_numpy(w_step).to(device)

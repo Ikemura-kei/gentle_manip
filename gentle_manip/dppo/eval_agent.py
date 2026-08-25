@@ -49,7 +49,8 @@ class _DiffusionPolicy:
                 s_lo, s_hi, a_lo, a_hi = self._resid
                 pred = self.model.network.aux_predict(cond)["grasp_width"].cpu().numpy()[:, 0]
                 w_phys = (pred + 1) / 2 * (s_hi - s_lo + 1e-6) + s_lo          # state-norm -> m
-                w_act = 2 * (w_phys - a_lo) / (a_hi - a_lo + 1e-6) - 1         # -> action units
+                u = 2 * (w_phys - 0.0) / (0.088 - 0.0 + 1e-6) - 1              # -> derive space
+                w_act = 2 * (u - a_lo) / (a_hi - a_lo + 1e-6) - 1              # -> npz units (match dataset)
                 traj[:, :, -1] = traj[:, :, -1] + w_act[:, None]
         return traj[:, : self.act_steps]              # (n_env, act_steps, act_dim), normalized
 
