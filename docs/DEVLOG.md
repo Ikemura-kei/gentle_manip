@@ -372,6 +372,20 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-25 (night) — tofu smoke v3 (1653490): 63.5% demonstrator success; diagnosed as
+EDGE-PINCH grasps; v4 relaunched on the full v3.3 recipe.** 40/40 episodes + all videos at
+`dataset/demos/single_lift_tofu_soft/26-08-25-zeo/videos/`. Failure signature from
+dr_params.csv: failures have HALF the pad contact area (25.4 vs 59.1 mm²) and much higher
+contact pressure (91 vs 63 kPa) at similar width/grip — the classic cube edge/corner-pinch
+mode (grasp_synthesis notes: the cube is the multi-optimal hard case), which v3.3's
+anti-pinch terms (`--grasp-area-min-mm2 15 --grasp-w-press 0.05`) exist to demote. The v3
+smoke predates the v3.3 merge, so it ran without them. v4 smoke (1654259) = full v3.3
+recipe on tofu (anti-pinch + continuous approach + 20-step close + 10 stop frames), 40 eps
+all-video, same gate: user reviews videos before the 650 run. Note: seed-0's 8 scene draws
+all landed ≥1.0 scale (4% chance, verified the [0.8,1.4] range IS active — batch-1 draw
+1.182 matches the new range's transform of the old 1.318 draw).
+
+
 **2026-08-25 (night) — OVERNIGHT PLAN (user, before sleep): v3.3 synth campaign on upstream
 arrival.** The local agent is finishing an improved grasp synth (v3.3). Standing order for the
 cluster agent: (1) periodic watcher on origin/master (armed); (2) on push: merge properly,
