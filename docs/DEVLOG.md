@@ -387,7 +387,7 @@ consistency (t0 gripper ~80 mm open; |cmd z − ach z| median <1 cm) — now par
 chain and any future merge; (2) sim eval cannot validate the real-slice health of a
 co-trained policy — the poisoned mapping is invisible to sim clouds; the local agent's
 offline real-cloud probe (real cloud in, action out) is the cheap pre-deploy check.
-FIX (chain live): re-convert `single_lift_mushroom_real_merged` WITH
+Fix-slice verification: my chain gate PASSED (t0 gripper 79.8 mm vs poisoned 44; z lead 10.7 mm = the K4 design lead; gripper tracking 0.1 mm); the local agent's canonical `verify_derived_dataset.py` passes seam, flags dwell 0.429 — the KNOWN-BENIGN real-teleop value (doc: 'the real slice carries 0.42 and works'; the 0.20 threshold is sim-calibrated). Pre-deploy rule going forward: run `probe_policy_real_obs.py` on any co-trained checkpoint before recommending deployment. FIX (chain live): re-convert `single_lift_mushroom_real_merged` WITH
 `--derive-source-action delta fast_rot --derive-lookahead 4` → gate → re-merge →
 `..._noos_cmd_v33b` → retrain v33b_plain / v33b_aux0p5 / v33b_aux1p5. The v33 sim curves
 (orkam 0.715 @200 etc.) remain VALID as sim-recipe evidence; the checkpoints are
