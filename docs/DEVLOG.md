@@ -374,6 +374,24 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-27 — paired-reg families launched (user): tofu(v11 smoke, pure sim) ×3 seeds +
+njhbz(shift9)+pairing ×3 seeds; verifier dwell gate shown NORMALIZATION-SENSITIVE.**
+Six trainings (jobs 1692481-86, seeds 42/27/43 — cfg-default IS 42 so the requested
+"original, 27, 42" collides; 43 = campaign alternate, flagged to user): (A) tofu_preg_s* —
+njhbz-style recipe on `single_lift_tofu_soft_v11_7d` (36 eps from the v11 smoke; PURE SIM,
+real data to be added later) + alzey's paired mechanism (PairedRegDiffusionModel,
+paired_cube3_clouds.npz, w=0.5 — pairs are task-agnostic cube3 features); (B)
+shift9_preg_s* — the v33b_shift9 dataset + the same pairing = both alignment mechanisms
+stacked on the current best recipe, and the shift9 family's first seed-spread. Eval
+watchers armed per run. GATE NOTE for the local agent: verify_derived_dataset's dwell[sim]
+FAILed tofu at 0.455 while the mushroom v33 sim set passed at 0.193 — but in
+normalization-independent units the two datasets are IDENTICAL (vector dwell 0.095 vs
+0.094; median |d_xyz| 0.0104 vs 0.0109 derive-units): the metric is computed in each
+dataset's own npz normalization and inflates when per-dim ranges differ (pure-sim tofu vs
+merged mushroom). Override documented here; the verifier should compute dwell in
+derive-space or physical units.
+
+
 **2026-08-26/27 — v33b curves: shift9 WINS (njhbz 0.725 > afucm 0.685); the deprecated
 orkam "recipe win" does NOT reproduce on clean data (lciml 0.595) — claim retracted.**
 Standard-eval bests (vs afucm 0.685/24.0): njhbz (v33b+shift9 clouds) 0.725/0.740 @100
