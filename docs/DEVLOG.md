@@ -760,6 +760,32 @@ the next episode's video — this was the dominant desync (ghost contains real m
 videos from before the fixes align exactly by END-ANCHORING (the save side flushes at the save
 tick); the paired renderer does this automatically.
 
+**2026-08-25 — ⛔ v33 REAL SLICE IS BROKEN: undrived delta actions. All v33 policies must be
+retrained.** Full write-up: [v33_real_slice_bug.md](v33_real_slice_bug.md). Deploying
+`orkam/state_200` on the real arm made it climb in +z with the gripper part-closed; `state_400`
+and `kjljs/state_100` behave identically. Root cause is NOT the deploy wiring (verified
+correct), NOT the checkpoint, and NOT the v3.3 recipe: the real slice merged into
+`single_lift_mushroom_simreal_realws_noos_cmd_v33` was **never derived** — the demos' recorded
+DELTA actions were written into the 7d absolute dataset as if already absolute. A delta of ≈0
+decodes to the MIDPOINT of each absolute range, so that slice teaches, for any real-looking
+cloud, `z = 0.252 m` (midpoint; demos achieve 0.096) and `gripper = 44 mm` (midpoint; demos
+hold 80). The robot reproduced those numbers exactly. Confirmed cluster-side from
+`downloaded_runs/orkam/normalization.npz` (action z max 0.75 → 0.438 m; no sim collection
+exceeds 0.235 m). **afucm is unaffected** (its merged z max 0.072 → 0.239 m — properly derived
+slice), which is exactly why afucm works and every v33 checkpoint does not.
+**Fix:** re-convert with `--derive-source-action delta_pose_delta_gripper_fast_rot
+--derive-lookahead 4`, re-merge, retrain (command in the doc). **The v3.3 recipe has not yet
+been fairly tested** — this failure says nothing about it.
+**Two gates added, both verified:** `gentle_manip/scripts/verify_derived_dataset.py` (dataset:
+derivation/lead/seam/dwell — flags the broken slice on 4 counts, passes a good one; run on every
+convert output) and `examples/sim2real_diagnose/probe_policy_real_obs.py` (policy: real vs sim
+vs hybrid observations, exits non-zero if the policy climbs or closes at t0 — afucm PASS,
+orkam/kjljs FAIL). **Method lesson (generalizes):** simulated evaluation is structurally blind
+to a co-trained policy's real branch — orkam scored 0.715 in sim vs afucm's 0.685 while being
+non-functional on real input. Sim ranking doesn't merely fail to transfer here; it cannot see
+brokenness at all. Second lesson: a policy that mispredicts on demos **from its own training
+set** is a data bug, not a model bug — that one-line check redirected the whole investigation.
+
 **2026-08-25 — v3.3 synthesis READY FOR CLUSTER (recipe + handoff: [v3.3_synth.md](v3.3_synth.md)).**
 v3.3 = v3.2 with settle rolled back 6→1 (user), + **approach speed compensation** (per-env
 duration = profile arc-length / 0.0024 m/step; speed band 2.73–3.48 → 2.42–2.55 mm/step,
