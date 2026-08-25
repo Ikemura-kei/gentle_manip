@@ -274,3 +274,14 @@ experiments section of either.**
 **One framing to avoid:** "we achieve gentle manipulation of real food." We have gentle
 grasp *selection* validated in simulation and lift success validated in reality; the link
 between the two on real produce is exactly the missing measurement.
+
+---
+
+## Companion: structured outlines + method section
+
+`docs/paper/` holds the LaTeX companion to this document: a complete **method section**
+written against the v3.3 recipe and a trained generalist (`method.tex`, with a
+reproducibility parameter table), and **three full paper outlines** matching the three
+framings above (`outlines.tex`: section plans, figure/table lists, per-version risk, and a
+claim ledger mapping every claim to its evidence and status). Build with
+`cd docs/paper && pdflatex main.tex && pdflatex main.tex`.

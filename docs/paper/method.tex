@@ -1,0 +1,424 @@
+% !TEX root = main.tex
+% ---------------------------------------------------------------------------
+% Method section — assumes the v3.3 synthesis recipe and a trained generalist.
+% Written to be venue-agnostic: Sec. 3.1-3.8 are shared by all three framings in
+% outlines.tex; only the emphasis (which subsection is "the contribution") changes.
+% ---------------------------------------------------------------------------
+\section{Method}
+\label{sec:method}
+
+We describe a pipeline that produces a gentle grasping policy for deformable, fragile
+objects without any contact sensing at deployment. The organising idea is that the
+quantity which defines gentleness---internal stress---is unobservable to the robot but
+\emph{exact} inside a deformable simulator. We therefore spend it where it exists: an
+autonomous demonstrator selects grasps by minimising predicted internal stress
+(\S\ref{sec:method:synth}), executes them under a randomised scene distribution
+(\S\ref{sec:method:demos}), and a point-cloud policy is behaviour-cloned from the result
+(\S\ref{sec:method:policy}) and deployed on hardware from depth and proprioception alone
+(\S\ref{sec:method:deploy}).
+
+\subsection{Problem setting}
+\label{sec:method:problem}
+
+A 7-DoF arm with a parallel-jaw gripper must lift a single fragile object from a table and
+hold it, without damaging it. The object's pose, size, shape and material stiffness vary
+between episodes and are not directly observable. Perception is a single fixed external
+depth camera; there is no tactile or force sensing in the loop.
+
+Demonstrations are generated in a material-point-method (MPM) simulator that represents the
+object as a deformable continuum, so that internal stress is available at every particle and
+the contact between the gripper and the object is resolved rather than scripted. The same
+task, workspace and camera geometry are instantiated on hardware, and the boundary between
+the two is a single observation struct: everything above it (point-cloud processing, action
+encoding) is shared code, everything below it is backend-specific.
+
+At each control step $t$ the policy observes
+\begin{equation}
+  o_t \;=\; \bigl(\, \mathbf{p}_t,\; \mathbf{q}_t,\; w_t,\; \mathcal{P}_t \,\bigr),
+  \label{eq:obs}
+\end{equation}
+the end-effector position $\mathbf{p}_t\!\in\!\mathbb{R}^3$, its orientation as a unit
+quaternion $\mathbf{q}_t\!\in\!S^3$, the measured gripper width $w_t\!\in\!\mathbb{R}$, and a
+point cloud $\mathcal{P}_t\!\in\!\mathbb{R}^{N_p\times 3}$ with $N_p\!=\!1024$ points in the
+robot base frame. The action is an \emph{absolute} target pose and gripper width,
+\begin{equation}
+  a_t \;=\; \bigl(\, \mathbf{p}^{\mathrm{cmd}}_t,\; \boldsymbol{\theta}^{\mathrm{cmd}}_t,\;
+                    w^{\mathrm{cmd}}_t \,\bigr) \;\in\; \mathbb{R}^{7},
+  \label{eq:act}
+\end{equation}
+with orientation encoded as Euler angles (\S\ref{sec:method:spaces}). An episode succeeds if
+the object's centre enters a height band and remains there for $T_{\text{hold}}$ consecutive
+steps; it is \emph{gentle} to the degree that the peak internal (von~Mises) stress stays
+below the material's bruising threshold. Success is measurable on hardware; gentleness, in
+this work, is measured in simulation.
+
+One design decision follows from this asymmetry and is used throughout: gentleness is
+enforced at \emph{data-generation} time by the demonstrator rather than by a reward term or a
+feedback controller, so the deployed policy never needs a signal it cannot observe.
+
+\subsection{Stress-aware grasp synthesis}
+\label{sec:method:synth}
+
+The demonstrator plans, for a given object instance, a $7$-DoF grasp
+$x = (\mathbf{t}, \mathbf{r}, \omega)$: the tool-centre-point position $\mathbf{t}$, its
+orientation $\mathbf{r}$ (Euler), and the \emph{commanded} gripper width $\omega$. Planning
+happens on the mesh, outside the physics simulator.
+
+\paragraph{Width-controlled contact model.}
+A real parallel jaw is position-controlled: one commands a width and the grip force is an
+outcome. We model this directly. The object is tetrahedralised and a linear-elastic
+stiffness matrix $K$ assembled. Because the object is free-floating, $K$ is rank-deficient
+by the six rigid-body modes $R$, so all solves use an inertia-relief (bordered) system
+factored once per object,
+\begin{equation}
+  \begin{bmatrix} K & R \\ R^{\!\top} & 0 \end{bmatrix}
+  \begin{bmatrix} u \\ \alpha \end{bmatrix}
+  =\begin{bmatrix} b \\ 0 \end{bmatrix}.
+  \label{eq:inertia-relief}
+\end{equation}
+Closing to width $\omega$ indents the object by $\delta_{l},\delta_{r}$ per jaw. We prescribe
+\emph{normal-only} displacement at the contact nodes---the tangential directions stay
+free---with a rounded (parabolic) pad profile $d_i=\delta\,\bigl(1-(r_i/r_{\text{pad}})^2\bigr)$.
+Both details matter: fully-bonded contact against a flat plane clamps the surface and
+produces a mesh-dependent flat-punch edge singularity instead of bulk compression, whereas
+the normal-only rounded pad lets the material bulge and yields a physical compression zone.
+
+Under position control the displacement field is independent of Young's modulus, so stress
+and grip force are both \emph{linear} in it. We solve once at $E\!=\!1$ to obtain
+$(\sigma_1, F_1)$ and recover any material by scaling,
+\begin{equation}
+  \sigma(E) \;=\; E\,\sigma_1, \qquad F(E) \;=\; E\,F_1 ,
+  \label{eq:E-linear}
+\end{equation}
+which makes evaluating a candidate grasp across a distribution of stiffnesses essentially
+free---one FEM solve per pose, scalar arithmetic per material sample. A grasp is
+\emph{holdable} when friction at the two pads carries the object's weight with an
+acceleration margin $a$,
+\begin{equation}
+  2\,\mu\,F(E) \;\ge\; m\,g\,\bigl(1 + a/g\bigr).
+  \label{eq:hold}
+\end{equation}
+
+\paragraph{Grasp score.}
+Among holdable grasps we prefer those that deform the object least, press flush, and do not
+concentrate load on a small patch. Writing $\sigma_{\text{top10}}$ for the mean of the
+highest decile of element stresses (with elements adjacent to the contacts masked, since a
+point load produces a mesh-dependent spike there) and $\sigma_{p98}$ for the unmasked $98$th
+percentile, the objective to maximise is
+\begin{equation}
+  \begin{aligned}
+  S(x) \;=\; &-\,\sigma_{\text{top10}}(x)
+              \;-\; w_{\text{al}}\bigl(1-\mathrm{al}(x)\bigr)
+              \;-\; w_{\text{pk}}\,\sigma_{p98}(x) \\[2pt]
+             &-\; w_{\text{pr}}\,\frac{F(x)}{A_{\min}(x)}
+              \;-\; w_{\text{az}}\,\bigl[\theta_{\text{az}}(x)-\bar\theta\bigr]_{+},
+  \end{aligned}
+  \label{eq:score}
+\end{equation}
+subject to holdability~\eqref{eq:hold} and a hard floor on the contact area of the
+\emph{worst} pad, $A_{\min}(x) \ge A_{\text{floor}}$; infeasible candidates are returned on a
+shaped penalty ladder so the search retains a gradient toward feasibility. The terms encode
+distinct failure modes we observed. The alignment term $\mathrm{al}(x)$, the mean absolute
+cosine between the closing axis and the local surface normals, rejects grazing and edge
+contacts. The peak and pressure terms penalise \emph{local} damage that the masked bulk
+statistic hides. The area floor is what eliminates stem-type grasps: on our object these
+score \emph{better} on bulk stress than a correct enveloping grasp (squeezing near a stiff,
+slender part deforms the body less), so a search that optimises bulk stress alone converges
+toward them; they are separated instead by worst-pad contact area, which differs by roughly
+a factor of six between the two grasp types. Finally $\theta_{\text{az}}$ is the azimuth of
+the closing axis relative to the camera ray, bounded by $\bar\theta$ so the fingers do not
+occlude the object in the very observation the policy must act on. A shaped penalty rather
+than a hard rejection is required here: occlusion-reducing candidates otherwise sit on a flat
+infeasibility floor where a soft weight has no gradient.
+
+\paragraph{Search.}
+$S$ is optimised with CMA-ES from multiple seeds---canonical closing axes plus a yaw fan
+centred on the camera-perpendicular direction---since a single start reliably misses the
+gentle basin. The FEM factorisation is built once per object geometry and reused across all
+candidates and all envs sharing that geometry, so per-candidate cost is one Schur-complement
+back-substitution.
+
+\subsection{Demonstration generation}
+\label{sec:method:demos}
+
+Planned grasps are executed in a deformable (MPM) simulator to produce
+$(\text{observation},\text{action})$ trajectories in the same format a real teleoperation
+session would produce.
+
+\paragraph{Execution.}
+Each parallel environment runs an independent phase machine---approach, settle, close,
+firm, lift, hold---so that environments may progress at different rates and, on failure,
+rewind. Commands are still issued as one batched step; only the per-environment row varies.
+At the close$\rightarrow$firm boundary the measured contact signal is read once: a grasp that
+came out weak receives an additional closure, which recovers marginal grasps without
+introducing over-squeeze elsewhere. Slip during the lift triggers a bounded regrasp, and the
+failed attempt is retained in the demonstration by design, so recovery behaviour is
+represented in the data.
+
+\paragraph{Approach trajectory.}
+Rather than interpolating linearly from home to the grasp pose, the approach reproduces the
+structure we measured in human teleoperation: the operator aligns laterally while still well
+above the object, then descends, with orientation adjusting throughout. We implement this as
+\emph{per-axis progress} over a single phase, with no waypoint and no stop:
+\begin{equation}
+  s_{xy}(\alpha) \;=\; \mathrm{smoothstep}\!\Bigl(\min\bigl(\tfrac{\alpha}{f},\,1\bigr)\Bigr),
+  \qquad
+  s_{z}(\alpha) \;=\; \alpha ,
+  \qquad \alpha \in (0,1],
+  \label{eq:approach}
+\end{equation}
+where $f\!\sim\!\mathcal{U}[f_{\text{lo}},f_{\text{hi}}]$ is drawn per environment and sets
+how early the lateral motion completes; orientation is slerped over the full $\alpha$. The
+lateral velocity reaches zero only at its own arrival, while $z$ is still moving, so the path
+is continuous and never dwells (\S\ref{sec:method:supervision} explains why that matters).
+The phase \emph{duration} is set from the profile's arc length $L(f)$ and a reference speed,
+\begin{equation}
+  T_{\text{app}} \;=\; \mathrm{clip}\bigl(\,L(f)/v_{\text{ref}},\; T_{\min},\, T_{\max}\bigr),
+  \label{eq:duration}
+\end{equation}
+so that per-step speed is approximately constant across episodes. A fixed duration would
+instead make speed proportional to the spawn distance; measured on our demonstrations this
+produces a speed--distance correlation far outside what human teleoperation exhibits, and it
+makes the commanded action magnitude depend on where the episode started rather than on the
+current state.
+
+\paragraph{Scene randomisation.}
+Each scene draws object pose in the physical workspace rectangle, full yaw and bounded
+pitch/roll with a probability of a large flip (so the object may settle inverted), uniform
+scale, procedural mesh deformation (bend, twist, taper, anisotropic axis scale), material
+($E$, $\nu$, $\rho$, coupling friction), a base mesh from a per-category pool, and a small
+jitter on the arm's home pose. Geometry-changing draws require a scene rebuild and are
+applied at a configurable cadence; pose-level draws are per reset.
+
+\paragraph{Post-processing.}
+Two dataset-level steps follow collection. First, runs of identical held commands longer
+than a threshold are collapsed to a fixed number of frames; this is applied only to absolute
+actions, where a held command is a literal repeated target, and the retained count at the end
+of the episode is what supervises \emph{stopping} once the lift height is reached. Second, a
+geometric filter removes episodes whose final configuration indicates the object dangling
+from the fingertips rather than being enveloped---diagnosed from the tool-centre-point
+position relative to the object centre at hold, with the width and lateral-offset cues
+applied conditionally so that genuinely small objects are not misclassified.
+
+\subsection{Observation and action spaces}
+\label{sec:method:spaces}
+
+\paragraph{Perception.}
+Depth is back-projected with the camera intrinsics and extrinsics into the robot base frame,
+cropped to the workspace, denoised by a voxel-occupancy outlier filter (which is a no-op on
+clean simulated depth and removes flying pixels on the real sensor), and reduced to $N_p$
+points by farthest-point sampling. Because the arm occupies most of the workspace, an
+\emph{arm-focus} reweighting samples points that are neither low nor near the end-effector at
+a reduced rate, so the fixed budget concentrates on the object and the fingers. This
+reweighting is applied identically in both domains---it is scene geometry, not sensor
+noise---whereas the outlier filter is deliberately domain-specific. Quaternions are
+sign-canonicalised (largest-magnitude component positive) in the shared pipeline, which is a
+no-op in simulation and removes a systematic sign difference reported by the real arm.
+
+\paragraph{Actions.}
+The raw policy output is clipped to $[-1,1]^7$ and mapped affinely onto workspace position
+bounds, Euler ranges and the physical gripper range. The Euler encoding carries a constant
+frame offset chosen so that the nominal downward-pointing tool orientation lies away from the
+$\pm\pi$ wrap, removing a seam that otherwise appears in the middle of the action
+distribution. The decoded absolute target is then rate-limited against the \emph{previous
+commanded} target,
+\begin{equation}
+  \Delta \mathbf{p} \leftarrow \mathrm{clip}(\Delta \mathbf{p}, \pm\rho_{p}), \quad
+  \Delta \mathbf{r} \leftarrow \mathrm{clip}(\log(R_{\text{cmd}}R_{\text{prev}}^{\!\top}), \pm\rho_{r}), \quad
+  \Delta w \leftarrow \mathrm{clip}(\Delta w, \pm\rho_{w}),
+  \label{eq:rate}
+\end{equation}
+with the rotation clipped per axis in the world rotation-vector representation. The same
+bound is enforced in the demonstration generator, so the dataset is bounded by construction,
+and at both backends, so an out-of-distribution policy output executes as a bounded walk
+rather than a full-speed servo jump. Absolute (rather than delta) actions are used because
+they re-anchor to a pose every step and therefore do not accumulate execution error across a
+chunk.
+
+\subsection{Action supervision: lead and dwell}
+\label{sec:method:supervision}
+
+Behaviour cloning of absolute-pose actions has two failure modes that produce a policy with
+excellent training loss and no useful behaviour. We state them as dataset conditions because
+both are properties of the demonstrations, not of the architecture.
+
+The first concerns \emph{what} is recorded. If the action label is the pose the robot
+\emph{achieved} at the next step, then in a closed loop the policy can satisfy its objective
+by commanding where it already is: since the controller lags its target, achieved poses trail
+commands, and the learned map has a fixed point at $a_t \approx x_t$. Supervision must use
+targets that lead the state---in practice the recorded \emph{commanded} targets, which carry
+the controller's tracking lag inherently, or a $K$-step lookahead if only achieved poses
+survive. We express the requirement as a dataset predicate on the lead distribution,
+\begin{equation}
+  \mathrm{quantile}_{75}\bigl(\lVert a_t - x_t \rVert\bigr) \;\ge\; \varepsilon_{\text{lead}} .
+  \label{eq:lead}
+\end{equation}
+
+The second concerns \emph{how the trajectory moves}. Even with commanded supervision, a
+demonstration whose velocity passes through zero mid-trajectory---the natural consequence of
+minimum-jerk time scaling, and of holding a pose---presents the policy with long runs of
+near-identical consecutive actions. A chunked policy conditioned on a short proprioceptive
+history reaches the same fixed point there: it predicts the action it just executed. We
+therefore require the demonstrations to be sparse in near-repeated actions,
+\begin{equation}
+  \Pr\bigl(\lVert a_{t+1} - a_t \rVert_\infty < \varepsilon_{\text{dw}}\bigr)
+    \;\lesssim\; \tau_{\text{dw}} ,
+  \label{eq:dwell}
+\end{equation}
+which the continuous approach profile~\eqref{eq:approach} satisfies by construction, and
+which a waypoint-and-stop or minimum-jerk profile does not. The one place a deliberate
+repeat is desirable is the end of the episode, where a small number of held frames is the
+only supervision the policy receives for \emph{stopping} at the lift height; the trim
+threshold in \S\ref{sec:method:demos} sets that count. Both~\eqref{eq:lead}
+and~\eqref{eq:dwell} are checked automatically before training.
+
+\subsection{Policy and training}
+\label{sec:method:policy}
+
+The policy is a denoising-diffusion behaviour-cloning model over action chunks. A PointNet
+encoder maps the current cloud to a visual feature; it is concatenated with a short history
+of the proprioceptive part of~\eqref{eq:obs} to form the conditioning vector. A residual MLP
+denoiser predicts a chunk of $H$ future actions,
+\begin{equation}
+  \mathcal{L}(\phi)\;=\;
+  \mathbb{E}_{(o,\,a_{t:t+H}),\;k,\;\epsilon}
+  \Bigl[\;\bigl\lVert \epsilon - \epsilon_\phi\bigl(\tilde a^{(k)}_{t:t+H},\,k,\,c(o)\bigr)\bigr\rVert^2\Bigr],
+  \label{eq:bc}
+\end{equation}
+with $k$ a sampled diffusion step, $\tilde a^{(k)}$ the noised chunk and $c(o)$ the
+conditioning. An exponential moving average of the weights is retained for evaluation. All
+checkpoints are kept and evaluated (\S\ref{sec:method:eval}) rather than selecting the last,
+because the best checkpoint is consistently early in training.
+
+\paragraph{Co-training with real demonstrations.}
+Simulated demonstrations supply coverage; a small set of real teleoperated demonstrations
+supplies the sensor and dynamics statistics of the target domain. The two are concatenated
+without oversampling and normalised jointly, so a single policy sees both distributions with
+their natural mixing ratio. Real demonstrations are recorded through the same shared
+perception and action pipeline as the simulated ones, so the only differences between the two
+data sources are those the hardware actually introduces.
+
+\subsection{From specialist to generalist}
+\label{sec:method:generalist}
+
+Nothing in \S\ref{sec:method:synth}--\ref{sec:method:demos} is specific to one object
+category: the planner requires a mesh and a material, and the executor requires a planned
+grasp. A generalist is therefore obtained by extending the scene distribution rather than by
+changing the method. Each category contributes a mesh set---scanned, or reconstructed from
+photographs with an image-to-3D model, then rescaled to the category's physical extent---and a
+material preset ($E$, $\nu$, $\rho$, yield); a scene draws a category, then a mesh within it,
+then the usual scale, shape and material randomisation on top. Demonstrations from all
+categories are pooled into a single dataset with per-category episode counts balanced by
+construction, and one policy is trained on the pool.
+
+Because the demonstrator is itself per-category, its statistics (planning success, induced
+stress, contact area) are recorded alongside every episode. This matters for diagnosis: a
+generalist that fails on a category may be failing because the policy lacks capacity across
+categories, or because the demonstrator itself was weak on that geometry, and these two are
+distinguishable only if the demonstrator is audited per category rather than in aggregate.
+
+\subsection{Evaluation protocol}
+\label{sec:method:eval}
+
+Because the pipeline has many interacting choices, all simulated evaluation goes through one
+harness with a fixed specification: a fixed number of episodes, a fixed number of parallel
+environments, and a deterministic per-batch randomisation seed, so that environment $j$ of
+batch $i$ presents an identical scenario to every checkpoint and every method. Geometry-level
+randomisation is rebuilt on a fixed batch cadence rather than continuously, and any periodic
+randomisation that a training server would otherwise apply is frozen for the duration of an
+evaluation. We report task success, the fraction of episodes that ever reached the success
+band (which separates grasping from holding failures), the gap between the two, and stress
+percentiles over successful episodes. Deformable simulation on GPU is not bit-reproducible
+across runs, so identical initial conditions still yield small variation in outcome; the
+fixed scenario sequence controls the initial conditions, not the rollout noise.
+
+On hardware, evaluation uses a fixed set of object placements inside the same workspace
+rectangle used for training-time randomisation, with the object's orientation varied between
+trials. Because a real trial cannot be repeated on an identical object instance---produce
+varies, and a squeezed item is not reusable---real evaluation reports success over trials at
+a stated sample size, and gentleness on hardware is assessed qualitatively unless a
+destructive test is run.
+
+\subsection{Real-robot deployment}
+\label{sec:method:deploy}
+
+Deployment runs the same policy, the same perception pipeline and the same action decoder as
+training, with three additions.
+
+\paragraph{Residual perception calibration.}
+Camera extrinsics are calibrated once from fiducials; on top of that we apply a measured
+residual translation. To obtain it we construct \emph{step-aligned real/simulated observation
+pairs}: a recorded real episode's actions are replayed open-loop in simulation with the
+object placed at the real first-frame fingertip position and the simulated home pose matched
+to the real one, so that episode $i$, step $t$ is the same commanded state in both domains.
+Because the proprioceptive channels of such pairs agree to within a few millimetres, any
+residual displacement between the two point clouds is attributable to perception rather than
+to control. Segmenting the cloud and measuring the displacement of the arm---whose pose is
+pinned by proprioception---yields a systematic offset along the camera ray, which is then
+applied as a constant correction to the camera translation. This procedure is a reusable
+diagnostic: it converts ``the sim-to-real gap'' into a decomposition with a correctable part
+(a rigid offset) and a residual part (sensor noise, geometry mismatch).
+
+\paragraph{Execution.}
+Action chunks are smoothed by an exponential moving average across chunk boundaries and
+bounded by the same rate limit~\eqref{eq:rate} used during collection, so that an
+out-of-distribution output is executed as a bounded walk. The arm is commanded in servo mode
+at the control rate, and no tactile or force sensing is used at any point in the deployed
+loop.
+
+\subsection{Implementation details}
+\label{sec:method:impl}
+
+Table~\ref{tab:params} lists the parameters needed to reproduce the pipeline. Values are the
+ones used for the results reported below; where a quantity is randomised, the range is given.
+
+\begin{table}[t]
+\centering\small
+\begin{tabular}{ll}
+\toprule
+\textbf{Simulation} & MPM deformable, $\Delta t = 1/30$\,s, 235 substeps, grid density 250 \\
+\quad material (nominal / DR) & $E$: 0.3 / $[0.2,0.3]$\,MPa; $\nu$: 0.35 / $[0.32,0.38]$;
+                                $\rho$: $[900,1100]$\,kg\,m$^{-3}$; yield $\approx$ 40\,kPa \\
+\quad coupling friction & $[3.5, 4.5]$ \\
+\midrule
+\textbf{Scene randomisation} & \\
+\quad object position & $x\!\in\![0.29,0.48]$\,m, $y\!\in\![-0.11,0.11]$\,m (physical table rectangle) \\
+\quad orientation & yaw $\mathcal{U}(-180^\circ,180^\circ)$; pitch/roll $\pm45^\circ$;
+                    flip w.p.\ 0.25 to $\pm[160^\circ,180^\circ]$ \\
+\quad scale / shape & scale $[0.8,1.5]$; bend $\pm25^\circ$; twist $\pm20^\circ$;
+                      taper $\pm0.15$; one-axis scale $[0.95,1.15]$ \\
+\quad arm home jitter & $\pm2$\,cm per axis \\
+\midrule
+\textbf{Perception} & crop $[0.20,-0.215,0.004]$--$[0.71,0.215,0.45]$\,m; FPS to $N_p\!=\!1024$ \\
+\quad outlier filter (real only) & voxel 1\,cm, $\ge$23 neighbours \\
+\quad arm-focus & full weight below $z\!=\!0.15$\,m or within $r\!=\!0.13$\,m of the EE;
+                  else sampled at $0.15\times$ \\
+\midrule
+\textbf{Action} & position $[0.26,-0.225,0.003]$--$[0.59,0.225,0.50]$\,m; gripper $[0,0.088]$\,m \\
+\quad rotation encoding & Euler \textsc{xyz} with frame offset $(180^\circ,0,0)$ \\
+\quad rate limit $\rho$ & $(4.5, 4.5, 5.5)$\,mm, $(12, 12, 45)$\,mrad, $5$\,mm per step \\
+\midrule
+\textbf{Demonstrator} & CMA-ES, 1145 evaluations, multi-start; area floor 15\,mm$^2$
+                        (scaled by scale$^2$) \\
+\quad score weights & alignment, peak, pressure, azimuth bound $\bar\theta = 60^\circ$;
+                      pose jitter $30^\circ$ \\
+\quad execution phases & settle 1, close 20, firm 8, lift, hold; extra closure 5\,mm \\
+\quad approach & $f\!\sim\!\mathcal{U}[0.45,0.75]$, $v_{\text{ref}}\!=\!2.4$\,mm/step,
+                 $T_{\text{app}}\!\in\![40,130]$ steps \\
+\quad post-processing & held runs $>$12 collapsed to 10 frames; pinch filter \\
+\midrule
+\textbf{Policy} & PointNet encoder $\rightarrow$ 512-d; MLP $[1024,1024,1024]$, residual \\
+\quad chunking & horizon $H\!=\!4$, proprio history 2, one cloud per step, 20 denoising steps \\
+\quad optimisation & batch 128, lr $10^{-4}$ cosine (100 warm-up), 600 epochs, EMA 0.995 \\
+\quad size & $\approx$2.9\,M parameters \\
+\midrule
+\textbf{Control / hardware} & 7-DoF arm, parallel jaw, fixed external depth camera, 30\,Hz,
+                              4 executed actions per chunk \\
+\midrule
+\textbf{Evaluation} & 200 episodes, 5 parallel environments, fixed base seed,
+                      geometry rebuilt every 4 batches \\
+\bottomrule
+\end{tabular}
+\caption{Pipeline parameters. Ranges denote per-scene randomisation.}
+\label{tab:params}
+\end{table}
