@@ -373,6 +373,27 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-25/26 — ⛔ v33 DATASET POISONED (real slice un-derived) — local agent's real
+deploy caught it; fix chain running.** The v3.3 doc's §3 merge command named
+`dataset/dppo/single_lift_mushroom_real` — a real slice whose recorded DELTA actions were
+written through as absolutes (never derived). Near-zero deltas decode to mid-range
+absolutes, so on real-looking clouds the policy learned z→0.252 m / grip→44 mm; deployed
+orkam did exactly that (climb + half-close). SIM evals stayed excellent (0.715 — sim
+clouds never trigger the poisoned mapping), so the cluster-side gates (seam, dwell) could
+not catch it. afucm/s08/all other co-trains UNAFFECTED (properly derived slice; verified
+via normalization z-ranges: afucm 0.239 m vs v33's broken 0.438 m).
+LESSONS: (1) a co-train dataset gate must check the REAL slice's commanded-vs-achieved
+consistency (t0 gripper ~80 mm open; |cmd z − ach z| median <1 cm) — now part of the fix
+chain and any future merge; (2) sim eval cannot validate the real-slice health of a
+co-trained policy — the poisoned mapping is invisible to sim clouds; the local agent's
+offline real-cloud probe (real cloud in, action out) is the cheap pre-deploy check.
+FIX (chain live): re-convert `single_lift_mushroom_real_merged` WITH
+`--derive-source-action delta fast_rot --derive-lookahead 4` → gate → re-merge →
+`..._noos_cmd_v33b` → retrain v33b_plain / v33b_aux0p5 / v33b_aux1p5. The v33 sim curves
+(orkam 0.715 @200 etc.) remain VALID as sim-recipe evidence; the checkpoints are
+deploy-blocked (deploy_real.sh block, upstream 2b39d31).
+
+
 **2026-08-26 — item-18 iter 4 LAUNCHED (residual width + grasp-window weighting) + tofu
 v9→v10.** Following the predictability study (heads corr≈0.8 → policy-learning problem),
 two mechanisms implemented (519e973) and launched on the s08 dataset, afucm recipe +
