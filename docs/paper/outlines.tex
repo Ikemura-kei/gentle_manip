@@ -1,0 +1,230 @@
+% !TEX root = main.tex
+% ---------------------------------------------------------------------------
+% Three paper outlines. The Method section (method.tex) is SHARED by all three;
+% what changes is which subsection carries the contribution, and which
+% experiments are promoted to the headline table.
+% Status markers:  [HAVE] measured   [RUN] in flight   [NEED] not yet run
+% ---------------------------------------------------------------------------
+\section{Paper outlines}
+\label{sec:outlines}
+
+All three versions share \S\ref{sec:method} and differ in framing, headline experiment, and
+which related-work axis they engage. A shared claim ledger is given in
+\S\ref{sec:outlines:ledger}; per-version deltas are noted inline.
+
+% ===========================================================================
+\subsection{Version A --- ``Coverage, not more demonstrations''}
+\label{sec:outlines:A}
+
+\paragraph{Titles.}
+\emph{Coverage over Count: Autonomous Stress-Aware Demonstrations for Gentle Robotic
+Grasping}\,/\,\emph{More Demonstrations Do Not Fix Precise Grasping}.
+
+\paragraph{Abstract sketch.}
+Gentle grasping of fragile food is a precision problem: the correct gripper width is a
+function of pose, size, shape and stiffness, none directly observable. We show that scaling
+teleoperated-style demonstrations does not resolve it---success saturates while the failure
+mode remains incorrect grasp width---and that what is scarce is coverage of the physical
+variation rather than trajectory count. We therefore generate demonstrations autonomously
+with a stress-minimising grasp planner over a randomised scene distribution, and show
+on hardware that broad simulated coverage co-trained with a small real slice outperforms both
+pure-simulation and real-only policies, while simulated ranking alone fails to predict real
+ranking.
+
+\paragraph{Section outline.}
+\begin{enumerate}
+  \item \textbf{Introduction.} Precision framing; the saturation observation as the hook;
+        contributions (i) the coverage diagnosis, (ii) the stress-aware autonomous
+        demonstrator, (iii) the transfer recipe and its real validation.
+  \item \textbf{Related work.} Demonstration scaling and data-quality work; sim2real for
+        deformables; grasp-quality metrics (force-closure vs.\ stress-based); gentle/compliant
+        manipulation (tactile-centric) as the contrasting tradition.
+  \item \textbf{Motivating study: does demonstration count help?} \emph{Own section, not a
+        result buried in ablations.} Fixed architecture, three dataset sizes, failure-mode
+        decomposition (approach vs.\ width). Extend to real demonstration counts
+        \textbf{[RUN]}.
+  \item \textbf{Method} (\S\ref{sec:method}), emphasis on
+        \S\ref{sec:method:synth}--\ref{sec:method:demos}: the demonstrator is the coverage
+        instrument.
+  \item \textbf{Experiments.}
+    \begin{enumerate}\renewcommand{\labelenumii}{\alph{enumii})}
+      \item Demonstrator quality: planning success, reproducibility, stress vs.\ a geometric
+            baseline \textbf{[HAVE]}.
+      \item Simulated policy performance and the demonstrator-property ablations (firmness,
+            occlusion bound, approach profile, stop supervision) \textbf{[HAVE/RUN]}.
+      \item Coverage ablations: size band, shape/mesh pool, out-of-distribution size
+            \textbf{[RUN]}.
+      \item Real-robot: pure-sim vs.\ real-only vs.\ co-trained; real-demo-count curve
+            \textbf{[HAVE/RUN]}.
+      \item Generalist: single policy across categories \textbf{[RUN]}.
+    \end{enumerate}
+  \item \textbf{Analysis.} Why simulated ranking inverts on hardware; the measured
+        perception offset; what remains unexplained.
+  \item \textbf{Limitations and conclusion.}
+\end{enumerate}
+
+\paragraph{Key figures/tables.}
+(F1) saturation curve + failure-mode split; (F2) pipeline schematic; (F3) demonstrator stress
+distributions vs.\ baseline; (T1) simulated ablation table; (T2) real-robot table with
+sample sizes; (F4) real-demo-count curve; (F5) qualitative real rollouts.
+
+\paragraph{Version-specific risk.} A reviewer reads the saturation result as
+architecture-specific. Mitigation: pair it with the demonstrator-property ablation, where the
+\emph{same} architecture and count move substantially once the demonstrations change---which
+is precisely the claim that count is not the binding constraint.
+
+% ===========================================================================
+\subsection{Version B --- ``Gentleness without touch''}
+\label{sec:outlines:B}
+
+\paragraph{Titles.}
+\emph{Gentleness Without Touch: Compiling Simulated Stress into Tactile-Free Manipulation
+Policies}\,/\,\emph{Stress as Supervision}.
+
+\paragraph{Abstract sketch.}
+Delicate manipulation is usually built around tactile sensing, the closest observable proxy
+for the internal stress that actually damages an object. We observe that this quantity is not
+merely observable but exact inside a deformable simulator, and use it there: a
+stress-minimising planner selects grasps by predicted internal stress under a
+position-controlled contact model, and the resulting demonstrations are distilled into a
+policy that acts from a single depth view and proprioception, with no contact sensing at
+deployment. We evaluate on a real arm across object poses, sizes and shapes, and compare
+against a tactile-equipped policy on the same task.
+
+\paragraph{Section outline.}
+\begin{enumerate}
+  \item \textbf{Introduction.} Touch as the default modality and its practical costs; the
+        observation that the causal quantity is exact in simulation; the claim that
+        gentleness can be \emph{compiled into demonstrations} rather than sensed.
+  \item \textbf{Related work.} Tactile manipulation and tactile-conditioned policies;
+        privileged-information / teacher--student distillation; deformable simulation;
+        stress- and fragility-aware grasp metrics.
+  \item \textbf{Method} (\S\ref{sec:method}), emphasis on \S\ref{sec:method:synth}: the
+        contact model, the $E$-linearity that makes material randomisation cheap, and the
+        score terms as an operational definition of ``gentle''.
+  \item \textbf{Experiments.}
+    \begin{enumerate}\renewcommand{\labelenumii}{\alph{enumii})}
+      \item Does the metric mean anything? Stress-minimising vs.\ geometric planner, at
+            matched success \textbf{[HAVE]}; sensitivity to material and size.
+      \item Does gentleness survive distillation? Policy-induced stress vs.\ demonstrator
+            stress in simulation \textbf{[HAVE, needs a dedicated presentation]}.
+      \item Real-robot task performance without touch \textbf{[HAVE]}, across pose/size/shape
+            and categories \textbf{[RUN]}.
+      \item \textbf{Tactile comparison} \textbf{[NEED]}: a tactile-conditioned policy trained
+            on real demonstrations on the same task and protocol. \emph{This is the
+            experiment that makes the framing defensible.}
+      \item Real gentleness proxy \textbf{[NEED]}: post-lift deformation or contact-force
+            logging, so ``gentle'' is not exclusively a simulated claim.
+    \end{enumerate}
+  \item \textbf{Analysis.} What the stress signal buys (which failure modes it removes:
+        stem/rim grasps, over-squeeze); where it is blind (dynamic effects during lift,
+        which the quasi-static model does not represent).
+  \item \textbf{Limitations and conclusion.} Explicitly: we do not claim touch is unnecessary
+        in general.
+\end{enumerate}
+
+\paragraph{Key figures/tables.}
+(F1) the idea figure---stress field inside the simulated object next to the real camera view,
+same grasp; (F2) planner comparison with stress distributions and the bruising threshold
+marked; (F3) pipeline; (T1) real results, tactile-free vs.\ tactile baseline; (F4)
+grasp-selection gallery showing rejected stem/rim candidates and the accepted envelop; (T2)
+gentleness metrics, simulated and real proxy.
+
+\paragraph{Version-specific risk.} Without (d) the paper asserts a tactile-free advantage it
+never tests. Two pre-registered answers to the objections already in our notes: \emph{if
+tactile is unavailable, is depth unavailable too?}---the argument is cost, fingertip geometry,
+wear and per-gripper recalibration, not sensor availability in principle; \emph{why not
+simulate tactile instead?}---because tactile is a proxy for stress, and in simulation we can
+supervise the causal quantity directly.
+
+% ===========================================================================
+\subsection{Version C --- ``What it takes to transfer a precise, gentle skill''}
+\label{sec:outlines:C}
+
+\paragraph{Titles.}
+\emph{Fixed Points and Blind Spots: An Empirical Account of Sim-to-Real Transfer for Precise
+Gentle Manipulation}\,/\,\emph{What It Takes}.
+
+\paragraph{Abstract sketch.}
+We report an end-to-end study of transferring a precise, gentle grasping skill from
+deformable simulation to a real arm. Beyond the working recipe, we isolate two failure modes
+of behaviour cloning with absolute action chunks---supervision without lead, and trajectory
+dwell---each of which yields excellent training loss and near-zero success, and give dataset
+predicates that detect both before training. We further show that simulated ranking does not
+transfer across data regimes, and quantify the perception component of the sim-to-real gap
+using step-aligned real/simulated observation pairs.
+
+\paragraph{Section outline.}
+\begin{enumerate}
+  \item \textbf{Introduction.} The narrow-path argument; contributions as \emph{findings}
+        rather than a system.
+  \item \textbf{System} (condensed \S\ref{sec:method}) --- enough to make the findings
+        reproducible.
+  \item \textbf{Finding 1: absolute-action BC has two fixed points.}
+        \S\ref{sec:method:supervision} promoted to a full section: mechanism, minimal
+        reproduction, the $2\times2$ control (representation $\times$ derivation) that
+        exonerates every other factor, the two predicates, and the recovery
+        ($0 \rightarrow$ working) when the dwell condition is met \textbf{[HAVE]}.
+  \item \textbf{Finding 2: demonstration properties dominate demonstration count.}
+        Saturation study plus the firmness/approach/stop ablations \textbf{[HAVE/RUN]}.
+  \item \textbf{Finding 3: simulated ranking inverts on hardware.} The three-way real
+        comparison and what it implies for model selection \textbf{[HAVE]}.
+  \item \textbf{Finding 4: the gap is partly a measurable perception offset.} The paired
+        real/simulated replay methodology---which is itself a reusable contribution---and the
+        residual decomposition \textbf{[HAVE]}.
+  \item \textbf{Putting it together.} The final recipe; specialist and generalist results
+        \textbf{[RUN]}.
+  \item \textbf{Limitations and conclusion.}
+\end{enumerate}
+
+\paragraph{Key figures/tables.}
+(F1) the stall: training loss vs.\ evaluation success for the failing and fixed datasets,
+with the action-difference histogram inset; (F2) the $2\times2$ control table; (F3) paired
+real/simulated cloud overlay before and after the offset correction; (T1) the recipe table
+(component $\rightarrow$ measured effect); (T2) real-robot results.
+
+\paragraph{Version-specific risk.} Perceived as an experience report. Mitigation: Finding~1 is
+architecture-agnostic and, to our knowledge, undocumented; lead with a minimal reproduction
+that a reader could run on their own BC stack, and state the predicates as reusable dataset
+gates.
+
+% ===========================================================================
+\subsection{Shared claim ledger}
+\label{sec:outlines:ledger}
+
+Every claim any of the three versions would make, with the evidence backing it and its
+current status.
+
+\begin{center}\small
+\begin{tabular}{p{0.46\linewidth} p{0.30\linewidth} l}
+\toprule
+\textbf{Claim} & \textbf{Evidence} & \textbf{Status} \\
+\midrule
+Demonstration count saturates; failure mode is grasp width & three dataset sizes, fixed
+architecture, simulated & \textbf{[HAVE]} (sim only) \\
+Real-demonstration count curve & $N\!\in\!\{0,5,10,50\}$ co-training, real trials & \textbf{[RUN]} \\
+Stress-minimising planner is gentler than a geometric one & paired collections, matched
+success & \textbf{[HAVE]} \\
+Demonstrator firmness moves policy success & controlled recipe change & \textbf{[HAVE]} \\
+Occlusion bound reduces hidden-object observations & ground-truth occlusion measure & \textbf{[HAVE]} \\
+Approach-profile / stop-frame effects & v3.1--v3.3 recipe series & \textbf{[RUN]} \\
+Absolute-action BC needs lead; dwell is a second, independent stall & controlled datasets,
+$2\times2$ & \textbf{[HAVE]} \\
+Simulated ranking inverts on hardware & three policies, real trials & \textbf{[HAVE]}, small $n$ \\
+Perception offset measured and correctable & step-aligned real/sim pairs & \textbf{[HAVE]} \\
+Co-training beats pure-sim and real-only in real & real trials & \textbf{[HAVE]}, small $n$ \\
+Generalist across categories & pooled multi-category training & \textbf{[RUN]} \\
+Policy is gentle \emph{on real produce} & --- & \textbf{[NEED]} \\
+Tactile-free is competitive with tactile & --- & \textbf{[NEED]} (Version~B only) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Recommendation.} Version~A is publishable with what exists plus the in-flight runs.
+Version~B is the most distinctive but is gated on one new experiment (the tactile baseline)
+and one measurement (a real gentleness proxy); if both are run it is the strongest paper.
+Version~C is the safest technically and should in any case supply the experiment sections of
+A or B---Findings~1 and~4 are the most transferable results we have. The framing to avoid in
+all three is a blanket ``gentle manipulation of real food'' claim: gentleness is currently
+validated in simulation, task success on hardware, and the link between them is the missing
+measurement.
