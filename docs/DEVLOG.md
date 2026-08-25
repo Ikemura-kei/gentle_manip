@@ -372,6 +372,23 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-26 — WIDTH PREDICTABILITY STUDY (user question: is width predictable from the
+cloud at all?): YES — corr ≈0.8 vs the 0.85 data ceiling → the failure is PURELY policy
+learning.** Offline eval of the trained width heads (predictions at 0/15/30% episode
+timesteps, denormalized mm; `.agent_tmp/eval_width_head.py`, job 1670446):
+dgvmu in-domain corr 0.785 / MAE 2.8mm / R² 0.60; bcvrt 0.736/3.0/0.54; rturn (s08-trained)
+0.819/2.7/0.67 in-domain AND 0.804/2.4/0.53 on the smallband OOD. The [1.0,1.5]-trained
+heads clamp below range (OOD R²<0) — generalization tracks data coverage, as expected.
+CONCLUSIONS: (1) the 1024-pt cloud carries the size signal — perception is NOT the
+bottleneck; (2) the executor discards information that is accurate to ~2.5mm at its own
+conditioning interface (even when explicitly appended, 18b) — hypothesis: the diffusion
+ε-loss barely separates adaptive from constant width (a few normalized units among
+hundreds), so the constant is a near-minimum. NEXT-STEP CANDIDATES (not launched):
+**residual width actions** (relabel gripper dim as residual from the head's prediction —
+adaptation becomes architectural, policy learns only corrections; convert-time transform +
+small inference change), grasp-window-only gripper loss weighting, conditioning dropout.
+
+
 **2026-08-26 — width-adaptation probes COMPLETE across all 9 policies (figure:
 `docs/figures/width_at_grasp_all_2026-08-26.png`); the mechanism question is answered.**
 New probes (s08 arms on [0.8,1.5]; bcvrt on the standard range): bcvrt (18b feed-forward)
