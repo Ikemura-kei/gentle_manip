@@ -97,6 +97,41 @@ for the real teleop sessions — check the recording's own `config.yaml`, which 
 `--derive-lookahead 4` supplies the commanded lead that slow teleop lacks. Then re-merge with
 `merge_npz_datasets` and retrain. **Run the gate below on the output before training.**
 
+### 4.1 Do the perception-bias correction in the same pass (recommended)
+
+The real slice is being rebuilt anyway, which is the cheap moment to also remove the rig's
+measured ~9 mm perception bias from the stored clouds — simulated clouds are unbiased by
+construction, so correcting the real ones brings the two halves of a co-training set into
+agreement instead of ~9 mm apart. Source the corrected demos from:
+
+```bash
+uv run --project envs/sim python -m gentle_manip.scripts.shift_demo_clouds \
+  dataset/demos/single_lift_mushroom_real_merged --shift 0.009 0 0
+# -> dataset/demos/single_lift_mushroom_real_merged_shift9mm  (clouds +9 mm x; proprio,
+#    actions and zero-padding untouched; shift + source + commit recorded in its config.yaml)
+```
+
+then convert *that* run with the command above. Produce **both** variants and keep them as
+separate datasets so the comparison is possible.
+
+**⚠ Deployment pairing rule — this is the part that goes wrong silently.** A policy trained on
+corrected clouds must be deployed with `point_cloud_shift: [0.009, 0, 0]` **active** in
+`real_lab.yaml`; a policy trained on uncorrected clouds must be deployed with it at **zero**.
+Either pairing is self-consistent; a mismatch reintroduces the full bias and there is no error
+message. Note that afucm's ~75 % was measured with the shift OFF on uncorrected data — a
+consistent pairing — so it remains a valid baseline either way.
+
+**Bookkeeping requirement:** every run must state in its `EXPERIMENT.md` (and in the
+`experiments.csv` description) which real variant it used — `real_merged` or
+`real_merged_shift9mm` — otherwise the two families become indistinguishable after the fact and
+the deploy pairing cannot be checked.
+
+**Open question worth resolving while you are at it:** the +9 mm figure comes from a
+nearest-neighbour displacement estimate, which attenuates under shape noise; the residual after
+correction suggests the true bias may be ~12–13 mm (see
+[item1_cube3_simreal_gap.md](item1_cube3_simreal_gap.md)). One more measure-shift iteration on
+the paired cube3 data would pin it before a large collection is committed to a value.
+
 ## 5. The two gates (added to the repo)
 
 ### 5.1 Dataset gate — `gentle_manip/scripts/verify_derived_dataset.py`
