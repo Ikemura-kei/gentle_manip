@@ -399,10 +399,19 @@ Remaining mechanism: `--grasp-diversity-tol 0.3` picks RANDOMLY among all grasps
 (diagonal grasps score decent FEM stress, offsetting the align penalty). v8 (1655995):
 diversity-tol 0 + jitter 0 → pure argmax with w_align 3e4 — align p10 must approach 1.0
 BY CONSTRUCTION; if success still ~68%, align was a confound and iteration stops.
-Standing observation across v3-v8: align≥0.9 → 100% success in EVERY variant (n=25/27/29);
-the entire failure mass is align<0.85. Lesson stands: per-OBJECT synthesis knobs — and
-the diversity machinery (tol+jitter), not the objective weights, is what controls the
-achieved-pose distribution. Note: seed-0's 8 scene draws
+**FINAL STATUS (investigation closed pending user/local-agent):** v8 (argmax, no
+diversity/jitter, w_align 3e4, 1655995) = 70.3% — best of the series but align p10 still
+0.72: in some scenes the TILTED grasp is the genuine FEM argmax even at w_align 3e4
+(scene-level: batches at align 0.90-0.94 succeed 88-100%, batches at 0.73-0.84 succeed
+25-38%). Spawn-tilt hypothesis falsified (corr(spawn tilt, align)=0.016 over 192 attempts).
+Solid facts: align≥0.9 → 97-100% success in EVERY variant; the entire failure mass is
+align<0.85; anti-pinch/squeeze/jitter/align-weight knobs individually insufficient.
+ROOT FIX (proposed, NOT implemented): finger_grasp.synthesize_grasp needs the §11.7-style
+canonical flush-seed round-2 (exists in plan_width_grasp, absent here) so a flush candidate
+is always evaluated per scene — local agent's module, coordinate before changing.
+Series: v3 63.5% (-zeo) · v4 62.5% (-dpg) · v5 56.3% · v6 64.5% (-ter) · v7 67.8% (-cvu)
+· v8 70.3% (-bud). All-video dirs for user review; recommended interim recipe = v8's.
+Tofu 650 + trainings remain GATED. Note: seed-0's 8 scene draws
 all landed ≥1.0 scale (4% chance, verified the [0.8,1.4] range IS active — batch-1 draw
 1.182 matches the new range's transform of the old 1.318 draw).
 
