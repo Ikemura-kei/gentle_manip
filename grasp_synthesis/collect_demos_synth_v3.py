@@ -933,6 +933,12 @@ def main() -> None:
                         "bulk stress while spiking locally, sect 11.7); metric default 0.3, but the "
                         "legacy collector path forwards 0 — pass 0.3 to opt in. None (default) = "
                         "legacy off.")
+    p.add_argument("--grasp-w-tilt", type=float, default=None,
+                   help="approach-TILT penalty: score -= w_tilt * (1 - cos(approach axis, straight down)). "
+                        "Targets tilted-gripper edge contact that align CANNOT see (align measures the "
+                        "closing axis vs surface normal; the approach pitch is orthogonal to it) and the "
+                        "rounded-pad FEM underprices. ~1.5e5 makes a 15 deg tilt cost ~5 kPa-equivalents. "
+                        "None (default) = legacy off.")
     p.add_argument("--grasp-w-area", type=float, default=None,
                    help="whole-grasp contact-area REWARD (score += w_area * area) — continuous "
                         "flush-contact promotion beyond the --grasp-area-min-mm2 floor. None "
@@ -1068,7 +1074,7 @@ def main() -> None:
                         "roll_deg", "pitch_deg", "yaw_deg", "flipped",
                         "home_dx", "home_dy", "home_dz", "scene_scale", "scene_bend_deg",
                         "mesh_variant",
-                        "stress_Pa", "grip_N", "align", "pressure_Pa", "min_pad_mm2", "width_mm"])
+                        "stress_Pa", "grip_N", "align", "pressure_Pa", "min_pad_mm2", "width_mm", "tilt_deg"])
 
     total_saved  = 0
     total_failed = 0
@@ -1175,7 +1181,8 @@ def main() -> None:
                                     area_min=args.grasp_area_min_mm2 * 1e-6 * float(scene_dr['scale']) ** 2,
                                     w_press=(args.grasp_w_press or None),
                                     **({"w_peak": args.grasp_w_peak} if args.grasp_w_peak is not None else {}),
-                                    **({"w_area": args.grasp_w_area} if args.grasp_w_area is not None else {}))
+                                    **({"w_area": args.grasp_w_area} if args.grasp_w_area is not None else {}),
+                                    **({"w_tilt": args.grasp_w_tilt} if args.grasp_w_tilt is not None else {}))
             if r.get("x") is None or r.get("stress_top10") is None:   # diversity found no feasible grasp;
                 print(f"  Env {i}: no feasible diverse grasp -> retry WITHOUT diversity")  # retry reliably
                 r = fg.synthesize_grasp(fem_obj, fem_pad_geo, obj_pos_all[i], obj_quat_all[i],
@@ -1186,7 +1193,8 @@ def main() -> None:
                                         area_min=args.grasp_area_min_mm2 * 1e-6 * float(scene_dr['scale']) ** 2,
                                         w_press=(args.grasp_w_press or None),
                                         **({"w_peak": args.grasp_w_peak} if args.grasp_w_peak is not None else {}),
-                                        **({"w_area": args.grasp_w_area} if args.grasp_w_area is not None else {}))
+                                        **({"w_area": args.grasp_w_area} if args.grasp_w_area is not None else {}),
+                                    **({"w_tilt": args.grasp_w_tilt} if args.grasp_w_tilt is not None else {}))
             best_x = r["x"]
             if best_x is None or r.get("stress_top10") is None:       # extremely rare: still nothing ->
                 # default straight-down grasp at the object xy so the FSM never sees None (this episode may
@@ -1264,7 +1272,8 @@ def main() -> None:
                                 round(float(g.get("stress_top10") or 0), 1), round(float(g.get("grip") or 0), 4),
                                 round(float(g.get("align") or 0), 4), round(float(g.get("pressure") or 0), 1),
                                 round(float((g.get("min_pad_area") or 0) * 1e6), 2),
-                                round(float(g["x"][6] * 1e3), 2)])
+                                round(float(g["x"][6] * 1e3), 2),
+                                round(float(g.get("tilt_deg") or 0), 1)])
         dr_csv.flush()
 
         # ── Package and shard successful (or all) episodes ──
