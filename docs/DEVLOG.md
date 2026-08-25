@@ -381,7 +381,18 @@ mode (grasp_synthesis notes: the cube is the multi-optimal hard case), which v3.
 anti-pinch terms (`--grasp-area-min-mm2 15 --grasp-w-press 0.05`) exist to demote. The v3
 smoke predates the v3.3 merge, so it ran without them. v4 smoke (1654259) = full v3.3
 recipe on tofu (anti-pinch + continuous approach + 20-step close + 10 stop frames), 40 eps
-all-video, same gate: user reviews videos before the 650 run. Note: seed-0's 8 scene draws
+all-video, same gate: user reviews videos before the 650 run.
+**UPDATE (same night) — smoke iteration series & ROOT CAUSE:** v4 (full v3.3, 1654259)
+62.5% — anti-pinch improved contact (fail pad 25→39 mm², pressure 91→62 kPa) but success
+flat → pinch was a symptom. v5 (2 mm squeeze, 1655154) 56.3% — WORSE, so squeeze direction
+is mushroom-like (more grip = fewer drops); yield-through ruled out. Failure STILLS
+(videos_failed/*_grasp.png) showed the real mode: TILTED corner/edge grasps high on the
+block, align 0.74-0.79. dr_params align-vs-success on v4: align≥0.9 → 100% (25/25),
+<0.85 → 26%. Cause: the collector's `--grasp-align` default 2000 (deliberately lowered
+from the metric's 3e4 for mushroom pose diversity) lets the flat-faced cube's degenerate
+tilted-optima family through — §11.7's cube pathology exactly. v6 smoke (1655383): v4
+recipe + `--grasp-align 30000`. Prediction: ≥85%. Lesson: per-OBJECT synthesis knobs —
+alignment weight must scale with face flatness. Note: seed-0's 8 scene draws
 all landed ≥1.0 scale (4% chance, verified the [0.8,1.4] range IS active — batch-1 draw
 1.182 matches the new range's transform of the old 1.318 draw).
 
