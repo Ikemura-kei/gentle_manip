@@ -374,6 +374,20 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-26 — tofu v11 COMPLETE: 97.6% (97.9% per-attempt), tilt bounded (mean 3.8°,
+p90 12°); recipe ready for the user's 650 gate.** v11 (`26-08-25-yhn`, 48 attempts) ==
+v10 statistically (success/align/grip identical); its real additions are the w_tilt
+bound + the tilt_deg audit column (v10's tilt was unmeasured — column predates it).
+CORRECTION to the interim read: v10's align was already 0.958 — the spawn-z + peak/area
+fixes did most of the quality work; v11 polices the residual tilt tail. Stress-number
+"oddities" (user): explained — the plot shows contact-MASKED bulk top10 and tracks GRIP
+(ep0008 1.98 N/6.4k vs ep0007 14.54 N/16.6k = deep squeeze, not artifact); REAL bug
+found: scoring used --grasp-E default 3e5 (mushroom) → tofu Pa/N displayed ~6× inflated
+(ranking E-invariant; holdability check inflated). 650-recipe recommendation: v11 flags
++ --grasp-E 50000 --grasp-density 1050 (+ optional deep-squeeze cap); trainings at gate:
+afucm-recipe plain + (pending rztss probe) residual-width instead of aux w=2.0.
+
+
 **2026-08-26 — REAL RESULTS (user): alzey ≈70%+ (item 16 POSITIVE in real) but
 over-squeezes; qjzsf weak at workspace edge + crushes more.**
 - alzey/state_200 (paired-feature encoder reg): ≥70% real success (not rigorously
