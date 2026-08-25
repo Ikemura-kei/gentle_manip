@@ -14,6 +14,12 @@ hold_steps: 30
 object_name: "tofu"
 object_type: "soft"
 
+# Spawn HIGH enough that a tilted spawn's lowest CORNER clears the floor (user, 2026-08-25:
+# corners were burying). Worst case: half-diagonal sqrt(3)*15mm * scale 1.4 = 36.4mm below
+# center -> 42mm gives ~5mm clearance; the object drops a little and settles before the
+# pose is read (v3 collector settle phase). Registry default (0.016) assumed a FLAT cube.
+object_spawn_z: 0.042
+
 # Same sim resolution as the mushroom (shared Config C): 3cm at 4mm cells = 7.5 cells,
 # same regime as the 3.3cm mushroom. substeps 235 is tuned for E=3e5; tofu's E=4e3
 # needs ~8.7x less, so stability margin is large.
