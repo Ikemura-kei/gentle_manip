@@ -24,6 +24,18 @@ class _DiffusionPolicy:
         self.obs_keys = list(obs_keys)
         self.device = device
         self.act_steps = int(act_steps)
+        # RESIDUAL WIDTH ACTIONS (item 18 iter 4): if GM_RESIDUAL_WIDTH points at the
+        # dataset's normalization.npz, the policy was trained on width RESIDUALS
+        # (action dim -1 minus the episode grasp width in action-normalized units), and
+        # the width head's prediction is added back here at inference. Unset = no-op.
+        import os
+        self._resid = None
+        rw = os.environ.get("GM_RESIDUAL_WIDTH")
+        if rw:
+            nz = np.load(rw)
+            self._resid = (float(nz["obs_min"][-1]), float(nz["obs_max"][-1]),
+                           float(nz["action_min"][-1]), float(nz["action_max"][-1]))
+            print(f"[eval_agent] residual-width ACTIVE (norm from {rw})", flush=True)
 
     def reset(self):
         pass
@@ -33,6 +45,12 @@ class _DiffusionPolicy:
             cond = {k: torch.from_numpy(np.asarray(obs[k])).float().to(self.device)
                     for k in self.obs_keys}
             traj = self.model(cond=cond, deterministic=True).trajectories.cpu().numpy()
+            if self._resid is not None:
+                s_lo, s_hi, a_lo, a_hi = self._resid
+                pred = self.model.network.aux_predict(cond)["grasp_width"].cpu().numpy()[:, 0]
+                w_phys = (pred + 1) / 2 * (s_hi - s_lo + 1e-6) + s_lo          # state-norm -> m
+                w_act = 2 * (w_phys - a_lo) / (a_hi - a_lo + 1e-6) - 1         # -> action units
+                traj[:, :, -1] = traj[:, :, -1] + w_act[:, None]
         return traj[:, : self.act_steps]              # (n_env, act_steps, act_dim), normalized
 
 

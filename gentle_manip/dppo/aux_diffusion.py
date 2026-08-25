@@ -34,7 +34,20 @@ class AuxDiffusionModel(DiffusionModel):
         self._aux_log: dict = {}   # last-step loss components, for optional wandb logging
 
     def p_losses(self, x_start, cond: dict, t):
-        diff_loss = super().p_losses(x_start, cond, t)     # standard denoising loss (unchanged)
+        if "width_loss_w" in cond:
+            # per-chunk width-dim loss weighting (item-18 iter 4, grasp-window arm): own
+            # elementwise pass; weighted mean so all-ones is bit-identical to the base loss.
+            noise = torch.randn_like(x_start, device=x_start.device)
+            x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
+            x_recon = self.network(x_noisy, t, cond=cond)
+            target = noise if self.predict_epsilon else x_start
+            per = (x_recon - target) ** 2                                   # (B, Ta, Da)
+            w = cond["width_loss_w"].view(-1, 1)                             # (B, 1)
+            num = per[..., :-1].sum() + (per[..., -1] * w).sum()
+            den = per[..., :-1].numel() + w.expand_as(per[..., -1]).sum()
+            diff_loss = num / den
+        else:
+            diff_loss = super().p_losses(x_start, cond, t)  # standard denoising loss (unchanged)
         total = diff_loss
         self._aux_log = {"loss_diffusion": float(diff_loss.detach())}
         if (self.aux_contact_weight > 0.0 or self.aux_object_pos_weight > 0.0

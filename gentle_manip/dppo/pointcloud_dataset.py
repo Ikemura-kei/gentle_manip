@@ -20,7 +20,16 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
     def __init__(self, dataset_path, horizon_steps=64, cond_steps=1, pc_cond_steps=1,
                  max_n_episodes=10000, device="cuda:0",
                  cloud_pose_jitter_trans=0.0, cloud_pose_jitter_rot_deg=0.0,
-                 first_frame_context=False, aux_grasp_width=False):
+                 first_frame_context=False, aux_grasp_width=False,
+                 normalization_path=None, residual_width=False, width_window_weight=0.0):
+        # normalization_path: the dataset's normalization.npz (unit conversions).
+        # residual_width=True -> action dim -1 is
+        #   relabeled as (commanded width - episode grasp width) in action-normalized units;
+        #   inference adds the width head's prediction back (eval_agent GM_RESIDUAL_WIDTH).
+        #   Requires aux_grasp_width. width_window_weight W>1: per-chunk width-dim loss
+        #   weight (cond["width_loss_w"]) = W when the chunk overlaps the closing/hold
+        #   window (commanded width below episode-open minus 5 mm), else 1 (needs
+        #   normalization_path for the 5 mm conversion).
         assert pc_cond_steps <= cond_steps, "pc_cond_steps must be <= cond_steps"
         super().__init__(dataset_path, horizon_steps=horizon_steps, cond_steps=cond_steps,
                          img_cond_steps=1, max_n_episodes=max_n_episodes, use_img=False,
@@ -67,6 +76,32 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
             per_ep = np.array([st[s0:s0+l, -1].min() for s0, l in zip(starts, tl2)], np.float32)
             lab = np.repeat(per_ep, tl2)[:total]
             self.aux_grasp_width = torch.from_numpy(lab[:, None]).float().to(device)  # (T,1)
+        self._hor = int(horizon_steps)
+        self.width_loss_mask = None
+        self.width_window_weight = float(width_window_weight)
+        if residual_width or self.width_window_weight > 1.0:
+            assert aux_grasp_width and normalization_path, \
+                "residual/window features need aux_grasp_width + normalization_path"
+            nz = np.load(normalization_path)
+            s_lo, s_hi = float(nz["obs_min"][-1]), float(nz["obs_max"][-1])
+            a_lo, a_hi = float(nz["action_min"][-1]), float(nz["action_max"][-1])
+            w_phys = (per_ep + 1) / 2 * (s_hi - s_lo + 1e-6) + s_lo          # episode width (m)
+            w_act = 2 * (w_phys - a_lo) / (a_hi - a_lo + 1e-6) - 1           # action units
+            if residual_width:
+                w_step = np.repeat(w_act, tl2)[:total].astype(np.float32)
+                self.actions[:, -1] = self.actions[:, -1] - torch.from_numpy(w_step).to(device)
+                print(f"[dataset] RESIDUAL WIDTH actions active (dim -1 -= episode width; "
+                      f"mean offset {w_act.mean():+.3f})", flush=True)
+            if self.width_window_weight > 1.0:
+                a_w = data["actions"][:total, -1]                             # ORIGINAL commands
+                d5 = 2 * 0.005 / (a_hi - a_lo + 1e-6)                         # 5 mm in action units
+                open_lvl = np.repeat(
+                    np.array([a_w[s0:s0+l].max() for s0, l in zip(starts, tl2)], np.float32),
+                    tl2)[:total]
+                self.width_loss_mask = torch.from_numpy(
+                    (a_w < open_lvl - d5).astype(np.float32)).to(device)      # (T,) closing/hold
+                print(f"[dataset] width-window loss weight {self.width_window_weight} on "
+                      f"{float(self.width_loss_mask.mean())*100:.0f}% of steps", flush=True)
 
     def __getitem__(self, idx):
         batch = super().__getitem__(idx)             # {"state": (cond_steps, Do)}, actions
@@ -88,6 +123,10 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
             conditions["aux_valid"] = self.aux_valid[start]            # (1,) mask
         if self.aux_grasp_width is not None:
             conditions["aux_grasp_width"] = self.aux_grasp_width[start]  # (1,) episode min width
+        if self.width_loss_mask is not None:
+            in_window = bool(self.width_loss_mask[start:start + self._hor].any())
+            conditions["width_loss_w"] = torch.tensor(
+                self.width_window_weight if in_window else 1.0, device=self.width_loss_mask.device)
         return Batch(batch.actions, conditions)
 
     def _jitter_pose(self, pc: torch.Tensor) -> torch.Tensor:
