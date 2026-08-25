@@ -352,7 +352,8 @@ running" — replacing any whose experiments have since finished.**
 | dgvmu | single_lift_mushroom_simreal_realws_noos_cmd/dgvmu | 100 | 0.610 | 0.725 | 0.750 | 30.7 | 54.1 | item 18 aux width head w=0.5 — head converges (loss 0.0061) but NO success gain vs afucm 0.685; NEGATIVE alone |
 | eqrth | single_lift_mushroom_simreal_realws_noos_cmd/eqrth | 200 | 0.555 | 0.650 | 0.675 | 27.6 | 52.2 | item 18 aux width head w=2.0 — worse, degrades with epochs (0.225 @600); heavy aux weight hurts |
 | pyzpl | single_lift_mushroom_simreal_realws_noos_cmd/pyzpl | 100 | 0.610 | 0.665 | 0.685 | 28.2 | 53.7 | fix 2 gripper-dim loss ×3 — no gain vs afucm; @300 near-tie 0.600/0.710/0.790 sust 22.7 (gentler pick) |
-| tysvo | single_lift_mushroom_simreal_realws_noos_cmd/tysvo | (curve filling) | 0.350 | 0.585 | 0.600 | 44.2 | 56.8 | fix 5 FiLM UNet head — @100 only so far; training + evals 200-400 in flight |
+| tysvo | single_lift_mushroom_simreal_realws_noos_cmd/tysvo | 100 | 0.350 | 0.585 | 0.600 | 44.2 | 56.8 | fix 5 FiLM UNet head — NEGATIVE: collapses after 100 (0.00-0.18, @600 0.060); FiLM conditioning harmful here |
+| bcvrt | single_lift_mushroom_simreal_realws_noos_cmd/bcvrt | 100 | 0.675 | 0.720 | 0.740 | 33.8 | 55.1 | 18b planned-width feed-forward (aux0.5+feed) — MATCHES afucm success (no aux-pressure cost) but width still flat (at-grasp corr 0.09); curve declines after 100 |
 
 **OOD evals** (existing checkpoints on out-of-range geometry; separate distribution):
 
@@ -371,6 +372,25 @@ running" — replacing any whose experiments have since finished.**
 ---
 
 ## Log
+
+**2026-08-26 — item-18 iter 4 LAUNCHED (residual width + grasp-window weighting) + tofu
+v9→v10.** Following the predictability study (heads corr≈0.8 → policy-learning problem),
+two mechanisms implemented (519e973) and launched on the s08 dataset, afucm recipe +
+aux w0.5, eval on [0.8,1.5]: **rztss** = RESIDUAL WIDTH actions (dataset relabels action
+dim −1 as command − episode width in action units; eval adds the width head's prediction
+back via GM_RESIDUAL_WIDTH — adaptation guaranteed by construction; transform validated
+offline: closure residual ≈ −13 mm = squeeze+compression offset) · **s08_winw** =
+width-dim ε-loss ×8 on chunks overlapping the closing/hold window (~58% of steps; fixes
+pyzpl's global-weighting bluntness), queued on quota. Also running: **xqmxw** = s08_18b
+(aux0.5+feed on the s08 data). TOFU: spawn z 0.016→0.042 (8bcb1e6; user spotted tilted
+spawns burying corners — worst-case half-diagonal 36.4 mm at scale 1.4); collector gained
+`--grasp-w-peak` / `--grasp-w-area` flags (635f9c4) — the §11.7 peak term (unmasked p98,
+0.3) existed but a legacy-default bug forwarded 0 in EVERY run to date, so corner-grasp
+spikes were invisible to the objective (user's hypothesis, confirmed in code). Smoke v9
+cancelled unrun (user); **v10** (1678043, queued) = v8 argmax recipe + spawn fix +
+w_peak 0.3 + area floor 35 mm² (tofu-calibrated: failure pads 38.8 mm² sat above the
+mushroom-stem-calibrated 15) — tests burial + corner grasps in one go.
+
 
 **2026-08-26 — WIDTH PREDICTABILITY STUDY (user question: is width predictable from the
 cloud at all?): YES — corr ≈0.8 vs the 0.85 data ceiling → the failure is PURELY policy
@@ -461,7 +481,7 @@ READ `docs/v3.3_synth.md` (documents the new-synth collection + training procedu
 size range ([0.8, 1.5] — needs an mm4+s08 DR variant), and train with the width-aux
 supervision at MULTIPLE weights (informed by attempt-1/2: w=0.5 healthy, w=2.0 harmful,
 18b feed-forward @0.5 matched baseline 0.675 — so likely 0.5 / 1.5 [+ feed variant]).
-Tofu 650+training remains GATED on the user's video OK (smoke v3 1653490 in flight).
+Tofu 650+training remains GATED on the user's video OK (gate now on smoke v10, see the tofu series entry).
 EXECUTED: v3.3 push merged clean (8abfeb6); campaign chain LAUNCHED per doc §1-5 — 650-ep mm4_s08 collection (v3.3 recipe verbatim incl. anti-stem + pinch filter), convert with the CORRECTED gates (within-episode seam; dwell <0.20 by design), merge_npz_datasets with the real 55 → `..._noos_cmd_v33`, then 3 arms: v33_plain / v33_aux0p5 / v33_aux1p5 (width-aux weights per the user's overnight ask), eval on the standard `_7d_realws` experiment vs afucm. Collect sbatch gained EXTRA_ARGS passthrough for the new flags.
 **COMPLETED (2026-08-26 early):** collection 26-08-25-clq 650 eps / 93.8% demonstrator
 (per-mesh 0.90-0.98, scale<1.0 at 0.947, 3 NaN-guard discards / 87 batches); pinch filter
