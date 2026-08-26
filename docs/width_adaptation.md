@@ -184,8 +184,19 @@ for a retrofitted head.
    table or a claim. Required for any arm we intend to keep.
 3. **Real robot** — the only test that settles gentleness.
 
-Currently canonical-evaluated: floor margin 0 (1728066, in flight). Everything else is probe-only
-and must NOT be reported as an eval result.
+**Canonical results so far (200 eps, video):**
+
+| arm | probe (60 ep) | canonical (200 ep) |
+|---|---|---|
+| lulkx@600 baseline | 0.883 | **0.820** |
+| floor margin 0 | 0.250 | **0.260** |
+
+Probe-vs-canonical agreement is close on the WEAK arm (0.250/0.260) and optimistic on the STRONG
+one (0.883/0.820, +0.063). So probes are fine for screening and ranking, but any arm landing near
+the 0.70 gate MUST be confirmed canonically before it is believed. Videos for the floor arm:
+`lulkx/eval/state_600_floor_eval/render/` (200 clips).
+
+Everything else is probe-only and must NOT be reported as an eval result.
 
 ## 7. Update protocol
 
