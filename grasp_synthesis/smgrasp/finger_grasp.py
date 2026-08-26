@@ -511,6 +511,56 @@ def _score_finger_grasp_impl(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, 
             "occ": (None if occ is None else float(occ))}
 
 
+
+def medial_seed_points(obj, n: int):
+    """`n` deep-interior seed points with their local tangent, for seeding the CMA search.
+
+    The default seeding puts EVERY start's pad centre over the object's COM and sizes the seed
+    width from the object's GLOBAL extent along the closing axis. Both assume a convex, roughly
+    isotropic body. On a crescent (banana) the COM sits where the material is a thin curved band
+    -- pads there either bury (`degenerate`) or straddle the concavity (`no_contact`) -- and the
+    global extent along the long axis (95 mm) is far wider than anything graspable, so no start
+    is ever feasible and extra starts/evals cannot help (they only vary orientation).
+
+    Depth is the distance from each tet centroid to the nearest boundary node, i.e. roughly the
+    local half-thickness; keeping the deepest quantile traces the medial axis. Sampling is
+    farthest-point so the seeds spread ALONG the body, and the local tangent is the principal
+    direction of nearby deep points, so each seed can close PERPENDICULAR to the body.
+
+    Convex objects are handled by the same code: their deep set collapses toward the centre, so
+    the seeds land near the COM as before -- but concentrated in the THICKEST region, which on a
+    mushroom is the cap rather than the stem.
+    """
+    from scipy.spatial import cKDTree
+    verts, tets = np.asarray(obj.verts), np.asarray(obj.tets)
+    faces = np.concatenate([tets[:, [0, 1, 2]], tets[:, [0, 1, 3]],
+                            tets[:, [0, 2, 3]], tets[:, [1, 2, 3]]], axis=0)
+    key = np.sort(faces, axis=1)
+    _, idx, cnt = np.unique(key, axis=0, return_index=True, return_counts=True)
+    bnd = np.unique(faces[idx[cnt == 1]])                     # faces owned by ONE tet = surface
+    cent = (verts[tets[:, 0]] + verts[tets[:, 1]] + verts[tets[:, 2]] + verts[tets[:, 3]]) / 4.0
+    depth = cKDTree(verts[bnd]).query(cent, k=1)[0]
+    deep = cent[depth >= np.percentile(depth, 70)]            # medial-ish core
+    if len(deep) < 2:
+        deep = cent
+    picks = [int(np.argmax(depth[depth >= np.percentile(depth, 70)]))] if len(deep) else [0]
+    d2 = np.full(len(deep), np.inf)
+    for _ in range(min(n, len(deep)) - 1):                    # farthest-point spread along the body
+        d2 = np.minimum(d2, np.linalg.norm(deep - deep[picks[-1]], axis=1))
+        picks.append(int(np.argmax(d2)))
+    tree = cKDTree(deep)
+    out = []
+    for i in picks:
+        c = deep[i]
+        nb = deep[tree.query_ball_point(c, r=max(float(np.ptp(deep, axis=0).max()) * 0.25, 5e-3))]
+        if len(nb) >= 3:                                       # local principal direction = tangent
+            u, sv, vt = np.linalg.svd(nb - nb.mean(0), full_matrices=False)
+            tan = vt[0]
+        else:
+            tan = np.array([1.0, 0.0, 0.0])
+        out.append((c, tan / (np.linalg.norm(tan) + 1e-12)))
+    return out
+
 def _closing_axis_world(x_tcp) -> np.ndarray:
     return Rot.from_euler("xyz", np.asarray(x_tcp[3:6], float)).apply([0.0, 1.0, 0.0])
 
@@ -572,6 +622,7 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                       area_min: float = 0.0, cam_pos=None, occ_k: int = 96,
                       cam_azimuth_max_deg=None,
                       execute_offset: float = 0.0,
+                      medial_seeds: int = 0,
                       roll_max: float = np.pi / 2, yaw_max_deg=None,
                       refine: bool = True, refine_scan: int = 25, seed: int = 0, verbose: bool = False,
                       record_history: bool = False,
@@ -689,6 +740,22 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
         proj = obj.verts @ ax
         return float(np.clip((proj.max() - proj.min()) - 2 * indent, 0.01, 0.079))
 
+    def _local_width(point, closing_axis_world, indent=1.5e-3):
+        """Cross-section along the closing axis measured LOCALLY, in a slab around `point`, not
+        across the whole object. On an elongated body the global extent (banana long axis: 95 mm)
+        is wider than the gripper and nothing near it can touch; the local section is the ~30 mm
+        that actually has to be closed on."""
+        ax = Robj_inv.apply(closing_axis_world)          # world -> object-local, like _seed_width
+        ax = ax / (np.linalg.norm(ax) + 1e-12)
+        d = obj.verts - np.asarray(point, float)
+        along = d @ ax
+        radial = np.linalg.norm(d - np.outer(along, ax), axis=1)
+        near = radial <= max(float(np.percentile(radial, 5)), 8e-3)      # slab about the axis
+        if near.sum() < 8:
+            near = radial <= np.percentile(radial, 15)
+        sel = along[near]
+        return float(np.clip((sel.max() - sel.min()) - 2 * indent, 0.01, 0.079))
+
     yaws = np.linspace(-np.pi / 2, np.pi / 2, n_starts)
     if cam_azimuth_max_deg is not None and cam_pos is not None:
         # Centre the seed fan on the yaw whose closing axis is PERPENDICULAR to the camera ray and
@@ -721,6 +788,22 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
     if yaw_max_deg is not None:                       # fold to the equivalent grasp, then clip
         yaws = (np.asarray(yaws, float) + np.pi / 2) % np.pi - np.pi / 2
         yaws = np.clip(yaws, -_yaw_hi, _yaw_hi)
+    # MEDIAL SEEDING (opt-in): replace the all-starts-at-COM placement with points spread along
+    # the body, each closing PERPENDICULAR to the local tangent and sized by the LOCAL section.
+    med = medial_seed_points(obj, n_starts) if medial_seeds else None
+    if med is not None:
+        yaws = []
+        for _c, _t in med:
+            th = Robj_inv.inv().apply(np.asarray(_t, float))[:2]   # local tangent -> world
+            if np.linalg.norm(th) < 1e-9:
+                th = np.array([1.0, 0.0])
+            th = th / np.linalg.norm(th)
+            # top-down closing axis(yaw) = [sin y, -cos y, 0]; make it _|_ the tangent
+            yaws.append(float(np.arctan2(-th[0], th[1])))
+        yaws = (np.asarray(yaws) + np.pi / 2) % np.pi - np.pi / 2          # fold (jaw symmetry)
+        if yaw_max_deg is not None:
+            yaws = np.clip(yaws, -_yaw_hi, _yaw_hi)
+
     for i, yaw in enumerate(yaws):
         r, p, y = _down_quat_euler(yaw)
         p = p + float(pitch_seeds[i])
@@ -728,8 +811,12 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
         # point clears the table (these fingers are ~61 mm — finger_min_world_z is linear in tz, slope +1,
         # so one eval gives the exact lift). Width is seeded at THIS axis's cross-section (see _seed_width).
         Ri = Rot.from_euler("xyz", [r, p, y])
-        wi = _seed_width(Ri.apply([0.0, 1.0, 0.0]))
-        tcp0 = com - Ri.apply([0.0, 0.0, _z_off(wi) + pad_geo["z_center"]])
+        _axis_w = Ri.apply([0.0, 1.0, 0.0])
+        # med points live in the object-LOCAL recentered frame; lift to world through the object's
+        # orientation before using them as a TCP anchor (obj.verts are recentered, NOT rotated).
+        _anchor = com if med is None else (com + Robj_inv.inv().apply(med[i][0]))
+        wi = _seed_width(_axis_w) if med is None else _local_width(med[i][0], _axis_w)
+        tcp0 = _anchor - Ri.apply([0.0, 0.0, _z_off(wi) + pad_geo["z_center"]])
         s0 = np.array([tcp0[0], tcp0[1], tcp0[2], r, p, y, wi])
         s0[2] += (table_z + ground_buf + 0.003) - finger_min_world_z(s0, pad_geo)
         s0[2] = float(np.clip(s0[2], tz_lo, tz_hi))
