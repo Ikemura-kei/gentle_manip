@@ -2,8 +2,9 @@
 # Used by: experiments/single_lift_banana_soft_abs_action_armfocus.yaml
 # Status: experimental
 #
-# scale capped at 1.0: the banana is 5.8 cm thick at scale 1.0 and the gripper opens 8.8 cm,
-# so 1.5x (8.7 cm) would be ungraspable. Everything else matches soft_orientation_realws_mm4_s08.
+# scale [0.9, 1.1] (user): the 9.5 cm banana is 3.24 cm thick, so this spans 2.9-3.6 cm of
+# grasp width — comfortably inside the 8.8 cm opening. Everything else matches
+# soft_orientation_realws_mm4_s08.
 object_pos_x: [0.29, 0.48]
 object_pos_y: [-0.11, 0.11]
 object_nominal_xy: [0.47, 0.0]
@@ -16,7 +17,7 @@ object_bend_deg:   [-25, 25]
 object_twist_deg:  [-20, 20]
 object_taper:      [-0.15, 0.15]
 object_axis_scale: [0.95, 1.15]
-object_scale:      [0.70, 1.00]
+object_scale:      [0.90, 1.10]
 object_E: [2.0e5, 3.0e5]
 object_nu: [0.32, 0.38]
 object_rho: [900, 1000]

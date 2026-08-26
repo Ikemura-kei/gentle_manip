@@ -13,10 +13,10 @@ object_type: "soft"
 
 mpm_grid_density: 600
 sim_substeps: 560
-mpm_bounds: [[0.40, -0.06, -0.02], [0.56, 0.06, 0.15]]
+mpm_bounds: [[0.40, -0.06, -0.02], [0.56, 0.06, 0.27]]
 
-success_z_min: 0.080
-success_z_max: 0.120
+success_z_min: 0.150
+success_z_max: 0.260
 hold_steps: 30
 success_scale: 0.2
 
