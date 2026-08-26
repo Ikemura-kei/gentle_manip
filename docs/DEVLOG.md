@@ -405,9 +405,17 @@ structural, not a hack.
 ACTIONS: Config 2 (3 seeds) cancelled — width comes solely from the head there too, so it
 shares the flaw exactly. New `network.width_head_blind` zeroes the gripper-width entries of
 the proprio slice before the head, forcing it to infer level AND timing from vision+pose;
-frozen retrain on lulkx@600 running (job 1726896). If the blind head still cannot produce the
-sharp ramp, the conclusion is that TIMING must stay with the policy and only the LEVEL can be
-delegated — i.e. implement the floor `w=max(w_policy, w_head)`.
+frozen retrain on lulkx@600 running (job 1726896). **BLIND HEAD RESULT: it DOES learn the ramp — vision+pose carry timing AND level.**
+Full-trajectory prediction (val ep0, mm): blind `78 81 80 80 78 79 80 | 66 42 20 | 32 28 29
+32 33` vs true `80 80 80 80 80 80 80 | 78 50 33 | 32 32 32 32 32` — MAE **3.9 mm** over 3
+episodes (the sighted head's 0.6 mm was cheating). So the earlier failure was ENTIRELY the
+copy shortcut, not missing information. WATCH: the blind head overshoots to 20 mm
+mid-transition (13 mm tighter than the demo) — exactly the transient that would crush;
+the canonical eval + width probe (jobs 1726965/66) will show whether it matters.
+PROCESS NOTE (my bug): the FIRST 'blind' run was not blind — my sed patched `nc.` while the
+trainer used `net_cfg.`, so it trained a SIGHTED head that I then masked at inference,
+producing a spurious 22.1 mm MAE. Caught because val corr 0.999 was inconsistent with the
+inference error; the trainer now PRINTS its resolved flags so this cannot recur silently.
 
 
 **2026-08-27 — burial fix (d4aafeb) checked against OUR collections: no retro-action needed.**
