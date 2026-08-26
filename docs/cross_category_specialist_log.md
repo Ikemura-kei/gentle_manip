@@ -1662,3 +1662,92 @@ augment synth v3 data to ~150 episodes/category → train a generalist DIRECTLY 
 metrics → THEN propose an FSM for recovery/retry demo collection, smoketest small, and
 stop for user discussion before any large-scale re-collection (explicit standing
 instruction — do not scale that phase up autonomously).
+
+## Banana regrasp-hover fix: TIDE and ReTVL experiments (2026-08-25 night → 2026-08-26)
+
+Continuation of the banana regrasp/retry debugging campaign (see
+`project_HANDOFF_regrasp_debug_2026-08-25.md` in Claude's memory for the full earlier
+history: `--fast-reattempt` collection method, the 150-direct+15-regrasp retrain
+reaching 41% SR but still showing hover/jitter on second attempts). User asked for a
+literature review (papers on regrasp/retry in imitation learning and the state-action
+ambiguity problem — Rewind-IL, ReTVL, FAR, "To Err is Robotic", the action-chunking
+compounding-error paper), then to try the found methods in priority order overnight:
+**TIDE → ReTVL → RL-finetune** ("do your best to make retry work").
+
+### 1. Rewind-IL-style TIDE monitor + FAR-lite perturbation — NEGATIVE RESULT
+
+New module `gentle_manip/dppo/eval_agent_tide.py`. Two variants, both purely additive
+(subclass `EvalHarnessAgent`, don't touch the shared harness):
+- **Detector-only** (`EvalHarnessAgentTIDE`): switches eval to receding-horizon
+  execution (`act_steps=1` instead of the usual open-loop 4-step chunks — needed so
+  consecutive policy queries have an overlapping prediction window to compare) and
+  logs a per-step Temporal Inter-chunk Discrepancy Estimate (mean squared diff between
+  what the previous chunk predicted for step *t* vs. what the fresh chunk predicts for
+  the same step) to `tide_scores.csv`.
+- **+ Perturbation** (`EvalHarnessAgentTIDEPerturb`, FAR's arXiv 2607.01111 mechanism):
+  on a TIDE trip (threshold=0.15, the p90 of the detector-only run's own distribution),
+  injects fresh Gaussian noise (`sigma=0.15`, normalized action space) into the action
+  for a sustained 15-step window, meant to kick the policy off the deterministic
+  fixed-point that a hovering state settles into.
+
+Result on the 150-direct+15-regrasp checkpoint (epoch 430, val=0.0243): **27% SR**
+(100 episodes), down from the no-intervention baseline's 41%. Consistent across all 20
+eval batches, not noise. Root cause (plausible): the smoke test showed ~36% of all
+steps ended up under active perturbation — too aggressive, likely disrupting otherwise-
+good grasp attempts as often as it rescued genuinely stuck ones. Detector-only TIDE
+logging itself worked correctly (sane, non-degenerate scores); it's specifically the
+perturbation *trigger tuning* that needs work if this is revisited. **Not pursued
+further given the ordering — TIDE closed out, moved to ReTVL.**
+
+### 2. ReTVL (arXiv 2606.24633) — retry-supervised value-weighted BC
+
+Strictly followed the paper's algorithm (Eq 2 global progress CE loss + Eq 8 local
+preference loss + Eq 9 combined value objective + Eq 10 BC-weighting formula), adapted
+in exactly two ways: (a) the value-network backbone is our own `PointNetEncoderXYZ` +
+small MLP instead of their VLM (Robometer-4B) — we have no RGB/language modality to
+condition on in the first place; (b) retry keypoints are labeled *algorithmically* from
+the recorded `gripper_width` trajectory (clean open→close(fail)→reopen→close(success)
+signature, verified against all 50 `--fast-reattempt` regrasp episodes) instead of by
+human annotators.
+
+New modules: `retvl_retry_labeling.py` (keypoint detector), `retvl_value.py` (value net
+architecture + Eq 10 helper), `train_retvl_value.py` (20,000-step value-net training,
+converged loss 4.2→~1.5), `build_retvl_weighted_dataset.py` (turns 150 direct-grasp +
+50 regrasp source episodes into a value-weighted training set).
+
+**First attempt (hard pruning) — inconclusive/likely flawed.** `build_retvl_weighted_dataset.py`
+v1 computed per-chunk α via Eq 10, then Bernoulli-kept/dropped each chunk outright
+(later smoothed with a moving average + fixed threshold after the *naive* per-chunk
+version fragmented every trajectory into ~6-step unusable snippets — `1/(1-p)` at
+p≈0.5). Retrained the specialist from scratch on the resulting 317-span, 285-train-
+episode set (epoch 400 best checkpoint, val=0.0228, run `rhkcr`, after 3 timeout-resumed
+training segments `qnbxx→rhkcr→rvipt`). Eval trended 57-80% SR per batch (well above
+the user's 60% target) — **but the user caught, from watching actual rollout videos,
+that successes were coming from clean first attempts, and second-attempt regrasps
+still never touched the object.** Investigation confirmed the retry-motion *content*
+survived pruning intact (dropped windows sit in the ambiguous pre-keypoint region, not
+around the redescend — verified directly against 5 episodes' span boundaries), but
+found a real bug: **hard-deleting frames and re-stitching the survivors into separate
+"episode" entries breaks `cond_steps=8` history continuity exactly at the decision
+boundary** — the new span right after a cut starts cold, with no memory that a first
+attempt just failed, undermining the very history-conditioning mechanism this whole
+campaign added `cond_steps` for in the first place. SR was very likely inflated by
+survivorship from the (larger, dominant) 150 direct-grasp portion of the mix, not
+genuine fixed regrasp behavior.
+
+**Second attempt (in progress as of this log entry): switch to weighted *sampling*
+instead of hard deletion.** Keep all 200 source episodes fully intact and contiguous
+(no cuts, no re-stitching); compute the same Eq 10 α per timestep; use a
+`torch.utils.data.WeightedRandomSampler` over DPPO's `StitchedSequenceDataset.indices`
+(mapping each dataset sample index back to its source episode + local timestep to look
+up its α) so high-value chunks are sampled more often and low-value ones less often —
+mathematically equivalent to per-sample loss reweighting in expectation, without ever
+touching DPPO's loss computation, and critically without ever breaking an episode's
+temporal contiguity. This should keep the exact ReTVL weighting signal while
+eliminating the cold-start bug above. Retrain + re-eval + **actual video review**
+(not just the SR number, given the survivorship-bias lesson just learned) pending.
+
+**Lesson for future retry/regrasp work on any category**: a headline SR number is not
+sufficient evidence that regrasp itself works when the training mix is dominated by
+clean first-attempt demos — always sample eval videos specifically from episodes where
+the first attempt is known/likely to have failed before trusting an aggregate SR.

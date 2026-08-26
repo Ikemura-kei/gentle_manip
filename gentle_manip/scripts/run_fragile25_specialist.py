@@ -467,9 +467,13 @@ def best_checkpoint(run_dir: Path, category: str) -> Optional[Path]:
     return find_best_checkpoint(run_dir, log_path if log_path.exists() else None)
 
 
-def eval_specialist(category: str, cfg_dir: Path, checkpoint: Path, port: int = 5570) -> dict:
+def eval_specialist(category: str, cfg_dir: Path, checkpoint: Path, port: int = 5570,
+                    config_name: str = "eval_diffusion_pointnet", log_suffix: str = "") -> dict:
     # Launch sim server, run eval, tear down -- mirrors this session's manual pattern.
-    server_log = RESULTS_DIR / "eval_logs" / f"{category}_server.log"
+    # config_name/log_suffix let a one-off variant config (e.g. a TIDE-instrumented eval)
+    # reuse this launcher without touching the default eval_diffusion_pointnet path or
+    # clobbering its log files -- both default to the original behavior.
+    server_log = RESULTS_DIR / "eval_logs" / f"{category}{log_suffix}_server.log"
     server_log.parent.mkdir(parents=True, exist_ok=True)
     sub_env = os.environ.copy()
     sub_env.pop("PYTHONPATH", None)
@@ -490,9 +494,9 @@ def eval_specialist(category: str, cfg_dir: Path, checkpoint: Path, port: int = 
         else:
             raise RuntimeError(f"sim server for {category} did not become ready in 120s")
 
-        eval_log = RESULTS_DIR / "eval_logs" / f"{category}.log"
+        eval_log = RESULTS_DIR / "eval_logs" / f"{category}{log_suffix}.log"
         eval_cmd = ["uv", "run", "--project", "envs/dppo", "python", "-m", "gentle_manip.dppo.train",
-                   "--config-name", "eval_diffusion_pointnet", "--config-path", str(cfg_dir),
+                   "--config-name", config_name, "--config-path", str(cfg_dir),
                    f"base_policy_path={checkpoint}"]
         with open(eval_log, "w") as logf:
             r = subprocess.run(eval_cmd, cwd=str(REPO), stdout=logf, stderr=subprocess.STDOUT, env=sub_env)
