@@ -176,7 +176,8 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
                     pose_scale: float = 1.0, record_path: "Path | None" = None,
                     shard_size: int = 0, action_config=None,
                     smooth_alpha: "float | None" = None,
-                    max_pos_step_m: "float | None" = None) -> None:
+                    max_pos_step_m: "float | None" = None,
+                    gripper_offset_m: float = 0.0) -> None:
     """Receding-horizon deploy loop shared by real and sim deployment.
 
     env: PolicyEnv-like — reset()->obs dict, step(action)->(obs, ...). policy:
@@ -428,6 +429,20 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
                             else:
                                 action[:6] = 0.0                     # zero pose delta
                     action = _cap_pos(_smooth(action))
+                    if gripper_offset_m and _abs_filters_on:
+                        # OPEN-UP OFFSET (2026-08-26): add a fixed offset to the COMMANDED gripper
+                        # width. Motivation (real result): v3.3-family policies over-squeeze real
+                        # mushrooms — their training data commands 31.3 mm at closure vs the
+                        # afucm/alzey family's 34.1 mm (small-scale DR pulled the learned constant
+                        # down), and the policy applies a near-constant width regardless of object
+                        # size. A +2-3 mm offset restores the gentler operating point WITHOUT
+                        # retraining, and is the cheapest test of that diagnosis on the robot.
+                        # Raw action units: gripper spans [gripper_min, gripper_max] over the clip
+                        # range, so convert metres -> raw the same way _raw_pos_cap does for xyz.
+                        _g_span = float(action_config.gripper_max - action_config.gripper_min)
+                        action[-1] = float(np.clip(
+                            action[-1] + gripper_offset_m / _g_span * (_clip_hi - _clip_lo),
+                            _clip_lo, _clip_hi))
                     key = keys.poll()
                     if key in (" ", "r"):
                         print("  manual reset — re-homing")

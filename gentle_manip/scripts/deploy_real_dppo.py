@@ -232,6 +232,12 @@ def main() -> None:
                         "With --shard-size>0 this is a DIRECTORY of shard_XXXX.pkl instead of one pkl")
     p.add_argument("--shard-size", type=int, default=10,
                    help="episodes per shard pkl (0 = single pkl); keeps each read/write small")
+    p.add_argument("--gripper-offset-m", type=float, default=0.0,
+                   help="add a fixed OPEN-UP offset (metres) to every commanded gripper width. "
+                        "For the over-squeeze seen with v3.3-family policies: their data closes to "
+                        "31.3 mm vs afucm/alzey's 34.1 mm, and the policy commands a near-constant "
+                        "width, so +0.002-0.003 restores the gentler operating point with no "
+                        "retraining. 0 (default) = unchanged.")
     p.add_argument("--device", default="cuda:0")
     args = p.parse_args()
 
@@ -281,7 +287,8 @@ def main() -> None:
     run_deploy_loop(env, policy, args.max_steps, args.rate,
                     pose_scale=args.pose_scale, record_path=args.record,
                     shard_size=args.shard_size, action_config=action_config,
-                    smooth_alpha=args.smooth_alpha, max_pos_step_m=args.max_pos_step_m)
+                    smooth_alpha=args.smooth_alpha, max_pos_step_m=args.max_pos_step_m,
+                    gripper_offset_m=args.gripper_offset_m)
 
 
 if __name__ == "__main__":
