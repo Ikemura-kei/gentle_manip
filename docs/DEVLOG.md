@@ -539,6 +539,30 @@ WHAT is planned; the banana still usually fails to actually lift. The bottleneck
 grasp->lift transition, now on properly-oriented across-the-body grasps. Still not ready to
 collect a banana dataset.
 
+**Does it generalize? YES in kind — and the width cap IS auto-derivable** (`width_max="auto"`,
+`--grasp-width-max-mm auto`). The descriptor is the median **LOCAL cross-section perpendicular to
+the long axis** — the width an across-the-body grasp actually has to close on — times 2.3. This is
+the descriptor the earlier bbox idea should have been: **the bbox ranks the banana LARGEST/easiest
+(95 mm longest extent) when its graspable width is ~18 mm.**
+
+| object | elongation | local x-sec (FEM mesh) | auto cap | UNCAPPED grasp width | effect |
+|---|---|---|---|---|---|
+| mushroom | 1.09 | 31.0 mm | 71.4 mm | 34.5 mm | inert, 2.1x headroom |
+| strawberry | 1.23 | 33.7 mm | 77.4 mm | 41.7 mm | inert, 1.9x headroom |
+| raspberry | 1.06 | 14.3 mm | 32.9 mm | 18.0 mm | inert, 1.8x headroom |
+| **banana** | **5.12** | 20.9 mm | **48.1 mm** | **76.6 mm (median)** | **BINDS** — cuts 4 of the 5 tfi grasps |
+
+So the cap is **inert by construction on compact objects** (safe to leave on) and binds only on
+elongated ones. TWO caveats, both measured and both in the `local_cross_section` docstring:
+1. The 2.3 coefficient is calibrated on ONE elongated object.
+2. It runs on the **FEM** object, whose mesh is voxel-remeshed (`prepare_mesh`, voxel_div=14) and
+   is therefore THICKER than the source for a thin body — the banana reads **20.9 mm vs 17.9 mm**
+   on the raw mesh (~17 % inflation), so `auto` yields a **48.1 mm** cap rather than the 41.2 mm
+   the raw mesh implies. 48 mm still binds hard, but it is LOOSER than the **40 mm that was
+   hand-tuned and end-to-end verified**. Prefer an explicit `--grasp-width-max-mm` where a value
+   has been validated; use `auto` for a NEW object.
+
+
 
 
 **Negative result — medial-axis seeding does NOT help (`--grasp-medial-seeds`, default OFF).**

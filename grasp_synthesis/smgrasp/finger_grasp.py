@@ -387,6 +387,45 @@ def score_finger_grasp(obj, x_tcp, *, cam_pos=None, cam_azimuth_max_deg=None, **
     return r
 
 
+LOCAL_XSEC_TO_WIDTH = 2.3     # width cap = this x the local cross-section (see local_cross_section)
+
+
+def local_cross_section(obj, *, n_slabs: int = 10, lo_f: float = 0.2, hi_f: float = 0.8) -> float:
+    """Median LOCAL cross-section perpendicular to the object's long axis (metres) — the width a
+    proper across-the-body grasp actually has to close on.
+
+    This is the shape descriptor that `width_max="auto"` uses, and it is deliberately NOT the bbox:
+    the bbox ranks the banana as the LARGEST, easiest object (95 mm longest extent) when its
+    graspable width is 17.9 mm — a bbox-derived bound would be wrong in exactly the wrong
+    direction. Measured 2026-08-26: mushroom 28.5, strawberry 30.5, raspberry 13.2, banana 17.9 mm.
+    At the 2.3x coefficient the resulting cap is INERT for every compact object (65.6 / 70.2 /
+    30.4 mm, all ~2x above any width they plan) and BINDS only on the banana (41.2 mm, vs the
+    40 mm that was hand-tuned to fix it).
+
+    TWO CAVEATS, both measured:
+    1. The 2.3 coefficient is calibrated on ONE elongated object. It is inert-by-construction for
+       compact shapes, so it is safe to leave on, but it is not validated across a range of
+       elongated ones.
+    2. This runs on the FEM object, whose mesh has been voxel-remeshed (`prepare_mesh`,
+       voxel_div=14) and so is THICKER than the source for a thin body: the banana reads 20.9 mm
+       here vs 17.9 mm on the raw mesh (~17% inflation). The derived cap is therefore 48.1 mm
+       rather than the 41.2 mm the raw mesh implies. 48 mm still binds hard on the banana (it
+       excludes 4 of the 5 uncapped grasps, which ran 42-79 mm, median 76.6) but it is LOOSER
+       than the 40 mm that was hand-tuned and end-to-end verified. Prefer an explicit
+       --grasp-width-max-mm where a value has been validated; use "auto" for a new object."""
+    v = np.asarray(obj.verts, float)
+    ax = int(np.argmax(v.max(0) - v.min(0)))
+    lo, hi = v[:, ax].min(), v[:, ax].max()
+    oth = [a for a in range(3) if a != ax]
+    ws = []
+    for f in np.linspace(lo_f, hi_f, n_slabs):
+        c = lo + f * (hi - lo)
+        sel = np.abs(v[:, ax] - c) < 0.03 * (hi - lo)
+        if sel.sum() > 3:
+            ws.append(min(float(v[sel, a].max() - v[sel, a].min()) for a in oth))
+    return float(np.median(ws)) if ws else float((v.max(0) - v.min(0)).min())
+
+
 def _score_finger_grasp_impl(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                        table_z: float = 0.0, ground_buf: float = 0.0035, g: float = 9.81,
                        accel: float = 0.0, max_indent: float = 0.01, obj_sdf=None,
@@ -733,7 +772,14 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
     # the `area_min` floor and the `w_press` pressure term reward. Bounding the width structurally
     # — like roll_max/yaw_max_deg — removes them from the search space instead of trying to
     # out-weight them. None (default) = 0.079, unchanged.
-    _w_hi = 0.079 if width_max is None else float(np.clip(width_max, 0.012, 0.079))
+    if width_max is None:
+        _w_hi = 0.079
+    elif isinstance(width_max, str):                 # "auto": derive from the shape descriptor
+        if width_max != "auto":
+            raise ValueError(f"width_max must be a number, None or 'auto' (got {width_max!r})")
+        _w_hi = float(np.clip(LOCAL_XSEC_TO_WIDTH * local_cross_section(obj), 0.012, 0.079))
+    else:
+        _w_hi = float(np.clip(width_max, 0.012, 0.079))
     lb = [com[0] - half_xy[0], com[1] - half_xy[1], tz_lo,
           np.pi - roll_max, -0.2 * np.pi, -_yaw_hi, 0.008]
     ub = [com[0] + half_xy[0], com[1] + half_xy[1], tz_hi,
