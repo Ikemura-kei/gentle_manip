@@ -379,6 +379,28 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-27 — v3.4 smoke (yaw≤55° home-frame · n-grasp 30 · squeeze 3 mm): 93.8%, IDENTICAL
+to the v3.3 anchor, with better contact on every axis.** `26-08-26-cdg`, 64 attempts, all
+three flags verified in the launch line.
+
+| | v3.3 anchor (clq, n=696) | v3.4 (cdg, n=64) |
+|---|---|---|
+| demonstrator success | 0.938 | **0.938** |
+| CMA grasp width | 39.0 ± 9.3 mm | **43.7 ± 9.5 mm** |
+| contact pad | 44 mm² | **51 mm²** |
+| contact pressure | 52.3 kPa | **46.4 kPa** |
+| align | 0.897 | **0.926** |
+| fallback grasps | 2 | 0 |
+
+READ: the +4.7 mm wider commanded width is the lever the REAL evidence pointed at (gentle
+alzey's data commanded 34.1 mm vs crushing v3.3's 31.3), now combined with alzey's slower
+30-step ramp — and it costs NOTHING in demonstrator success. Lower pressure on a bigger pad
+is the gentleness signature we want. CAVEATS: n=64 is a smoke, and ±9.5 mm spread means
++4.7 mm is DIRECTIONAL, not precise; the tilt row is not a regression (the anchor predates
+the tilt_deg column, so its 0.0° means UNMEASURED). v3.4 is the candidate recipe for the
+next full mushroom collection; only the robot can confirm the gentleness claim.
+
+
 **2026-08-27 — alzey probed at last: NOT genuinely size-adaptive (r=0.229) — its real-world
 "gentleness adaptive to object size" is a LEVEL+RATE effect.** Prediction registered before
 the run ("expect alzey also fairly flat, r<0.4; if r>0.6 my whole reading needs revision")
