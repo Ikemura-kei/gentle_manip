@@ -146,7 +146,15 @@ for a retrofitted head.
    Why the inference was wrong: R2=0.818 used the MEASURED `align`, which comes from contact
    geometry (object surface normals at the patch), not from EE pose. Pose becomes align only when
    combined with local object geometry — exactly what is occluded at closure. Dead end.
-2. **Align-filtered demos** (drop bottom 20% align) — **NOTE: the local agent's `--grasp-width-max-mm`
+2. **Align-filtered demos — DEPRIORITIZED 2026-08-26 (job 1729033), my "+0.09" was measured
+   against the WRONG BASELINE.** The +0.841->0.933 figure came from RAW clq, but the real pipeline
+   already applies the PINCH filter, which alone lifts corr to 0.916. On the actual pipeline input
+   the align filter adds only **+0.022** (0.916 -> 0.938) and -7.7% stress, while discarding 20% of
+   the data (599 -> 479 episodes). Scale coverage stays clean (74-82% per bin, all mesh variants),
+   so it is not harmful — just marginal. Dataset is built and join-proven (corr 0.9999) at
+   `dataset/demos/single_lift_mushroom_soft/26-08-25-clq-alignfilt` if we want it later.
+   ORIGINAL (over-stated) claim below for the record:
+   ~~drop bottom 20% align~~ — **NOTE: the local agent's `--grasp-width-max-mm`
    (df3f0b7) attacks the SAME phenomenon structurally, and better.** They measured CMA grasping a
    banana along its LONG axis (42-79 mm widths vs a ~17 mm cross-section; 4 of 5 spanned the
    crescent end-to-end, none lifted) because those grasps present more pad contact and so WIN on
