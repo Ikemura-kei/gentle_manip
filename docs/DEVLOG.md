@@ -403,9 +403,15 @@ IMPLEMENTATION (3dbc4e3, all flag-gated — existing runs bit-identical):
 · GPU smoke test (`.agent_tmp/smoke_width_head.py`) passes 5/5: head shape, finite loss with
   the width component logged, splice idempotence, width weight exactly 0 with pose weights
   renormalised, baseline training path unchanged.
-RUNS: **Config 1** (job 1726007) = freeze lulkx@600 entirely, fit ONLY the head — answers
-whether an encoder trained with NO width supervision still carries object size (rturn's did,
-but its encoder WAS width-supervised). **Config 2** = co-trained, 3 seeds (whead_s42/27/43,
+RUNS: **Config 1 RESULT (job 1726007): the frozen encoder DOES carry object size.** Fitting only
+the head on lulkx@600 (encoder+denoiser frozen; 0.03% of params trainable) gives, AT THE
+CLOSURE FRAME, **corr 0.888 / MAE 2.50 mm** — slightly BETTER than rturn's width-SUPERVISED
+aux head (0.82 / 2.65 mm), on an encoder that never saw a width loss. So the head can be
+RETROFITTED to our best policies with no retrain. CAVEAT worth keeping: the raw val corr is
+0.999 / MAE 0.78 mm, but that is dominated by TRIVIAL steps (most of an episode is 'hold
+~80 mm open', where predicting the current value scores near-perfectly); only the closure
+number is decision-relevant. Checkpoint `state_600_whead.pt`; canonical eval + width probe
+with GM_WIDTH_HEAD=1 running (jobs 1726079/80). **Config 2** = co-trained, 3 seeds (whead_s42/27/43,
 jobs 1725987-89) on the shift9 dataset. NOTE Config 2 has the head but NOT paired-reg (the
 class chain doesn't stack them today), so its baseline is **njhbz 0.805**, not avfnp 0.830;
 merging both mechanisms is a small refactor if the head proves out.
