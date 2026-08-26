@@ -2239,6 +2239,18 @@ instead of a 2h burn, on its first night. `GM_EVAL_MIN_SUCCESS` (0.05) / `GM_EVA
 0/20 with p=0.08%; a true-0.10 policy is killed ~12% of the time. Never raise the threshold near a
 rate that matters.
 
+**B12. `verify_derived_dataset`'s DWELL gate is NOT DISCRIMINATING — it fails the PRODUCTION
+dataset.** Building an align-filtered dataset, the gate reported `dwell 0.451 -> FAIL` and I nearly
+concluded the filtering had broken it. CONTROL (job 1729239): the same verifier on the
+known-good `single_lift_mushroom_soft_v33_7d` — the dataset that trained lulkx to 0.820 — reports
+**0.449, also FAIL**. Seam passes on both. The DEVLOG's recorded "dwell 0.193" for that same
+dataset must come from a different metric definition or an older verifier.
+CONSEQUENCES: (a) the gate carries NO signal in its current form and has been giving false
+assurance — anything that "passed" it recently deserves re-checking; (b) it needs its threshold
+recalibrated or the metric fixed. TODO, not done tonight.
+LESSON: when a gate fails, run it on a KNOWN-GOOD input before believing it. Without that control
+a valid experiment would have been abandoned on a broken check.
+
 Earlier, same class: the `--gripper-offset-m` feedback bug (additive bias on an observed channel),
 the residual-width two-space unit bug, and the fake "blind" run (sed patched `nc.` while the
 trainer read `net_cfg.`). All three are unit/plumbing mismatches that produced plausible numbers.

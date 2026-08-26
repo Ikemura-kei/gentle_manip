@@ -144,6 +144,19 @@ class _DiffusionPolicy:
         self._act_calls = 0
         if self._latch_step > 0:
             print(f"[eval_agent] floor latches after {self._latch_step} act() calls", flush=True)
+        # CFG at eval: amplify how much the point cloud moves the output (see pointnet_diffusion).
+        # Requires a checkpoint TRAINED with cond_dropout_prob>0 (it needs the null token); a plain
+        # checkpoint has null_visual=None and this raises rather than silently doing nothing.
+        cfg_scale = float(os.environ.get("GM_CFG_SCALE", "0") or 0)
+        if cfg_scale > 0:
+            net = getattr(self.model, "network", None)
+            if getattr(net, "null_visual", None) is None:
+                raise RuntimeError("GM_CFG_SCALE set but this checkpoint has no null token — it "
+                                   "was not trained with +model.network.cond_dropout_prob>0")
+            net.cfg_scale = cfg_scale
+            net.cfg_width_only = bool(int(os.environ.get("GM_CFG_WIDTH_ONLY", "0") or 0))
+            print(f"[eval_agent] CFG active: scale={cfg_scale} width_only={net.cfg_width_only}",
+                  flush=True)
         self._dump_tag = os.environ.get("GM_WIDTH_DUMP")
         self._dump_buf, self._dump_batch = [], 0
         self._dump_mm = None

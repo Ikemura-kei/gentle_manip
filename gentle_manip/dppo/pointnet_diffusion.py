@@ -78,7 +78,7 @@ class PointNetDiffusionMLP(nn.Module):
                  out_activation_type="Identity", use_layernorm=False, residual_style=True,
                  aux_contact=False, aux_object_pos=False, aux_grasp_width=False,
                  feed_width_pred=False, width_traj_head=False, width_head_blind=False,
-                 width_head_bins=0, aux_hidden=128,
+                 width_head_bins=0, cond_dropout_prob=0.0, aux_hidden=128,
                  use_first_frame_context=False):
         super().__init__()
         pn = dict(pointnet or {})
@@ -130,6 +130,7 @@ class PointNetDiffusionMLP(nn.Module):
         # multimodal (diffusion suits it) but width given the object is unimodal REGRESSION —
         # 9 probes showed the diffusion path collapses width to a constant (r~0.1) while a
         # regression head on the SAME features reaches r~0.82. It reads `_cond_encoded` =
+        self._visual_dim = int(visual_feature_dim) * (2 if use_first_frame_context else 1)
         # [pointnet_feat (+ctx) ⊕ flattened proprio]; proprio carries the CURRENT gripper
         # width, so the head knows where it is on the closing ramp and continues it instead of
         # jumping to the final value.
@@ -158,6 +159,18 @@ class PointNetDiffusionMLP(nn.Module):
             print(f"[PointNetDiffusionMLP] width_traj_head=True blind={self.width_head_blind} "
                   f"bins={self.width_head_bins}", flush=True)   # run was silently SIGHTED
         self._cond_dim_per_step = None if not width_head_blind else int(cond_dim // max(1, pc_cond_steps))
+        # CLASSIFIER-FREE GUIDANCE (2026-08-26). The last untested item from the original list, and
+        # the one that targets the OTHER half of the diagnosis: the diffusion path learning
+        # p(width|scene) ~= p(width), i.e. underusing its conditioning. Train with the VISUAL half
+        # of the conditioning randomly replaced by a learned null token; at inference extrapolate
+        #     eps = eps_uncond + w * (eps_cond - eps_uncond)
+        # which AMPLIFIES how much the point cloud moves the output. Implemented inside forward()
+        # (two passes) so the sampling loop, model wrapper and eval harness are untouched.
+        self.cond_dropout_prob = float(cond_dropout_prob)
+        self.cfg_scale = 0.0            # set at EVAL only (GM_CFG_SCALE); 0 = plain conditional
+        self.cfg_width_only = False     # guide only the width dim (pose stays untouched)
+        self.null_visual = nn.Parameter(torch.zeros(self._visual_dim)) \
+            if cond_dropout_prob > 0 else None
 
     def _cond_encoded(self, cond: Dict[str, torch.Tensor]) -> torch.Tensor:
         """[pointnet_feat ⊕ flattened proprio] — the shared conditioning feature."""
@@ -213,6 +226,15 @@ class PointNetDiffusionMLP(nn.Module):
             return (idx + 0.5) / self.width_head_bins * 2.0 - 1.0
         return out
 
+    def _denoise(self, x_flat, time_emb, cond_encoded, B, Ta, Da):
+        return self.mlp_mean(torch.cat([x_flat, time_emb, cond_encoded], dim=-1)).view(B, Ta, Da)
+
+    def _drop_visual(self, cond_encoded):
+        """Replace the VISUAL slice with the learned null token (proprio is kept)."""
+        out = cond_encoded.clone()
+        out[:, :self._visual_dim] = self.null_visual
+        return out
+
     def forward(self, x, time, cond: Dict[str, torch.Tensor], **kwargs):
         """x: (B, Ta, Da); time: (B,); cond: {state:(B,To,Do), point_cloud:(B,Tpc,N,3)}."""
         B, Ta, Da = x.shape
@@ -222,8 +244,21 @@ class PointNetDiffusionMLP(nn.Module):
             # aux_predict keeps the base feature, so head input dims are unchanged)
             cond_encoded = torch.cat([cond_encoded, self.width_head(cond_encoded).detach()], dim=-1)
         time_emb = self.time_embedding(time.view(B, 1)).view(B, self.time_dim)
-        x = torch.cat([x, time_emb, cond_encoded], dim=-1)
-        return self.mlp_mean(x).view(B, Ta, Da)
+        if self.training and self.cond_dropout_prob > 0:
+            drop = torch.rand(B, device=x.device) < self.cond_dropout_prob
+            if drop.any():
+                cond_encoded = cond_encoded.clone()
+                cond_encoded[drop, :self._visual_dim] = self.null_visual
+            return self._denoise(x, time_emb, cond_encoded, B, Ta, Da)
+        if (not self.training) and self.cfg_scale > 0 and self.null_visual is not None:
+            e_c = self._denoise(x, time_emb, cond_encoded, B, Ta, Da)
+            e_u = self._denoise(x, time_emb, self._drop_visual(cond_encoded), B, Ta, Da)
+            guided = e_u + self.cfg_scale * (e_c - e_u)
+            if self.cfg_width_only:      # amplify the cloud's effect on WIDTH only; pose untouched
+                out = e_c.clone(); out[:, :, -1] = guided[:, :, -1]
+                return out
+            return guided
+        return self._denoise(x, time_emb, cond_encoded, B, Ta, Da)
 
 
 class PointNetDiffusionUNet(nn.Module):
