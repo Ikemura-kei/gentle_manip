@@ -454,6 +454,25 @@ uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.p
   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
   --record dataset/real_deploy/lulkx600 --shard-size 10 --max-steps 5000
 
+# ── CLUSTER: avfnp/state_400 — SEED SIBLING of lulkx (same v33b_shift9 dataset, same paired-reg
+# w=0.5, seed 27 vs lulkx's 43; different best checkpoint, 400 vs 600). Same wiring, same
+# MANDATORY shift-ACTIVE pairing, same table placement as the lulkx block above.
+# Verified identically: normalization is byte-identical to lulkx's (same dataset) and clean
+# (z max 0.269 m, gripper 80.0 mm); no paired-reg extras in the checkpoint (28 keys); pre-deploy
+# probe PASSES all four obs combinations.
+# Because the two differ ONLY by seed, running both measures seed variance on the real robot —
+# useful context for reading any single real number, since our real trial counts are ~30.
+#
+# ckpt=downloaded_runs/avfnp/checkpoint/state_400.pt
+# normalization=downloaded_runs/avfnp/normalization.npz
+
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/avfnp400 --shard-size 10 --max-steps 5000
+
 # ══════════════════════════════════════════════════════════════════════════════════════════
 # ⛔ DO NOT DEPLOY any v33 policy (orkam, kjljs, …) UNTIL THE REAL SLICE IS RE-CONVERTED.
 # Root cause (2026-08-25, diagnosed from dataset/real_deploy/orkam200 + offline probes):
