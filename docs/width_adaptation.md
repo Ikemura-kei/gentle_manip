@@ -69,6 +69,28 @@ width sits far below its at-grasp width -> it really does close in mid-air on so
 0.2-0.4 mm for the floor arms. Scoring adaptation by MIN width would have read partly noise on the
 very arm everything is compared against.
 
+### 2a-bis. TOFU IS NOT A WIDTH PROBLEM (job 1728683, 2026-08-26) — premise overturned
+
+| | corrAT | range | %demo | success | gapMIN |
+|---|---|---|---|---|---|
+| mushroom baseline | +0.336 | 1.0 mm | **9%** | 0.883 | 3.7 |
+| mushroom + floor (best) | +0.511 | 3.2 mm | 29% | 0.517 | 0.4 |
+| **tofu baseline (mntlf@500)** | +0.281 | 2.8 mm | **28%** | 0.517 | **9.2** |
+
+Tofu's demonstrator spans 9.8 mm; the tofu BASELINE policy already covers 2.8 mm = **28%**, i.e.
+as much as our best mushroom MECHANISM delivers. **Tofu adapts ~3x better than mushroom out of the
+box.** The premise that drove the tofu urgency — "tofu fails because width is constant and its
+tolerance is narrow" — is FALSE. The width mechanism will not fix tofu's 0.585 ceiling.
+
+What IS wrong with tofu: `gapMIN` = **9.2 mm** (vs 0.2-0.4 for the mushroom floor arms) — the
+policy keeps closing far past the grasp point. Peak stress is LOW (20324 Pa vs mushroom 53498,
+min_pad 129.7 vs 45.2 mm2), so it is not crushing; the likely story is closures on AIR in the ~48%
+of episodes that fail, i.e. a grasp POSITIONING/TIMING problem. Needs its own investigation
+(start with the eval videos), NOT more width work.
+
+LESSON: run the baseline diagnostic BEFORE building machinery on an assumed failure mode. Two tofu
+level heads were fitted before this probe was run.
+
 ### 2b. Ceilings and links
 
 | quantity | mushroom | tofu |
