@@ -379,6 +379,32 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-27 — `--gripper-offset-m` TRIED ON THE RIG: does not rescue the v3.3 over-squeeze;
+retrain is the path. Knob kept (fixed) for later use.** The no-retrain mitigation was tested on
+the real robot and **did not help much (user)** — the decision is to wait for the retrain rather
+than tune the offset further. Two things are worth keeping from the attempt:
+1. **A REAL BUG in the knob was found and fixed** (e4235c2). First attempt: with
+   `--gripper-offset-m 0.003` the gripper **walked open after the lift and dropped the object**
+   (user). Cause: the offset biased only the COMMAND, so the measured width returned ~3 mm wider
+   than anything in training — and the policy CONDITIONS on `gripper_width`. It read the wider
+   value as "not closed yet / released", commanded wider, and the offset re-applied its bias on
+   top: positive feedback. The offset is now **invisible to the policy** (the same amount is
+   subtracted from the width fed to `policy.reset/push`), so proprioception stays on the training
+   manifold while the robot holds `offset` wider; recording keeps the RAW obs. Even so, the
+   corrected version did not fix the crushing.
+2. **What that tells us about the diagnosis.** A constant open-up offset is exactly the right
+   SHAPE of correction for a constant-width policy, so its failure is evidence that commanded
+   width is not the whole story — the closing RATE (1.78 vs 1.28 mm/step) and/or the sim-vs-real
+   material stiffness (E = 0.3 MPa, soft end of 0.3-3.0) are carrying more of the effect than the
+   2.8 mm width gap alone. Worth remembering before attributing the retrain's outcome solely to
+   the width distribution.
+STATUS: knob stays in the tree at default 0 (inert). Worth re-trying **after** a retrain that
+fixes the rate/extra-close, as a fine-tuning trim rather than a rescue — and it is also the
+cheapest probe available if over-squeeze reappears on a future family. CAVEAT for whoever picks
+it up: hiding width from the policy is only sound while the policy's width behaviour is
+near-constant; on a genuinely size-adaptive policy it would corrupt the adaptation.
+
+
 **2026-08-26 — shrimps: 8 images, one mesh PER IMAGE; euler gate 5/8 (10/24 candidates).**
 `obj_images/shrimps/` holds 8 DIFFERENT objects, not views of one, so a new mode:
 `scripts/mesh_from_photos/select_per_image.py` picks the best seed for each image and
