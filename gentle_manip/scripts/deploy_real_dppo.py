@@ -237,7 +237,11 @@ def main() -> None:
                         "For the over-squeeze seen with v3.3-family policies: their data closes to "
                         "31.3 mm vs afucm/alzey's 34.1 mm, and the policy commands a near-constant "
                         "width, so +0.002-0.003 restores the gentler operating point with no "
-                        "retraining. 0 (default) = unchanged.")
+                        "retraining. 0 (default) = unchanged. The offset is INVISIBLE TO THE "
+                        "POLICY: the same amount is subtracted from the gripper_width the policy "
+                        "is conditioned on, because feeding it the widened measurement puts its "
+                        "proprioception out of distribution and it walks the gripper open after "
+                        "the lift (observed on the rig, 2026-08-26).")
     p.add_argument("--device", default="cuda:0")
     args = p.parse_args()
 

@@ -148,6 +148,7 @@ def _wait_for_start(keys: "KeyPoller") -> None:
     if not keys.enabled:
         return
     print("  homed — press 'k' to start (q to quit) ...")
+
     while True:
         key = keys.poll()
         if key == "k":
@@ -395,6 +396,22 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
         if _raw_pos_cap is not None:
             prev_pos_raw[0] = pose[0:3].copy()
 
+    # ── gripper-offset compensation ───────────────────────────────────────────────
+    # The offset biases the COMMAND, so the measured width comes back ~offset wider than
+    # anything in training. The policy conditions on gripper_width, so feeding it that raw
+    # value puts its proprioception out of distribution: it reads the wider width as "not
+    # closed yet / released", commands wider, and the offset adds the bias again — a positive
+    # feedback loop that walks the gripper open after the lift (observed on the rig,
+    # 2026-08-26). Subtracting the offset from the width the POLICY sees keeps its input on
+    # the training manifold while the ROBOT still holds `offset` wider, which is the whole
+    # point of the knob. Recording keeps the RAW obs (what physically happened).
+    def _policy_obs(o: dict) -> dict:
+        if not gripper_offset_m:
+            return o
+        oc = dict(o)
+        oc["gripper_width"] = np.asarray(o["gripper_width"], np.float32) - gripper_offset_m
+        return oc
+
     try:
         with KeyPoller() as keys:
             controls = ("k = start   SPACE = reset episode (re-home)   q = quit"
@@ -402,7 +419,7 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
             print(f"deploying up to {max_steps} steps at {rate:.0f} Hz "
                   f"(re-plan every {policy.n_action_steps}).  {controls}")
             obs = env.reset()                                       # homes the robot
-            policy.reset(obs)
+            policy.reset(_policy_obs(obs))
             _seed_abs_filters(obs)                                  # anchor filters to the actual home pose
             print("  " + _pc_health(obs))                           # cube-signal sanity at home
             _wait_for_start(keys)                                   # hold until 'k'
@@ -474,7 +491,7 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
                         print(_line, flush=True)
                     else:                                                      # delta mode: no abs pose
                         print(f"[gripper] actual={_gw_act:.4f} m  (cmd raw={float(action[-1]):+.3f})", flush=True)
-                    policy.push(obs)
+                    policy.push(_policy_obs(obs))
                     steps += 1
                     if period > 0:
                         dt = time.perf_counter() - t0
@@ -485,7 +502,7 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
                     if shard:
                         _flush_full_shards()                       # persist finished shards mid-run
                     obs = env.reset()
-                    policy.reset(obs)
+                    policy.reset(_policy_obs(obs))
                     _seed_abs_filters(obs)                         # anchor filters to the actual re-homed pose
                     print("  " + _pc_health(obs))
                     steps = 0
