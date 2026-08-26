@@ -91,6 +91,26 @@ of episodes that fail, i.e. a grasp POSITIONING/TIMING problem. Needs its own in
 LESSON: run the baseline diagnostic BEFORE building machinery on an assumed failure mode. Two tofu
 level heads were fitted before this probe was run.
 
+### 2a-ter. THE FLOOR IS A TRADE DIAL, NOT A SOLUTION (margin sweep, 2026-08-26)
+
+| arm | success | corrAT | range | %demo |
+|---|---|---|---|---|
+| baseline | 0.883 | +0.336 | 1.0 mm | 9% |
+| floor margin 4 mm | 0.517 | +0.511 | 3.2 mm | 29% |
+| floor margin 6 mm | 0.617 | +0.420 | 2.4 mm | 21% |
+| floor margin 8 mm | **0.750** | +0.346 | 1.3 mm | **11%** |
+
+Margin 8 mm CLEARS the 0.70 gate — but adaptation has collapsed to baseline (11% vs 9%, corr
+0.346 vs 0.336): the floor has stopped binding, so 0.750 is just the baseline leaking through.
+**No margin setting escapes the trade**; the exchange rate is ~linear at **+10% range per -0.18
+success**. Extrapolated to the 70% target the success cost is unacceptable. This curve IS the
+mechanism's Pareto frontier with the OLD head (corr 0.624 at latch, P(over>2mm) 0.51).
+
+**What the refit arms must do: BEAT this curve, not sit on it.** The refit head (corr 0.741 at
+latch, P(over>2mm) 0.29) should need LESS margin for the same success -> more binding -> more range
+at equal success. If 1728724/1728725/1728949/1728950 land ON the trade line, the floor family is
+exhausted and we move to the untried candidates (§5).
+
 ### 2b. Ceilings and links
 
 | quantity | mushroom | tofu |
