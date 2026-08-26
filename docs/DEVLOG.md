@@ -379,6 +379,42 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-26 — REAL RESULT (user): every v33b/v3.3 checkpoint OVER-SQUEEZES and crushes;
+alzey remains the gentle, size-appropriate one. Diagnosed from the datasets.**
+1. **PRIMARY — the commanded grip is tighter.** Commanded width at closure: v33b_shift9
+   **31.3 ± 6.9 mm (p10 21.2)** vs alzey/afucm **34.1 ± 6.5 mm (p10 25.9)** — 2.8 mm tighter
+   on average, 4.7 mm at the low end. CAUSE: our own small-object fix. Extending scale DR to
+   [0.8, 1.5] filled the data with small mushrooms, which pulled the learned CONSTANT width
+   down; width adaptation never transferred (every probe flat ~30 mm), so that tighter
+   constant is applied to normal-size REAL mushrooms. This is the real-world bill for the
+   sim small-object gain (avfnp 0.90/0.90) — a flat-width policy cannot have both.
+2. **SECONDARY — closing is 39% faster** (user's hypothesis, confirmed): v3.3 closes at
+   **1.78 mm/step (p90 2.19)** vs alzey **1.28 (p90 1.52)**, i.e. `--n-grasp 20` vs `30`. On
+   a position-controlled real gripper that is a bigger commanded-minus-achieved gap per tick
+   = harder driving at contact. Compounds (1).
+3. **AMPLIFIER — sim material may be too soft.** Our mushroom is E=0.3 MPa, the SOFT end of
+   the literature 0.3-3.0 MPa. A stiffer real mushroom yields far more stress for the same
+   over-closure — which explains the INVERSION: v33b looks gentler in sim (28.1 vs alzey's
+   33.9 kPa sustained) yet crushes in real. Sim stress is not a faithful real-gentleness
+   proxy at this material setting.
+ACTIONS: (a) shipped `--gripper-offset-m` (987e21d, default 0) — deploy-time open-up offset;
+`--gripper-offset-m 0.003` on lulkx/avfnp tests the diagnosis on the rig with NO retraining;
+(b) next collection: `--n-grasp 30`, `--grasp-extra-close 0.0025-0.003`, and either narrow
+the scale range or accept the grip-margin cost of small-object coverage; (c) consider
+re-measuring/raising the mushroom E.
+
+**Same report — YAW/OCCLUSION: the bound HELD in data; ±60° is simply not tight enough.**
+Yaw at closure (30° bins) is confined to **±90° with mass in ±60°** for v3.3 — and TIGHTER
+than alzey's data, which reaches ±120°. So `--cam-azimuth-max-deg 60` did its job. Why the
+robot still occludes: (i) ±60° already allows the gripper body to block the camera; (ii) yaw
+is TASK-IRRELEVANT for a near-symmetric cap, so the policy's target is flat across the whole
+permitted band and diffusion samples anywhere in it, occasionally at the occluding edge;
+(iii) real clouds are slightly OOD, pushing the tail past anything sim showed. FIX: tighten
+at COLLECTION (`--cam-azimuth-max-deg 30-40`) rather than expect the policy to learn a
+preference it was never given. NOTE this failure is invisible to our sim eval (occlusion is
+not scored) — same blind-spot class as the v33 real-slice bug.
+
+
 **2026-08-26 — fallback-contamination cross-check (prompted by the local agent's banana
 finding): ALL our collections are clean.** Their diagnosis — a blocked planner emits
 DEFAULT top-down fallback grasps that keep "success rate" high while the audit columns
