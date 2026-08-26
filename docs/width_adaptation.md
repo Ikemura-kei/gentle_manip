@@ -288,6 +288,44 @@ separately, not just the pooled number.
 Supporting evidence this could work: cross-category size perception TRANSFERS (~0.55 both
 directions, job 1729369), so the encoder can in principle read size for both.
 
+## 4c. LEADING CANDIDATE: CONTACT-TRIGGERED STOP (2026-08-27, analysis done, plumbing pending)
+
+The floor family failed STRUCTURALLY: it converts a prediction into a width by clamping, so
+prediction error -> gripper stops at the wrong place -> drop. Requirement for any successor:
+**influence width WITHOUT gating closure at a PREDICTED value.**
+
+`size_adaptation_literature.md` §2c supplies it — "a grasp is itself a measurement". Close until
+CONTACT FORCE reaches F*, then stop. The stopping point is set by PHYSICS, not by a prediction,
+so there is no prediction error to cause drops, and NO size estimate is needed at all.
+
+**Why the width adaptation comes for free:** at a force-triggered stop,
+`width ~= object_size - indentation(F*)`, and indentation at a given force is roughly a material
+property -> width tracks size with SLOPE ~1.0, at or above the demonstrator's 0.88-1.08.
+
+**Supporting data (dr_params `grip_N`, success-only):**
+
+| | grip_N | CV | corr(grip, scale) | corr(width, scale) |
+|---|---|---|---|---|
+| mushroom (n=653) | 2.10 +- 1.50 N | 0.72 | +0.376 | +0.841 |
+| tofu (n=614) | 2.22 +- 1.57 N | 0.71 | +0.475 | +0.791 |
+
+The demonstrator is NOT constant-force — grip rises with size (heavier objects need more hold).
+So the design question is the THRESHOLD, not the mechanism: constant F* adapts width well but
+under-grips heavy objects; a high F* over-squeezes small ones. Resolution: scale F* by estimated
+mass, where a COARSE size estimate suffices — force feedback ABSORBS the error instead of turning
+it into a drop. That is the qualitative difference from the floor.
+
+**It also earns the "reactive" answer to the reviewer** (see §6): an open-loop pose+width regressor
+CANNOT stop on contact; this can. Testable by perturbing mid-grasp or varying stiffness at fixed
+geometry.
+
+**IMPLEMENTATION (not done — multi-file, deliberately not attempted unattended at 00:30):**
+contact force exists in sim (`sf.extra["contact_force"]`, `CONTACT_FORCE_THRESH_N`) but only
+surfaces as a PRIVILEGED OBS. It must be threaded into the step `info` (like `stress_max`,
+policy_env.py ~L254) -> serve_env -> SimEnvClient -> venv info -> the policy adapter. At REAL
+deploy the gripper's own force/current feedback provides it, so this is NOT privileged information
+at deployment — only the sim plumbing makes it look that way.
+
 ## 5. Queued ideas, highest value first
 
 1. ~~Condition the width head on the grasp pose~~ **REFUTED 2026-08-27 (job 1728668).**
