@@ -1,0 +1,169 @@
+# Width adaptation — LIVE log & plan
+
+**Single source of truth for the width-adaptation campaign.** Updated promptly as experiments
+launch, results land, or analysis changes a conclusion. Deep analysis lives in
+`docs/width_predictability.md`; literature in `docs/size_adaptation_literature.md`; project-wide
+history in `docs/DEVLOG.md`.
+
+**Last updated:** 2026-08-26 ~22:45 CEST
+**Deadline:** 2 days from 2026-08-26 (venue). **Goal: adaptive width AND success >= 0.7.**
+
+---
+
+## 1. Where we stand (one paragraph)
+
+The policy commands a near-constant width across a 12-46 mm object range. Nine head variants
+failed. Tonight established that this is **NOT a perception problem** (size is recoverable from
+the cloud at 0.739 mushroom / 0.842 tofu) and **NOT a demonstrator-noise problem** (width is
+0.84/0.79 determined by size, R2 0.82 once `align` is included). It is a **control** problem.
+
+Stated in the units that matter (§2a): the demonstrator spans **11.3 mm** of aperture across the
+size range; our best DEPLOYED policy (alzey) spans **1.4 mm (12%)**; our best MECHANISM (latched
+floor) spans **3.4 mm (30%)** but at 0.250 success. Target is **~8 mm (70%) at >=0.70 success**.
+So the floor is a genuine step change over anything deployed (2.4x alzey) and still well short of
+sufficient. Current effort is the control mechanism (shrinkage shift); two higher-value untested
+ideas are queued behind it (§5.1 pose-conditioned head, §5.2 align-filtered demos).
+
+## 2. Current state of the numbers
+
+### 2a. THE SCOREBOARD — report mm of aperture, not just correlation
+
+Correlation says width moves in the RIGHT DIRECTION; it says nothing about moving ENOUGH. A
+policy can score r=0.9 with a 1 mm range and be useless. **Always report both.**
+
+| policy | r (at-grasp) | small->big width | % of demonstrator range | success |
+|---|---|---|---|---|
+| demonstrator (data) | +0.841 | **11.3 mm** | 100% | 0.94 (collection) |
+| **alzey — best REAL policy** | **+0.229** | **1.4 mm** | **12%** | ~0.70 real |
+| afucm | -0.040 | -0.3 mm | -3% | — |
+| lulkx base — **re-measured, identical code** | **+0.336** | **1.0 mm** | **9%** | **0.883** |
+| lulkx + latched floor (margin 0) | +0.474 | 3.4 mm | **30%** | **0.250** |
+| lulkx + floor, margin 2 mm | +0.469 | 3.2 mm | 28% | 0.450 |
+| lulkx + floor, **margin 4 mm** | **+0.511** | 3.2 mm | **29%** | **0.517** |
+| **TARGET** | — | **~8 mm** | **~70%** | **>=0.70** |
+
+**Where the target comes from (not an arbitrary threshold):** the demonstrator spans 11.3 mm
+between size halves (23.8 mm across the full 0.82-1.49 scale range, slope 35.7 mm/unit scale). A
+policy with ZERO adaptation therefore mis-sizes by up to +-5.7 mm at the extremes — which is
+exactly the >5 mm over-tight condition that bruises mushrooms, and matches the measured ~30%
+over-tight rate. Keeping worst-case width error under ~3 mm requires ~70% of the demonstrator's
+range.
+
+**Verdict on alzey: NOT size-adaptive.** 12% of the range. Its real-world success (~70%) and
+gentleness are genuine but come from LEVEL (~2 mm wider) and RATE (39% slower closing), which help
+every object equally. The paper cannot claim size adaptation on alzey's evidence.
+
+**CORRECTION (01:50):** the baseline correlation quoted all night as "~0.1" (from an older probe,
+0.138) is **0.336** when measured with correct normalization and the at-grasp definition. Claims of
+the form "floor lifts corr from ~0.1 to 0.474" OVERSTATED the gain; it is 0.336 -> 0.511. The mm
+range is unaffected and is the number to lead with: 1.0 mm -> 3.2 mm, 9% -> 29%.
+
+**`gapMIN` validates the user's warning about episode-min:** baseline gapMIN = **3.7 mm** (its min
+width sits far below its at-grasp width -> it really does close in mid-air on some episodes), vs
+0.2-0.4 mm for the floor arms. Scoring adaptation by MIN width would have read partly noise on the
+very arm everything is compared against.
+
+### 2b. Ceilings and links
+
+| quantity | mushroom | tofu |
+|---|---|---|
+| corr(cloud@t=0 -> object size) — perception ceiling | 0.739 | 0.842 |
+| corr(size -> demonstrator width), success-only | 0.841 | 0.791 |
+| corr(size -> width), ALL episodes (selection effect) | 0.708 | 0.791 |
+| R2(width ~ size + align) | 0.818 | 0.818 |
+| base policy success | 0.820 (lulkx@600) | 0.470 (gadkf@300, climbing) |
+
+## 3. Experiment ledger
+
+### Completed — mechanisms
+| arm | result | verdict |
+|---|---|---|
+| aux width head (w=0.5/1.5/2.0/2.5), FiLM, 18b feed-forward, loss reweighting, residual actions | no adaptation | dead |
+| per-step head, SIGHTED | copies proprio width (80->79.4, 28->28.6), 0.000 success | dead (wrong target, see §5.1) |
+| per-step head, BLIND | ramp ~15 mm early, 0.000 success (end-to-end CONFIRMED vs lulkx 0.820), lift onset 2% | dead |
+| discretised head (K=64 CE, "mode averaging" fix) | ramp FLAT, MAE 4.5 vs 3.9 mm, middle-band 23 vs true 14 | dead — premise refuted |
+| **latched floor** `max(w_policy, w_level)` | **corr 0.474** (first real adaptation) but success 0.250 | promising, mis-centred |
+| quantile level heads tau=0.10 / 0.25 | P(over>2mm) 0.58 -> 0.04 / 0.10; bias -6.7 / -3.8 mm | ready, unevaluated |
+
+### Running (as of last update)
+| job | arm | expect |
+|---|---|---|
+| 1728497 | baseline probe (no floor/shift), corrected NORM | anchors the "~0.1" baseline with identical code |
+| ~~1728498/1728499~~ | shift alpha=0.5/1.0 — **VOID, my unit bug** (absolute width converted with the delta scale factor -> uniform -8mm squeeze, 0.000 both arms) | relaunched |
+| ~~1728625/1728626~~ | shrinkage shift alpha=0.5/1.0 — **DEAD, genuinely** (conversion verified -0.351 norm, still 0.00 over 20 eps; killed by the degenerate watchdog). Inherits the same eval-time +3mm over-prediction but applies it as a UNIFORM widening, whereas the floor only loosens when it binds. | dead |
+| 1728724 / 1728725 | **floor + REFIT head, margin 0 / 2 mm** | BEST CANDIDATE: head bias now -1.6mm, so little/no margin needed |
+| ~~1728500~~ margin 2mm | **DONE: succ 0.450 (from 0.250), corr 0.469, 28% range, lift% 1.00, gapMIN 0.2** — the +3mm debias is nearly FREE (success +0.20 at ~0 adaptation cost) | confirms bias diagnosis |
+| 1728501 | floor margin 4 mm | does more debias help, or start costing adaptation? |
+| 1728675 / 1728684 | level-head refits, 60 epochs + WD (mushroom, tofu@mntlf) | 0.667 -> ~0.77 expected; lifts EVERY arm |
+| 1728683 | **tofu baseline width probe** (mntlf@500) | UNTESTED ASSUMPTION: is tofu's 0.585 ceiling even a width problem? |
+| 1728356 | aux-width retrain (size supervision in ENCODER) | tests whether 0.739 perception is a lower bound |
+| 1728066 | latched floor, margin 0 (full eval) | success number for the 0.474 arm |
+| tofu650 ckpts 500/600 | tofu curve | is tofu's failure width-related at all? |
+
+### 2c. Level heads — REFIT (60 epochs + weight decay) fixes both accuracy AND bias
+
+| head | policy succ | corr | bias | P(over>2mm) |
+|---|---|---|---|---|
+| mushroom lulkx@600 — OLD (8 ep) | 0.883 | 0.743 | **+3.0 mm** | **0.58** |
+| mushroom lulkx@600 — REFIT | 0.883 | **0.763** | **-1.6 mm** | **0.19** |
+| tofu gadkf@300 — REFIT | 0.470 | **0.802** | -1.9 mm | 0.15 |
+| tofu mntlf@500 — REFIT | 0.585 | 0.762 | -1.5 mm | 0.18 |
+
+The +3.0 mm over-prediction that caused the floor's ENTIRE success collapse (0.867 -> 0.250) was a
+TRAINING ARTIFACT, not a property of the features. Refitting removes it and raises corr. Effect is
+consistent across objects and checkpoints.
+
+**Level-head quality does NOT track policy quality:** gadkf@300 (policy 0.470) gives a BETTER head
+(0.802) than mntlf@500 (policy 0.585, head 0.762). Do not assume the best policy is the best base
+for a retrofitted head.
+
+## 4. Decisions taken (with reasons)
+
+- ~~Stop building heads (prediction at ceiling ~0.62)~~ **RETRACTED 2026-08-26 22:20.** That
+  ceiling assumed SIZE MEDIATES EVERYTHING and rested on an UNDER-TRAINED head. Job 1728668 got
+  corr **0.771** cloud->width on the SAME data/features/split where Step 0 got 0.597 — the only
+  difference being 300 epochs + weight decay vs 40 epochs. So (a) the cloud carries width info
+  beyond scale, and (b) our level head (0.667 at t=0) is under-trained, not at ceiling. Refitting
+  properly (1728675) lifts the ceiling for EVERY mechanism currently running.
+- **Target METRIC EXTENT (mm), never `scene_scale`.** Scale is category-relative, undefined on
+  real objects, and the goal is a multi-category generalist. `width_mm` already IS metric extent
+  plus a constant (verified: join corr 0.9992-0.9998, constant ~9.5 mm offset).
+- **Do not filter demos on the width residual** — circular, biases the reported statistic. Filter
+  on contact QUALITY and take predictability as a by-product.
+- **Latch the floor early (t=0), not at closure onset.** Vision corr is 0.667 at t=0 and collapses
+  to 0.097 at contact (occlusion). The "latch later" fix would have made it worse.
+
+## 5. Queued ideas, highest value first
+
+1. ~~Condition the width head on the grasp pose~~ **REFUTED 2026-08-27 (job 1728668).**
+   V (vision@t=0) 0.771 | P (proprio pose@closure) 0.574 | **V+P 0.748 — pose HURTS slightly.**
+   Why the inference was wrong: R2=0.818 used the MEASURED `align`, which comes from contact
+   geometry (object surface normals at the patch), not from EE pose. Pose becomes align only when
+   combined with local object geometry — exactly what is occluded at closure. Dead end.
+2. **Align-filtered demos** (drop bottom 20% align): corr 0.841 -> **0.933** AND stress -10%, scale
+   coverage preserved. Sharpens the conditional the diffusion policy fits, attacking mean-seeking
+   at the source. Needs a dataset rebuild + re-merge -> MUST pass `verify_derived_dataset.py`
+   (this path is where the v33 poisoning happened).
+3. **Proprioception after contact (RMA-style history module).** Vision dies at contact exactly
+   when gripper width + contact force become a DIRECT size measurement. The two channels are
+   complementary IN PHASE; a single-frame head cannot exploit that.
+4. **Leave-one-mesh-variant-out** rerun of Step 0 — current 0.739/0.842 measure interpolation, not
+   generalisation. Cheap; needed before any novelty claim.
+5. **Classifier-free guidance on the width dim** — the one untested item from the original list;
+   targets the diffusion path underusing its conditioning. Full retrain.
+
+## 6. Reviewer questions to answer in the paper
+
+- *"Why not regress grasp pose from the cloud and execute open-loop?"* — Reactivity. But our
+  policy is not currently reactive either, so this must be EARNED (see §5.3) and demonstrated
+  (perturb mid-grasp, or vary stiffness at fixed geometry).
+- *"Why not regress width and do a top-down grasp?"* — NOT refuted by yaw geometry on our data
+  (CMA-ES picks flush grasps, so the sqrt(2) diagonal effect never appears; measured corr -0.08).
+  Either find a different argument or just run the baseline.
+- Novelty claim ("no one has studied parallel-jaw aperture adaptation in IL") rests on a 6-query
+  scan — needs systematic screening before print.
+
+## 7. Update protocol
+
+Append to §3 the moment a job launches or lands; move conclusions into §2/§4 and revise §5's
+ordering when a result changes the ranking. Bugs go to the DEVLOG bug ledger, not here.

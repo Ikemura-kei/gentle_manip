@@ -154,10 +154,24 @@ class WidthHeadDiffusionModel(WeightedAuxDiffusionModel):
     def p_losses(self, x_start, cond: dict, t):
         total = super().p_losses(x_start, cond, t)       # pose diffusion (+ any aux heads)
         # Target is the GROUND-TRUTH chunk's width column — already in x_start, no new label.
-        pred = self.network.predict_width_traj(cond)                    # (B, Ta)
-        wmse = F.mse_loss(pred, x_start[:, :, -1])
-        self._aux_log["loss_width_traj"] = float(wmse.detach())
-        return total + self.width_head_weight * wmse
+        tgt = x_start[:, :, -1]                                          # (B, Ta), in [-1, 1]
+        K = int(getattr(self.network, "width_head_bins", 0))
+        if K > 0:
+            # CROSS-ENTROPY over K width bins (2026-08-27). An MSE head MODE-AVERAGES at the
+            # closure decision point: where the chunk might be "still open" or "already closed"
+            # it returns the mean of the two, a width belonging to neither (measured 66/42/20
+            # against a true 78/50/33), so the ramp is mushy and closure never triggers cleanly.
+            # A classifier cannot average — it must place mass on a bin — so argmax gives a
+            # decisive width. Same trick as action tokenisation in RT-1/RT-2-style policies,
+            # and unlike a diffusion head it stays deterministic, so closure TIMING is not
+            # randomised (which for a grasp would be its own hazard).
+            lab = torch.clamp(((tgt + 1) / 2 * K).long(), 0, K - 1)      # (B, Ta)
+            logits = self.network.width_traj_logits(cond)                # (B, Ta, K)
+            wloss = F.cross_entropy(logits.reshape(-1, K), lab.reshape(-1))
+        else:
+            wloss = F.mse_loss(self.network.predict_width_traj(cond), tgt)
+        self._aux_log["loss_width_traj"] = float(wloss.detach())
+        return total + self.width_head_weight * wloss
 
     def forward(self, cond, deterministic=True):
         """Sample pose by diffusion, then OVERWRITE the width dim with the head's prediction."""

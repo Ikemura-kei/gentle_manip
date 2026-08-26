@@ -78,7 +78,7 @@ class PointNetDiffusionMLP(nn.Module):
                  out_activation_type="Identity", use_layernorm=False, residual_style=True,
                  aux_contact=False, aux_object_pos=False, aux_grasp_width=False,
                  feed_width_pred=False, width_traj_head=False, width_head_blind=False,
-                 aux_hidden=128,
+                 width_head_bins=0, aux_hidden=128,
                  use_first_frame_context=False):
         super().__init__()
         pn = dict(pointnet or {})
@@ -133,8 +133,19 @@ class PointNetDiffusionMLP(nn.Module):
         # [pointnet_feat (+ctx) ⊕ flattened proprio]; proprio carries the CURRENT gripper
         # width, so the head knows where it is on the closing ramp and continues it instead of
         # jumping to the final value.
+        # width_head_bins K>0 (2026-08-27): DISCRETISED width head — K logits per chunk step
+        # instead of one regressed value, trained with cross-entropy. WHY: MSE mode-averages.
+        # Measured on the blind regression head, at the closure transition it predicted
+        # 66/42/20 where truth was 78/50/33 — the mean of "still open" and "closed", a value
+        # belonging to NEITHER mode, so the ramp is mushy and never triggers cleanly. A
+        # classifier must COMMIT to a bin (the action-tokenisation trick used by RT-1/RT-2 and
+        # most VLA policies), which restores a sharp ramp while staying deterministic at
+        # inference (argmax) — unlike a diffusion head, which would randomise closure TIMING.
+        self.width_head_bins = int(width_head_bins)
+        self._horizon_for_bins = int(horizon_steps)
+        out_dim = horizon_steps * self.width_head_bins if self.width_head_bins > 0 else horizon_steps
         self.width_traj_head = (nn.Sequential(nn.Linear(self._aux_dim, aux_hidden), nn.ReLU(),
-                                              nn.Linear(aux_hidden, horizon_steps))
+                                              nn.Linear(aux_hidden, out_dim))
                                 if width_traj_head else None)
         # width_head_blind (2026-08-27): ZERO the gripper-width entries of the proprio slice
         # before the head. WHY: with the current width visible the head learns to COPY it
@@ -143,6 +154,9 @@ class PointNetDiffusionMLP(nn.Module):
         # channel — driven by it, the gripper crept 80->54 mm and never grasped (0.00 success).
         # Blinding forces the head to infer the width AND the closure timing from vision+pose.
         self.width_head_blind = bool(width_head_blind)
+        if width_traj_head:                       # print RESOLVED flags — an earlier "blind"
+            print(f"[PointNetDiffusionMLP] width_traj_head=True blind={self.width_head_blind} "
+                  f"bins={self.width_head_bins}", flush=True)   # run was silently SIGHTED
         self._cond_dim_per_step = None if not width_head_blind else int(cond_dim // max(1, pc_cond_steps))
 
     def _cond_encoded(self, cond: Dict[str, torch.Tensor]) -> torch.Tensor:
@@ -167,6 +181,18 @@ class PointNetDiffusionMLP(nn.Module):
             out["grasp_width"] = self.width_head(ce)
         return out
 
+    def width_traj_logits(self, cond: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """(B, Ta, K) raw logits for the discretised head (training/CE loss)."""
+        assert self.width_head_bins > 0, "width_head_bins must be > 0"
+        feat = self._cond_encoded(cond)
+        if self.width_head_blind:
+            B, To, Do = cond["state"].shape
+            feat = feat.clone(); base = feat.shape[-1] - To * Do
+            for i in range(To):
+                feat[:, base + i * Do + (Do - 1)] = 0.0
+        return self.width_traj_head(feat).view(feat.shape[0], self._horizon_for_bins,
+                                               self.width_head_bins)
+
     def predict_width_traj(self, cond: Dict[str, torch.Tensor]) -> torch.Tensor:
         """(B, Ta) normalized commanded width for every step of the chunk (width_traj_head)."""
         assert self.width_traj_head is not None, "width_traj_head is not enabled"
@@ -179,7 +205,13 @@ class PointNetDiffusionMLP(nn.Module):
             base = feat.shape[-1] - To * Do
             for i in range(To):
                 feat[:, base + i * Do + (Do - 1)] = 0.0
-        return self.width_traj_head(feat)
+        out = self.width_traj_head(feat)
+        if self.width_head_bins > 0:                     # logits -> bin centres in [-1, 1]
+            B = out.shape[0]
+            logits = out.view(B, self._horizon_for_bins, self.width_head_bins)
+            idx = logits.argmax(-1).float()
+            return (idx + 0.5) / self.width_head_bins * 2.0 - 1.0
+        return out
 
     def forward(self, x, time, cond: Dict[str, torch.Tensor], **kwargs):
         """x: (B, Ta, Da); time: (B,); cond: {state:(B,To,Do), point_cloud:(B,Tpc,N,3)}."""

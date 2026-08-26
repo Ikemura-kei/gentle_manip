@@ -70,6 +70,23 @@ unset PYTHONPATH ROS_DISTRO 2>/dev/null || true
 echo "[sbatch] host=$(hostname) arch=$(uname -m) job=${SLURM_JOB_ID:-NA} eval ckpt=$CKPT"
 [ -f "$CKPT" ] || { echo "[sbatch] MISSING checkpoint: $CKPT"; exit 1; }
 [ -f "$NORM" ] || { echo "[sbatch] MISSING normalization: $NORM"; exit 1; }
+# PRE-FLIGHT: NORM must be the dataset the CHECKPOINT was trained on. The default above is
+# soft_pcd, which is WRONG for every other lineage, and the mismatch is SILENT — action
+# denormalization is corrupted for the whole eval while the run still completes and reports a
+# plausible-looking success rate. Cost us a full margin sweep on 2026-08-26. Derive the expected
+# dataset from the run's own hydra config and refuse to start if it disagrees.
+CKPT_RUN_CFG="$(dirname "$(dirname "$CKPT")")/.hydra/config.yaml"
+if [ -f "$CKPT_RUN_CFG" ]; then
+    WANT_ENV=$(grep -m1 "^env: " "$CKPT_RUN_CFG" | awk "{print \$2}")
+    if [ -n "$WANT_ENV" ] && [ "$(basename "$(dirname "$NORM")")" != "$WANT_ENV" ]; then
+        echo "[sbatch] NORMALIZATION MISMATCH — refusing to run."
+        echo "[sbatch]   checkpoint trained on env : $WANT_ENV"
+        echo "[sbatch]   NORM points at dataset    : $(basename "$(dirname "$NORM")")"
+        echo "[sbatch]   fix: NORM=\$REPO/dataset/dppo/$WANT_ENV/normalization.npz"
+        exit 1
+    fi
+    echo "[sbatch] normalization OK: $WANT_ENV"
+fi
 
 # Include EVAL_SUBDIR when set: several evals may run SEQUENTIALLY inside one job (pretrain
 # auto-eval), and a single shared filename would leave only the last one's server log for
@@ -123,6 +140,35 @@ if [ "$GM_EVAL_WATCHDOG_MIN" -gt 0 ] 2>/dev/null; then
   ) &
   WATCHDOG_PID=$!
   echo "[sbatch] sim-server watchdog armed (${GM_EVAL_WATCHDOG_MIN} min silence -> job killed), pid $WATCHDOG_PID"
+fi
+
+# ---- DEGENERATE-EVAL watchdog (2026-08-27) ------------------------------------------------
+# A broken width mechanism collapses to ~0 success and then burns the full 2h for a number we
+# already know. Kill once at least GM_EVAL_MIN_EPISODES episodes have run and cumulative success
+# is below GM_EVAL_MIN_SUCCESS. Set GM_EVAL_MIN_SUCCESS=0 to disable.
+# FALSE-POSITIVE MATH: batches are fixed-seed and ~iid, so a policy whose TRUE rate is 0.3 shows
+# 0/20 with probability 0.7^20 = 0.08%. A true-0.10 policy is killed ~12% of the time — acceptable,
+# since a 0.10 policy is not a candidate. Never set the threshold near a rate you care about.
+GM_EVAL_MIN_SUCCESS=${GM_EVAL_MIN_SUCCESS:-0.05}
+GM_EVAL_MIN_EPISODES=${GM_EVAL_MIN_EPISODES:-20}
+if [ "$(awk -v v="$GM_EVAL_MIN_SUCCESS" 'BEGIN{print (v>0)?1:0}')" = "1" ]; then
+  JOB_OUT="${REPO}/logs/slumr_logs/${SLURM_JOB_ID}.out"
+  (
+    while sleep 120; do
+      [ -f "$JOB_OUT" ] || continue
+      read -r NB MEAN <<< "$(grep -o 'success=[0-9.]*' "$JOB_OUT" 2>/dev/null \
+        | sed 's/success=//' | awk '{n++; s+=$1} END {print n+0, (n?s/n:0)}')"
+      [ "${NB:-0}" -eq 0 ] && continue
+      EPS=$(( NB * NUM_ENVS ))
+      if [ "$EPS" -ge "$GM_EVAL_MIN_EPISODES" ] && \
+         [ "$(awk -v m="$MEAN" -v t="$GM_EVAL_MIN_SUCCESS" 'BEGIN{print (m<t)?1:0}')" = "1" ]; then
+        echo "[sbatch] DEGENERATE: success ${MEAN} over ${EPS} episodes < ${GM_EVAL_MIN_SUCCESS} — killing job ${SLURM_JOB_ID} early"
+        scancel "${SLURM_JOB_ID}" 2>/dev/null || kill -9 $$ 2>/dev/null
+        break
+      fi
+    done
+  ) &
+  echo "[sbatch] degenerate-eval watchdog armed (<${GM_EVAL_MIN_SUCCESS} after ${GM_EVAL_MIN_EPISODES} eps -> early kill), pid $!"
 fi
 
 # ---- run the canonical eval (BC base policy; record_batches=null = ONE clip PER EPISODE) ----

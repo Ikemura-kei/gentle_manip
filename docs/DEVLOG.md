@@ -379,6 +379,29 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-26 — Literature scan on policy size-adaptation (items 17/18) →
+`docs/size_adaptation_literature.md`.** Headline: **no published work does our controlled
+study** (single parallel-jaw IL/diffusion policy measured for grasp-APERTURE adaptation
+across object scale) — the width-vs-scale correlation looks like a novel diagnostic.
+Closest precedent for the fix is **RMA-style privileged-vector regression**: Liang, Ellis &
+Henriques (CVPR 2024, arXiv 2312.04670) infer object **mass and shape** from action+proprio
+history on a manipulator; original RMA (arXiv 2107.04034) is the recipe. We are already
+half-way there — `priv_object_dr_params=[scale,bend]` is consumed by the state teacher; the
+missing half is the adaptation module for the point-cloud student.
+**On the single-view worry (user):** do NOT build on full amodal shape completion — that
+literature is explicit that single-view completion is uncertain and hallucinated geometry
+breaks grasp planning. Reframe: we need ONE scalar (extent along the gripper closing axis),
+which for a fixed external camera is usually *perpendicular to the camera ray* and hence
+visible; and post-contact, gripper width + contact_force measure size directly. **Decisive
+cheap first experiment: offline-regress `priv_object_dr_params[0]` from the ALREADY-RECORDED
+demo point clouds.** That separates "student can't see size" from "student sees size but
+ignores it" — which current evidence does not distinguish — before any architecture change.
+If it sees but ignores, that is representation collapse (D2PPO dispersive loss, AAAI 2026).
+Equivariant policies (EquiBot CoRL 2024) are the expensive option AND carry a caveat: SIM(3)
+scales translations, but our gripper DoF is a separate normalised scalar — check the action
+head. Scan is NOT systematic; escalate before any novelty claim in print.
+
+
 **2026-08-27 — ⛔ BOTH "head drives width" variants FAIL end-to-end. Timing cannot be
 delegated; only LEVEL can. The floor design is what survives.**
 · SIGHTED head: offline MAE 0.6 mm, closed-loop **0.000** success (probe AND canonical eval) —
@@ -1990,3 +2013,273 @@ workspace box, 8-run co-training matrix, DP3 canonical-harness adapter + retrain
 full checkpoint retention. Details: the three subpages above. In flight as of this entry:
 DP3 harness evals (4 existing ckpts), DP3 Part A retrains (12-ckpt), DP3-on-sim arm
 (train + sweep).
+
+### 2026-08-27 — Width adaptation has a LIVE tracker: `docs/width_adaptation.md`
+
+Per user mandate, the width campaign now keeps a single live log+plan updated AS experiments
+launch/land, not retrospectively: `docs/width_adaptation.md` (status, number table, experiment
+ledger, decisions+reasons, ranked queue, reviewer questions). Analysis detail stays in
+`docs/width_predictability.md`; bugs stay in the DEVLOG bug ledger.
+
+### 2026-08-26/27 — CEILING ANALYSIS: the failure is NOT perceptual (likely a paper contribution)
+
+Prompted by the user asking the right question: "is the width predictable from point cloud at
+all? If the cloud hides too much, no algorithm can rescue it."
+
+**Demonstrator side (pure CSV, no model).** Across every 650-episode collection, `dr_params.csv`
+gives `scene_scale` and the chosen `width_mm` on the same row:
+
+| object | corr(width, scale) | width sd | residual after scale | corr(w,align) | corr(w,yaw) |
+|---|---|---|---|---|---|
+| mushroom (n=650) | **+0.85** | 6.3 mm | 3.2 mm | +0.27 | -0.03 |
+| tofu (n=614) | **+0.79** | 7.1 mm | 4.3 mm | -0.06 | -0.08 |
+
+So the demonstrator's width is ~0.85-determined by SIZE ALONE, and orientation barely enters.
+My earlier worry that CMA-ES stochasticity caps learnability was WRONG.
+
+**Orientation hypothesis (user's) TESTED AND NOT CONFIRMED.** For a cube the extent along the
+closing axis is s*(|cos|+|sin|), a 41% swing over a 45deg wedge, so tofu width "should" depend
+strongly on yaw. Folding yaw into the 0-45deg wedge gives corr ~ -0.08. Reason: CMA-ES's
+alignment term picks FLUSH FACE grasps nearly every time, so the demonstrator never enters the
+diagonal regime. The geometry is real; the demonstrator suppresses it. (Consequence for the
+paper: a "regress width + top-down grasp" baseline is NOT refuted by yaw geometry on our data --
+find a different argument, or just run the baseline.)
+
+**Perception side (Step 0, job 1728536; join PROVEN at corr 0.9998 via the width_mm cross-check).**
+Frozen lulkx encoder, fresh head, t=0 cloud, mushroom:
+
+    cloud -> object SCALE : corr 0.739
+    cloud -> grasp WIDTH  : corr 0.597
+
+Predicting SIZE beats predicting WIDTH, as expected: width carries ~3.2 mm of demonstrator
+residual that the head must absorb as noise.
+
+**THE CEILING.** corr(cloud->size) 0.739 x corr(size->width) 0.85 = **~0.63** is the maximum any
+width head can reach on this encoder. Our heads measure 0.60-0.67 — i.e. AT the ceiling. My
+earlier INFERENCE that corr(cloud->size) >= 0.78 was too optimistic; measured, it is 0.739.
+
+**Therefore the nine head variants were chasing ~0.03 of headroom.** The real loss is:
+
+    0.63 available  ->  0.474 delivered at grasp  (and success 0.867 -> 0.250)
+
+which is entirely a CONTROL problem: turning a decent estimate into a commanded width without
+destroying the grasp. All remaining GPU on the mushroom side goes to the shift/floor mechanism,
+not to better heads.
+
+CAVEAT: 0.739 is through the POLICY's frozen encoder, so it is a LOWER BOUND on what the cloud
+contains — an encoder trained with size supervision could exceed it. That is exactly what the
+aux-width retrain (1728356) tests, so it stays alive.
+
+**Tofu is harder on both axes** (predictability 0.79 vs 0.85, residual 4.3 vs 3.2 mm) against a
+much narrower tolerance band — consistent with the user's instinct even though the yaw mechanism
+they proposed is not the cause. Tofu Step 0 running (1728554, gadkf@300 encoder).
+
+**Not adopted (yet):** switching the level head's target from width to scale. Principled and the
+numbers favour it (0.739*0.85 = 0.63 vs 0.597 direct), but it buys ~5% on a quantity that is not
+the bottleneck and adds a fitted linear map to the deploy path.
+
+**From `docs/size_adaptation_literature.md` (other agent's scan) — two items that change our read:**
+1. §2c "a grasp is itself a measurement": at contact, gripper width + contact force DIRECTLY
+   encode object size. This reframes our phase analysis — vision corr collapses 0.667 -> 0.097 at
+   closure onset because of occlusion, but that is exactly when PROPRIOCEPTION becomes a direct
+   size measurement. We deleted that channel (`width_head_blind=True`) because a sighted head
+   "copied" it. The copying was diagnosed as cheating only because we asked for the WRONG TARGET
+   (per-step width, where copying trivially wins). Vision and proprioception are complementary IN
+   PHASE; a single-frame head cannot exploit that, an RMA-style HISTORY module can.
+2. §4 flags "final closed gripper width as an aux MSE target" as UNVERIFIED — that is precisely
+   our item-18 head. No external precedent to lean on; the defence must come from our ablations.
+
+### 2026-08-26/27 — BUG LEDGER for the width-adaptation campaign (read before launching evals)
+
+User mandate under a 2-day deadline: "remember all bugs encountered, we have no time to waste".
+Every one of these cost queue time or invalidated a result. Guards added where possible.
+
+**B1. NORM defaulted to the WRONG dataset (worst one — silently invalidates a whole eval).**
+`dppo_eval.sbatch` line 64: `NORM=${NORM:-.../single_lift_mushroom_soft_pcd/normalization.npz}`.
+Any checkpoint from another lineage gets its actions denormalized with the wrong min/max — the
+run COMPLETES and reports a plausible success rate, so nothing looks wrong. Ranges differ a lot:
+v33b_shift9 action[-1] = [-0.718, 0.818] (span 1.536) vs soft_pcd [-0.500, 0.000] (span 0.500).
+Cost: the entire first margin sweep + both shift arms + the baseline probe (5 jobs).
+GUARD ADDED: the sbatch now reads the checkpoint's own `.hydra/config.yaml`, compares `env:` to
+the dataset NORM points at, and REFUSES to start on a mismatch.
+NOTE: job 1728066 (floor margin 0 -> corr 0.474 / success 0.250) DID set NORM correctly, so that
+headline result stands.
+
+**B2. Three consecutive launches, one missing env var each.** `EVAL_EXPERIMENT`, then
+`SIM_EXPERIMENT`, then `CFG_DIR` — each failing fast but costing a queue round-trip, because I
+reconstructed the invocation piecemeal instead of copying the whole working one.
+RULE: copy the full working command from a job that ran, change ONLY the experiment variable.
+(The sbatch defaults are stale in general: `single_lift_mushroom_soft_eval.yaml` no longer exists
+and `CFG_DIR`'s default `single_lift_mushroom_soft_pcd` is not a valid cfg dir.)
+
+**B3. Diagnosed ramp shape from a SUBSAMPLED print.** The "mode averaging" theory came from
+`[::12]` sampling; at consecutive frames the truth is a smooth 15-frame ramp and there is no
+bimodal decision. Built and ran the whole discretisation fix on a false premise.
+RULE: never infer a temporal shape from a subsampled print, and always carry a ground-truth
+control computed the SAME way (the `true=14` middle-band count is what exposed it).
+
+**B4. Validated a one-moment quantity on a phase-POOLED average.** Level-head val corr 0.743
+pools over t and is dominated by the long approach phase; at the moment the latch actually fires
+it is 0.667, and at closure onset/mid-episode it collapses to 0.097/0.030 (occlusion).
+RULE: validate a quantity AT THE MOMENT it is used.
+
+**B5. "It can only loosen, so it is safe" — wrong.** The floor cannot create a CRUSH mode, from
+which I concluded it could not hurt success. Loosening is exactly how you DROP an object:
+success 0.867 -> 0.250. RULE: enumerate the failure mode the mechanism CREATES, not just the one
+it avoids.
+
+**B6. Episode-MIN width is not a safe adaptation metric** (user caught). A policy that goes OOD
+and closes in mid-air scores a small min with no grasp behind it, inflating apparent adaptation.
+AT-GRASP (EE-z min -> first frame risen >2cm) is primary; both are now reported side by side with
+a `lift%` column (at-grasp is NaN, never silently backfilled) and a `gapMIN` column that flags
+miss-closures directly. `.agent_tmp/probe_report.py`.
+
+**B7. The width-dump writer was an ad-hoc patch that vanished**, leaving previously published
+probe numbers unreproducible (including the "~0.1 baseline" quoted for weeks).
+FIXED: `GM_WIDTH_DUMP` is now a permanent, mm-denominated feature of `dppo/eval_agent.py`,
+recording commanded width AND ee_z, flushed per batch plus an `atexit` flush (reset() alone only
+flushes the PREVIOUS batch, so the final one was being lost). Baseline is being re-measured with
+identical code rather than carried over.
+
+**B8. `ep_min` shared across train/val splits.** One dict keyed by episode start; both splits
+start at s0=0, so val overwrote train targets. Impact measured as negligible (corr 0.743 vs
+0.748) but fixed.
+
+**B9. Killed a disproved arm without launching its replacement** — nothing trained for 2h against
+a hard deadline. RULE: kill and relaunch in the SAME action.
+
+**B10. Absolute-vs-difference affine conversion (shift mean) — killed both shift arms.**
+`GM_WIDTH_SHIFT_MEAN_MM` is an ABSOLUTE width, but I converted it with the DELTA scale factor
+`kk = 4/(0.088*(a_hi-a_lo))`, dropping the affine OFFSET. 34.32mm mapped to +1.016 instead of
+-0.351, so every episode got a uniform -8mm squeeze (clipped) -> 0.000 success on alpha=0.5 AND
+alpha=1.0. An absolute width converts through the FULL affine map; only a difference converts by
+the scale alone. (The margin knob and the dump were correct — margin IS a difference, and the dump
+already used the full inverse affine.)
+GUARD ADDED: a ROUND-TRIP check in `eval_agent.py` — invert the conversion and compare to the
+input, raise if it differs by >0.01mm. NOTE: my first attempt was a RANGE check, which does NOT
+work here — 0-88mm maps to [-1.367, +1.237], so the buggy +1.016 sits comfortably inside any
+plausible bound. Only the round-trip catches it (it decodes +1.016 back to 80.54mm vs 34.32 input).
+LESSON: for any two-space conversion, verify by INVERTING it, not by bounding it.
+
+**B11 (positive).** The degenerate-eval watchdog the user proposed caught B10 in 30 episodes
+instead of a 2h burn, on its first night. `GM_EVAL_MIN_SUCCESS` (0.05) / `GM_EVAL_MIN_EPISODES`
+(20) in `dppo_eval.sbatch`. False-positive math is in the comment there: a true-0.30 policy shows
+0/20 with p=0.08%; a true-0.10 policy is killed ~12% of the time. Never raise the threshold near a
+rate that matters.
+
+Earlier, same class: the `--gripper-offset-m` feedback bug (additive bias on an observed channel),
+the residual-width two-space unit bug, and the fake "blind" run (sed patched `nc.` while the
+trainer read `net_cfg.`). All three are unit/plumbing mismatches that produced plausible numbers.
+STANDING RULE for this campaign: any mm<->normalized conversion is done in ONE place, prints its
+resolved value in BOTH units, and is sanity-checked against a known span before a long job runs.
+
+### 2026-08-26 (late) — Floor: adaptation WORKS, but an over-prediction bias crashes success
+
+**Result (lulkx@600, width-probe protocol, 60 eps):**
+
+| metric | base | + latched floor (margin 0) |
+|---|---|---|
+| width/size corr AT GRASP | ~0.1 | **0.474** (succ-only 0.693) |
+| commanded width small-half vs big-half | flat | 38.5 vs 41.9 mm |
+| success | 0.867 | **0.250** |
+
+So the decomposition DOES deliver adaptation — the first mechanism of nine that ever has.
+Adaptation and success are being TRADED, not jointly lost, which is a far better position
+than any previous arm reached.
+
+**My "it can only loosen, so it is safe" claim was WRONG.** It cannot create a new CRUSH mode,
+and I concluded from that it could not hurt success. Loosening is exactly how you DROP an
+object: the floor is a hard max, so any over-prediction holds the gripper too wide and the
+grasp slips. I reasoned about one failure mode and ignored the one the mechanism creates.
+
+**Phase analysis (job 1728362) INVERTED my follow-up hypothesis.** I assumed the latch (fired
+on the episode's first act()) sampled the head at its worst moment. The opposite is true:
+
+    phase                          corr  bias_mm  RMSE_mm  P(over>2mm)  P(over>5mm)
+    t=0 (what the latch uses)     0.667      3.0      5.8         0.58         0.35
+    closure onset                 0.097      1.0      7.6         0.49         0.32
+    mid-episode                   0.030      1.2      7.9         0.51         0.35
+
+At t=0 the external camera sees the object UNOCCLUDED; by closure onset the gripper and arm
+are wrapped around it and the size signal is gone. Latching early is already correct, and the
+"latch later" fix I was about to run would have made it worse. (Same occlusion explains the
+user-observed drift on lift frames: corr 0.03 there.)
+
+**The aggregate val corr 0.743 is misleading** — it pools over t, and approach is ~77 of ~120
+steps, so it is dominated by frames where the object is visible. Per-phase corr is the honest
+number. LESSON: for any quantity used at ONE moment of the episode, validate it AT THAT MOMENT,
+never on a phase-pooled average.
+
+**Root cause: bias, not timing.** The head over-predicts by +3.0 mm and is >2 mm too wide in
+58% of episodes. That is the whole success loss.
+
+**Fixes (both running):**
+1. `GM_WIDTH_FLOOR_MARGIN_MM` sweep 2/4 mm (1728367/8) — brackets the +3 mm bias empirically.
+2. **Quantile level head** (1728381/2, tau=0.10/0.25): pinball loss instead of MSE. The floor's
+   error is ASYMMETRIC (over-prediction drops the object; under-prediction is harmless), so the
+   conditional MEAN is the wrong estimator — the tau-quantile over-predicts only ~tau of the
+   time, conservative by CONSTRUCTION rather than by a hand-tuned constant. `TAU` env var in
+   `.agent_tmp/train_level_head.py`; the trainer now reports bias_mm and P(over>2mm), not MSE.
+
+**Also fixed:** `ep_min` was one dict keyed by episode start shared across train and val — both
+splits start at s0=0, so val silently overwrote train targets. Re-fit gives corr 0.743 vs 0.748,
+i.e. negligible, so the running evals stay valid; fix kept.
+
+**Process:** three consecutive eval launches failed on one missing env var at a time
+(EVAL_EXPERIMENT, then SIM_EXPERIMENT, then CFG_DIR) because I reconstructed the invocation
+piecemeal instead of copying the whole working one from job 1728066. Copy the working command,
+then change only what the experiment varies.
+
+### 2026-08-26 — Width adaptation: the mode-averaging diagnosis was WRONG; it is PHASE vs LEVEL
+
+**Deadline:** user set a hard 2-day limit (venue). Target: adaptive width AND success >= 0.7.
+
+**I diagnosed mode averaging and was wrong.** The "mushy 66/42/20 vs true 78/50/33" that
+convinced me was an ARTIFACT OF PRINTING EVERY 12th FRAME. A fine-grained ramp check
+(job 1728131, `.agent_tmp/wbins_traj_check.py`) shows the truth:
+
+    TRUE closure zoom : 75 73 71 69 66 64 62 59 57     <- SMOOTH ~15-frame ramp
+    MSE  head         : 60 56 62 51 51 49 50 46 44     <- tracks it, but ~15 mm EARLY
+    BINS head (K=64)  : 66 66 66 66 66 66 66 66 66     <- flat: WORSE
+    middle-band frames: true=14  MSE=15  BINS=23  |  MAE: MSE 3.9mm  BINS 4.5mm
+
+The closure is a smooth ramp, NOT a bimodal step, so there is no bimodal decision to average
+away — and the MSE head's middle-band count MATCHES ground truth. Discretisation (action
+tokenisation, K=64 + CE) is the textbook mode-averaging fix and it made every metric worse.
+**Line dropped**; the co-trained bins retrains (1728126/7) were cancelled on this evidence.
+
+**LESSON (methodological, reusable): never diagnose a temporal shape from a subsampled print.**
+A smooth N-frame ramp viewed every 12th frame is indistinguishable from a step with mushy
+intermediates. Any claim about ramp shape/timing must come from consecutive frames, and must
+carry a ground-truth control computed the same way (the middle-band count here) — without the
+`true=14` column I would have "confirmed" mode averaging from the BINS run too.
+
+**The real failure: PHASE vs LEVEL.** A per-step width head must emit two things at once —
+the closure PHASE (where in the ramp am I) and the LEVEL (how tight for THIS object). One head
+cannot supply both from our inputs:
+  * SIGHTED (proprio width visible): phase is trivially the current width -> learns
+    "predict ~= current width", copies its input (80->79.4, 28->28.6), zero adaptation.
+  * BLIND (proprio width zeroed): level roughly right, but no phase signal -> ramp fires
+    ~15 mm early, 0.000 closed-loop, lift onset in 2% of episodes.
+This single mechanism explains EVERY per-step head result we have collected.
+
+**Consequence: the floor is principled, not a hack.** Phase belongs to the policy (its width
+command is the only width signal ever trained closed-loop); level belongs to a point-cloud
+head (r~0.89 through an MLP vs r~0.1 through the diffusion path). `w_cmd = max(w_policy,
+w_level)`, latched per episode, assigns each to its rightful owner and only ever LOOSENS, so
+it cannot create a new crush mode — which is what protects the success gate.
+
+**New knob:** `GM_WIDTH_FLOOR_MARGIN_MM` (+ `GM_WIDTH_NORM`) in `dppo/eval_agent.py` —
+`w_cmd = max(w_policy, w_level - margin)`. Given in MILLIMETRES and converted inside the
+adapter on purpose: the floor lives in npz-normalized action units, and hand-converting at the
+call site is exactly how the residual-width bug happened. Sweep running at margin 0/2/4 mm
+(1728066, 1728305, 1728306) on lulkx@600 (level head val corr 0.748).
+
+**lulkx is not overfitting** (user asked): 100..600 = 0.575/0.735/0.810/0.805/0.810/0.820 —
+flat from 300 on, 600 marginally best, all within +-0.027 SE. Keeping 600 as the retrofit base.
+
+**Process lesson:** I cancelled the first Config-2 runs (1725987-9) for a sound reason (the copy
+test had just shown a sighted head useless) but launched no replacement, leaving nothing
+training for 2h against a hard deadline. When killing a disproved arm, launch its replacement
+in the SAME action.
+
