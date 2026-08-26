@@ -77,7 +77,8 @@ class PointNetDiffusionMLP(nn.Module):
                  time_dim=16, mlp_dims=(512, 512, 512), activation_type="ReLU",
                  out_activation_type="Identity", use_layernorm=False, residual_style=True,
                  aux_contact=False, aux_object_pos=False, aux_grasp_width=False,
-                 feed_width_pred=False, width_traj_head=False, aux_hidden=128,
+                 feed_width_pred=False, width_traj_head=False, width_head_blind=False,
+                 aux_hidden=128,
                  use_first_frame_context=False):
         super().__init__()
         pn = dict(pointnet or {})
@@ -135,6 +136,14 @@ class PointNetDiffusionMLP(nn.Module):
         self.width_traj_head = (nn.Sequential(nn.Linear(self._aux_dim, aux_hidden), nn.ReLU(),
                                               nn.Linear(aux_hidden, horizon_steps))
                                 if width_traj_head else None)
+        # width_head_blind (2026-08-27): ZERO the gripper-width entries of the proprio slice
+        # before the head. WHY: with the current width visible the head learns to COPY it
+        # (measured: feed 80 mm -> predicts 79.4; feed 28 -> 28.6), which minimises the MSE
+        # because the closing ramp is only a few frames of ~200. A copier cannot DRIVE the
+        # channel — driven by it, the gripper crept 80->54 mm and never grasped (0.00 success).
+        # Blinding forces the head to infer the width AND the closure timing from vision+pose.
+        self.width_head_blind = bool(width_head_blind)
+        self._cond_dim_per_step = None if not width_head_blind else int(cond_dim // max(1, pc_cond_steps))
 
     def _cond_encoded(self, cond: Dict[str, torch.Tensor]) -> torch.Tensor:
         """[pointnet_feat ⊕ flattened proprio] — the shared conditioning feature."""
@@ -161,7 +170,16 @@ class PointNetDiffusionMLP(nn.Module):
     def predict_width_traj(self, cond: Dict[str, torch.Tensor]) -> torch.Tensor:
         """(B, Ta) normalized commanded width for every step of the chunk (width_traj_head)."""
         assert self.width_traj_head is not None, "width_traj_head is not enabled"
-        return self.width_traj_head(self._cond_encoded(cond))
+        feat = self._cond_encoded(cond)
+        if self.width_head_blind:
+            # proprio is the TAIL of cond_encoded: [visual | state_flat(To*Do)]. The gripper
+            # width is the last entry of each per-step obs vector -> zero those positions.
+            B, To, Do = cond["state"].shape
+            feat = feat.clone()
+            base = feat.shape[-1] - To * Do
+            for i in range(To):
+                feat[:, base + i * Do + (Do - 1)] = 0.0
+        return self.width_traj_head(feat)
 
     def forward(self, x, time, cond: Dict[str, torch.Tensor], **kwargs):
         """x: (B, Ta, Da); time: (B,); cond: {state:(B,To,Do), point_cloud:(B,Tpc,N,3)}."""

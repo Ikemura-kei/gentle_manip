@@ -379,6 +379,37 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-27 — ⛔ WIDTH-HEAD-DRIVES-WIDTH FAILS: the head learned to COPY its proprio input,
+so nothing ever initiates closure (0.00 success). Config 2 killed; blind variant launched.**
+End-to-end test of Config 1 (`state_600_whead.pt`, head spliced over the width dim, banner
+confirmed active): success **0.000**, commanded width stuck at 53-55 mm. Mechanism proven by
+a controlled sweep — fix the cloud/pose, vary ONLY the current gripper width fed in:
+
+| current width in | head's next 4 out |
+|---|---|
+| 80.0 mm | 79.4 79.4 79.4 79.5 |
+| 60.0 mm | 58.5 58.1 56.6 56.6 |
+| 45.0 mm | 43.5 42.9 42.2 41.7 |
+| 28.0 mm | 28.6 28.4 28.2 27.9 |
+
+It is a COPIER (echo the input, decrement ~0.5 mm/chunk). The true demo trajectory is
+`80 … 77.7 → 50.3 → 33.1 → hold` — a sharp DECISION to close, cued by the visual state. The
+head never learned it because copying already minimises the MSE (the ramp is ~5 of ~200
+frames). Driven by the head, the gripper crept 80→54 mm and never grasped.
+**MY ERROR:** I claimed proprio "answers the per-step objection". It makes the head's
+SUPERVISED task well-posed but simultaneously hands it the answer, so copying dominates and
+the head cannot DRIVE the channel. The user's instinct that per-step is the hard part was
+better than my response. It also VINDICATES the clamp the user called hacky: every viable
+variant keeps the POLICY for timing and the head for level — that decomposition is
+structural, not a hack.
+ACTIONS: Config 2 (3 seeds) cancelled — width comes solely from the head there too, so it
+shares the flaw exactly. New `network.width_head_blind` zeroes the gripper-width entries of
+the proprio slice before the head, forcing it to infer level AND timing from vision+pose;
+frozen retrain on lulkx@600 running (job 1726896). If the blind head still cannot produce the
+sharp ramp, the conclusion is that TIMING must stay with the policy and only the LEVEL can be
+delegated — i.e. implement the floor `w=max(w_policy, w_head)`.
+
+
 **2026-08-27 — burial fix (d4aafeb) checked against OUR collections: no retro-action needed.**
 The local agent's soft-body spawn-burial fix (rotation about the centroid drops an elongated
 object's tip below the table) raised the question of whether our MUSHROOM data is affected —
