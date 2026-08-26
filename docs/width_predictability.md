@@ -225,6 +225,26 @@ The `align` decomposition still stands (it is a property of the demonstrator's d
 head fit), but the idea it suggested — conditioning on the student's own POSE — is refuted:
 V 0.771 / P 0.574 / V+P 0.748. Pose is not align; align needs contact geometry.
 
+## The demonstrator is NOT an existence proof for the student (user correction, 2026-08-27)
+
+Tempting argument, and WRONG: "CMA-ES achieves 11.3 mm of aperture range at 94% success, so the
+information must be there." **The demonstrator sees the FULL MESH** (complete geometry + an FEM
+contact model); the student sees ONE partial view from a fixed L515, cropped, 1024 points, with
+the arm in frame. They do not have the same information, so the demonstrator bounds nothing about
+what the student can do.
+
+The valid argument is the DIRECT measurement on the student's own observation:
+
+    single-view cloud @ t=0 -> object size    0.739 (mushroom) / 0.842 (tofu)
+    single-view cloud @ t=0 -> grasp width    0.771 (well-trained head)
+    ...vs DELIVERED                           0.336 baseline / 0.511 floor
+
+That headroom is measured on exactly the input the deployed policy has — no mesh, no completion.
+Consistent with `size_adaptation_literature.md` §2c: single-view amodal completion is unreliable
+and we must not build on it, but the scalar we need (extent along the CLOSING AXIS) is typically
+perpendicular to the camera ray and therefore in the visible silhouette; the occluded dimension is
+largely the one we do NOT need.
+
 ## Bottom line
 
 The point cloud is NOT hiding the information: size is recoverable at 0.739 (mushroom) / 0.842
