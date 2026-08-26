@@ -99,12 +99,13 @@ OBJECT_MAP: dict[str, ObjectDef] = {
     "raspberry": ObjectDef("raspberry", MATERIALS["raspberry"], object_type="soft",
                            size=(0.0153, 0.0154, 0.0146), default_pos=(0.47, 0.0, 0.0082),
                            mesh_path=str(_OBJ_DIR / "raspberry.stl")),
-    # Banana ~17 cm (photo-reconstructed, stem + its flat cut face removed). The mesh is a
-    # strong crescent, so its bbox is nearly square in plane (17 x 16.5 cm) and only 5.8 cm
-    # thick — the thickness is what the gripper closes on, so scale DR must stay <=1.0 or the
-    # grasp width exceeds the 8.8 cm opening.
+    # Banana ~9.5 cm (photo-reconstructed, stem + its flat cut face removed; user-set nominal
+    # extent). The mesh is a strong crescent, so the bbox is nearly square in plane
+    # (9.5 x 9.2 cm) and 3.24 cm thick — the thickness is what the gripper closes on. At this
+    # size it is ~70 g, needing only ~0.5 N of grip; the earlier 17 cm cut was 398 g (~2.8 N)
+    # and its 20 cm CMA search box made the planner miss the thin feasible band entirely.
     "banana": ObjectDef("banana", MATERIALS["banana"], object_type="soft",
-                        size=(0.170, 0.165, 0.058), default_pos=(0.47, 0.0, 0.031),
+                        size=(0.095, 0.092, 0.0324), default_pos=(0.47, 0.0, 0.0175),
                         mesh_path=str(_OBJ_DIR / "banana.obj")),
     # Strawberry ~4 cm (photo-reconstructed, calyx/leaves removed and the body made watertight
     # by a voxel remesh with morphological opening). Squat: 4.0 x 3.8 x 3.25 cm (tip->crown is

@@ -707,8 +707,8 @@ particles at the mushroom's density), strawberry grid 320, raspberry grid 600.
 | object | eps | demo success | PINCH | stress_top10 (yield) | grip | align | min_pad | width |
 |---|---|---|---|---|---|---|---|---|
 | strawberry | 40 | 93.8% | **1/40 = 2.5%** | 8.3 kPa p90 12.6 (18) | 1.86 N | 0.944 | 33.4 mm² | 49.0 mm |
-| banana | 8 | (87.5% — all FALLBACK) | n/a | audit all zero | — | — | — | — |
-| raspberry | rerunning | — | — | — | — | — | — | — |
+| raspberry | 24 | (see rasp row below) | — | 10.5 kPa (15) | 0.25 N | — | — | 16.9 mm |
+| banana | — | BLOCKED (all FALLBACK) | n/a | audit all zero | — | — | — | — |
 
 **Strawberry is the good case**: flush centred envelops (visual check clean), stress less than
 half its yield, min_pad 2× the 15 mm² floor, and area floor 15 + w_peak 0.3 held the pinch rate
@@ -716,18 +716,34 @@ to 2.5%. **RASPBERRY: the grid-600 task config is MPM-stable but RIGID-solver un
 "Invalid constraint forces causing 'nan'" killed 5/5 batches (0 episodes saved) even though
 synthesis itself produced 40 clean grasps. CFL supports ~325 substeps so the config's 350 is
 marginal; new `single_lift_raspberry_soft_stable.yaml` raises it to 560 (the cluster's original
-config left untouched). **BANANA IS BLOCKED, and it is NOT what it looks like**: holdability is
-fine (FEM reaches 15 N at 4 mm indent vs the 2.79 N needed, at 8.7 kPa), and it is not the area
-floor, not the azimuth bound, and not the seed fan — each was tested and eliminated. The cause
-is that the CMA xy search box is 1.2× the object's world bbox (~20×20 cm for a 17 cm banana)
-while feasible grasps are a thin band along its centreline with tightly coupled yaw and width;
-at ~190 evals/start the joint hit rate is ~0. Raising to 24 starts × 6000 evals recovered only
-2 real grasps in 16 attempts. Every saved banana episode is therefore a DEFAULT top-down
-fallback (audit columns all zero — that is how to spot it). Fix options, not yet done: seed the
-search on the object's medial axis rather than the bbox, or accept a smaller banana. Related
-mesh caveat: this reconstruction is disproportionately fat (5.8 cm thick at 17 cm long vs a
-real ~3.7 cm), giving 420 cm³ / **398 g** against a real banana's ~120 g — worth re-cutting
-before any real use.
+config left untouched). **BANANA IS BLOCKED — an ELONGATED-OBJECT limit of the planner, not a size or
+physics problem.** Eliminated one at a time: holdability is fine (FEM reaches 15 N at 4 mm
+indent vs the 2.79 N needed, at 8.7 kPa); not the area floor; not the azimuth bound; not the
+pitch-seed fan; and NOT the object size — the user re-specified the banana at **9.5 cm nominal
+extent with scale DR [0.9, 1.1]** (asset regenerated: 9.5 × 9.2 × 3.24 cm, 73 cm³, **69.5 g**,
+required grip only 0.49 N — a far more realistic banana than the first 17 cm / 398 g cut) and
+it STILL fails on every episode. Instrumenting `score_finger_grasp` over 400 random in-bounds
+candidates explains it: the CMA xy box is 1.2× the object's world bbox, so banana
+half_xy = 60×62 mm vs strawberry 26×24 mm — a ~6× larger area — while the banana's footprint
+is a thin curved band filling ~23% of its box (strawberry ~60%) AND its feasible yaw is coupled
+to the local tangent, which varies along the arc (a round berry accepts almost any yaw). Random
+hit rate is 0 for BOTH objects, so the planner depends entirely on its seeds + local descent;
+that works when the object fills its box and fails when it does not. 24 starts × 6000 evals
+recovered only 2 real grasps in 16 attempts. Every saved banana episode is a DEFAULT top-down
+fallback — **spot these by the all-zero audit columns (stress/grip/align/min_pad = 0)**, the
+demonstrator "success rate" stays high and is meaningless. FIX (not done, needs a code change):
+seed the search along the object's MEDIAL AXIS with tangent-aligned yaw instead of seeding the
+bbox centre. Applies to any elongated produce (banana, carrot, chilli, bean).
+
+**RASPBERRY: two independent silent failures, both fixed** (`single_lift_raspberry_soft_stable.yaml`;
+the cluster's original config is untouched). (1) grid 600 + 350 substeps NaN'd the RIGID solver
+("Invalid constraint forces") on 5/5 batches — CFL supports ~325 so 350 was marginal; 560 fixes
+it. (2) With that fixed it still saved 0/24 across 21 batches **with no error at all**: the
+collector lifts `LIFT_HEIGHT = 0.20 m` above the grasp, but the config's MPM domain stopped at
+z = 0.15, so the berry left the grid on every lift and the success check silently failed 160/160.
+Ceiling raised to 0.27 (and the success band widened to match a 20 cm lift) → 8/8 on the first
+batch. Lesson for any new object: **check `mpm_bounds` z against grasp_z + LIFT_HEIGHT** — the
+failure mode is a silent 0% save rate, not a crash.
 
 **2026-08-26 — local-agent response to the v33 post-mortem: the handoff doc was the origin;
 both cluster findings actioned.** Owning the first cause plainly: **`v3.3_synth.md` §3 named
