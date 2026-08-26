@@ -21,6 +21,7 @@ the oriented rectangular pad is opt-in (`u1,u2,half_uv`).
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import trimesh
@@ -614,6 +615,7 @@ def _down_quat_euler(yaw: float) -> np.ndarray:
 
 def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                       table_z: float = 0.0, ground_buf: float = 0.0035, obj_size: float = 0.03,
+                      width_max: Optional[float] = None,
                       bbox_margin: float = 1.2, z_lift=(0.02, 0.12), sigma: float = 0.15, maxfevals: int = 400,
                       n_starts: int = 6, g: float = 9.81, accel: float = 0.0, max_indent: float = 0.01,
                       obj_sdf=None, pen_tol: float = 0.003, table_tol: float = 0.002,
@@ -722,10 +724,20 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
     # exactly like roll_max. Yaw and yaw+pi are the same parallel-jaw grasp, so fold into
     # [-pi/2, pi/2] before clipping. None (default) = unchanged.
     _yaw_hi = np.pi if yaw_max_deg is None else float(np.radians(float(yaw_max_deg)))
+    # WIDTH bound. The default 0.079 is the gripper max, which on an ELONGATED object lets CMA
+    # grasp along the LONG axis — pressing the two ends together instead of closing across the
+    # body. Measured on the banana (2026-08-26, run 26-08-26-tfi): synthesized widths were
+    # 42-79 mm (median 76.6) against a ~17 mm local cross-section, i.e. 4 of 5 grasps spanned the
+    # crescent end-to-end, and none lifted. Those grasps WIN on the cost function because they
+    # present MORE pad contact (min_pad 28-34 mm2 vs 23.8 for the across-body grasp), which both
+    # the `area_min` floor and the `w_press` pressure term reward. Bounding the width structurally
+    # — like roll_max/yaw_max_deg — removes them from the search space instead of trying to
+    # out-weight them. None (default) = 0.079, unchanged.
+    _w_hi = 0.079 if width_max is None else float(np.clip(width_max, 0.012, 0.079))
     lb = [com[0] - half_xy[0], com[1] - half_xy[1], tz_lo,
           np.pi - roll_max, -0.2 * np.pi, -_yaw_hi, 0.008]
     ub = [com[0] + half_xy[0], com[1] + half_xy[1], tz_hi,
-          np.pi + roll_max,  0.2 * np.pi,  _yaw_hi, 0.079]
+          np.pi + roll_max,  0.2 * np.pi,  _yaw_hi, _w_hi]
 
     # object world→local rotation, for measuring the cross-section along each seed's closing axis
     q = np.asarray(obj_quat_wxyz, float)
@@ -738,7 +750,7 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
         it, a single max-extent seed width biases every start toward the long axis (high stress)."""
         ax = Robj_inv.apply(closing_axis_world); ax = ax / (np.linalg.norm(ax) + 1e-12)
         proj = obj.verts @ ax
-        return float(np.clip((proj.max() - proj.min()) - 2 * indent, 0.01, 0.079))
+        return float(np.clip((proj.max() - proj.min()) - 2 * indent, 0.01, _w_hi))
 
     def _local_width(point, closing_axis_world, indent=1.5e-3):
         """Cross-section along the closing axis measured LOCALLY, in a slab around `point`, not
@@ -835,7 +847,10 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
     if refine and feasible:
         cur_round[0] = 2
         for xb in _distinct_tcp_poses(feasible, n=6, pos_thr=1.5 * obj_size, ang_thr=np.radians(30)):
-            for w in np.linspace(0.7 * xb[6], min(1.6 * xb[6], 0.079), refine_scan):
+            # Cap at _w_hi, NOT the hardcoded gripper max: otherwise the refine scan walks a
+            # width-bounded grasp straight back out past `width_max` (measured: a 40 mm cap
+            # still returned a 45.1 mm grasp) and the structural bound leaks.
+            for w in np.linspace(0.7 * xb[6], min(1.6 * xb[6], _w_hi), refine_scan):
                 x2 = xb.copy(); x2[6] = w
                 cost(x2)                                         # updates best if a gentler holdable width wins
 

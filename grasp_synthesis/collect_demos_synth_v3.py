@@ -839,6 +839,17 @@ def main() -> None:
     p.add_argument("--grasp-voxel-div",   type=int,   default=14,   help="FEM remesh resolution (keep ndof<~5k)")
     p.add_argument("--grasp-target-tets", type=int,   default=1500, help="FEM target tet count")
     p.add_argument("--grasp-n-starts",    type=int,   default=6,    help="CMA multi-start count")
+    p.add_argument("--grasp-width-max-mm", type=float, default=None,
+                   help="Cap the synthesized grasp WIDTH (mm, scaled by the scene DR scale like "
+                        "--grasp-area-min-mm2). Default None = the gripper max, 79 mm. Set this for "
+                        "ELONGATED objects: with the full range available CMA grasps along the LONG "
+                        "axis, pressing the two ends together rather than closing across the body, "
+                        "because an end-to-end grasp presents MORE pad contact and both the area "
+                        "floor and w_press reward that. Measured on the banana (run 26-08-26-tfi, "
+                        "local cross-section ~17 mm): widths 42-79 mm, median 76.6, 4 of 5 spanning "
+                        "the crescent, none lifting. With --grasp-width-max-mm 40 --grasp-area-min-mm2 "
+                        "10 the same 6 poses gave widths 25-40 mm, align 0.69 -> 0.87 and peak stress "
+                        "16.1 kPa (under the banana's 25 kPa yield).")
     p.add_argument("--keep-synth-failures", action="store_true",
                    help="SAVE episodes whose grasp synthesis failed and fell back to the default "
                         "top-down grasp. Off by default because those demos are actively HARMFUL: "
@@ -1042,6 +1053,7 @@ def main() -> None:
                         "grasp_area_min_mm2": args.grasp_area_min_mm2,
                         "grasp_medial_seeds": bool(args.grasp_medial_seeds),
                         "grasp_escalate": int(args.grasp_escalate),
+                        "grasp_width_max_mm": args.grasp_width_max_mm,
                         "grasp_w_press": args.grasp_w_press,
                         "grasp_extra_close": args.grasp_extra_close},
         "dr": exp.dr,
@@ -1219,6 +1231,7 @@ def main() -> None:
                                     area_min=args.grasp_area_min_mm2 * 1e-6 * float(scene_dr['scale']) ** 2,
                                     w_press=(args.grasp_w_press or None),
                                     medial_seeds=int(args.grasp_medial_seeds),
+                                    **({"width_max": args.grasp_width_max_mm * 1e-3 * float(scene_dr['scale'])} if args.grasp_width_max_mm else {}),
                                     **({"w_peak": args.grasp_w_peak} if args.grasp_w_peak is not None else {}),
                                     **({"w_area": args.grasp_w_area} if args.grasp_w_area is not None else {}),
                                     **({"w_tilt": args.grasp_w_tilt} if args.grasp_w_tilt is not None else {}),
@@ -1233,6 +1246,7 @@ def main() -> None:
                                         area_min=args.grasp_area_min_mm2 * 1e-6 * float(scene_dr['scale']) ** 2,
                                         w_press=(args.grasp_w_press or None),
                                         medial_seeds=int(args.grasp_medial_seeds),
+                                        **({"width_max": args.grasp_width_max_mm * 1e-3 * float(scene_dr['scale'])} if args.grasp_width_max_mm else {}),
                                         **({"w_peak": args.grasp_w_peak} if args.grasp_w_peak is not None else {}),
                                         **({"w_area": args.grasp_w_area} if args.grasp_w_area is not None else {}),
                                     **({"w_tilt": args.grasp_w_tilt} if args.grasp_w_tilt is not None else {}),
@@ -1256,6 +1270,7 @@ def main() -> None:
                                         area_min=args.grasp_area_min_mm2 * 1e-6 * float(scene_dr['scale']) ** 2,
                                         w_press=(args.grasp_w_press or None),
                                         medial_seeds=int(args.grasp_medial_seeds),
+                                        **({"width_max": args.grasp_width_max_mm * 1e-3 * float(scene_dr['scale'])} if args.grasp_width_max_mm else {}),
                                         **({"w_peak": args.grasp_w_peak} if args.grasp_w_peak is not None else {}),
                                         **({"w_area": args.grasp_w_area} if args.grasp_w_area is not None else {}),
                                         **({"w_tilt": args.grasp_w_tilt} if args.grasp_w_tilt is not None else {}),

@@ -488,9 +488,57 @@ synthesized grasp can actually lift it.
   occlusion bound was never the binding constraint. It also admitted a 33.0 kPa grasp against the
   banana's 25 kPa yield. Not adopted.
 
-**Where the banana actually fails is the grasp->lift transition**, on grasps the planner rates as
-good (align up to 0.97, stress 12-15 kPa). That is the only thing worth investigating next; the
-`fail*.mp4` clips in `26-08-26-tfi` are genuine-grasp failures with the fallbacks removed.
+**SAME DAY, third pass — the plans themselves were bad: CMA was grasping ALONG the banana's LONG
+AXIS. New structural bound `--grasp-width-max-mm` fixes it.** User inspection of `26-08-26-tfi`:
+"it grasps along the long axis of the banana". Confirmed from `dr_params.csv` — against a ~17 mm
+local cross-section, the 5 synthesized grasps had widths **42.3 / 55.9 / 76.6 / 76.7 / 79.0 mm**
+(median 76.6), i.e. 4 of 5 pressed the two crescent TIPS together instead of closing across the
+body. None lifted.
+
+**Why CMA preferred them, and why it was OUR bug.** An end-to-end grasp presents MORE pad contact
+(`min_pad` 28-34 mm2) than the correct across-the-body grasp (23.8 mm2), and TWO terms we set
+reward exactly that: the `area_min` floor (20 mm2, calibrated on a **33 mm mushroom cap**) and
+`w_press` (grip / contact area). A proper grasp on a 17 mm band inherently yields small pad
+contact, so the floor sat right at the edge of rejecting the CORRECT grasp while the long-axis
+grasp cleared it comfortably. **This is the same size-calibration bug already fixed in
+`filter_pinch_episodes.py` (thresholds must scale with object size), left unfixed in synthesis.**
+
+**The mechanism that let it happen:** the width search bound was the hardcoded gripper max
+`0.079`, and `_seed_width` measures the object's **global** cross-section along the closing axis —
+95 mm for the banana's long axis, which CLIPS to 0.079, so every long-axis seed starts pinned at
+max width and CMA stays there. (`_seed_width`'s docstring claims per-axis seeding avoids "biasing
+every start toward the long axis"; on the banana the clip hides the difference and it does not.)
+
+**Fix — `width_max`, a STRUCTURAL bound in the style of `roll_max` / `yaw_max_deg`** (plumbed as
+`--grasp-width-max-mm`, scaled by the scene-DR scale like `--grasp-area-min-mm2`; default None =
+0.079 = every existing object unchanged). A second leak was found and fixed with it: the width
+REFINE scan used `min(1.6 * xb[6], 0.079)`, hardcoding the gripper max, so a 40 mm cap still
+returned a 45.1 mm grasp until it was changed to respect `_w_hi`.
+
+**Measured, 6 DR-matched poses (standalone, escalation ladder):**
+
+| config | feasible | widths | stress kPa med/max | align med |
+|---|---|---|---|---|
+| baseline (<=79 mm, area 20) | 6/6 | 22-**79** mm | 10.8 / 15.5 | 0.69 |
+| <=40 mm, area 20 | 6/6 | 34-40 mm | 12.1 / **27.5** (over yield) | 0.84 |
+| **<=40 mm, area 10** | 6/6 | 25-40 mm | 13.3 / **16.1** | **0.87** |
+
+**This REVERSES the earlier "keep the area floor at 20 mm2" conclusion, for a principled reason:**
+the 20 mm2 floor was the only thing discouraging tiny-contact grasps while no width bound existed,
+a job it was badly suited to. With the width capped structurally, the crescent grasps area-10
+previously admitted are impossible by construction, so the floor can drop to what is physically
+right for a 17 mm-wide object. Use **`--grasp-width-max-mm 40 --grasp-area-min-mm2 10`** for the
+banana.
+
+**In the collector under full DR (run `26-08-26-bvy`, 5 batches / 40 spawns):** synthesis
+**26 ok / 6 failed (~81 %, was ~30 %)**, widths **23.3-44.0 mm (median 40.5), ZERO above 45 mm**,
+align median 0.78. So the plan-quality problem the user identified is FIXED.
+
+**But demonstrator success is still ~4/26 (~15 %) on genuine grasps.** The width cap corrected
+WHAT is planned; the banana still usually fails to actually lift. The bottleneck remains the
+grasp->lift transition, now on properly-oriented across-the-body grasps. Still not ready to
+collect a banana dataset.
+
 
 
 **Negative result — medial-axis seeding does NOT help (`--grasp-medial-seeds`, default OFF).**
