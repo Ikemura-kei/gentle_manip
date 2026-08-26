@@ -133,6 +133,15 @@ Two facts make it practical:
    extent plus a near-constant offset — verified here: achieved width correlates with `width_mm`
    at 0.9992–0.9998 with a constant ~9.5 mm gap. "Predict width in mm" already IS "predict metric
    extent", and is already category-general.
+1b. **The definition problem is SOLVED upstream (1fdb06f, local agent).**
+   `smgrasp.finger_grasp.local_cross_section(obj)` returns the median cross-section perpendicular
+   to the long axis in metres — "the width a proper across-the-body grasp actually has to close
+   on". Their key point: a BBOX would be wrong in exactly the wrong direction (the banana's bbox
+   makes it the LARGEST object at 95 mm while its graspable width is 17.9 mm). Measured nominals:
+   mushroom 28.5, strawberry 30.5, raspberry 13.2, banana 17.9 mm. So the level-head target should
+   be `scale x local_cross_section(nominal)`: metric, category-general, mesh-computable, and it is
+   what the demonstrator is closing on. This is the retargeting flagged in flaw #4, now concrete.
+
 2. **The nominal is a TRAINING-time constant only.** Target = `scale x nominal_extent_mm`, known
    per category in sim. Within a category this is a linear rescale of scale, so it inherits the
    same learnability (0.842), but the head OUTPUTS mm — so inference and real deployment need no

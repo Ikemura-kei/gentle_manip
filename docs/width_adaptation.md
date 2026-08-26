@@ -28,6 +28,12 @@ ideas are queued behind it (§5.1 pose-conditioned head, §5.2 align-filtered de
 
 ### 2a. THE SCOREBOARD — report mm of aperture, not just correlation
 
+**PROTOCOL WARNING — never mix these.** All success rates in the table below are the 60-episode
+WIDTH PROBE (`n_episodes=60`, `scene_group_size=1`, video off). The CANONICAL eval is 200 episodes
+/ 5 envs WITH per-episode video (hard requirements #1/#2). They differ measurably on the SAME
+checkpoint: lulkx@600 = **0.820 canonical** vs **0.883 probe**. Probes SCREEN (40 min); canonical
+evals CONFIRM (2 h). **No arm is claimed on probe evidence alone.**
+
 Correlation says width moves in the RIGHT DIRECTION; it says nothing about moving ENOUGH. A
 policy can score r=0.9 with a 1 mm range and be useless. **Always report both.**
 
@@ -36,7 +42,7 @@ policy can score r=0.9 with a 1 mm range and be useless. **Always report both.**
 | demonstrator (data) | +0.841 | **11.3 mm** | 100% | 0.94 (collection) |
 | **alzey — best REAL policy** | **+0.229** | **1.4 mm** | **12%** | ~0.70 real |
 | afucm | -0.040 | -0.3 mm | -3% | — |
-| lulkx base — **re-measured, identical code** | **+0.336** | **1.0 mm** | **9%** | **0.883** |
+| lulkx base — **re-measured, identical code** | **+0.336** | **1.0 mm** | **9%** | **0.883** probe / 0.820 canon |
 | lulkx + latched floor (margin 0) | +0.474 | 3.4 mm | **30%** | **0.250** |
 | lulkx + floor, margin 2 mm | +0.469 | 3.2 mm | 28% | 0.450 |
 | lulkx + floor, **margin 4 mm** | **+0.511** | 3.2 mm | **29%** | **0.517** |
@@ -169,6 +175,17 @@ for a retrofitted head.
   Either find a different argument or just run the baseline.
 - Novelty claim ("no one has studied parallel-jaw aperture adaptation in IL") rests on a 6-query
   scan — needs systematic screening before print.
+
+## 6b. Evaluation funnel (do not skip a stage)
+
+1. **Width probe** — 60 eps, `scene_group_size=1`, no video, ~40 min. Screens mechanisms and gives
+   corr + mm range + %demo. Cheap enough to sweep. NOT an eval.
+2. **Canonical eval** — 200 eps / 5 envs, per-episode video, ~2 h. The only number that goes in a
+   table or a claim. Required for any arm we intend to keep.
+3. **Real robot** — the only test that settles gentleness.
+
+Currently canonical-evaluated: floor margin 0 (1728066, in flight). Everything else is probe-only
+and must NOT be reported as an eval result.
 
 ## 7. Update protocol
 
