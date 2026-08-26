@@ -383,7 +383,13 @@ natural range on curved geometry); CMA width 41.9±9.6 mm — the width SPREAD i
 scene-DR-driven, not jitter-driven, so argmax preserves it. Per-mesh: mushroom/m3 1.00,
 m1 0.906, m2 0.792 (n=24, likely noise — watch). READ: the diversity machinery's main
 output on mushrooms was pinches; argmax+peak is a candidate straight upgrade for the next
-full mushroom collection (user to confirm from videos).
+full mushroom collection (user to confirm from videos). PRECISION NOTE (from the local
+agent's multi-object push): pure argmax needs ALL FOUR knobs zeroed (tol, jitter-deg,
+jitter-pos, pitch-seed-deg — `_div_on` ORs them); this run left jitter-pos 0.003 +
+pitch-seed 25 at defaults — near-argmax (tol=0 makes jitter acceptance ≈ never fire;
+pitch seeding only shapes search init), results stand, but use the 4-zeros form going
+forward. Cross-validation: their strawberry run (same recipe) → pinch 2.5% @ 93.8% —
+argmax+peak now replicated on two objects.
 
 
 **2026-08-27 — ANCHOR RUN DOCUMENTATION: njhbz (v33b_shift9) — full pipeline + args.**
