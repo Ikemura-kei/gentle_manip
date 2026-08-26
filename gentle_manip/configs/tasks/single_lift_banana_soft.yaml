@@ -1,15 +1,20 @@
-# [task] Soft banana lift (~9.5 cm crescent, 3.24 cm thick — the thickness is the grasp width).
+# [task] Soft banana lift (~9.5 cm crescent, 1.86 cm thick — the thickness is the grasp width).
 # Used by: experiments/single_lift_banana_soft_abs_action_armfocus.yaml
 # Status: experimental (multi-object synthesis probe, 2026-08-26)
 #
-# MPM: at the 9.5 cm nominal size the banana is ~73 cm^3, so the mushroom's grid density 250
-# gives ~1.1k particles at 4 mm cells (~8 cells across the 3.24 cm thickness) — comparable
-# resolution to the mushroom's 842. substeps scale with grid density and sqrt(E)
-# (0.25 vs 0.3 MPa): 235*sqrt(0.25/0.3) ~ 214, rounded to 240.
+# Mesh re-prepped 2026-08-26 from the seed0 scan: the FIRST banana asset was mis-prepped
+# (73 cm^3, 9.5 x 9.2 x 3.24 cm) because the stem cut removed ~35% of the banana's LENGTH,
+# so `--target-extent 0.095` then landed on the CURVE SPAN instead of the banana and scaled
+# the whole object up ~1.5x. Correct asset: 9.5 x 7.07 x 1.86 cm, 26 cm^3.
+#
+# MPM: the banana is now THIN (1.86 cm), so grid density 250 (4 mm cells) would put only
+# ~4.6 cells across the thickness — too coarse to resolve a grasp. 300 gives 3.3 mm cells
+# (~5.6 cells) at ~2.7k particles. substeps scale with grid density and sqrt(E):
+# 240 * (300/250) ~ 288, rounded to 290.
 object_name: "banana"
 object_type: "soft"
-mpm_grid_density: 250
-sim_substeps: 240
+mpm_grid_density: 300
+sim_substeps: 290
 mpm_bounds: [[0.20, -0.20, -0.03], [0.57, 0.20, 0.30]]
 
 success_z_min: 0.150

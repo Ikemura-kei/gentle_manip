@@ -379,6 +379,74 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-26 — Banana synthesis UNBLOCKED. Root cause was a MIS-PREPPED MESH, not the grasp
+search; the general fix is ESCALATING CMA BUDGET on failure (`--grasp-escalate`, default 2).**
+Two independent bugs, found in this order:
+
+1. **The installed `banana.obj` was a 2.8x-oversized wedge, not a banana.** The raw scan aspect
+   is `[0.66, 1.0, 0.225]` but the installed mesh measured **9.5 x 9.2 x 3.24 cm, 73 cm3**
+   (aspect `[1.0, 0.97, 0.34]`). Cause: the stem cut removed ~35 % of the banana's LENGTH, so
+   the long axis was no longer the longest bbox extent — `--target-extent 0.095` then landed on
+   the **curve span** of the crescent and scaled the whole object up ~1.5x. **Lesson: never scale
+   a curved/asymmetric object with `--target-extent` (longest-bbox) after a cut that shortens the
+   long axis — use `--target-axis-extent <axis> <m>`, which names the axis explicitly.**
+   Re-prepped from the `IMG20260824145616_seed0` scan: **9.5 x 7.07 x 1.86 cm, 26 cm3**,
+   watertight, euler 2. Local graspable width **17.3 mm** (was 25.9). Registry size/`default_pos`
+   and the task MPM settings updated with it (thin object -> grid density 250 -> **300**,
+   substeps 240 -> **290**, so ~5.6 cells span the 1.86 cm thickness instead of 4.6).
+   `prep_object_mesh.py` gained `--force-remesh` for scans that are watertight but the WRONG
+   TOPOLOGY (this seed0 scan is genus 1 — the hooked stem tip closes into a handle). In the end
+   the stem cut alone fixed the topology, and forcing the remesh made things worse (decimation
+   broke watertightness), so the flag exists but was not needed here.
+
+2. **The banana's feasible set is genuinely ~6x smaller than a mushroom's — it needs more
+   SEARCH, not different search.** Instrumenting the status of every CMA candidate:
+   banana **0.6 %** holdable vs mushroom **3.7 %**, with an otherwise near-identical rejection
+   mix (no_contact ~40 %, table ~31-36 %, penetrate ~21-23 %). So it is not a distinct failure
+   mode. Confirmed directly: at 4x budget (16 starts / 4000 fevals) standalone feasibility went
+   **2/8 -> 8/8**. Implemented as `--grasp-escalate N` (default 2) in `collect_demos_synth_v3.py`:
+   on synthesis failure, retry with n_starts and maxfevals both DOUBLED, up to N times.
+   **Escalating on demand beats a per-object budget constant or a shape heuristic** — it costs
+   nothing when the base budget already succeeds (mushroom / strawberry / raspberry synthesis is
+   unchanged, and a run with no failures is bit-identical to before), and it needs no shape
+   descriptor. A **bbox-derived** descriptor would be actively wrong here: the banana's bbox reads
+   as a large easy object while its graspable local width is only 17 mm.
+
+**Measured, collector under full DR (8 envs):** old mesh 1-2/16; new mesh alone 2/8; new mesh +
+escalation **4/8**, and the grasps are now proper local-width grasps (w 30-35 mm, align
+0.77-0.94, stress 15-21 kPa) instead of crescent spans. Dropping the area floor 20 -> 10 mm2
+raises the count to 6/8 but **admits bad grasps** — 3 of the 6 span the crescent tips (w 75-79 mm,
+align 0.51-0.69, one at 24.6 kPa against the banana's 25 kPa yield, i.e. bruising). Since
+demonstrator quality caps the learned policy, **keep the area floor at 20 mm2 and rely on
+escalation**; ~50 % demonstrator success just means collection takes ~2x longer.
+
+**Negative result — medial-axis seeding does NOT help (`--grasp-medial-seeds`, default OFF).**
+Seeding CMA from deep-interior medial points (each closing perpendicular to the local tangent,
+width from the LOCAL cross-section instead of the global extent) was the hypothesis for elongated
+objects. It fails on both counts: on the banana it gave **1 feasible grasp in 16** spawns (vs 0-2
+for COM seeding) and cannot solve the corrected mesh at all, and it **regresses convex objects
+with a slender sub-feature** — on a mushroom the medial axis runs down the STEM, producing exactly
+the stem grasps the area floor exists to reject (align 0.93 -> 0.66, min_pad 13.8 -> 5.7 mm2,
+stress 6.3 -> 10.5 kPa). Kept off by default and documented in the flag's help text so it is not
+re-derived.
+
+**Synthesis health check, all four objects** (6 DR-matched poses each: yaw full, pitch/roll +-45,
+flip 0.25; collector-matched constraints — area floor 20 mm2, azimuth 60 deg, w_press 0.05,
+w_peak 0.3 — with the escalation ladder):
+
+| object | feasible | stress kPa (med / max) | align (med) |
+|---|---|---|---|
+| mushroom | 6/6 | 13.6 / 16.5 | 0.92 |
+| strawberry | 6/6 | 4.9 / 5.6 | 0.95 |
+| banana | see above (~4/8 under the collector) | 15-21 | 0.77-0.94 |
+
+**Still open:** the banana's best grasps sit at 15-21 kPa against a **25 kPa** yield, so it is
+close to bruising even when synthesis succeeds — the material yield is a literature guess, not
+measured, and may need calibration before banana demos are trusted for gentleness. Raspberry
+likewise runs near its yield. **Auto-tuning the area floor** (the same way budget is now
+escalated) is a sensible follow-up but was not attempted.
+
+
 **2026-08-27 — `--gripper-offset-m` TRIED ON THE RIG: does not rescue the v3.3 over-squeeze;
 retrain is the path. Knob kept (fixed) for later use.** The no-retrain mitigation was tested on
 the real robot and **did not help much (user)** — the decision is to wait for the retrain rather
