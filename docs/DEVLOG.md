@@ -374,6 +374,23 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-26 — real-obs gate on the shift9_preg family: lulkx/mqlxj PASS, avfnp (the best
+sim score) FAILS on one hybrid row — the probe becomes a DEPLOY-SELECTION tool, not just a
+poison detector.** Probed against `real_merged_shift9mm` (matching their training clouds).
+- lulkx@600 PASS (descends on all four rows, grip pinned 80 mm) · mqlxj@400 PASS.
+- avfnp@400 FAIL, but READ THE ROWS: it fails ONLY the diagnostic hybrid `sim proprio +
+  REAL cloud` (cmd z 0.2033→0.2044, climbs); gripper is perfect (80 mm) everywhere and the
+  DEPLOYMENT condition `REAL proprio + REAL cloud` descends 4.8 mm over the chunk —
+  comparable to lulkx's 4.5 mm. So this is NOT the v33 poisoning signature (that was z
+  0.225 + grip 44 mm on BOTH real-cloud rows); it is a milder visual-branch weakness that
+  only surfaces when proprio is mismatched.
+- DECISION: deploy **lulkx/state_600** (0.820, clean PASS) over avfnp/state_400 (0.830,
+  marginal). The 0.01 sim gap is within seed noise; probe cleanliness is the better
+  discriminator — and this is the first time the gate has RANKED two healthy policies
+  rather than just rejecting a broken one.
+- Deploy pairing for all shift9_preg runs: point_cloud_shift [0.009,0,0] ACTIVE.
+
+
 **2026-08-26 — THREE FAMILIES REPORT: paired-reg on shift9 data is the campaign's BEST
 (3 seeds 0.77/0.83/0.82); residual-width v2 FAILS; tofu-on-smoke-data fails (data volume).**
 - **shift9_preg ×3 seeds (mqlxj/avfnp/lulkx, dataset v33b_shift9 + PairedReg w0.5)** —
