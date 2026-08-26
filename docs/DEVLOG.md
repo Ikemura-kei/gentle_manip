@@ -379,6 +379,32 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-27 — ⭐ THE CRUSHING IS A VARIANCE PROBLEM, NOT A LEVEL PROBLEM — which explains
+why the +3 mm offset failed on the rig, and revives width adaptation with a precise
+justification.** Offline check (`.agent_tmp/substitution_check.py`, rturn head on the s08
+val split): per-episode over-squeeze = commanded − the demonstrator's own grasp width.
+
+| regime | mean | worst | mean abs | **frac >5 mm too tight** | size-variance captured |
+|---|---|---|---|---|---|
+| CONSTANT (policy today, ~30.2 mm) | −1.6 mm | −15.8 mm | 5.7 mm | **30%** | 0% |
+| SUBSTITUTE (head level) | +0.2 mm | −12.9 mm | 2.7 mm | **4%** | 67% |
+
+True widths 31.8 ± 6.8 mm (range 11.8-46.0); head r=0.819, MAE 2.65 mm.
+READS: (1) the policy's MEAN width is already right (−1.6 mm) — the pathology is SPREAD:
+one width for a 12-46 mm range, so 30% of grasps are >5 mm too tight, worst −15.8 mm.
+(2) A constant offset shifts the whole distribution and therefore CANNOT fix a spread — it
+loosens the already-fine small objects while still crushing the large ones. That is exactly
+the rig outcome, and it RETRACTS my earlier inference "if ±3 mm is inert, adaptivity is
+probably inert too": the offset was inert BECAUSE it is a level shift. (3) Adaptivity is the
+only mechanism that addresses spread, and substitution would cut the badly-crushed fraction
+30% → 4% with a head that already generalizes OOD (r 0.80 on smallband).
+NEXT (cheapest first): no-retraining SUBSTITUTION at deploy — the policy's own width command
+supplies the TIMING (no stage predictor needed), the head supplies the LEVEL; the substituted
+amount MUST be invisible to the policy's proprioception (the e4235c2 feedback lesson).
+User's post-training idea (refine the width dim only) remains the retraining path if
+substitution's head error proves too coarse.
+
+
 **2026-08-27 — `--gripper-offset-m` TRIED ON THE RIG: does not rescue the v3.3 over-squeeze;
 retrain is the path. Knob kept (fixed) for later use.** The no-retrain mitigation was tested on
 the real robot and **did not help much (user)** — the decision is to wait for the retrain rather
