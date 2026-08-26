@@ -106,7 +106,29 @@ Margin 8 mm CLEARS the 0.70 gate — but adaptation has collapsed to baseline (1
 success**. Extrapolated to the 70% target the success cost is unacceptable. This curve IS the
 mechanism's Pareto frontier with the OLD head (corr 0.624 at latch, P(over>2mm) 0.51).
 
-**VERDICT (2026-08-26): the refit head does NOT beat the curve — the floor family is EXHAUSTED.**
+**FINAL VERDICT (2026-08-26): the floor is a ONE-PARAMETER family indexed by EFFECTIVE BIAS.**
+Ten configurations — 5 margins x 2 head qualities x 2 latch points — all on one curve:
+
+| arm | success | corrAT | range | %demo |
+|---|---|---|---|---|
+| baseline | 0.883 | +0.336 | 1.0 mm | 9% |
+| **old head, margin 4** | 0.517 | +0.511 | **3.2 mm** | **29%** (best) |
+| refit head, margin 0 | 0.517 | +0.478 | 2.6 mm | 23% |
+| refit head, margin 2 | 0.650 | +0.456 | 2.3 mm | 21% |
+| refit + latch@15%, m0 | 0.500 | +0.304 | 2.0 mm | 17% |
+| refit + latch@15%, m2 | 0.667 | +0.417 | 2.2 mm | 20% |
+
+**Both offline "improvements" made DELIVERED adaptation WORSE** — the best arm is still the
+ORIGINAL head. MECHANISM: the old head's **+3.0 mm over-prediction was acting as a NEGATIVE
+MARGIN**, making the floor bind more often -> more adaptation AND more drops. Fixing the bias to
+-1.6 mm made it bind less -> fewer drops, less adaptation. **Bias and margin are the same knob with
+opposite signs**, so head accuracy and latch timing are nearly irrelevant: only how OFTEN the floor
+binds matters. This explains WHY it is one curve, not merely that it is.
+
+CONSEQUENCE: improving the level head is pointless for this mechanism. Anything that converts a
+per-episode scalar into a commanded width by CLAMPING rides this curve.
+
+(superseded) ~~the refit head does NOT beat the curve — the floor family is EXHAUSTED.~~
 
 | arm | success | range | %demo |
 |---|---|---|---|
