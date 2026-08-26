@@ -1,0 +1,36 @@
+# [task] Soft raspberry lift — STABILITY VARIANT of single_lift_raspberry_soft.
+# Used by: experiments/single_lift_raspberry_soft_abs_action_armfocus.yaml
+# Status: experimental (2026-08-26)
+#
+# Identical to single_lift_raspberry_soft except sim_substeps 350 -> 560. At grid density 600
+# the MPM->rigid coupling forces on a 1.5 cm berry made the RIGID solver throw
+# "Invalid constraint forces causing 'nan'" partway through every batch (5/5 batches lost, 0
+# episodes saved). The CFL estimate for this cell size and E supports ~325 substeps, so 350 is
+# marginal; 560 buys the margin the coupling needs. Cost scales linearly with substeps.
+
+object_name: "raspberry"
+object_type: "soft"
+
+mpm_grid_density: 600
+sim_substeps: 560
+mpm_bounds: [[0.40, -0.06, -0.02], [0.56, 0.06, 0.15]]
+
+success_z_min: 0.080
+success_z_max: 0.120
+hold_steps: 30
+success_scale: 0.2
+
+rewards:
+  stress:
+    scale: 0.2
+    cap: 1.5                 # fraction of the raspberry's OWN 15 kPa yield (auto-injected)
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 0.1
+    decay: 8.0
+  lift:
+    scale: 0.1
+    # gate scaled to the object: 0.079 is sized for a ~3cm object, far too loose for a 1.5cm berry
+    grasp_gate_dist: 0.040
+    lift_target: 0.07

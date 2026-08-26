@@ -566,6 +566,47 @@ Fix-slice verification: my chain gate PASSED (t0 gripper 79.8 mm vs poisoned 44;
 `..._noos_cmd_v33b` → retrain v33b_plain / v33b_aux0p5 / v33b_aux1p5. **orkam / engcz / kjljs are DEPRECATED** (2026-08-26, user): remaining eval jobs cancelled, experiments.csv statuses set `deprecated-poisoned-real-slice`; their checkpoints are UNSALVAGEABLE for real deployment — the broken real-branch mapping is learned into the weights (a visual-conditional behavior, not a decode issue) AND the merged normalization itself is contaminated (real-slice ranges compress every sim channel), so no inference-time patch exists; retraining (v33b) is the only fix. Their partial sim curves (orkam 0.715 @200 etc.) are kept ONLY as v3.3-recipe sim evidence, clearly marked deprecated.
 
 
+**2026-08-26/27 — MULTI-OBJECT SYNTHESIS PROBE (user): banana / strawberry / raspberry on the
+njhbz recipe with PURE ARGMAX + peak term. Strawberry excellent, raspberry needed a substeps
+fix, BANANA BLOCKED (planner search scaling, diagnosed).** Recipe = njhbz collect args with
+`--grasp-diversity-tol 0 --grasp-jitter-deg 0 --grasp-jitter-pos 0 --grasp-pitch-seed-deg 0`
+(pure argmax — note ALL FOUR must be 0, the code's `_div_on` gate ORs them) plus
+`--grasp-w-peak 0.3`, per-object area floor, everything else identical.
+NEW ASSETS (`gentle_manip/scripts/prep_object_mesh.py`, new reusable tool: plane cut → largest
+component → watertight repair → uniform scale → recentre):
+`banana.obj` 17×16.5×5.8 cm (stem AND its flat cut face removed at the y=0.53 neck, watertight,
+from `obj_meshes/banana1`); `strawberry.obj` 4.0×3.8×3.25 cm (calyx cut at y=0.15 then
+**morphological opening on the voxel fill** — a plain plane cut leaves leaf stubs that splay
+BELOW the cut; opening ×2 strips them at ~1% volume cost — remeshed watertight). Registered
+with new materials (banana E 0.25 MPa/yield 25 kPa; strawberry E 0.15 MPa/yield 18 kPa) + task,
+DR and experiment configs. MPM per size: banana grid 180 (its 420 cm³ would carry 6.5k
+particles at the mushroom's density), strawberry grid 320, raspberry grid 600.
+
+| object | eps | demo success | PINCH | stress_top10 (yield) | grip | align | min_pad | width |
+|---|---|---|---|---|---|---|---|---|
+| strawberry | 40 | 93.8% | **1/40 = 2.5%** | 8.3 kPa p90 12.6 (18) | 1.86 N | 0.944 | 33.4 mm² | 49.0 mm |
+| banana | 8 | (87.5% — all FALLBACK) | n/a | audit all zero | — | — | — | — |
+| raspberry | rerunning | — | — | — | — | — | — | — |
+
+**Strawberry is the good case**: flush centred envelops (visual check clean), stress less than
+half its yield, min_pad 2× the 15 mm² floor, and area floor 15 + w_peak 0.3 held the pinch rate
+to 2.5%. **RASPBERRY: the grid-600 task config is MPM-stable but RIGID-solver unstable** —
+"Invalid constraint forces causing 'nan'" killed 5/5 batches (0 episodes saved) even though
+synthesis itself produced 40 clean grasps. CFL supports ~325 substeps so the config's 350 is
+marginal; new `single_lift_raspberry_soft_stable.yaml` raises it to 560 (the cluster's original
+config left untouched). **BANANA IS BLOCKED, and it is NOT what it looks like**: holdability is
+fine (FEM reaches 15 N at 4 mm indent vs the 2.79 N needed, at 8.7 kPa), and it is not the area
+floor, not the azimuth bound, and not the seed fan — each was tested and eliminated. The cause
+is that the CMA xy search box is 1.2× the object's world bbox (~20×20 cm for a 17 cm banana)
+while feasible grasps are a thin band along its centreline with tightly coupled yaw and width;
+at ~190 evals/start the joint hit rate is ~0. Raising to 24 starts × 6000 evals recovered only
+2 real grasps in 16 attempts. Every saved banana episode is therefore a DEFAULT top-down
+fallback (audit columns all zero — that is how to spot it). Fix options, not yet done: seed the
+search on the object's medial axis rather than the bbox, or accept a smaller banana. Related
+mesh caveat: this reconstruction is disproportionately fat (5.8 cm thick at 17 cm long vs a
+real ~3.7 cm), giving 420 cm³ / **398 g** against a real banana's ~120 g — worth re-cutting
+before any real use.
+
 **2026-08-26 — local-agent response to the v33 post-mortem: the handoff doc was the origin;
 both cluster findings actioned.** Owning the first cause plainly: **`v3.3_synth.md` §3 named
 `dataset/dppo/single_lift_mushroom_real` in the merge command** — a stale prebuilt npz that had

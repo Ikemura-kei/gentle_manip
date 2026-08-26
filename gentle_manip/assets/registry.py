@@ -99,6 +99,20 @@ OBJECT_MAP: dict[str, ObjectDef] = {
     "raspberry": ObjectDef("raspberry", MATERIALS["raspberry"], object_type="soft",
                            size=(0.0153, 0.0154, 0.0146), default_pos=(0.47, 0.0, 0.0082),
                            mesh_path=str(_OBJ_DIR / "raspberry.stl")),
+    # Banana ~17 cm (photo-reconstructed, stem + its flat cut face removed). The mesh is a
+    # strong crescent, so its bbox is nearly square in plane (17 x 16.5 cm) and only 5.8 cm
+    # thick — the thickness is what the gripper closes on, so scale DR must stay <=1.0 or the
+    # grasp width exceeds the 8.8 cm opening.
+    "banana": ObjectDef("banana", MATERIALS["banana"], object_type="soft",
+                        size=(0.170, 0.165, 0.058), default_pos=(0.47, 0.0, 0.031),
+                        mesh_path=str(_OBJ_DIR / "banana.obj")),
+    # Strawberry ~4 cm (photo-reconstructed, calyx/leaves removed and the body made watertight
+    # by a voxel remesh with morphological opening). Squat: 4.0 x 3.8 x 3.25 cm (tip->crown is
+    # the SHORT axis, z), so an exact "4 cm long x 3 cm wide" is not reachable without
+    # distorting it — uniformly scaled to a 4 cm longest extent instead.
+    "strawberry": ObjectDef("strawberry", MATERIALS["strawberry"], object_type="soft",
+                            size=(0.040, 0.038, 0.0325), default_pos=(0.47, 0.0, 0.0204),
+                            mesh_path=str(_OBJ_DIR / "strawberry.obj")),
 }
 
 

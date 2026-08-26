@@ -1,0 +1,32 @@
+# [task] Soft strawberry lift (~4 cm squat berry, calyx removed).
+# Used by: experiments/single_lift_strawberry_soft_abs_action_armfocus.yaml
+# Status: experimental (multi-object synthesis probe, 2026-08-26)
+#
+# MPM: berry volume ~27 cm^3. grid 320 gives ~870 particles at 3.1 mm cells (~10 cells across
+# the 3.25 cm short axis) — comparable resolution to the mushroom's 842 particles. substeps
+# scale with grid density and sqrt(E): 235*(320/250)*sqrt(0.15/0.3) ~ 213, rounded up to 260
+# for margin on the softer, juicier material.
+object_name: "strawberry"
+object_type: "soft"
+mpm_grid_density: 320
+sim_substeps: 260
+mpm_bounds: [[0.24, -0.16, -0.03], [0.54, 0.16, 0.30]]
+
+success_z_min: 0.150
+success_z_max: 0.260
+hold_steps: 30
+success_scale: 0.2
+
+rewards:
+  stress:
+    scale: 0.2
+    cap: 1.5                 # fraction of the strawberry's OWN 18 kPa yield (auto-injected)
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 0.1
+    decay: 8.0
+  lift:
+    scale: 0.1
+    grasp_gate_dist: 0.055
+    lift_target: 0.13
