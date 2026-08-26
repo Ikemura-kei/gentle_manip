@@ -350,6 +350,10 @@ running" — replacing any whose experiments have since finished.**
 | cutkl | single_lift_mushroom_simreal_realws_noos_ht_cmd/cutkl | 100 | 0.490 | 0.715 | 0.730 | 25.6 | 52.5 | hold-tail on afucm setup, s43 (mildly negative) |
 | ymbve | single_lift_mushroom_simreal_realws_noos_ht_cmd/ymbve | 600 | 0.675 | 0.745 | 0.785 | 23.9 | 51.4 | hold-tail + h8/e4, s42 — RESCUES h8 (0.04→0.68) |
 | udvpq | single_lift_mushroom_simreal_realws_noos_ht_cmd/udvpq | 100 | 0.670 | 0.710 | 0.725 | 30.6 | 54.0 | hold-tail + h8/e4, s43 — rescue replicates (0.67) |
+| njhbz | single_lift_mushroom_simreal_realws_noos_cmd_v33b_shift9/njhbz | 300 | 0.805 | 0.820 | 0.825 | 28.1 | 52.9 | v3.3 + shift9 clouds, PLAIN — curve PEAKS then decays (0.81@300 -> 0.66@600); real-obs PASS; width flat 0.083, small/big 0.80/0.97 |
+| mqlxj | single_lift_mushroom_simreal_realws_noos_cmd_v33b_shift9/mqlxj | 400 | 0.770 | 0.800 | 0.815 | 25.4 | 52.1 | shift9 + paired-reg, seed 42 — real-obs PASS |
+| avfnp | single_lift_mushroom_simreal_realws_noos_cmd_v33b_shift9/avfnp | 400 | 0.830 | 0.835 | 0.835 | 28.8 | 53.0 | shift9 + paired-reg, seed 27 — BEST sim; small-object gap ELIMINATED (0.90/0.90); width corr 0.295; real-obs fails only the OOD hybrid row |
+| lulkx | single_lift_mushroom_simreal_realws_noos_cmd_v33b_shift9/lulkx | 600 | 0.820 | 0.865 | 0.865 | 28.1 | 53.1 | shift9 + paired-reg, seed 43 — PLATEAU 0.81-0.82 across ckpts 300-600 (no peak-hunting needed); real-obs PASS; small/big 0.83/0.93 |
 | dgvmu | single_lift_mushroom_simreal_realws_noos_cmd/dgvmu | 100 | 0.610 | 0.725 | 0.750 | 30.7 | 54.1 | item 18 aux width head w=0.5 — head converges (loss 0.0061) but NO success gain vs afucm 0.685; NEGATIVE alone |
 | eqrth | single_lift_mushroom_simreal_realws_noos_cmd/eqrth | 200 | 0.555 | 0.650 | 0.675 | 27.6 | 52.2 | item 18 aux width head w=2.0 — worse, degrades with epochs (0.225 @600); heavy aux weight hurts |
 | pyzpl | single_lift_mushroom_simreal_realws_noos_cmd/pyzpl | 100 | 0.610 | 0.665 | 0.685 | 28.2 | 53.7 | fix 2 gripper-dim loss ×3 — no gain vs afucm; @300 near-tie 0.600/0.710/0.790 sust 22.7 (gentler pick) |
