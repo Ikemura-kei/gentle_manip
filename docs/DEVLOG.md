@@ -374,6 +374,20 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-26 — paired-reg file was NOT bias-corrected (user caught it); corrected variant
+built + 3 seeds launched.** `paired_cube3_clouds.npz` dates from 2026-08-23, three days
+before `shift_demo_clouds.py` existed, and its real half is uncorrected (real x-centroid
+0.4218 vs sim 0.4393). So the shift9_preg family (mqlxj/avfnp/lulkx) trains on a MIXED
+signal: co-train real slice corrected (+9 mm) while the paired regularizer aligns
+UNCORRECTED real features to sim. Two readings, both plausible: (a) the regularizer aligns
+the wrong real distribution and is therefore under-performing; (b) aligning across a ~9 mm
+offset teaches encoder shift-INVARIANCE and is part of why this family is the campaign's
+best. Test: `paired_cube3_clouds_shift9.npz` (real half +9 mm x; verified no zero-padding
+so a plain shift is safe) → **preg9_s{42,27,43}** (jobs 1696934-36), identical to the
+shift9_preg family in every other respect, so the ONLY delta is paired-file correction —
+a clean 3v3 seed-matched A/B against mqlxj/avfnp/lulkx (0.770/0.830/0.820).
+
+
 **2026-08-26 — ⭐ THE SMALL-OBJECT GRADIENT IS GONE (avfnp 0.90 small / 0.90 big) — and it
 was solved WITHOUT width adaptation.** Width probes on the shift9_preg family (same
 protocol/geometries as all nine earlier probes):
