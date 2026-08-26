@@ -33,10 +33,14 @@ import numpy as np
 import yaml
 
 HOLD_WIN = 12
-VERT_PINCH = 0.0        # m: TCP above object centre => dangling
-WIDTH_PINCH = 0.025     # m: near-closed fingers => rim pinch
-VERT_SOFT = -0.005      # m
-HORIZ_SOFT = 0.015      # m
+# Thresholds are calibrated on the mushroom (33 mm nominal extent) and SCALE with object size:
+# on a 15 mm raspberry an absolute -5 mm vertical / 25 mm width test flags a perfectly good
+# envelop (measured: 22/24 false positives), and on a large object it would miss real pinches.
+REF_SIZE = 0.033        # m: the mushroom the thresholds were tuned on
+VERT_PINCH = 0.0        # m: TCP above object centre => dangling (size-independent: a sign test)
+WIDTH_PINCH = 0.025     # m: near-closed fingers => rim pinch          (scaled)
+VERT_SOFT = -0.005      # m                                            (scaled)
+HORIZ_SOFT = 0.015      # m                                            (scaled)
 
 
 def load_episodes(run: Path):
@@ -62,8 +66,28 @@ def episode_metrics(ep):
     return vert, horiz, width
 
 
-def is_pinch(vert, horiz, width):
-    return (vert > VERT_PINCH) or (vert > VERT_SOFT and (width < WIDTH_PINCH or horiz > HORIZ_SOFT))
+def is_pinch(vert, horiz, width, size_scale: float = 1.0):
+    """size_scale = object nominal extent / REF_SIZE (1.0 for a mushroom)."""
+    return ((vert > VERT_PINCH)
+            or (vert > VERT_SOFT * size_scale
+                and (width < WIDTH_PINCH * size_scale or horiz > HORIZ_SOFT * size_scale)))
+
+
+def size_scale_for_run(run: Path) -> float:
+    """Object nominal extent / REF_SIZE, resolved from the run's own experiment config."""
+    cfg = run / "config.yaml"
+    if not cfg.exists():
+        return 1.0
+    try:
+        exp_name = yaml.safe_load(cfg.read_text()).get("experiment")
+        from gentle_manip.experiment import Experiment
+        from gentle_manip.assets.registry import get_object_def
+        exp = Experiment.load(exp_name)
+        obj = get_object_def(exp.task_cfg["object_name"])
+        return float(max(obj.size)) / REF_SIZE
+    except Exception as e:
+        print(f"  (could not resolve object size: {e}; using mushroom thresholds)")
+        return 1.0
 
 
 def main():
@@ -71,13 +95,17 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("run", type=Path)
     ap.add_argument("--out", type=Path, default=None, help="default: <run>-filt")
+    ap.add_argument("--size-scale", type=float, default=None,
+                    help="override the object-size threshold scaling (default: from the run config)")
     args = ap.parse_args()
 
     meta, eps = load_episodes(args.run)
+    scale = args.size_scale if args.size_scale else size_scale_for_run(args.run)
+    print(f"threshold size-scale {scale:.2f} (object extent / {REF_SIZE*1000:.0f} mm reference)")
     report, keep = [], []
     for i, ep in enumerate(eps):
         vert, horiz, width = episode_metrics(ep)
-        pinch = is_pinch(vert, horiz, width)
+        pinch = is_pinch(vert, horiz, width, scale)
         report.append({"episode": i, "vert_mm": round(vert * 1000, 1),
                        "horiz_mm": round(horiz * 1000, 1), "width_mm": round(width * 1000, 1),
                        "pinch": bool(pinch)})

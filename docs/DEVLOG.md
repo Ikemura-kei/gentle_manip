@@ -9,6 +9,7 @@ training/data foundation; the **generalist** data-collection/training recipe is 
 investigation.
 
 Subpages (detail documents):
+- [Paper TODO](PAPER_TODO.md) — what is needed to SUBMIT (blocking / strengthening / verification / cut), plus the settled story and related-work positioning
 - [Action-space ablation & follow-ups — final report](action_space_ablation_final_report.md) — all runs, curves, numbers
 - [hwo dataset investigation](hwo_dataset_investigation.md) — collection-recipe forensics (R1/R2)
 - [Abs-action derivation debugging](debug_partC_euler_action_anomaly.md) — the euler-seam and fixed-point-stall root causes
@@ -722,8 +723,27 @@ particles at the mushroom's density), strawberry grid 320, raspberry grid 600.
 | object | eps | demo success | PINCH | stress_top10 (yield) | grip | align | min_pad | width |
 |---|---|---|---|---|---|---|---|---|
 | strawberry | 40 | 93.8% | **1/40 = 2.5%** | 8.3 kPa p90 12.6 (18) | 1.86 N | 0.944 | 33.4 mm² | 49.0 mm |
-| raspberry | 24 | (see rasp row below) | — | 10.5 kPa (15) | 0.25 N | — | — | 16.9 mm |
+| raspberry | 24 | 100% | **4/24 = 16.7%** | 11.5 kPa p90 15.7 (15) | 0.34 N | 0.900 | 7.1 mm² | 18.2 mm |
 | banana | — | BLOCKED (all FALLBACK) | n/a | audit all zero | — | — | — | — |
+
+Reading the two that worked: the **strawberry is the clean case** (flush centred envelops,
+stress less than half its yield, min_pad 2× the 15 mm² floor). The **raspberry grasps 100% but
+pinches 6× more often** (16.7%) and runs at 11.5 kPa against a 15 kPa yield — p90 15.7 is AT
+yield, i.e. the gentlest holdable grasp on a 1.5 cm berry is already a bruising one. Its
+min_pad (7.1 mm²) sits just above the 4 mm² floor I set, so the floor is doing little; a berry
+this small may simply need a larger floor or a different end effector rather than a better
+search. The 4 flagged episodes are genuine (vert +0.4…+7.7 mm — TCP ABOVE the berry centre —
+at widths 1.4–4.7 mm vs the 8.7 mm median), not filter artefacts.
+
+**PINCH-FILTER BUG FOUND AND FIXED (thresholds were absolute, now size-scaled).** The filter's
+−5 mm vertical / 25 mm width / 15 mm horizontal tests were tuned on a 33 mm mushroom, so on the
+15 mm raspberry they flagged **22/24 = 91.7%** — nearly all false positives, since vert −4.5 mm
+and width 8.7 mm are a perfectly good envelop at that size. `filter_pinch_episodes.py` now
+resolves the object's nominal extent from the run's own experiment config and scales the three
+soft thresholds by `extent / 33 mm` (the vert>0 dangling test stays absolute — it is a sign
+test). Raspberry then reads 16.7% and the strawberry is unchanged at 2.5%. This is the second
+time absolute thresholds have misfired on a small object (the 0.9-scale mushroom2 batch was the
+first) — any new geometric gate should be written scale-relative from the start.
 
 **Strawberry is the good case**: flush centred envelops (visual check clean), stress less than
 half its yield, min_pad 2× the 15 mm² floor, and area floor 15 + w_peak 0.3 held the pinch rate
