@@ -379,6 +379,20 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-27 — alzey probed at last: NOT genuinely size-adaptive (r=0.229) — its real-world
+"gentleness adaptive to object size" is a LEVEL+RATE effect.** Prediction registered before
+the run ("expect alzey also fairly flat, r<0.4; if r>0.6 my whole reading needs revision")
+— confirmed. At-grasp corr 0.229 (succ-only 0.158), small-half 31.3 vs big-half 32.7 mm
+(1.4 mm of "adaptation" against a 6.7 mm true spread). Comparison: afucm −0.04 (33.5/33.2),
+lulkx 0.138 (30.2/30.1). So what distinguishes gentle-alzey from crushing-lulkx on the ROBOT
+is that alzey commands ~2 mm WIDER and its data closed 39% SLOWER (30-step ramp) — level and
+rate, not adaptation. This corroborates the variance analysis (mean is fine, spread kills)
+and is exactly what the v3.4 smoke (n-grasp 30 + 3 mm squeeze + yaw 55) tests.
+CONSEQUENCE: no trained policy in this campaign has ever exceeded r=0.30 on width (eqrth,
+and that cost 0.13 success), so the frozen head's **0.888 at closure** is a step change
+rather than an increment — provided the end-to-end eval shows success holds.
+
+
 **2026-08-27 — WIDTH-TRAJECTORY HEAD implemented and both configs launched (user design:
 6-DoF diffusion + standalone per-step width regression head).**
 RATIONALE: nine probes showed the SAME encoder features give r~0.82 through a regression
