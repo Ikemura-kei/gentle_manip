@@ -374,6 +374,20 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-26 — eval sim-server HANGS: 7 occurrences, pattern identified, watchdog added
+(832dbe8).** Signature (prmaw@600, 5 shift9_preg evals, mqlxj@600 twice): the sim server's
+FPS **decays monotonically** (17→12, 12.6→11.3) and then the log goes SILENT; the job then
+sits idle until the 8 h wall clock with 0 videos written (a healthy eval writes 200, one
+per episode, and an FPS line every ~40 s). Decay-then-stall points at RESOURCE GROWTH in
+the long-lived genesis child rather than a random fault, and it correlates with multi-eval
+contention on a node. Root cause NOT fixed (sim server = local agent's module; genesis is
+known to leak, which is why GenesisProcess exists at all) — flagged for them with this
+evidence. MITIGATION shipped in `dppo_eval.sbatch`: a watchdog kills the job after
+`GM_EVAL_WATCHDOG_MIN` (default 25) minutes of sim-server log silence, converting a silent
+8 h GPU burn into a fast FAILED that the standing monitors resubmit immediately. Cost of a
+false positive is one cheap retry; a healthy eval's gap is ~40 s, so the margin is ~35×.
+
+
 **2026-08-26 — real-obs gate on the shift9_preg family: lulkx/mqlxj PASS, avfnp (the best
 sim score) FAILS on one hybrid row — the probe becomes a DEPLOY-SELECTION tool, not just a
 poison detector.** Probed against `real_merged_shift9mm` (matching their training clouds).
