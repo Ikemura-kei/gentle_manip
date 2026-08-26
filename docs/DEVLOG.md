@@ -374,6 +374,33 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-26 — THREE FAMILIES REPORT: paired-reg on shift9 data is the campaign's BEST
+(3 seeds 0.77/0.83/0.82); residual-width v2 FAILS; tofu-on-smoke-data fails (data volume).**
+- **shift9_preg ×3 seeds (mqlxj/avfnp/lulkx, dataset v33b_shift9 + PairedReg w0.5)** —
+  best-ckpt success 0.770 / **0.830** / 0.820, ever up to 0.865, sustained 25-29 kPa.
+  Mean ≈0.807 with a TIGHT seed spread (±0.03) vs afucm 0.685 / njhbz 0.805 (1 seed).
+  **Qualitatively new: these curves RISE with epochs (peaks at 400-600)** while every
+  other family in the campaign peaks at 100 and decays — the paired consistency loss
+  appears to act as a regularizer that keeps training productive. STACKING CONFIRMED:
+  bias-corrected clouds (njhbz) + paired-feature alignment (alzey) > either alone; both
+  are DOMAIN-ALIGNMENT mechanisms, and they compose.
+- **resw2 = residual width v2 (nickq), the units-fixed mechanism: DECISIVE NEGATIVE** —
+  0.170 @100 decaying to 0.03, sustained 44 kPa. Mechanistic read: the fix made the
+  CLOSURE residual constant but left the APPROACH-phase residual scene-DEPENDENT (open
+  command ≈80 mm fixed minus a per-episode anchor), i.e. it moved the hard part rather
+  than removing it — and a head error there means the gripper is not fully open during
+  approach (collision/push). Residual width actions are ABANDONED; with 18b, aux weights,
+  FiLM and window weighting, that closes every mechanism tried for width adaptation.
+- **tofu_preg ×3 seeds (zffwn/tygdq/puysh, v11 smoke 36 eps, pure sim): 0.09/0.045/0.07**
+  — non-functional at every checkpoint, all seeds, curves still climbing at 600 (classic
+  underfit-by-data-volume). 36 episodes vs afucm's 635; the demonstrator is fine (97.6%).
+  Verdict: PIPELINE BRING-UP ONLY (tofu task/experiment/convert/train/eval path all work
+  end-to-end) — the tofu policy question needs the 650 collection, still user-gated.
+- OPERATIONAL: 5 shift9_preg evals were HUNG (sim server silent 3.5-5 h, same signature as
+  the prmaw hang) — cancelled and resubmitted with a 25-min silence detector armed. Hang
+  rate is now material (6 occurrences); if it recurs, add a watchdog to dppo_eval.sbatch.
+
+
 **2026-08-26 — argmax+peak mushroom probe collection (user ask): pinch rate 7.8% → 2.0%
 at equal success; width diversity survives argmax.** 100 eps, all-video
 (`26-08-26-cze`), = the njhbz anchor recipe with EXACTLY two changes: diversity/jitter
