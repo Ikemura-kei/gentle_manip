@@ -106,7 +106,30 @@ Margin 8 mm CLEARS the 0.70 gate — but adaptation has collapsed to baseline (1
 success**. Extrapolated to the 70% target the success cost is unacceptable. This curve IS the
 mechanism's Pareto frontier with the OLD head (corr 0.624 at latch, P(over>2mm) 0.51).
 
-**What the refit arms must do: BEAT this curve, not sit on it.** The refit head (corr 0.741 at
+**VERDICT (2026-08-26): the refit head does NOT beat the curve — the floor family is EXHAUSTED.**
+
+| arm | success | range | %demo |
+|---|---|---|---|
+| old head, margin 4 mm | 0.517 | 3.2 mm | **29%** |
+| REFIT head, margin 0 | 0.517 | 2.6 mm | **23%** |
+| old head, margin 6 mm | 0.617 | 2.4 mm | 21% |
+| REFIT head, margin 2 mm | 0.650 | 2.3 mm | 21% |
+
+At equal success the refit gives LESS range; at equal range slightly more success. With n=60
+(success SE ~0.065) both are 1-2 SE — it sits ON the same frontier. A much better head (corr
+0.667->0.763, P(over>2mm) 0.58->0.19) bought essentially NOTHING in the delivered trade.
+
+**Therefore the bottleneck is the MECHANISM'S STRUCTURE, not its inputs.** A per-episode scalar
+floor can only turn a prediction into a commanded width by PREVENTING CLOSURE, and preventing
+closure is what drops the object. Any mechanism of this shape rides the same curve.
+
+**Requirement for the next mechanism: influence width WITHOUT GATING CLOSURE.** That rules out
+floor/max, quantile-floor, and margin variants. It does NOT rule out (a) changing what the policy
+LEARNS (align-filtered or width-capped demos, CFG on the width dim), or (b) a mechanism that
+reshapes the whole width TRAJECTORY rather than clamping its endpoint.
+
+ORIGINAL expectation, for the record:
+~~What the refit arms must do: BEAT this curve, not sit on it.~~ The refit head (corr 0.741 at
 latch, P(over>2mm) 0.29) should need LESS margin for the same success -> more binding -> more range
 at equal success. If 1728724/1728725/1728949/1728950 land ON the trade line, the floor family is
 exhausted and we move to the untried candidates (§5).
