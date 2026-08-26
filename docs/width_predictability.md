@@ -89,7 +89,26 @@ and strengthened: the loss is in control, not perception.
    right for "how determined is width by size in general". **Report both; never the 0.85 alone.**
 2. **Mild nonlinearity.** Spearman exceeds Pearson on both objects (0.872 vs 0.841; 0.822 vs
    0.791), so the linear residual (3.2 / 4.3 mm) slightly OVERSTATES irreducible error.
-3. **Random split, not geometry holdout.** `size_adaptation_literature.md` §3 Step 0 specifies
+3. **RESOLVED 2026-08-26 — LEAVE-ONE-VARIANT-OUT RUN (jobs 1729259-61). Perception does NOT
+   generalise to an unseen shape:**
+
+   | split | cloud -> scale | cloud -> width |
+   |---|---|---|
+   | random (quoted throughout this doc) | **0.739** | **0.597** |
+   | hold out mushroom1 | 0.589 | 0.410 |
+   | hold out mushroom2 | 0.442 | 0.227 |
+   | hold out mushroom3 | 0.436 | 0.298 |
+
+   Correlation roughly HALVES on a held-out shape — and these are four scans of the SAME category.
+   **NOT a label artifact:** per-variant nominal width at scale=1 is 33.4 / 33.1 / 32.5 / 33.3 mm
+   (<3% spread), so `scene_scale` IS commensurable across variants and the drop is genuine.
+   CONSEQUENCE: every "perception is not the bottleneck" statement in this doc holds only
+   WITHIN DISTRIBUTION. For the multi-category generalist goal (banana/strawberry/shrimp) the
+   perception ceiling on an unseen object is ~0.44-0.59 for size, not 0.739 — a first-order problem
+   that no control-side mechanism can fix.
+
+   ORIGINAL caveat text:
+   ~~Random split, not geometry holdout.~~ `size_adaptation_literature.md` §3 Step 0 specifies
    holding out geometries; we split episodes at random, so 0.739 / 0.842 measure interpolation
    within seen mesh variants, not generalisation to a new shape. Mushroom has 4 variants — a
    leave-one-variant-out rerun is the honest version and is cheap. **Not yet done.**
