@@ -264,6 +264,30 @@ and we must not build on it, but the scalar we need (extent along the CLOSING AX
 perpendicular to the camera ray and therefore in the visible silhouette; the occluded dimension is
 largely the one we do NOT need.
 
+## CROSS-CATEGORY size perception DOES transfer (job 1729369, 2026-08-26)
+
+One shared encoder (lulkx), METRIC target (`width_mm` — comparable across categories, unlike
+`scene_scale`), join-proven on both (0.9998 / 0.9992):
+
+| train -> test | corr | MAE |
+|---|---|---|
+| mushroom -> mushroom (in-dist) | +0.643 | 3.9 mm |
+| tofu -> tofu (in-dist) | +0.397 | 5.1 mm |
+| **mushroom -> TOFU (cross-cat)** | **+0.550** | 5.5 mm |
+| **tofu -> MUSHROOM (cross-cat)** | **+0.549** | 5.3 mm |
+
+Transfer is symmetric at ~0.55 — nearly mushroom's in-distribution level, and BETTER than the
+within-category leave-one-variant-out gave (0.23-0.41 for width). **Prediction was collapse; it did
+not happen.** Encouraging for the multi-category requirement: a SINGLE metric-size head may serve
+several categories rather than needing per-category heads — which is what the `local_cross_section`
+target was designed for.
+
+CAVEATS: (1) both conditions use the MUSHROOM encoder, so "tofu -> tofu" is itself cross-domain at
+the encoder level, which depresses it (0.397) — the cross-cat numbers are conservative for
+mushroom->tofu and flattered in reverse. (2) Cross-category beating within-category holdout is
+counterintuitive and UNEXPLAINED; plausibly tofu's wider, more regular size range is easier to read
+than a specific held-out mushroom scan. Do not over-claim until understood.
+
 ## Bottom line
 
 The point cloud is NOT hiding the information: size is recoverable at 0.739 (mushroom) / 0.842
