@@ -186,10 +186,19 @@ for a retrofitted head.
 
 **Canonical results so far (200 eps, video):**
 
-| arm | probe (60 ep) | canonical (200 ep) |
-|---|---|---|
-| lulkx@600 baseline | 0.883 | **0.820** |
-| floor margin 0 | 0.250 | **0.260** |
+| arm | probe (60 ep) | canonical succ | ever | **sustained stress** |
+|---|---|---|---|---|
+| lulkx@600 baseline | 0.883 | **0.820** | 0.865 | **28.1 kPa** |
+| floor margin 0 | 0.250 | **0.260** | 0.310 | **14.0 kPa** |
+
+**THE FLOOR HALVES SUSTAINED GRIP STRESS (28.1 -> 14.0 kPa).** Mushroom yield is ~40 kPa, so the
+baseline holds at ~70% of yield (bruising territory) and the floor at ~35% (safe). Peak stress
+agrees directionally (53.5 -> 47.7 kPa on the probe arms) but SUSTAINED is the bruising-relevant
+number — prolonged compression during the hold. So the floor is NOT "adaptive but worse": on the
+grasps it completes it is dramatically GENTLER, and its only defect is dropping too many. That
+defect is exactly what the refit head (bias +3.0 -> -1.6mm) and latch@15% (P(over>2mm) 0.51 ->
+0.29) target. Target outcome: baseline-level success AND half the grip stress AND 3x the aperture
+range — a much stronger claim than "width is adaptive".
 
 Probe-vs-canonical agreement is close on the WEAK arm (0.250/0.260) and optimistic on the STRONG
 one (0.883/0.820, +0.063). So probes are fine for screening and ranking, but any arm landing near
