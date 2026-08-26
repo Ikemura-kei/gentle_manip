@@ -562,6 +562,37 @@ elongated ones. TWO caveats, both measured and both in the `local_cross_section`
    hand-tuned and end-to-end verified**. Prefer an explicit `--grasp-width-max-mm` where a value
    has been validated; use `auto` for a NEW object.
 
+**ALL banana runs on ONE consistent metric — the width cap did NOT raise demo yield.** Earlier
+headline `success_rate` values are NOT comparable across runs because they counted crushing
+fallbacks as successes. Recomputed from each run's `dr_params.csv` as successes among SYNTHESIZED
+grasps only (`stress_Pa > 0`):
+
+| run | config | spawns | synth | genuine ok | rate among synth | **genuine/spawn** | headline |
+|---|---|---|---|---|---|---|---|
+| zbj | old mesh + medial seeding | 24 | 3 | 0 | 0 % | 0 % | 0.400 |
+| qqw | new mesh, no escalation | 24 | 4 | 2 | 50 % | 8.3 % | 0.381 |
+| fsl | new mesh, fixed 4x budget | 24 | 8 | 3 | 37.5 % | 12.5 % | 0.381 |
+| zuo | new mesh + escalation, area20 | 24 | 10 | 3 | 30 % | 12.5 % | 0.421 |
+| hli | new mesh + escalation, area10 | 40 | 23 | 4 | 17.4 % | 10 % | 0.210 |
+| **bvy** | **+ width cap 40, area10** | 32 | **26** | 4 | 15.4 % | **12.5 %** | (killed) |
+
+**The width cap took synthesis 30 % -> 81 % but genuine successes per spawn stayed at 12.5 %,
+identical to fsl and zuo.** At 3-4 successes per run these differences are noise. What the cap
+bought is PLAN QUALITY (widths 23-44 mm vs a 76.6 mm median, no long-axis grasps, align 0.69 ->
+0.78) — worth keeping, since it separates demos that grasp the banana correctly from demos that
+squeeze its ends — but NOT more usable demos.
+
+The fallback column explains the old headline numbers: **zuo's 0.421 was 3 genuine + 6 CRUSHING
+episodes**, i.e. two thirds of its "successes" were the fallback grasp. bvy has 1 fallback success
+because synthesis now rarely fails, so nothing masks the true rate any more.
+
+**CONCLUSION: the banana sits at ~10-12 % genuine demonstrator yield regardless of the fix.**
+Every lever tried this session — mesh correction, budget escalation, fixed 4x budget, azimuth
+60->75, width cap — moved synthesis feasibility or plan quality, and NONE moved lift success.
+That is consistent evidence the blocker is the **grasp->lift transition**, not the planner.
+Do not spend more effort on synthesis for this object until that is understood.
+
+
 
 
 
