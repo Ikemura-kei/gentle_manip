@@ -379,6 +379,28 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-27 — ⛔ BOTH "head drives width" variants FAIL end-to-end. Timing cannot be
+delegated; only LEVEL can. The floor design is what survives.**
+· SIGHTED head: offline MAE 0.6 mm, closed-loop **0.000** success (probe AND canonical eval) —
+  it COPIES the current width (80→79.4, 28→28.6), so closure is never initiated; gripper
+  creeps 80→54 mm.
+· BLIND head (gripper width zeroed from its input): offline it genuinely LEARNS the ramp
+  (`78 81 80 … 66 42 20 … 32 28 29 32`, MAE **3.9 mm** vs true, so vision+pose DO carry timing
+  and level) — yet closed-loop it is **0.000** too, width stuck ~68 mm, lift onset detected in
+  only 2% of episodes. That is DISTRIBUTION SHIFT: offline it is teacher-forced on DEMO arm
+  trajectories; online the arm follows the POLICY and the visual cue it learned never fires.
+CONCLUSION (twice-confirmed, two different failure modes): the closure DECISION must stay with
+the policy — its width command is the only width signal trained closed-loop with its own
+feedback. A feedforward head can supply the LEVEL, not the TIMING.
+⇒ The floor `w_cmd = max(w_policy, w_level(scene))` is now the design of record. It is not a
+hack: it is the only decomposition that survives both experiments, and the user's original
+objection (per-step is the hard part) was the correct instinct. NOTE the level predictor
+should be the per-EPISODE scalar aux head (rturn-style, r=0.82) — a constant target, so
+copying is impossible by construction — not the trajectory head.
+QUOTA: cancelled the 5 orphaned Config-2 checkpoint evals (sighted-head ckpts ⇒ guaranteed
+0.000) left queued by their watchers.
+
+
 **2026-08-27 — ⛔ WIDTH-HEAD-DRIVES-WIDTH FAILS: the head learned to COPY its proprio input,
 so nothing ever initiates closure (0.00 success). Config 2 killed; blind variant launched.**
 End-to-end test of Config 1 (`state_600_whead.pt`, head spliced over the width dim, banner
