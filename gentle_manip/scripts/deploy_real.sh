@@ -445,14 +445,46 @@
 # with the shift OFF on uncorrected data; both pairings are self-consistent, the data differs.
 # REAL TABLE PLACEMENT: object inside x [0.29, 0.48], y [-0.11, 0.11] (robot-base frame).
 #
-ckpt=downloaded_runs/lulkx/checkpoint/state_600.pt
-normalization=downloaded_runs/lulkx/normalization.npz
-uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-  --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
-  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
-  --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/lulkx600 --shard-size 10 --max-steps 5000
+# ckpt=downloaded_runs/lulkx/checkpoint/state_600.pt
+# normalization=downloaded_runs/lulkx/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/lulkx600 --shard-size 10 --max-steps 5000
+
+# ── CLUSTER: njhbz/state_300 — the PLAIN v33b_shift9 ANCHOR (no paired-reg), seed 42.
+# The campaign's best sim policy (0.805/0.820 @300, sustained 28.1) and the A/B CONTROL for the
+# paired-reg family: njhbz(seed 42, plain) vs mqlxj(seed 42, paired-reg w=0.5) differ ONLY by
+# the regularizer, so that pair isolates item 16's real-robot effect. Same dataset, same wiring,
+# same MANDATORY shift-ACTIVE pairing as the lulkx block. Verified: normalization identical to
+# lulkx's and clean; 28 keys; probe PASSES (cmd z 0.1976 +-1.5 mm descending, grip 79.9 mm).
+#
+# ckpt=downloaded_runs/njhbz/checkpoint/state_300.pt
+# normalization=downloaded_runs/njhbz/normalization.npz
+
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/njhbz300 --shard-size 10 --max-steps 5000
+
+# ── CLUSTER: mqlxj/state_400 — paired-reg seed 42, completing the family (42 mqlxj / 27 avfnp /
+# 43 lulkx). Matched control for njhbz above (same seed, regularizer is the only difference).
+# Verified: normalization identical to lulkx's and clean; 28 keys, no paired-reg extras; probe
+# PASSES (cmd z 0.1983 +-0.8 mm descending — the tightest spread of the family, grip 80.0 mm).
+#
+# ckpt=downloaded_runs/mqlxj/checkpoint/state_400.pt
+# normalization=downloaded_runs/mqlxj/normalization.npz
+
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/mqlxj400 --shard-size 10 --max-steps 5000
 
 # ── CLUSTER: avfnp/state_400 — SEED SIBLING of lulkx (same v33b_shift9 dataset, same paired-reg
 # w=0.5, seed 27 vs lulkx's 43; different best checkpoint, 400 vs 600). Same wiring, same
