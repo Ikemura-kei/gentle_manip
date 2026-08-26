@@ -379,6 +379,21 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-27 — burial fix (d4aafeb) checked against OUR collections: no retro-action needed.**
+The local agent's soft-body spawn-burial fix (rotation about the centroid drops an elongated
+object's tip below the table) raised the question of whether our MUSHROOM data is affected —
+the mushroom's centroid sits ~14.8 mm above its base with a ~20 mm max radius, so an extreme
+rotation could in principle bury it ~5 mm. Checked empirically by success vs spawn tilt:
+· v3.3 anchor (n=696): flipped 0.963 vs upright 0.929; tilt>30° 0.948 vs 0.916
+· v3.4 smoke (n=64): flipped 1.000 vs upright 0.909
+· tofu 650 (n=616, already spawn-z-fixed): 0.986 vs 1.000
+Tilted/flipped spawns collect AS WELL OR BETTER everywhere, so burial never materially bit
+the compact objects — matching their note. Their fix is raise-only (previously-correct spawns
+untouched) and protects future elongated produce. Also adopting their second fallback marker:
+a MISSING `<episode>_grasp.png` means synthesis failed → fallback grasp (the renderer returns
+silently when the FEM has no contact), which is a cheaper check than the all-zero audit columns.
+
+
 **2026-08-26 — Banana: mis-prepped MESH fixed + escalating CMA budget added. Synthesis
 feasibility much improved; end-to-end demonstrator success only 0.38 -> 0.42, so the banana is
 STILL NOT ready for collection — the bottleneck moved from synthesis to execution.**
