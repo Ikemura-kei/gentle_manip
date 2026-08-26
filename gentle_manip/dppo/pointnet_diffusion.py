@@ -77,7 +77,7 @@ class PointNetDiffusionMLP(nn.Module):
                  time_dim=16, mlp_dims=(512, 512, 512), activation_type="ReLU",
                  out_activation_type="Identity", use_layernorm=False, residual_style=True,
                  aux_contact=False, aux_object_pos=False, aux_grasp_width=False,
-                 feed_width_pred=False, aux_hidden=128,
+                 feed_width_pred=False, width_traj_head=False, aux_hidden=128,
                  use_first_frame_context=False):
         super().__init__()
         pn = dict(pointnet or {})
@@ -123,6 +123,18 @@ class PointNetDiffusionMLP(nn.Module):
         # probe showed adaptation r=0.27-0.44 vs 0.85 in data; successes grip a constant ~28mm).
         self.width_head = (nn.Sequential(nn.Linear(self._aux_dim, aux_hidden), nn.ReLU(),
                                          nn.Linear(aux_hidden, 1)) if aux_grasp_width else None)
+        # PER-STEP WIDTH TRAJECTORY head (2026-08-27). Unlike `width_head` (ONE scalar per
+        # EPISODE, training-only auxiliary), this predicts the width for EVERY step of the
+        # action chunk and REPLACES the diffusion's width dim at inference. Rationale: pose is
+        # multimodal (diffusion suits it) but width given the object is unimodal REGRESSION —
+        # 9 probes showed the diffusion path collapses width to a constant (r~0.1) while a
+        # regression head on the SAME features reaches r~0.82. It reads `_cond_encoded` =
+        # [pointnet_feat (+ctx) ⊕ flattened proprio]; proprio carries the CURRENT gripper
+        # width, so the head knows where it is on the closing ramp and continues it instead of
+        # jumping to the final value.
+        self.width_traj_head = (nn.Sequential(nn.Linear(self._aux_dim, aux_hidden), nn.ReLU(),
+                                              nn.Linear(aux_hidden, horizon_steps))
+                                if width_traj_head else None)
 
     def _cond_encoded(self, cond: Dict[str, torch.Tensor]) -> torch.Tensor:
         """[pointnet_feat ⊕ flattened proprio] — the shared conditioning feature."""
@@ -145,6 +157,11 @@ class PointNetDiffusionMLP(nn.Module):
         if self.width_head is not None:
             out["grasp_width"] = self.width_head(ce)
         return out
+
+    def predict_width_traj(self, cond: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """(B, Ta) normalized commanded width for every step of the chunk (width_traj_head)."""
+        assert self.width_traj_head is not None, "width_traj_head is not enabled"
+        return self.width_traj_head(self._cond_encoded(cond))
 
     def forward(self, x, time, cond: Dict[str, torch.Tensor], **kwargs):
         """x: (B, Ta, Da); time: (B,); cond: {state:(B,To,Do), point_cloud:(B,Tpc,N,3)}."""

@@ -117,3 +117,53 @@ class WeightedAuxDiffusionModel(AuxDiffusionModel):
                 total = total + self.aux_grasp_width_weight * wmse
                 self._aux_log["loss_grasp_width"] = float(wmse.detach())
         return total
+
+
+class WidthHeadDiffusionModel(WeightedAuxDiffusionModel):
+    """Pose by diffusion, WIDTH by a per-step regression head (item 18, 2026-08-27).
+
+    Nine width probes established that the same encoder features yield r~0.82 through a
+    regression head and r~0.1 through the diffusion path: pose is genuinely multimodal (many
+    valid approaches -> diffusion is right) while width GIVEN the object is unimodal, and
+    diffusion's mean-seeking collapses it to a constant. A constant width is what over-squeezes
+    real mushrooms: the policy's MEAN width is fine (-1.6 mm) but it commands one width for a
+    12-46 mm size range, so 30% of grasps end >5 mm too tight.
+
+    So: the denoiser keeps all `action_dim` outputs (no shape change, so every existing config
+    and checkpoint still loads) but the width dim is REMOVED FROM ITS LOSS via the inherited
+    per-dim weights, and `width_traj_head` regresses the width for every step of the chunk.
+    `forward()` splices the head's prediction over the sampled width dim, so eval AND deploy
+    both get it with no call-site changes.
+
+    width_head_weight: MSE weight for the head (0 = head trained but unused in the loss).
+    diffusion_width_weight: the width dim's weight in the epsilon loss; 0.0 (default) stops the
+      denoiser being pulled toward the useless constant, which also frees encoder capacity.
+    """
+
+    def __init__(self, *args, width_head_weight: float = 1.0,
+                 diffusion_width_weight: float = 0.0, **kwargs):
+        w = kwargs.pop("action_dim_weights", None)
+        if w is None:                                   # default: pose dims 1, width dim as asked
+            w = [1.0] * (int(kwargs.get("action_dim", args[1] if len(args) > 1 else 7)) - 1) \
+                + [float(diffusion_width_weight)]
+        super().__init__(*args, action_dim_weights=w, **kwargs)
+        self.width_head_weight = float(width_head_weight)
+        assert getattr(self.network, "width_traj_head", None) is not None, \
+            "WidthHeadDiffusionModel requires network.width_traj_head=true"
+
+    def p_losses(self, x_start, cond: dict, t):
+        total = super().p_losses(x_start, cond, t)       # pose diffusion (+ any aux heads)
+        # Target is the GROUND-TRUTH chunk's width column — already in x_start, no new label.
+        pred = self.network.predict_width_traj(cond)                    # (B, Ta)
+        wmse = F.mse_loss(pred, x_start[:, :, -1])
+        self._aux_log["loss_width_traj"] = float(wmse.detach())
+        return total + self.width_head_weight * wmse
+
+    def forward(self, cond, deterministic=True):
+        """Sample pose by diffusion, then OVERWRITE the width dim with the head's prediction."""
+        out = super().forward(cond, deterministic=deterministic)
+        with torch.no_grad():
+            w = self.network.predict_width_traj(cond)                   # (B, Ta)
+        traj = out.trajectories.clone()
+        traj[:, :, -1] = w.to(traj.dtype)
+        return out._replace(trajectories=traj)

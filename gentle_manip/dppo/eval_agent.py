@@ -30,6 +30,19 @@ class _DiffusionPolicy:
         # the width head's prediction is added back here at inference. Unset = no-op.
         import os
         self._resid = None
+        # WIDTH-TRAJECTORY HEAD (item 18, 2026-08-27): the eval/deploy model class is
+        # DiffusionEval, NOT the training-time WidthHeadDiffusionModel, so that class's
+        # forward()-splice never runs here. Splice at the policy adapter instead: with
+        # GM_WIDTH_HEAD=1 the sampled chunk's width dim is REPLACED by the head's per-step
+        # regression. Assignment (not addition), so it is idempotent and cannot compound the
+        # way the gripper-offset bug did.
+        self._width_head = bool(os.environ.get("GM_WIDTH_HEAD")) and \
+            getattr(getattr(self.model, "network", None), "width_traj_head", None) is not None
+        if os.environ.get("GM_WIDTH_HEAD") and not self._width_head:
+            raise RuntimeError("GM_WIDTH_HEAD=1 but this checkpoint has no width_traj_head — add "
+                               "+model.network.width_traj_head=true to the eval overrides")
+        if self._width_head:
+            print("[eval_agent] width-trajectory HEAD active (width dim from regression head)", flush=True)
         rw = os.environ.get("GM_RESIDUAL_WIDTH")
         if rw:
             nz = np.load(rw)
@@ -45,6 +58,8 @@ class _DiffusionPolicy:
             cond = {k: torch.from_numpy(np.asarray(obs[k])).float().to(self.device)
                     for k in self.obs_keys}
             traj = self.model(cond=cond, deterministic=True).trajectories.cpu().numpy()
+            if self._width_head:
+                traj[:, :, -1] = self.model.network.predict_width_traj(cond).cpu().numpy()
             if self._resid is not None:
                 s_lo, s_hi, a_lo, a_hi = self._resid
                 pred = self.model.network.aux_predict(cond)["grasp_width"].cpu().numpy()[:, 0]
