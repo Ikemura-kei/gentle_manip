@@ -16,6 +16,17 @@ was implicated and the proprioceptive one exonerated.
 Expected for a healthy policy at episode start: gripper stays OPEN (~80 mm) and commanded z
 DESCENDS below the current end-effector height, on every row.
 
+TWO THINGS THE PROBE GETS WRONG IF YOU ARE NOT CAREFUL:
+  1. **Feed the real variant the policy TRAINED on.** A v33b_shift9 policy must be probed with
+     `single_lift_mushroom_real_merged_shift9mm`, an uncorrected-slice policy with
+     `single_lift_mushroom_real_merged`. Probing the poisoned orkam with SHIFT-CORRECTED clouds
+     made it PASS; with its own uncorrected clouds it fails outright (grip 56 mm, z spread
+     +-30 mm). Wrong input = wrong verdict, in both directions.
+  2. **Diffusion sampling starts from random noise**, so a single draw is a noisy verdict — a
+     marginal policy flips PASS/FAIL between identical runs. `--n-samples` (default 8) averages
+     and reports the spread; the spread is itself diagnostic (a healthy policy sits at +-1-2 mm
+     on z and +-0.0 mm on the gripper).
+
     uv run --project envs/dppo python examples/sim2real_diagnose/probe_policy_real_obs.py \
         --ckpt downloaded_runs/afucm/checkpoint/state_400.pt \
         --normalization downloaded_runs/afucm/normalization.npz \
@@ -106,6 +117,9 @@ def main() -> None:
     ap.add_argument("--denoising", type=int, default=20)
     ap.add_argument("--visual-dim", type=int, default=512)
     ap.add_argument("--mlp-dims", type=int, nargs="+", default=[1024, 1024, 1024])
+    ap.add_argument("--n-samples", type=int, default=8,
+                    help="diffusion sampling starts from random noise, so a single draw is a "
+                         "noisy verdict — average this many (default 8) and threshold the mean")
     args = ap.parse_args()
 
     from gentle_manip.actions.action_config import ActionConfig
@@ -124,19 +138,23 @@ def main() -> None:
             ("REAL proprio + REAL cloud", real))
 
     print(f"ckpt: {args.ckpt}")
-    print("healthy policy: gripper stays ~80 mm and commanded z DESCENDS on every row\n")
+    print(f"healthy policy: gripper ~80 mm and commanded z DESCENDS on every row "
+          f"(mean of {args.n_samples} diffusion samples)\n")
     bad = False
     for name, obs in rows:
-        raw = predict(model, stats, obs, args.cond_steps, args.act_steps)
-        dec = np.stack([pipe.process(a.reshape(1, -1))[0] for a in raw])
+        z0, g0 = [], []
+        for _ in range(args.n_samples):
+            raw = predict(model, stats, obs, args.cond_steps, args.act_steps)
+            dec = np.stack([pipe.process(a.reshape(1, -1))[0] for a in raw])
+            z0.append(dec[0, 2]); g0.append(dec[0, -1] * 1000)
+        z0, g0 = np.array(z0), np.array(g0)
         z_here = float(obs["ee_pos"][0][2])
-        grip = dec[:, -1] * 1000
-        climbing = dec[0, 2] > z_here + 0.002
-        closing = grip[0] < 70.0
+        climbing = z0.mean() > z_here + 0.002
+        closing = g0.mean() < 70.0
         flag = " <-- SUSPECT" if (climbing or closing) else ""
+        print(f"  {name:26s} ee_z {z_here:.4f} -> cmd z {z0.mean():.4f} +-{z0.std()*1000:.1f}mm "
+              f"({'CLIMB' if climbing else 'descend'})  grip {g0.mean():5.1f} +-{g0.std():.1f} mm{flag}")
         bad |= climbing or closing
-        print(f"  {name:26s} ee_z {z_here:.4f} -> cmd z {np.round(dec[:, 2], 4)}  "
-              f"grip(mm) {np.round(grip, 1)}{flag}")
     print("\nRESULT:", "FAIL — do not deploy" if bad else "PASS")
     raise SystemExit(1 if bad else 0)
 
