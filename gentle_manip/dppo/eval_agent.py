@@ -48,6 +48,7 @@ class _DiffusionPolicy:
         if os.environ.get("GM_WIDTH_FLOOR") and not self._width_floor:
             raise RuntimeError("GM_WIDTH_FLOOR=1 but this checkpoint has no aux width_head — add "
                                "+model.network.aux_grasp_width=true to the eval overrides")
+        self._floor_latch = None
         if self._width_floor:
             print("[eval_agent] width FLOOR active (policy timing, head level)", flush=True)
         rw = os.environ.get("GM_RESIDUAL_WIDTH")
@@ -58,7 +59,13 @@ class _DiffusionPolicy:
             print(f"[eval_agent] residual-width ACTIVE (norm from {rw})", flush=True)
 
     def reset(self):
-        pass
+        # LATCH (2026-08-27, user found the bug): the width floor must be a per-EPISODE
+        # constant. Recomputing it every step re-ran the level head on LIFT frames — object
+        # airborne, gripper occluding it, i.e. far outside what the head was trained/validated
+        # on (0/15/30% of the episode, object unoccluded) — so the prediction drifted UP and
+        # max() OPENED the gripper mid-hold, visibly loosening after a successful lift.
+        # Latch on the first act() of each episode and hold.
+        self._floor_latch = None
 
     def act(self, obs):
         with torch.no_grad():
@@ -76,8 +83,10 @@ class _DiffusionPolicy:
                 # cannot compound like the additive gripper-offset bug. Both "head drives the
                 # whole channel" variants failed (sighted copied its input; blind could not
                 # trigger closure in closed loop) — this is the decomposition that survived.
-                lvl = self.model.network.aux_predict(cond)["grasp_width"].cpu().numpy()[:, 0]
-                traj[:, :, -1] = np.maximum(traj[:, :, -1], lvl[:, None])
+                if getattr(self, "_floor_latch", None) is None:
+                    self._floor_latch = self.model.network.aux_predict(cond)["grasp_width"] \
+                        .cpu().numpy()[:, 0]                       # (n_env,) held for the episode
+                traj[:, :, -1] = np.maximum(traj[:, :, -1], self._floor_latch[:, None])
             if self._resid is not None:
                 s_lo, s_hi, a_lo, a_hi = self._resid
                 pred = self.model.network.aux_predict(cond)["grasp_width"].cpu().numpy()[:, 0]
