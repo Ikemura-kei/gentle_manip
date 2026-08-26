@@ -839,6 +839,15 @@ def main() -> None:
     p.add_argument("--grasp-voxel-div",   type=int,   default=14,   help="FEM remesh resolution (keep ndof<~5k)")
     p.add_argument("--grasp-target-tets", type=int,   default=1500, help="FEM target tet count")
     p.add_argument("--grasp-n-starts",    type=int,   default=6,    help="CMA multi-start count")
+    p.add_argument("--keep-synth-failures", action="store_true",
+                   help="SAVE episodes whose grasp synthesis failed and fell back to the default "
+                        "top-down grasp. Off by default because those demos are actively HARMFUL: "
+                        "the fallback closes to a fixed 45 mm regardless of the object, and the "
+                        "old comment's assumption that such an episode 'may not lift -> simply "
+                        "won't be saved' is FALSE for a wide object -- on the banana (70 mm across "
+                        "the crescent) it CRUSHES the object and lifts it, so it was saved as a "
+                        "success. Measured 2026-08-26: 5 of 8 saved banana episodes were crushing "
+                        "fallbacks. A demonstrator that crushes teaches a policy that crushes.")
     p.add_argument("--grasp-escalate", type=int, default=2,
                    help="On synthesis failure, retry with DOUBLED search budget this many times "
                         "(n_starts and maxfevals both x2, x4, ...). Objects whose feasible set is "
@@ -1105,6 +1114,7 @@ def main() -> None:
 
     total_saved  = 0
     total_failed = 0
+    total_fallback_dropped = 0   # succeeded-by-crushing fallback demos, dropped
     batch_idx   = 0
     shard_buf:  List[dict] = []
     shard_idx   = 0
@@ -1194,6 +1204,7 @@ def main() -> None:
             fem_mesh = actual_mesh
             print(f"  FEM: {fem_meta['tets']} tets, ndof={fem_meta['ndof']}, gpu={fem_meta['gpu']}")
         all_best_x = []
+        synth_failed: set[int] = set()      # envs running the fallback grasp (see --keep-synth-failures)
         all_grasp  = []                                          # per-env synthesis dict (for the grasp-pose viz)
         for i in range(n):
             cma_seed = int(cma_seed_rng.integers(1, 2**31 - 1))
@@ -1258,6 +1269,7 @@ def main() -> None:
                 r = {"x": best_x, "stress_top10": None, "grip": None, "align": None,
                      "pressure": None, "min_pad_area": None, "width_face": None}
                 print(f"  Env {i}: SYNTH FAILED -> default top-down grasp (fallback)")
+                synth_failed.add(i)
             all_best_x.append(best_x); all_grasp.append(r)
             if r.get("stress_top10") is not None:
                 print(f"  Env {i}: stress={r['stress_top10']:.0f}Pa grip={r['grip']:.3f}N align={r['align']:.3f}"
@@ -1345,6 +1357,13 @@ def main() -> None:
                 if not args.keep_failures:
                     continue
 
+            if i in synth_failed and not args.keep_synth_failures:
+                # Fallback (no synthesized grasp): drop the demo even though it "succeeded" — it
+                # succeeded by crushing. The failure video above is still written for inspection.
+                total_fallback_dropped += 1
+                print(f"    ep skipped: env {i} used the FALLBACK grasp (synthesis failed)")
+                continue
+
             obs_list = obs_bufs[i]
             if not obs_list:
                 continue
@@ -1392,12 +1411,15 @@ def main() -> None:
     print(f"  Episodes failed  : {total_failed}")
     print(f"  Total attempts   : {total_attempts}")
     print(f"  Success rate     : {success_rate*100:.1f}%")
+    if total_fallback_dropped:
+        print(f"  Fallback dropped : {total_fallback_dropped}  (synthesis failed -> crushing demo, not saved)")
     print(f"  Elapsed          : {elapsed/60:.1f} min")
     print(f"  Data             : {data_path}")
 
     stats = {
         "episodes_saved":  total_saved,
         "episodes_failed": total_failed,
+        "episodes_fallback_dropped": total_fallback_dropped,
         "total_attempts":  total_attempts,
         "success_rate":    round(success_rate, 4),
         "elapsed_min":     round(elapsed / 60, 2),

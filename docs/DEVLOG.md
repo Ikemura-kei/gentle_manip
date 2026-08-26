@@ -445,9 +445,53 @@ The area floor IS settled, on the end-to-end metric rather than on a quality arg
 0.51-0.69, one at 24.6 kPa against the banana's 25 kPa yield) that synthesize fine and then drop
 the object. **Keep the area floor at 20 mm2.**
 
-**Next lead for the banana** (untested): the failure is now at execution, so look at the
-grasp->lift transition rather than at synthesis — the `fail*.mp4` clips in 26-08-26-zuo are the
-place to start.
+**FOLLOW-UP the same day — the banana's 0.42 was an ARTEFACT. Its real demonstrator success on
+legitimate grasps is ~0.** User inspection of the `26-08-26-zuo` videos found (a) some clips have
+no `_grasp.png`, (b) the top-down grasp "lifts the banana but completely crushes it", and (c) the
+banana spawns partly BURIED for near-straight orientations. All three checked out, and together
+they invalidate the earlier number.
+
+1. **Missing `_grasp.png` == synthesis failed == FALLBACK grasp.** `finger_viz.render_grasp_pose`
+   does `sig = grasp_stress_voigt(...); if sig is None: return False` — a SILENT no-write, no
+   exception, so nothing appears in the log (zero "grasp viz failed" messages). A fallback grasp
+   has no FEM contact, so `sig` is None. The missing PNG is a reliable fallback marker.
+2. **The fallback grasp CRUSHES, and its episodes were being SAVED as successes.** The fallback is
+   a fixed `w=0.045` top-down grasp regardless of object. On the banana (70 mm across the crescent)
+   closing to 45 mm compresses it ~25 mm: it crushes AND lifts, so it passed the success test and
+   entered the dataset. The code comment asserting such an episode "may not lift -> simply won't be
+   saved" is FALSE for any object wider than 45 mm. **5 of the 8 saved `zuo` episodes were crushing
+   fallbacks.** Fixed: fallback episodes are now DROPPED (`--keep-synth-failures` to restore the old
+   behaviour), counted in `stats.yaml` as `episodes_fallback_dropped`.
+3. **Soft-body spawn DR buried the banana** (`genesis_worker.py`). Rotation DR rotates MPM particles
+   about their CENTROID and then shifts only in xy — no z re-seat. For a compact object that is
+   harmless, but the banana's half-length is 4.75 cm, so a 45 deg pitch swings a tip ~3.4 cm below a
+   centroid sitting only ~1.0 cm above the table. **Measured in `zuo`: object-centre z at t=0 was
+   0.0071-0.0098 m when the flat half-thickness alone is 0.0093 m** — and a properly-resting ROTATED
+   elongated object should sit HIGHER than that, not lower. Fixed by re-seating each env so its
+   lowest particle returns to its pre-rotation resting height, clamped to RAISE-ONLY so correctly
+   resting objects (and every previously collected object) are untouched.
+
+**The consequence.** Re-running the exact `zuo` config with the fallback drop: across 3 batches
+(24 spawns) there were 5 successful syntheses, **6 fallback-crush episodes dropped, and 0 genuine
+grasp episodes saved**. Batch 1 skipped envs 3 and 6 — precisely the envs `zuo` had saved as
+`ep0002_env3` / `ep0003_env6`. **So the banana's ~0.42 demonstrator success was almost entirely
+crushing fallbacks; on legitimate synthesized grasps it is near zero.** The banana is much further
+from usable than the earlier entry implied, and no banana dataset should be collected until a
+synthesized grasp can actually lift it.
+
+**Two levers tested and REJECTED for the banana:**
+- *More CMA budget.* Escalating to x16 makes a fully-failing env ~31x base cost (1145+2290+4580+
+  9160+18320 fevals) — one batch ran >20 min inside a single env and had to be killed. And a fixed
+  4x budget gave the SAME demonstrator success as none (0.381 both). Budget raises SYNTHESIS
+  feasibility, not lift success. Keep `--grasp-escalate 2`.
+- *Loosening the camera-azimuth bound 60 -> 75 deg.* Gave 4/8 synthesis, IDENTICAL to 60, so the
+  occlusion bound was never the binding constraint. It also admitted a 33.0 kPa grasp against the
+  banana's 25 kPa yield. Not adopted.
+
+**Where the banana actually fails is the grasp->lift transition**, on grasps the planner rates as
+good (align up to 0.97, stress 12-15 kPa). That is the only thing worth investigating next; the
+`fail*.mp4` clips in `26-08-26-tfi` are genuine-grasp failures with the fallbacks removed.
+
 
 **Negative result — medial-axis seeding does NOT help (`--grasp-medial-seeds`, default OFF).**
 Seeding CMA from deep-interior medial points (each closing perpendicular to the local tangent,
