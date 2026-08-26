@@ -379,6 +379,10 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-26 — Banana: mis-prepped MESH fixed + escalating CMA budget added. Synthesis
+feasibility much improved; end-to-end demonstrator success only 0.38 -> 0.42, so the banana is
+STILL NOT ready for collection — the bottleneck moved from synthesis to execution.**
+
 **2026-08-27 — v3.4 smoke (yaw≤55° home-frame · n-grasp 30 · squeeze 3 mm): 93.8%, IDENTICAL
 to the v3.3 anchor, with better contact on every axis.** `26-08-26-cdg`, 64 attempts, all
 three flags verified in the launch line.
@@ -488,13 +492,85 @@ Two independent bugs, found in this order:
    descriptor. A **bbox-derived** descriptor would be actively wrong here: the banana's bbox reads
    as a large easy object while its graspable local width is only 17 mm.
 
-**Measured, collector under full DR (8 envs):** old mesh 1-2/16; new mesh alone 2/8; new mesh +
-escalation **4/8**, and the grasps are now proper local-width grasps (w 30-35 mm, align
-0.77-0.94, stress 15-21 kPa) instead of crescent spans. Dropping the area floor 20 -> 10 mm2
-raises the count to 6/8 but **admits bad grasps** — 3 of the 6 span the crescent tips (w 75-79 mm,
-align 0.51-0.69, one at 24.6 kPa against the banana's 25 kPa yield, i.e. bruising). Since
-demonstrator quality caps the learned policy, **keep the area floor at 20 mm2 and rely on
-escalation**; ~50 % demonstrator success just means collection takes ~2x longer.
+**Measured, collector under full DR (8 envs).** Two DIFFERENT metrics, and they disagree —
+read them carefully:
+
+*Synthesis feasibility* (does CMA return a grasp at all), first batch: old mesh 1-2/16; new mesh
+alone 2/8; new mesh + escalation **4/8**, and the grasps are now proper local-width grasps
+(w 30-35 mm, align 0.77-0.94, stress 15-21 kPa) instead of crescent spans.
+
+*Demonstrator success* (does the episode actually lift and hold — the metric that matters for
+the dataset), from each run's `stats.yaml`:
+
+| run | config | success | attempts |
+|---|---|---|---|
+| 26-08-26-zbj | OLD mesh + medial seeding | 0.400 | 20 |
+| 26-08-26-qqw | new mesh, no escalation | 0.381 | 21 |
+| 26-08-26-fsl | new mesh, fixed 4x budget | 0.381 | 21 |
+| **26-08-26-zuo** | **new mesh + escalation, area 20 mm2** | **0.421** | 19 |
+| 26-08-26-hli | new mesh + escalation, area 10 mm2 | 0.211 | 38 |
+
+**Escalation raises SYNTHESIS feasibility a lot but end-to-end demonstrator success barely at
+all (0.381 -> 0.421, and the old mesh scored 0.400 — within noise).** The extra grasps it finds
+mostly fail to EXECUTE. The bottleneck has therefore MOVED, not closed: from "CMA cannot find a
+grasp" to "the grasp it finds does not hold in MPM". Do not read the 2/8 -> 4/8 feasibility jump
+as a fix. Banana at ~0.42 remains far below mushroom/strawberry (~0.94-1.0) and is **not yet good
+enough to collect a training set from** — a demonstrator this weak biases the dataset toward
+whatever it happens to manage (see the near-perfect-demonstrator note in CLAUDE.md).
+
+The area floor IS settled, on the end-to-end metric rather than on a quality argument: dropping
+20 -> 10 mm2 raised first-batch feasibility to 6/8 but HALVED demonstrator success (0.421 ->
+0.211), because the grasps the lower floor admits are the crescent spans (w 75-79 mm, align
+0.51-0.69, one at 24.6 kPa against the banana's 25 kPa yield) that synthesize fine and then drop
+the object. **Keep the area floor at 20 mm2.**
+
+**FOLLOW-UP the same day — the banana's 0.42 was an ARTEFACT. Its real demonstrator success on
+legitimate grasps is ~0.** User inspection of the `26-08-26-zuo` videos found (a) some clips have
+no `_grasp.png`, (b) the top-down grasp "lifts the banana but completely crushes it", and (c) the
+banana spawns partly BURIED for near-straight orientations. All three checked out, and together
+they invalidate the earlier number.
+
+1. **Missing `_grasp.png` == synthesis failed == FALLBACK grasp.** `finger_viz.render_grasp_pose`
+   does `sig = grasp_stress_voigt(...); if sig is None: return False` — a SILENT no-write, no
+   exception, so nothing appears in the log (zero "grasp viz failed" messages). A fallback grasp
+   has no FEM contact, so `sig` is None. The missing PNG is a reliable fallback marker.
+2. **The fallback grasp CRUSHES, and its episodes were being SAVED as successes.** The fallback is
+   a fixed `w=0.045` top-down grasp regardless of object. On the banana (70 mm across the crescent)
+   closing to 45 mm compresses it ~25 mm: it crushes AND lifts, so it passed the success test and
+   entered the dataset. The code comment asserting such an episode "may not lift -> simply won't be
+   saved" is FALSE for any object wider than 45 mm. **5 of the 8 saved `zuo` episodes were crushing
+   fallbacks.** Fixed: fallback episodes are now DROPPED (`--keep-synth-failures` to restore the old
+   behaviour), counted in `stats.yaml` as `episodes_fallback_dropped`.
+3. **Soft-body spawn DR buried the banana** (`genesis_worker.py`). Rotation DR rotates MPM particles
+   about their CENTROID and then shifts only in xy — no z re-seat. For a compact object that is
+   harmless, but the banana's half-length is 4.75 cm, so a 45 deg pitch swings a tip ~3.4 cm below a
+   centroid sitting only ~1.0 cm above the table. **Measured in `zuo`: object-centre z at t=0 was
+   0.0071-0.0098 m when the flat half-thickness alone is 0.0093 m** — and a properly-resting ROTATED
+   elongated object should sit HIGHER than that, not lower. Fixed by re-seating each env so its
+   lowest particle returns to its pre-rotation resting height, clamped to RAISE-ONLY so correctly
+   resting objects (and every previously collected object) are untouched.
+
+**The consequence.** Re-running the exact `zuo` config with the fallback drop: across 3 batches
+(24 spawns) there were 5 successful syntheses, **6 fallback-crush episodes dropped, and 0 genuine
+grasp episodes saved**. Batch 1 skipped envs 3 and 6 — precisely the envs `zuo` had saved as
+`ep0002_env3` / `ep0003_env6`. **So the banana's ~0.42 demonstrator success was almost entirely
+crushing fallbacks; on legitimate synthesized grasps it is near zero.** The banana is much further
+from usable than the earlier entry implied, and no banana dataset should be collected until a
+synthesized grasp can actually lift it.
+
+**Two levers tested and REJECTED for the banana:**
+- *More CMA budget.* Escalating to x16 makes a fully-failing env ~31x base cost (1145+2290+4580+
+  9160+18320 fevals) — one batch ran >20 min inside a single env and had to be killed. And a fixed
+  4x budget gave the SAME demonstrator success as none (0.381 both). Budget raises SYNTHESIS
+  feasibility, not lift success. Keep `--grasp-escalate 2`.
+- *Loosening the camera-azimuth bound 60 -> 75 deg.* Gave 4/8 synthesis, IDENTICAL to 60, so the
+  occlusion bound was never the binding constraint. It also admitted a 33.0 kPa grasp against the
+  banana's 25 kPa yield. Not adopted.
+
+**Where the banana actually fails is the grasp->lift transition**, on grasps the planner rates as
+good (align up to 0.97, stress 12-15 kPa). That is the only thing worth investigating next; the
+`fail*.mp4` clips in `26-08-26-tfi` are genuine-grasp failures with the fallbacks removed.
+
 
 **Negative result — medial-axis seeding does NOT help (`--grasp-medial-seeds`, default OFF).**
 Seeding CMA from deep-interior medial points (each closing perpendicular to the local tangent,

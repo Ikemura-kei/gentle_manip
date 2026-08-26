@@ -122,7 +122,19 @@ class GenesisWorker:
                 parts = np.asarray(base_particles, np.float32).reshape(self.num_envs, -1, 3)
                 if rot_mat is not None:                           # rotate each env about its centroid
                     cen = parts.mean(axis=1, keepdims=True)
+                    z0 = parts[:, :, 2].min(axis=1)               # resting height BEFORE the rotation
                     parts = np.einsum("nij,npj->npi", rot_mat, parts - cen) + cen
+                    # Rotating about the CENTROID does not preserve the resting height: for an
+                    # ELONGATED object a pitch/roll swings the far tip well below the centroid, so
+                    # the object spawns partly UNDERGROUND. The banana is 9.5 cm long with its
+                    # centroid only ~1.0 cm above the table, so a 45 deg pitch buries a tip ~2 cm
+                    # (half-length 4.75 cm * sin45 = 3.4 cm drop). Compact objects (mushroom,
+                    # strawberry, raspberry) barely move, which is why this went unnoticed.
+                    # Re-seat each env so its lowest particle returns to its original height.
+                    # Clamped to RAISE ONLY, so an object that was already resting correctly is
+                    # untouched and previously-collected behaviour is preserved.
+                    dz = np.maximum(z0 - parts[:, :, 2].min(axis=1), 0.0)
+                    parts[:, :, 2] += dz[:, None]
                 shift = np.zeros((self.num_envs, 1, 3), dtype=np.float32)
                 if object_dxy is not None:
                     shift[:, 0, :2] = np.asarray(object_dxy, dtype=np.float32)
