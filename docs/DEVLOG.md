@@ -379,8 +379,9 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
-**2026-08-26 — Banana synthesis UNBLOCKED. Root cause was a MIS-PREPPED MESH, not the grasp
-search; the general fix is ESCALATING CMA BUDGET on failure (`--grasp-escalate`, default 2).**
+**2026-08-26 — Banana: mis-prepped MESH fixed + escalating CMA budget added. Synthesis
+feasibility much improved; end-to-end demonstrator success only 0.38 -> 0.42, so the banana is
+STILL NOT ready for collection — the bottleneck moved from synthesis to execution.**
 Two independent bugs, found in this order:
 
 1. **The installed `banana.obj` was a 2.8x-oversized wedge, not a banana.** The raw scan aspect
@@ -412,13 +413,41 @@ Two independent bugs, found in this order:
    descriptor. A **bbox-derived** descriptor would be actively wrong here: the banana's bbox reads
    as a large easy object while its graspable local width is only 17 mm.
 
-**Measured, collector under full DR (8 envs):** old mesh 1-2/16; new mesh alone 2/8; new mesh +
-escalation **4/8**, and the grasps are now proper local-width grasps (w 30-35 mm, align
-0.77-0.94, stress 15-21 kPa) instead of crescent spans. Dropping the area floor 20 -> 10 mm2
-raises the count to 6/8 but **admits bad grasps** — 3 of the 6 span the crescent tips (w 75-79 mm,
-align 0.51-0.69, one at 24.6 kPa against the banana's 25 kPa yield, i.e. bruising). Since
-demonstrator quality caps the learned policy, **keep the area floor at 20 mm2 and rely on
-escalation**; ~50 % demonstrator success just means collection takes ~2x longer.
+**Measured, collector under full DR (8 envs).** Two DIFFERENT metrics, and they disagree —
+read them carefully:
+
+*Synthesis feasibility* (does CMA return a grasp at all), first batch: old mesh 1-2/16; new mesh
+alone 2/8; new mesh + escalation **4/8**, and the grasps are now proper local-width grasps
+(w 30-35 mm, align 0.77-0.94, stress 15-21 kPa) instead of crescent spans.
+
+*Demonstrator success* (does the episode actually lift and hold — the metric that matters for
+the dataset), from each run's `stats.yaml`:
+
+| run | config | success | attempts |
+|---|---|---|---|
+| 26-08-26-zbj | OLD mesh + medial seeding | 0.400 | 20 |
+| 26-08-26-qqw | new mesh, no escalation | 0.381 | 21 |
+| 26-08-26-fsl | new mesh, fixed 4x budget | 0.381 | 21 |
+| **26-08-26-zuo** | **new mesh + escalation, area 20 mm2** | **0.421** | 19 |
+| 26-08-26-hli | new mesh + escalation, area 10 mm2 | 0.211 | 38 |
+
+**Escalation raises SYNTHESIS feasibility a lot but end-to-end demonstrator success barely at
+all (0.381 -> 0.421, and the old mesh scored 0.400 — within noise).** The extra grasps it finds
+mostly fail to EXECUTE. The bottleneck has therefore MOVED, not closed: from "CMA cannot find a
+grasp" to "the grasp it finds does not hold in MPM". Do not read the 2/8 -> 4/8 feasibility jump
+as a fix. Banana at ~0.42 remains far below mushroom/strawberry (~0.94-1.0) and is **not yet good
+enough to collect a training set from** — a demonstrator this weak biases the dataset toward
+whatever it happens to manage (see the near-perfect-demonstrator note in CLAUDE.md).
+
+The area floor IS settled, on the end-to-end metric rather than on a quality argument: dropping
+20 -> 10 mm2 raised first-batch feasibility to 6/8 but HALVED demonstrator success (0.421 ->
+0.211), because the grasps the lower floor admits are the crescent spans (w 75-79 mm, align
+0.51-0.69, one at 24.6 kPa against the banana's 25 kPa yield) that synthesize fine and then drop
+the object. **Keep the area floor at 20 mm2.**
+
+**Next lead for the banana** (untested): the failure is now at execution, so look at the
+grasp->lift transition rather than at synthesis — the `fail*.mp4` clips in 26-08-26-zuo are the
+place to start.
 
 **Negative result — medial-axis seeding does NOT help (`--grasp-medial-seeds`, default OFF).**
 Seeding CMA from deep-interior medial points (each closing perpendicular to the local tangent,
