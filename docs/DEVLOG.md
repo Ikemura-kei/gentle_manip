@@ -374,6 +374,28 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-26 — ⭐ THE SMALL-OBJECT GRADIENT IS GONE (avfnp 0.90 small / 0.90 big) — and it
+was solved WITHOUT width adaptation.** Width probes on the shift9_preg family (same
+protocol/geometries as all nine earlier probes):
+
+| policy | at-grasp corr | small-half ever | big-half ever | gap |
+|---|---|---|---|---|
+| afucm (foundation) | −0.04 | 0.57 | 0.77 | 0.20 |
+| njhbz (shift9, plain) | 0.083 | 0.80 | 0.97 | 0.17 |
+| lulkx (shift9+paired) | 0.138 | 0.83 | 0.93 | 0.10 |
+| **avfnp (shift9+paired)** | 0.295 | **0.90** | **0.90** | **0.00** |
+
+Small-object ever-success went 0.57 → 0.90 on the identical probe while commanded width
+stayed essentially flat (0.295 at best, vs the data's 0.85). CONCLUSION for items 17/18/
+18b/iter-4: the small-object failure mode that motivated the entire width-adaptation
+thread is fixed by DATA QUALITY + DOMAIN ALIGNMENT (v3.3 synthesis · 4-mesh pool · scale
+[0.8,1.5] · bias-corrected clouds · paired-feature consistency), NOT by teaching the
+policy to size its grip. Width adaptation remains an open scientific question (the head
+predicts at r≈0.8; no mechanism transfers that to the action) but is DEMOTED from the
+critical path — it is not what small objects needed. NOTE avfnp is the sim+probe star yet
+FAILS the real-obs hybrid row → deploy **lulkx/state_600** (0.820, gap 0.10, clean PASS).
+
+
 **2026-08-26 — eval sim-server HANGS: 7 occurrences, pattern identified, watchdog added
 (832dbe8).** Signature (prmaw@600, 5 shift9_preg evals, mqlxj@600 twice): the sim server's
 FPS **decays monotonically** (17→12, 12.6→11.3) and then the log goes SILENT; the job then
