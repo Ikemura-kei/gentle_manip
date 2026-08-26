@@ -374,6 +374,17 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-26 — fallback-contamination cross-check (prompted by the local agent's banana
+finding): ALL our collections are clean.** Their diagnosis — a blocked planner emits
+DEFAULT top-down fallback grasps that keep "success rate" high while the audit columns
+(stress/grip/align/min_pad) are all zero — is a check every collection should pass. Ran it:
+tofu v10 0% · tofu v11 0% · mushroom argmax (cze) 0% · **mushroom anchor 26-08-25-clq
+(njhbz's data) 2/696 = 0.3%** (success 0.938 → 0.941 excluding them, i.e. immaterial) ·
+tofu 650 in progress 0% (and 160/160 successful so far). So no result to date is inflated
+by fallbacks, and the tofu-policy failure remains purely a data-volume story. ADOPTED as a
+standing post-collection check alongside the pinch rate.
+
+
 **2026-08-26 — paired-reg file was NOT bias-corrected (user caught it); corrected variant
 built + 3 seeds launched.** `paired_cube3_clouds.npz` dates from 2026-08-23, three days
 before `shift_demo_clouds.py` existed, and its real half is uncorrected (real x-centroid
