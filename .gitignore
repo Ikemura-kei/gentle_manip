@@ -106,3 +106,7 @@ obj_meshes/*/runs/
 obj_meshes/*/prepped/
 obj_meshes/*/turntable*
 obj_meshes/*/_*.png
+# per-image mesh selection previews (same rule as obj_meshes/*/turntable*): the .obj +
+# report.json + _selection.json are the artifacts; the renders are large and regenerable.
+obj_meshes/*/selected/*.mp4
+obj_meshes/*/selected/*.gif

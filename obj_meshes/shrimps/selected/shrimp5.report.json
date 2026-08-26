@@ -1,0 +1,50 @@
+{
+  "object": "shrimps",
+  "tag": "shrimp5_seed2",
+  "seed": 2,
+  "source_view": "shrimp5",
+  "raw": {
+    "vertices": 738566,
+    "faces": 1473064,
+    "watertight": false,
+    "components": 1969
+  },
+  "floater_removal": {
+    "components_found": 1969,
+    "largest_component_area_fraction": 0.98071,
+    "components_discarded": 1968
+  },
+  "after_topology_clean": {
+    "vertices": 709030,
+    "faces": 1420630,
+    "watertight": true
+  },
+  "decimation_method": "quadric (fast_simplification), staged via [142063, 14206, 12000] -> dropped 177 component(s) shed by decimation",
+  "post_decimation_components": 178,
+  "watertight_method": "pre-decimation: already watertight; post-decimation: manifold3d",
+  "scaling": {
+    "applied": false,
+    "reason": "no measurements.json -- doc section 7 says do not guess the scale. Mesh is in TripoSG's normalised frame; multiply by (longest_axis_m / longest_axis_normalised) to make it metric.",
+    "longest_axis_normalised": 1.91066
+  },
+  "clean": {
+    "vertices": 5378,
+    "faces": 10884,
+    "is_watertight": true,
+    "is_winding_consistent": true,
+    "euler_number": -64,
+    "genus": 33,
+    "components": 1,
+    "volume_normalised": 0.38383214,
+    "bbox_normalised": [
+      1.91066,
+      1.445754,
+      0.472066
+    ],
+    "volume_is_positive": true
+  },
+  "hard_failures": [
+    "euler_number is -64, not 2 (genus 33: handles or holes)"
+  ],
+  "passed": false
+}

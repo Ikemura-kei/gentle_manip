@@ -379,6 +379,42 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-26 — shrimps: 8 images, one mesh PER IMAGE; euler gate 5/8 (10/24 candidates).**
+`obj_images/shrimps/` holds 8 DIFFERENT objects, not views of one, so a new mode:
+`scripts/mesh_from_photos/select_per_image.py` picks the best seed for each image and
+writes `obj_meshes/shrimps/selected/<image>.{obj,report.json,mp4,gif}`. It ALWAYS selects
+(ranked: passes gate, then |euler-2|, then winding-consistent, then watertight), because a
+caller asking for "all of them" cannot have gaps; the verdict travels in `_selection.json`.
+
+Per image: shrimp3 3/3, shrimp8 3/3, shrimp2 2/3, shrimp4 1/3, shrimp7 1/3, shrimp6 0/3,
+**shrimp1 0/3 (best euler -32)**, **shrimp5 0/3 (best euler -64, up to 1969 floaters)**.
+
+**Generalises the thin-structure finding:** the driver is not "appendages" specifically but
+ANY geometry where two surfaces approach within a voxel of the ~512^3 grid —
+(a) thin blades: shrimp1's splayed tail fan, (b) NEAR-CLOSED CURLS: shrimp5's tail almost
+meeting its body, which fuses into a torus, (c) fine crevices in torn flesh. shrimp3/8,
+which are smooth simple curls with well-separated ends, pass 3/3.
+
+**Gate vs. visual quality diverge — do not read FAIL as unusable.** shrimp6 (euler 0,
+genus 1) and shrimp1 (genus 17) look good; shrimp1's handles are confined to the tail fan
+and its body is clean. shrimp5 is the only one that is genuinely bad (lumpy, torn, holed).
+Since genus does not block tetgen, treat euler as triage, not rejection.
+
+**Watermarked stock input is a real confound**, not just a licensing note: shrimp1's Alamy
+watermark is tiled ACROSS the shrimp body and shrimp5/7/8 carry agency marks. Flagged to
+the user for any paper/dataset use.
+
+**prep_images.py gained** (a) `.webp/.bmp/.tif` support -- shrimp6.webp would have been
+silently skipped; (b) `keep_largest_alpha()`, dropping non-largest foreground blobs BEFORE
+the bbox crop, because stock agency banner bars are separate blobs that would otherwise
+stretch the crop box and shrink the subject to a fraction of the frame; (c) scipy
+`ndimage.label` replacing a pure-python flood fill that was far too slow at full res.
+
+**Infra:** first submission died with `cudaErrorDevicesUnavailable` on n37... actually on
+**n206** (the GPU was busy/unavailable); resubmitting with `--exclude=n206` succeeded on
+n37. Node-specific, not a code fault. TODO: cheap `torch.cuda` probe before the 2 GB
+pipeline load so a bad node fails in seconds.
+
 **2026-08-26 — REAL RESULT (user): every v33b/v3.3 checkpoint OVER-SQUEEZES and crushes;
 alzey remains the gentle, size-appropriate one. Diagnosed from the datasets.**
 1. **PRIMARY — the commanded grip is tighter.** Commanded width at closure: v33b_shift9

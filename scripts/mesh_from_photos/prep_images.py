@@ -30,6 +30,39 @@ def matte(img: Image.Image, session) -> Image.Image:
     return remove(img, session=session, bgcolor=(0, 0, 0, 0))
 
 
+def _label(fg: np.ndarray):
+    """Connected components of a boolean mask (scipy; the pure-python flood fill
+    this replaced was O(pixels) in interpreted code and far too slow at full res)."""
+    from scipy import ndimage
+    lbl, n = ndimage.label(fg)
+    return lbl, n
+
+
+def keep_largest_alpha(rgba: Image.Image) -> tuple[Image.Image, float, int]:
+    """Zero alpha outside the largest connected foreground blob.
+
+    Stock images carry agency banner bars (Alamy/Dreamstime) that rembg keeps as
+    foreground. They are separate blobs, but because the crop below is taken from the
+    alpha BOUNDING BOX, one banner at the image edge stretches the box and shrinks the
+    subject to a fraction of the frame. Dropping non-largest blobs first also removes
+    watermark specks and stray floaters.
+    """
+    a = np.array(rgba)[:, :, 3]
+    fg = a > 127
+    if not fg.any():
+        return rgba, 1.0, 0
+    lbl, n = _label(fg)
+    if n <= 1:
+        return rgba, 1.0, 0
+    sizes = np.bincount(lbl.ravel())
+    sizes[0] = 0
+    k = int(sizes.argmax())
+    kept_frac = float(sizes[k] / sizes.sum())
+    arr = np.array(rgba)
+    arr[:, :, 3] = np.where(lbl == k, arr[:, :, 3], 0)
+    return Image.fromarray(arr), kept_frac, n - 1
+
+
 def alpha_stats(alpha: np.ndarray) -> dict:
     """Numbers that expose the failure modes doc section 3 says to flag."""
     fg = alpha > 127
@@ -37,41 +70,22 @@ def alpha_stats(alpha: np.ndarray) -> dict:
     if not fg.any():
         return {"empty": True}
 
-    # Connected components via a simple flood fill (no scipy dependency here).
-    lbl = np.zeros(fg.shape, dtype=np.int32)
-    cur, sizes = 0, []
-    idx = np.argwhere(fg)
-    seen = np.zeros(fg.shape, dtype=bool)
-    for sy, sx in idx:
-        if seen[sy, sx]:
-            continue
-        cur += 1
-        stack, n = [(sy, sx)], 0
-        seen[sy, sx] = True
-        while stack:
-            y, x = stack.pop()
-            lbl[y, x] = cur
-            n += 1
-            for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-                ny, nx = y + dy, x + dx
-                if 0 <= ny < h and 0 <= nx < w and fg[ny, nx] and not seen[ny, nx]:
-                    seen[ny, nx] = True
-                    stack.append((ny, nx))
-        sizes.append(n)
-    sizes.sort(reverse=True)
+    lbl, n = _label(fg)
+    sizes = np.bincount(lbl.ravel())
+    sizes[0] = 0
+    order = np.sort(sizes[sizes > 0])[::-1]
     total = int(fg.sum())
 
     ys, xs = np.where(fg)
     border = bool(fg[0, :].any() or fg[-1, :].any() or fg[:, 0].any() or fg[:, -1].any())
-    # Soft/partial alpha suggests a shadow or a matting failure rather than a clean cut.
     soft = float(((alpha > 20) & (alpha < 235)).sum() / max(total, 1))
 
     return {
         "empty": False,
         "fg_fraction": round(total / (h * w), 4),
-        "n_components": len(sizes),
-        "largest_component_fraction": round(sizes[0] / total, 4),
-        "second_component_px": int(sizes[1]) if len(sizes) > 1 else 0,
+        "n_components": int(n),
+        "largest_component_fraction": round(float(order[0] / total), 4),
+        "second_component_px": int(order[1]) if len(order) > 1 else 0,
         "bbox_xyxy": [int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())],
         "touches_border": border,
         "soft_alpha_fraction": round(soft, 4),
@@ -106,13 +120,17 @@ def main() -> None:
     ap.add_argument("--margin", type=float, default=0.05)
     ap.add_argument("--size", type=int, default=1024)
     ap.add_argument("--model", default="u2net", help="rembg model (u2net | isnet-general-use)")
+    ap.add_argument("--keep-all-components", action="store_true",
+                    help="do NOT drop non-largest foreground blobs before cropping "
+                         "(default is to drop them; see keep_largest_alpha)")
     args = ap.parse_args()
 
     in_dir, out_dir = Path(args.input_dir), Path(args.output_dir) / "prepped"
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    exts = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
     photos = sorted(p for p in in_dir.iterdir()
-                    if p.suffix.lower() in {".jpg", ".jpeg", ".png"} and not p.name.startswith("_"))
+                    if p.suffix.lower() in exts and not p.name.startswith("_"))
     if not photos:
         raise SystemExit(f"no photos in {in_dir}")
     # Canonical view order first, then anything else alphabetically.
@@ -124,6 +142,10 @@ def main() -> None:
     for p in photos:
         src = Image.open(p).convert("RGB")
         rgba = matte(src, session)
+        dropped_frac, dropped_n = 0.0, 0
+        if not args.keep_all_components:
+            rgba, kept, dropped_n = keep_largest_alpha(rgba)
+            dropped_frac = 1.0 - kept
         prepped = crop_and_resize(rgba, args.margin, args.size)
         prepped.save(out_dir / f"{p.stem}.png")
 
@@ -131,7 +153,13 @@ def main() -> None:
         st["source"] = p.name
         st["source_size"] = list(src.size)
         st["prepped_size"] = list(prepped.size)
+        st["pre_crop_blobs_dropped"] = dropped_n
+        st["pre_crop_area_dropped_fraction"] = round(dropped_frac, 4)
         st["warnings"] = w = []
+        if dropped_n:
+            w.append(f"dropped {dropped_n} non-largest foreground blob(s) before cropping "
+                     f"({dropped_frac:.1%} of matted area) -- check these were banners/"
+                     f"watermarks and not part of the object")
         if st.get("empty"):
             w.append("EMPTY MASK -- rembg found no foreground")
         else:
@@ -166,8 +194,9 @@ def main() -> None:
     print(f"wrote {len(photos)} prepped views -> {out_dir}")
     for view, st in report["views"].items():
         flags = "; ".join(st["warnings"]) or "clean"
-        print(f"  {view:8s} fg={st.get('fg_fraction', 0):.3f} "
-              f"comps={st.get('n_components', 0)} -> {flags}")
+        print(f"  {view:18s} fg={st.get('fg_fraction', 0):.3f} "
+              f"comps={st.get('n_components', 0)} dropped={st.get('pre_crop_blobs_dropped', 0)}"
+              f" -> {flags}")
 
 
 if __name__ == "__main__":
