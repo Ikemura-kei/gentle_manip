@@ -379,6 +379,22 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-26 — BUG (mine, fixed upstream e4235c2): `--gripper-offset-m` fed back and walked
+the gripper OPEN.** I implemented the deploy-time open-up offset as a pure OUTPUT transform
+(bias the commanded width after smoothing/capping) and forgot the policy is CLOSED-LOOP on
+that same channel: it conditions on measured `gripper_width`, so the biased command makes
+the measurement return ~offset wider than anything in training, the policy reads that as
+"not closed yet / released", commands wider, and the offset re-adds the bias every tick —
+positive feedback, observed on the rig. FIX (local agent): subtract the offset from the
+width the POLICY sees; the robot still holds `offset` wider (the point of the knob) and the
+recording keeps the RAW obs.
+**GENERAL RULE, worth applying to any future deploy knob:** a persistent BIAS on a commanded
+channel that the policy also OBSERVES must be compensated in the observation, or it closes a
+feedback loop. (Rate-limit style filters — smooth_alpha, max_pos_step_m — are exempt: they
+add lag, not bias, and the policy is trained against controller lag.) Before shipping such a
+knob, ask "does the policy observe this channel?" — I did not.
+
+
 **2026-08-26 — shrimps: 8 images, one mesh PER IMAGE; euler gate 5/8 (10/24 candidates).**
 `obj_images/shrimps/` holds 8 DIFFERENT objects, not views of one, so a new mode:
 `scripts/mesh_from_photos/select_per_image.py` picks the best seed for each image and
