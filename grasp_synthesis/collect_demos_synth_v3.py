@@ -927,6 +927,14 @@ def main() -> None:
                    help=f"'firm' phase steps (post-grasp extra squeeze idea #1); default {N_FIRM}. "
                         "0 = NO firm phase at all — the grasp goes straight to lift at width_cls "
                         "(matches the pre-firm v1 collector, e.g. the cho dataset).")
+    p.add_argument("--grasp-medial-seeds", action="store_true",
+                   help="seed the CMA search along the object's MEDIAL AXIS (deep-interior points, "
+                        "spread by farthest-point, each closing perpendicular to the local tangent "
+                        "and sized by the LOCAL cross-section) instead of putting every start at the "
+                        "COM with a global-extent width. Required for elongated/non-convex objects "
+                        "(a banana's COM sits in a thin band: pads there bury or miss, and since all "
+                        "starts share that xy, more starts/evals cannot help). Off by default -> "
+                        "convex objects keep bit-identical behaviour.")
     p.add_argument("--grasp-yaw-max-deg", type=float, default=None,
                    help="bound the TOOL yaw about the gripper's HOME orientation (yaw 0), in deg, "
                         "at CMA time — box + seed clip, folded for the parallel-jaw 180-deg "
@@ -1012,6 +1020,7 @@ def main() -> None:
                         "held_run_max": args.held_run_max, "held_run_keep": args.held_run_keep,
                         "grasp_jitter_deg": args.grasp_jitter_deg,
                         "grasp_area_min_mm2": args.grasp_area_min_mm2,
+                        "grasp_medial_seeds": bool(args.grasp_medial_seeds),
                         "grasp_w_press": args.grasp_w_press,
                         "grasp_extra_close": args.grasp_extra_close},
         "dr": exp.dr,
@@ -1186,6 +1195,7 @@ def main() -> None:
                                     cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg,
                                     area_min=args.grasp_area_min_mm2 * 1e-6 * float(scene_dr['scale']) ** 2,
                                     w_press=(args.grasp_w_press or None),
+                                    medial_seeds=int(args.grasp_medial_seeds),
                                     **({"w_peak": args.grasp_w_peak} if args.grasp_w_peak is not None else {}),
                                     **({"w_area": args.grasp_w_area} if args.grasp_w_area is not None else {}),
                                     **({"w_tilt": args.grasp_w_tilt} if args.grasp_w_tilt is not None else {}),
@@ -1199,6 +1209,7 @@ def main() -> None:
                                         cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg,
                                         area_min=args.grasp_area_min_mm2 * 1e-6 * float(scene_dr['scale']) ** 2,
                                         w_press=(args.grasp_w_press or None),
+                                        medial_seeds=int(args.grasp_medial_seeds),
                                         **({"w_peak": args.grasp_w_peak} if args.grasp_w_peak is not None else {}),
                                         **({"w_area": args.grasp_w_area} if args.grasp_w_area is not None else {}),
                                     **({"w_tilt": args.grasp_w_tilt} if args.grasp_w_tilt is not None else {}),
