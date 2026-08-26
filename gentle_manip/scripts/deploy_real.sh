@@ -422,6 +422,38 @@
 #   --shard-size 10 \
 #   --max-steps 5000
 
+# ── CLUSTER: lulkx/state_600 — v33b_shift9 + PAIRED-REG (item 16, w=0.5, cube3 pairs), seed 43.
+# The first entry on the FIXED dataset: v33b re-converted the real slice properly and shift9 uses
+# the bias-corrected real clouds. Health-checked before recommending (do this for every co-train):
+#   * normalization is CLEAN — action z max 0.072 -> 0.269 m and gripper max 80.0 mm, i.e. the
+#     demos' real values. (The poisoned v33 read 0.75 -> 0.438 m and 44 mm; that is the tell.)
+#   * pre-deploy probe PASSES on all four obs combinations (sim/real proprio x sim/real cloud):
+#     descends and holds 80 mm open at t0. orkam/kjljs FAILED this same probe.
+#       uv run --project envs/dppo python examples/sim2real_diagnose/probe_policy_real_obs.py \
+#         --ckpt downloaded_runs/lulkx/checkpoint/state_600.pt \
+#         --normalization downloaded_runs/lulkx/normalization.npz \
+#         --real dataset/demos/single_lift_mushroom_real_merged_shift9mm \
+#         --sim dataset/demos/single_lift_mushroom_soft/26-08-25-zrg --sim-episode 3
+#   * checkpoint carries no paired-reg extras (28 keys, plain PointNetDiffusionMLP) — the
+#     regularizer is training-only, so the standard deploy loader is correct. Big net (512 +
+#     [1024]^3) auto-loads from downloaded_runs/lulkx/.hydra.
+#
+# ⚠ DEPLOY PAIRING — MANDATORY: this policy trained on SHIFT-CORRECTED real clouds, so
+# real_lab.yaml MUST have `point_cloud_shift: [0.009, 0.0, 0.0]` ACTIVE (it currently is).
+# Running it with the shift at zero silently reintroduces the full ~9 mm bias — no error.
+# NOTE this also makes it NOT directly comparable to the afucm ~75% baseline, which was measured
+# with the shift OFF on uncorrected data; both pairings are self-consistent, the data differs.
+# REAL TABLE PLACEMENT: object inside x [0.29, 0.48], y [-0.11, 0.11] (robot-base frame).
+#
+ckpt=downloaded_runs/lulkx/checkpoint/state_600.pt
+normalization=downloaded_runs/lulkx/normalization.npz
+uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+  --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+  --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+  --record dataset/real_deploy/lulkx600 --shard-size 10 --max-steps 5000
+
 # ══════════════════════════════════════════════════════════════════════════════════════════
 # ⛔ DO NOT DEPLOY any v33 policy (orkam, kjljs, …) UNTIL THE REAL SLICE IS RE-CONVERTED.
 # Root cause (2026-08-25, diagnosed from dataset/real_deploy/orkam200 + offline probes):
@@ -480,11 +512,11 @@
 # normalization MUST be orkam's own (v33 union stats — new collection, NOT afucm's).
 # REAL TABLE PLACEMENT: x [0.29, 0.48], y [-0.11, 0.11] (robot-base frame).
 #
-ckpt=downloaded_runs/orkam/checkpoint/state_400.pt
-normalization=downloaded_runs/orkam/normalization.npz
-uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-  --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
-  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
-  --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/orkam400 --shard-size 10 --max-steps 5000
+# ckpt=downloaded_runs/orkam/checkpoint/state_400.pt
+# normalization=downloaded_runs/orkam/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/orkam400 --shard-size 10 --max-steps 5000
