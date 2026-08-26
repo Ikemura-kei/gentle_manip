@@ -268,6 +268,26 @@ for a retrofitted head.
 - **Latch the floor early (t=0), not at closure onset.** Vision corr is 0.667 at t=0 and collapses
   to 0.097 at contact (occlusion). The "latch later" fix would have made it worse.
 
+## 4b. GENERALIST TEASER — multi-object training (user hypothesis, 2026-08-27, job 1730005)
+
+**Hypothesis (user):** training on mushroom + tofu together may fix the collapse. MECHANISM: within
+one category the policy can sit at ~30 mm and be roughly right for every object — the mean-width
+shortcut is cheap. With two categories under a SHARED normalization (merge_npz_datasets does joint
+renorm) the marginal width distribution is much broader and likely bimodal, so that shortcut
+becomes expensive and the conditioning may finally get used.
+
+Setup: mushroom (align-filtered, 481 incl. real) + tofu (587) = **1068 episodes**, epochs scaled
+600 -> **350** so gradient steps stay comparable to lulkx (600 x 589) — data volume is not
+confounded with training length.
+
+**Read-out must be PER CATEGORY.** The informative failure mode is a policy that adapts BETWEEN
+categories (two clusters) but stays flat WITHIN each — that is a category classifier, not size
+perception, and it would look adaptive in aggregate. Report mushroom range and tofu range
+separately, not just the pooled number.
+
+Supporting evidence this could work: cross-category size perception TRANSFERS (~0.55 both
+directions, job 1729369), so the encoder can in principle read size for both.
+
 ## 5. Queued ideas, highest value first
 
 1. ~~Condition the width head on the grasp pose~~ **REFUTED 2026-08-27 (job 1728668).**
