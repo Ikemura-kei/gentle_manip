@@ -157,9 +157,21 @@ policy collapses on BOTH. Sim demos correlate 0.84 with size -> lulkx commands 1
 independent datasets. Our mechanism must EXTRACT adaptation that BC fails to capture, from either
 source — we cannot lean on a data deficiency.
 
-**OPEN GAP:** real episodes carry no per-episode object size, so corr(width, size) cannot be
-computed on real data the way it is for sim (0.84). Measuring a few of the real mushrooms would
-close this and is the number a reviewer will want beside the sim one.
+**Real object size range (user, from MEMORY — records lost; treat as an ESTIMATE, not a
+measurement): ~3-4.5 cm cap, i.e. 30-45 mm.** That bounds the real adaptation SLOPE:
+
+| | object size range | demo width range | slope |
+|---|---|---|---|
+| real (user session) | ~30-45 mm (**15 mm**) | 9.0 mm (p10-p90) | **~0.60 mm/mm** |
+| sim CMA-ES | ~27-49 mm (22 mm) | 19.3 mm (p10-p90) | ~0.88 mm/mm |
+| sim, fitted slope | — | — | 1.08 mm/mm |
+
+So human teleop adapted at ~60% of the CMA-ES rate — less aggressive but unmistakably adaptive,
+over a comparable size range (sim slightly wider). **LIMITATION:** without per-episode pairing this
+is an AGGREGATE spread, so size-driven variation cannot be separated from incidental variation the
+way it can in sim (corr 0.84). It is CONSISTENT WITH size-driven adaptation, which is weaker than
+a correlation. If the paper needs the real corr, a few real mushrooms must be measured against
+recorded episodes — the records for this session are lost.
 
 **No current arm dominates the baseline.** lulkx 0.883/9%; floor margin 4 0.517/29%; margin 8
 0.750/11%. Each trades. A dominating arm needs CFG (1729257), the align retrain, or the latch arms.
