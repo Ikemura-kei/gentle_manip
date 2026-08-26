@@ -88,7 +88,7 @@ uv run --project envs/sim_arrhenius --no-sync python -m gentle_manip.scripts.ser
     --experiment "$SIM_EXPERIMENT" --view "$VIEW" --num-envs "$NUM_ENVS" \
     --render-rgb --subprocess --port "$PORT" > "$SRV_LOG" 2>&1 &
 SRV_PID=$!
-cleanup() { echo "[sbatch] stopping sim server ($SRV_PID)"; kill "$SRV_PID" 2>/dev/null || true; wait "$SRV_PID" 2>/dev/null || true; }
+cleanup() { echo "[sbatch] stopping sim server ($SRV_PID)"; kill "$SRV_PID" 2>/dev/null || true; wait "$SRV_PID" 2>/dev/null || true; kill "${WATCHDOG_PID:-}" 2>/dev/null || true; }
 trap cleanup EXIT
 
 echo "[sbatch] waiting for SIM_SERVER_READY ($SRV_LOG)"
@@ -98,6 +98,32 @@ for _ in $(seq 1 180); do
     sleep 5
 done
 grep -q "SIM_SERVER_READY" "$SRV_LOG" || { echo "[sbatch] server not ready — tail:"; tail -50 "$SRV_LOG"; exit 1; }
+
+# ---- sim-server WATCHDOG (2026-08-26) --------------------------------------------------
+# Observed 7x: the sim server's FPS decays (e.g. 17->12, 12.6->11.3) and then the log goes
+# SILENT while the job sits idle until the 8h wall clock — burning a GPU for hours and
+# delaying the retry. Suspected resource growth in the long-lived genesis child under
+# multi-eval contention (root cause open; sim server is the local agent's module).
+# This watchdog turns that silent stall into a FAST FAILURE: if $SRV_LOG has not been
+# written for GM_EVAL_WATCHDOG_MIN minutes (default 25; 0 disables), kill the job so the
+# monitors see FAILED and resubmit immediately. A healthy eval writes an FPS line every
+# ~40 s, so 25 min is ~35x the normal gap — no false positives expected.
+GM_EVAL_WATCHDOG_MIN=${GM_EVAL_WATCHDOG_MIN:-25}
+if [ "$GM_EVAL_WATCHDOG_MIN" -gt 0 ] 2>/dev/null; then
+  (
+    while sleep 120; do
+      [ -f "$SRV_LOG" ] || continue
+      if [ -n "$(find "$SRV_LOG" -mmin +$GM_EVAL_WATCHDOG_MIN 2>/dev/null)" ]; then
+        echo "[sbatch] WATCHDOG: sim server silent >${GM_EVAL_WATCHDOG_MIN}min — killing job ${SLURM_JOB_ID}"
+        tail -5 "$SRV_LOG"
+        scancel "${SLURM_JOB_ID}" 2>/dev/null || kill -9 $$ 2>/dev/null
+        break
+      fi
+    done
+  ) &
+  WATCHDOG_PID=$!
+  echo "[sbatch] sim-server watchdog armed (${GM_EVAL_WATCHDOG_MIN} min silence -> job killed), pid $WATCHDOG_PID"
+fi
 
 # ---- run the canonical eval (BC base policy; record_batches=null = ONE clip PER EPISODE) ----
 # Hard requirement #2: per-trajectory video, no exceptions — record_batches=null records ALL
