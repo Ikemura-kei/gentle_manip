@@ -140,7 +140,14 @@ for a retrofitted head.
    Why the inference was wrong: R2=0.818 used the MEASURED `align`, which comes from contact
    geometry (object surface normals at the patch), not from EE pose. Pose becomes align only when
    combined with local object geometry — exactly what is occluded at closure. Dead end.
-2. **Align-filtered demos** (drop bottom 20% align): corr 0.841 -> **0.933** AND stress -10%, scale
+2. **Align-filtered demos** (drop bottom 20% align) — **NOTE: the local agent's `--grasp-width-max-mm`
+   (df3f0b7) attacks the SAME phenomenon structurally, and better.** They measured CMA grasping a
+   banana along its LONG axis (42-79 mm widths vs a ~17 mm cross-section; 4 of 5 spanned the
+   crescent end-to-end, none lifted) because those grasps present more pad contact and so WIN on
+   `area_min` + the pressure term. Bounding width removes them from the SEARCH SPACE; my filter
+   removes them POST HOC and throws away collected episodes. Prefer the structural bound for new
+   collections; keep filtering for data we already have. Both target the align-driven width
+   variance that makes width unpredictable from the cloud.: corr 0.841 -> **0.933** AND stress -10%, scale
    coverage preserved. Sharpens the conditional the diffusion policy fits, attacking mean-seeking
    at the source. Needs a dataset rebuild + re-merge -> MUST pass `verify_derived_dataset.py`
    (this path is where the v33 poisoning happened).
