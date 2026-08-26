@@ -382,7 +382,9 @@ running" — replacing any whose experiments have since finished.**
 **2026-08-27 — ⛔ WIDTH-HEAD-DRIVES-WIDTH FAILS: the head learned to COPY its proprio input,
 so nothing ever initiates closure (0.00 success). Config 2 killed; blind variant launched.**
 End-to-end test of Config 1 (`state_600_whead.pt`, head spliced over the width dim, banner
-confirmed active): success **0.000**, commanded width stuck at 53-55 mm. Mechanism proven by
+confirmed active): success **0.000** on BOTH the width probe and the canonical 200-episode
+eval (succ 0.000 / ever 0.000), commanded width stuck at 53-55 mm — two independent
+measurements agree, so the SIGHTED variant is conclusively dead. Mechanism proven by
 a controlled sweep — fix the cloud/pose, vary ONLY the current gripper width fed in:
 
 | current width in | head's next 4 out |
