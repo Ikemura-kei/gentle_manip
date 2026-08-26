@@ -134,6 +134,36 @@ latch, P(over>2mm) 0.29) should need LESS margin for the same success -> more bi
 at equal success. If 1728724/1728725/1728949/1728950 land ON the trade line, the floor family is
 exhausted and we move to the untried candidates (§5).
 
+### 2d. THE REAL BAR (user, 2026-08-26): beat a naive DP on ~50 real human demos
+
+The requirement is a width-adaptive, MULTI-CATEGORY policy with success >= a naive diffusion policy
+trained on real human demos in a LOW-DATA regime — NOT an absolute 70% of demonstrator range.
+That is a RELATIVE bar and it changes triage.
+
+**The real demos ARE width-adaptive (user collected them deliberately; measured, job 1729285):**
+
+| | n | grasp width | p10-p90 range |
+|---|---|---|---|
+| real human demos | 50 | 29.3 +- 4.3 mm | **9.0 mm** |
+| sim CMA-ES demos | 539 | 31.5 +- 7.1 mm | 19.3 mm |
+
+So we CANNOT claim "sim provides adaptation the human demos lack" — 4.3 mm sd is comparable to the
+sim demonstrator's own size-driven variation (the sim spread is wider mainly because sim DR spans
+scale 0.82-1.49, likely broader than the real mushrooms available).
+
+**The resulting story is STRONGER, not weaker:** both data sources are width-adaptive and the
+policy collapses on BOTH. Sim demos correlate 0.84 with size -> lulkx commands 1.0 mm (9%). So
+"diffusion BC under-uses conditioning on a low-variance action dimension" is demonstrable on TWO
+independent datasets. Our mechanism must EXTRACT adaptation that BC fails to capture, from either
+source — we cannot lean on a data deficiency.
+
+**OPEN GAP:** real episodes carry no per-episode object size, so corr(width, size) cannot be
+computed on real data the way it is for sim (0.84). Measuring a few of the real mushrooms would
+close this and is the number a reviewer will want beside the sim one.
+
+**No current arm dominates the baseline.** lulkx 0.883/9%; floor margin 4 0.517/29%; margin 8
+0.750/11%. Each trades. A dominating arm needs CFG (1729257), the align retrain, or the latch arms.
+
 ### 2b. Ceilings and links
 
 | quantity | mushroom | tofu |
