@@ -379,6 +379,40 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-27 — WIDTH-TRAJECTORY HEAD implemented and both configs launched (user design:
+6-DoF diffusion + standalone per-step width regression head).**
+RATIONALE: nine probes showed the SAME encoder features give r~0.82 through a regression
+head and r~0.1 through the diffusion path. Pose is genuinely multimodal (diffusion suits
+it); width GIVEN the object is unimodal regression, and diffusion's mean-seeking collapses
+it to a constant — which is exactly what over-squeezes (mean width is fine at −1.6 mm, but
+one width for a 12-46 mm range leaves 30% of grasps >5 mm too tight). A clamp/substitution
+at deploy was rejected as hacky by the user; this is the principled version.
+IMPLEMENTATION (3dbc4e3, all flag-gated — existing runs bit-identical):
+· `network.width_traj_head`: cond_encoded → horizon_steps widths. cond_encoded is
+  [pointnet_feat ⊕ proprio] and proprio carries the CURRENT gripper width, so the head
+  CONTINUES the closing ramp instead of jumping to the endpoint — this is what makes a
+  per-step head well-posed (user's objection to the scalar version).
+· `WidthHeadDiffusionModel`: width dim removed from the ε-loss via the existing per-dim
+  weights (NO shape change, so every config/checkpoint still loads — chosen over literally
+  emitting 6 dims to minimise bug surface); head target is `x_start[...,-1]`, i.e. the
+  ground-truth chunk's own width column — no new label, no dataset rebuild.
+· `eval_agent`: `GM_WIDTH_HEAD=1` splices the head over the sampled width dim. NECESSARY
+  because production samples via `DiffusionEval`, NOT the training class — the model-class
+  forward() override alone would never run at eval. Assignment ⇒ idempotent, so it cannot
+  compound the way the additive gripper-offset bug did.
+· GPU smoke test (`.agent_tmp/smoke_width_head.py`) passes 5/5: head shape, finite loss with
+  the width component logged, splice idempotence, width weight exactly 0 with pose weights
+  renormalised, baseline training path unchanged.
+RUNS: **Config 1** (job 1726007) = freeze lulkx@600 entirely, fit ONLY the head — answers
+whether an encoder trained with NO width supervision still carries object size (rturn's did,
+but its encoder WAS width-supervised). **Config 2** = co-trained, 3 seeds (whead_s42/27/43,
+jobs 1725987-89) on the shift9 dataset. NOTE Config 2 has the head but NOT paired-reg (the
+class chain doesn't stack them today), so its baseline is **njhbz 0.805**, not avfnp 0.830;
+merging both mechanisms is a small refactor if the head proves out.
+QUOTA (user): killed all ckpt-500/600 evals of older families and dropped tofu seed 43
+(tofu now 2 seeds: 42 + 27).
+
+
 **2026-08-26 — Banana synthesis UNBLOCKED. Root cause was a MIS-PREPPED MESH, not the grasp
 search; the general fix is ESCALATING CMA BUDGET on failure (`--grasp-escalate`, default 2).**
 Two independent bugs, found in this order:
