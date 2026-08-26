@@ -55,4 +55,15 @@ MATERIALS: dict[str, Material] = {
     # TODO: calibrate against a real berry; these are literature-plausible, not measured.
     "raspberry": Material(youngs_modulus=1e5, poisson_ratio=0.4, density=900.0,
                           von_mises_yield_stress=1.5e4),
+    # Banana (Musa, ripe, whole with peel): flesh is very soft (E ~0.1-0.5 MPa); the peel
+    # stiffens the whole fruit somewhat. E 0.25 MPa keeps MPM substeps near the mushroom's
+    # (substeps ~ sqrt(E)). Bruises readily -> yield 25 kPa. Density just under water.
+    # TODO: calibrate against a real banana; literature-plausible, not measured.
+    "banana": Material(youngs_modulus=2.5e5, poisson_ratio=0.35, density=950.0,
+                       von_mises_yield_stress=2.5e4),
+    # Strawberry (Fragaria): softer and far more bruise-prone than a mushroom — thin skin over
+    # juicy parenchyma. E 0.15 MPa, low yield (18 kPa), density just under water.
+    # TODO: calibrate against a real berry; literature-plausible, not measured.
+    "strawberry": Material(youngs_modulus=1.5e5, poisson_ratio=0.4, density=950.0,
+                           von_mises_yield_stress=1.8e4),
 }

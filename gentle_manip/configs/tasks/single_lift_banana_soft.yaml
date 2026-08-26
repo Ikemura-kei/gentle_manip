@@ -1,0 +1,34 @@
+# [task] Soft banana lift (~17 cm crescent, 5.8 cm thick — the thickness is the grasp width).
+# Used by: experiments/single_lift_banana_soft_abs_action_armfocus.yaml
+# Status: experimental (multi-object synthesis probe, 2026-08-26)
+#
+# MPM: the banana's volume is ~420 cm^3 (30x a mushroom), so at the mushroom's grid density it
+# would carry ~6.5k particles per env. grid 180 keeps ~2.4k particles with 5.6 mm cells — still
+# ~10 cells across the 5.8 cm thickness, which is what contact resolution needs. substeps scale
+# with grid density (mushroom 235 @ 250) and with sqrt(E) (0.25 vs 0.3 MPa) -> 200 is ample.
+# mpm_bounds widened because a 17 cm object spawning anywhere in the realws box sweeps a much
+# larger region than a mushroom does.
+object_name: "banana"
+object_type: "soft"
+mpm_grid_density: 180
+sim_substeps: 200
+mpm_bounds: [[0.14, -0.25, -0.03], [0.63, 0.25, 0.32]]
+
+success_z_min: 0.150
+success_z_max: 0.280
+hold_steps: 30
+success_scale: 0.2
+
+rewards:
+  stress:
+    scale: 0.2
+    cap: 1.5                 # fraction of the banana's OWN 25 kPa yield (auto-injected)
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 0.1
+    decay: 8.0
+  lift:
+    scale: 0.1
+    grasp_gate_dist: 0.090   # generous: the banana is long, so "near the object" is loose
+    lift_target: 0.13

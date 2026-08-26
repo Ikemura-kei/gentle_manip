@@ -1,0 +1,22 @@
+# [experiment] banana lift, njhbz-style armfocus setup (multi-object synthesis probe).
+# Used by: collect_demos_synth_v3 (data-character probe, 2026-08-26)
+# Status: experimental
+#
+# Mirrors single_lift_mushroom_soft_abs_action_armfocus_realws_mm4_s08 except task + dr:
+# same obs (superset_soft_armfocus), same 10d absolute action, same augmentation.
+task: single_lift_banana_soft
+action: abs_pose_abs_gripper
+dr: soft_orientation_realws_banana
+augmentation: l515_noise
+
+obs: superset_soft_armfocus
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400

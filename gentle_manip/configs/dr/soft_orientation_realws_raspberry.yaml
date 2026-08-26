@@ -1,0 +1,25 @@
+# [dr] njhbz recipe for the RASPBERRY (single mesh).
+# Used by: experiments/single_lift_raspberry_soft_abs_action_armfocus.yaml
+# Status: experimental
+#
+# SPAWN BOX IS NOT THE REALWS BOX. The raspberry task needs a tight, high-resolution MPM
+# domain (grid 600 over [[0.40,-0.06,-0.02],[0.56,0.06,0.15]]) or a 1.5 cm berry spans only
+# ~4 cells and the contact is unresolved. The spawn box must sit inside that domain with room
+# for the object and the lift, hence x [0.44,0.52] y [+-0.04] instead of realws.
+object_pos_x: [0.44, 0.52]
+object_pos_y: [-0.04, 0.04]
+object_nominal_xy: [0.48, 0.0]
+robot_init_pos_xyz: 0.01
+object_yaw_deg: 180
+object_pitch_roll_deg: 45
+object_flip_prob: 0.25
+object_flip_deg: [160, 180]
+object_bend_deg:   [-25, 25]
+object_twist_deg:  [-20, 20]
+object_taper:      [-0.15, 0.15]
+object_axis_scale: [0.95, 1.15]
+object_scale:      [0.80, 1.30]
+object_E: [0.8e5, 1.2e5]
+object_nu: [0.36, 0.44]
+object_rho: [850, 950]
+coup_friction: [3.5, 4.5]
