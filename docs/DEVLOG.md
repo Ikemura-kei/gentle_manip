@@ -420,10 +420,19 @@ poison detector.** Probed against `real_merged_shift9mm` (matching their trainin
   comparable to lulkx's 4.5 mm. So this is NOT the v33 poisoning signature (that was z
   0.225 + grip 44 mm on BOTH real-cloud rows); it is a milder visual-branch weakness that
   only surfaces when proprio is mismatched.
-- DECISION: deploy **lulkx/state_600** (0.820, clean PASS) over avfnp/state_400 (0.830,
-  marginal). The 0.01 sim gap is within seed noise; probe cleanliness is the better
-  discriminator — and this is the first time the gate has RANKED two healthy policies
-  rather than just rejecting a broken one.
+- **CORRECTION (same day, user question "they differ only by seed — why is one warned?"):**
+  confirmed avfnp/lulkx differ ONLY by seed (27 vs 43); same data, model, everything. The
+  failing row `sim proprio + REAL cloud` is OUT-OF-DISTRIBUTION BY CONSTRUCTION — no
+  training sample or deployment step ever pairs sim proprio with a real cloud; it exists
+  only to isolate modality. Two seeds extrapolating differently there is ordinary variance,
+  NOT robot evidence. On the DEPLOYMENT row both descend (avfnp −4.8 mm, lulkx −4.5 mm).
+  So the earlier "deploy lulkx over avfnp" ranking is RETRACTED: the gate is decisive for
+  what it was built for (the poisoned family failed BOTH real-cloud rows catastrophically:
+  z 0.225 + grip 44 mm) but must NOT rank healthy policies on an OOD row. Revised: both are
+  deployment-healthy; avfnp/400 preferred on merit (0.830, small-object gap 0.00 vs lulkx's
+  0.10), lulkx/600 the conservative alternative; deploy both if rig time allows.
+  SUGGESTION for the local agent: make the probe's PASS/FAIL depend on the real+real row,
+  with the hybrids reported as diagnostics only.
 - Deploy pairing for all shift9_preg runs: point_cloud_shift [0.009,0,0] ACTIVE.
 
 
