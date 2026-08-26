@@ -224,7 +224,24 @@ poisoning incident happened, so it needs the pre-flight gates): filter the sim c
 `align >= p20`, reconvert with `--derive-action`/`--derive-source-action`, re-merge with the
 UN-poisoned real slice, run `verify_derived_dataset.py`, then retrain.
 
-## CORRECTION 2026-08-27: the ceiling was under-estimated (under-trained head)
+## MAJOR CORRECTION 2026-08-27: AUX-WIDTH SUPERVISION RAISES THE CEILING TO 0.927 (job 1730946)
+
+Every perception number in this doc was measured through an encoder that was NEVER TRAINED TO SEE
+SIZE. Training one WITH `aux_grasp_width_weight=1.0` (run `ccpvb`) changes it completely:
+
+| encoder | cloud -> scale | cloud -> width |
+|---|---|---|
+| standard (used for all analysis above) | 0.739 | 0.597 |
+| **aux-width supervised** | **0.927** | **0.776** |
+
+Internally consistent: 0.927 x 0.841 (size->width) = 0.78, matching the direct 0.776.
+
+**CONSEQUENCE: the true perception ceiling is ~0.78 for width, not ~0.62.** Every "we are at the
+ceiling" statement earlier in this doc is VOID — they were measured on a handicapped encoder.
+Delivered today is 0.336 (baseline) / 0.511 (best floor arm), so the headroom is much larger than
+reported, AND it is reachable by a TRAINING-side change with no inference-time machinery.
+
+## Earlier correction: the ceiling was also under-estimated by an under-trained head
 
 Job 1728668 fit a 128-unit MLP for 300 epochs with weight decay on the SAME frozen features, data
 and split where Step 0's aux head (40 epochs, no decay) scored 0.597 for cloud->width:
