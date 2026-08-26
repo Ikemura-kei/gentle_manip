@@ -105,7 +105,7 @@ OBJECT_MAP: dict[str, ObjectDef] = {
     # size it is ~70 g, needing only ~0.5 N of grip; the earlier 17 cm cut was 398 g (~2.8 N)
     # and its 20 cm CMA search box made the planner miss the thin feasible band entirely.
     "banana": ObjectDef("banana", MATERIALS["banana"], object_type="soft",
-                        size=(0.095, 0.092, 0.0324), default_pos=(0.47, 0.0, 0.0175),
+                        size=(0.0707, 0.095, 0.0186), default_pos=(0.47, 0.0, 0.0104),
                         mesh_path=str(_OBJ_DIR / "banana.obj")),
     # Strawberry ~4 cm (photo-reconstructed, calyx/leaves removed and the body made watertight
     # by a voxel remesh with morphological opening). Squat: 4.0 x 3.8 x 3.25 cm (tip->crown is

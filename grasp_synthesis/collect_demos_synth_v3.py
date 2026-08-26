@@ -839,6 +839,17 @@ def main() -> None:
     p.add_argument("--grasp-voxel-div",   type=int,   default=14,   help="FEM remesh resolution (keep ndof<~5k)")
     p.add_argument("--grasp-target-tets", type=int,   default=1500, help="FEM target tet count")
     p.add_argument("--grasp-n-starts",    type=int,   default=6,    help="CMA multi-start count")
+    p.add_argument("--grasp-escalate", type=int, default=2,
+                   help="On synthesis failure, retry with DOUBLED search budget this many times "
+                        "(n_starts and maxfevals both x2, x4, ...). Objects whose feasible set is "
+                        "small need more search, not different search: the banana's holdable "
+                        "fraction is 0.6%% of candidates vs the mushroom's 3.7%%, and at 4x budget "
+                        "its feasibility went 2/8 -> 8/8 (measured 2026-08-26). Escalating on "
+                        "DEMAND beats a per-object budget constant or a shape heuristic: it costs "
+                        "nothing when the base budget already succeeds (so mushroom/strawberry/"
+                        "raspberry synthesis is unchanged), and it needs no shape descriptor -- a "
+                        "bbox one would be actively wrong here, since the banana's bbox reads as a "
+                        "large easy object while its graspable local width is only 17 mm. 0 = off.")
     p.add_argument("--grasp-gpu",         action="store_true",
                    help="use the GPU FEM solver (default CPU, so the metric doesn't compete with the sim GPU)")
     # ── Grasp-pose DIVERSITY (ON by default — these defaults broaden the demo distribution to match v2's
@@ -1021,6 +1032,7 @@ def main() -> None:
                         "grasp_jitter_deg": args.grasp_jitter_deg,
                         "grasp_area_min_mm2": args.grasp_area_min_mm2,
                         "grasp_medial_seeds": bool(args.grasp_medial_seeds),
+                        "grasp_escalate": int(args.grasp_escalate),
                         "grasp_w_press": args.grasp_w_press,
                         "grasp_extra_close": args.grasp_extra_close},
         "dr": exp.dr,
@@ -1214,6 +1226,29 @@ def main() -> None:
                                         **({"w_area": args.grasp_w_area} if args.grasp_w_area is not None else {}),
                                     **({"w_tilt": args.grasp_w_tilt} if args.grasp_w_tilt is not None else {}),
                                     **({"yaw_max_deg": args.grasp_yaw_max_deg} if args.grasp_yaw_max_deg is not None else {}))
+            # BUDGET ESCALATION: the retry above only drops diversity; if synthesis is still empty
+            # the feasible set is simply too small for this budget to land in. Double it and look
+            # again (see --grasp-escalate). Runs only on the failure path, so a run whose grasps all
+            # succeed at the base budget is bit-identical to before this existed.
+            for _esc in range(1, int(args.grasp_escalate) + 1):
+                if r.get("x") is not None and r.get("stress_top10") is not None:
+                    break
+                mult = 2 ** _esc
+                print(f"  Env {i}: still no feasible grasp -> escalating budget x{mult} "
+                      f"({args.grasp_n_starts * mult} starts, {args.maxfevals * mult} fevals)")
+                r = fg.synthesize_grasp(fem_obj, fem_pad_geo, obj_pos_all[i], obj_quat_all[i],
+                                        E=args.grasp_E, density=args.grasp_density, mu=args.grasp_mu,
+                                        table_z=args.table_z, maxfevals=args.maxfevals * mult,
+                                        n_starts=args.grasp_n_starts * mult,
+                                        seed=cma_seed + 13 * _esc, accel=args.grasp_accel,
+                                        cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg,
+                                        area_min=args.grasp_area_min_mm2 * 1e-6 * float(scene_dr['scale']) ** 2,
+                                        w_press=(args.grasp_w_press or None),
+                                        medial_seeds=int(args.grasp_medial_seeds),
+                                        **({"w_peak": args.grasp_w_peak} if args.grasp_w_peak is not None else {}),
+                                        **({"w_area": args.grasp_w_area} if args.grasp_w_area is not None else {}),
+                                        **({"w_tilt": args.grasp_w_tilt} if args.grasp_w_tilt is not None else {}),
+                                        **({"yaw_max_deg": args.grasp_yaw_max_deg} if args.grasp_yaw_max_deg is not None else {}))
             best_x = r["x"]
             if best_x is None or r.get("stress_top10") is None:       # extremely rare: still nothing ->
                 # default straight-down grasp at the object xy so the FSM never sees None (this episode may

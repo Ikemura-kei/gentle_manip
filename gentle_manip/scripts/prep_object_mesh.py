@@ -39,6 +39,12 @@ def main() -> None:
                     help="voxel-remesh resolution (longest extent / this) if repair is needed")
     ap.add_argument("--max-faces", type=int, default=12000,
                     help="face budget after a voxel remesh (matches the other object assets)")
+    ap.add_argument("--force-remesh", action="store_true",
+                    help="voxel-remesh even if the mesh is already watertight. Needed when a "
+                         "scan is watertight but has the WRONG TOPOLOGY (genus>0: a hooked stem "
+                         "tip that closes into a handle). The repair branch below only triggers "
+                         "on non-watertight input, so a genus-1 scan would otherwise pass "
+                         "straight through and reach the FEM tetraliser with a hole in it.")
     ap.add_argument("--despeckle", type=int, default=0,
                     help="morphological-opening iterations on the voxel fill: strips thin "
                          "protrusions (leaf/calyx stubs) that survive a plane cut. 2 works "
@@ -65,12 +71,12 @@ def main() -> None:
         m = max(parts, key=lambda p: p.area)
         print(f"largest component kept: {len(m.vertices)} verts of {len(parts)} bodies")
 
-    if not m.is_watertight:
+    if not m.is_watertight or args.force_remesh:
         m.merge_vertices(); m.update_faces(m.unique_faces()); m.remove_unreferenced_vertices()
         trimesh.repair.fill_holes(m)
         trimesh.repair.fix_normals(m)
-        print(f"repaired: watertight={m.is_watertight}")
-        if not m.is_watertight:
+        print(f"repaired: watertight={m.is_watertight} euler={m.euler_number}")
+        if not m.is_watertight or args.force_remesh:
             # Last resort: voxel remesh. marching_cubes returns the surface in VOXEL INDEX
             # space, so it must be pushed back through the grid transform or the mesh silently
             # comes out in the wrong units; then decimate back to an asset-sized budget.
