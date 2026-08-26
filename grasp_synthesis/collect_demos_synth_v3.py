@@ -927,6 +927,12 @@ def main() -> None:
                    help=f"'firm' phase steps (post-grasp extra squeeze idea #1); default {N_FIRM}. "
                         "0 = NO firm phase at all — the grasp goes straight to lift at width_cls "
                         "(matches the pre-firm v1 collector, e.g. the cho dataset).")
+    p.add_argument("--grasp-yaw-max-deg", type=float, default=None,
+                   help="bound the TOOL yaw about the gripper's HOME orientation (yaw 0), in deg, "
+                        "at CMA time — box + seed clip, folded for the parallel-jaw 180-deg "
+                        "symmetry. cam_azimuth_max_deg bounds the fan about the CAMERA, which still "
+                        "permitted ~90 deg home-frame yaw and real-rig occlusion. Suggest 55. "
+                        "None (default) = unchanged.")
     p.add_argument("--grasp-w-peak", type=float, default=None,
                    help="peak-aware stress weight: score -= w_peak * E * UNMASKED p98 stress. The "
                         "masked top10 objective HIDES contact spikes (corner/edge grasps score low "
@@ -1182,7 +1188,8 @@ def main() -> None:
                                     w_press=(args.grasp_w_press or None),
                                     **({"w_peak": args.grasp_w_peak} if args.grasp_w_peak is not None else {}),
                                     **({"w_area": args.grasp_w_area} if args.grasp_w_area is not None else {}),
-                                    **({"w_tilt": args.grasp_w_tilt} if args.grasp_w_tilt is not None else {}))
+                                    **({"w_tilt": args.grasp_w_tilt} if args.grasp_w_tilt is not None else {}),
+                                    **({"yaw_max_deg": args.grasp_yaw_max_deg} if args.grasp_yaw_max_deg is not None else {}))
             if r.get("x") is None or r.get("stress_top10") is None:   # diversity found no feasible grasp;
                 print(f"  Env {i}: no feasible diverse grasp -> retry WITHOUT diversity")  # retry reliably
                 r = fg.synthesize_grasp(fem_obj, fem_pad_geo, obj_pos_all[i], obj_quat_all[i],
@@ -1194,7 +1201,8 @@ def main() -> None:
                                         w_press=(args.grasp_w_press or None),
                                         **({"w_peak": args.grasp_w_peak} if args.grasp_w_peak is not None else {}),
                                         **({"w_area": args.grasp_w_area} if args.grasp_w_area is not None else {}),
-                                    **({"w_tilt": args.grasp_w_tilt} if args.grasp_w_tilt is not None else {}))
+                                    **({"w_tilt": args.grasp_w_tilt} if args.grasp_w_tilt is not None else {}),
+                                    **({"yaw_max_deg": args.grasp_yaw_max_deg} if args.grasp_yaw_max_deg is not None else {}))
             best_x = r["x"]
             if best_x is None or r.get("stress_top10") is None:       # extremely rare: still nothing ->
                 # default straight-down grasp at the object xy so the FSM never sees None (this episode may

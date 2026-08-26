@@ -572,7 +572,7 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                       area_min: float = 0.0, cam_pos=None, occ_k: int = 96,
                       cam_azimuth_max_deg=None,
                       execute_offset: float = 0.0,
-                      roll_max: float = np.pi / 2,
+                      roll_max: float = np.pi / 2, yaw_max_deg=None,
                       refine: bool = True, refine_scan: int = 25, seed: int = 0, verbose: bool = False,
                       record_history: bool = False,
                       diversity_tol: float = 0.0, jitter_deg: float = 0.0, jitter_pos: float = 0.0,
@@ -663,10 +663,18 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
     # roll_max = pi/2 (default) reproduces the historical band, which reaches a fully HORIZONTAL
     # tool axis at either end -> pure side grasps are inside the feasible set. Tightening roll_max
     # excludes them structurally, rather than relying on the w_tilt penalty alone.
+    # yaw_max_deg (2026-08-26, user): bound the TOOL yaw about the home orientation (yaw=0 is
+    # the gripper's initial pose). The camera-relative `cam_azimuth_max_deg` bounds the seed FAN
+    # about the camera-perpendicular direction, which still let the tool reach ~90 deg in the HOME
+    # frame and occlude the object on the real rig. A near-axisymmetric cap gives CMA no yaw
+    # gradient (grasps sit at their seed), so this is bounded STRUCTURALLY — box + seed clip —
+    # exactly like roll_max. Yaw and yaw+pi are the same parallel-jaw grasp, so fold into
+    # [-pi/2, pi/2] before clipping. None (default) = unchanged.
+    _yaw_hi = np.pi if yaw_max_deg is None else float(np.radians(float(yaw_max_deg)))
     lb = [com[0] - half_xy[0], com[1] - half_xy[1], tz_lo,
-          np.pi - roll_max, -0.2 * np.pi, -np.pi, 0.008]
+          np.pi - roll_max, -0.2 * np.pi, -_yaw_hi, 0.008]
     ub = [com[0] + half_xy[0], com[1] + half_xy[1], tz_hi,
-          np.pi + roll_max,  0.2 * np.pi,  np.pi, 0.079]
+          np.pi + roll_max,  0.2 * np.pi,  _yaw_hi, 0.079]
 
     # object world→local rotation, for measuring the cross-section along each seed's closing axis
     q = np.asarray(obj_quat_wxyz, float)
@@ -710,6 +718,9 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
             pj = np.radians(_drng.uniform(-pitch_seed_deg, pitch_seed_deg, n_starts))
             pj[::2] = 0.0
             pitch_seeds = pj
+    if yaw_max_deg is not None:                       # fold to the equivalent grasp, then clip
+        yaws = (np.asarray(yaws, float) + np.pi / 2) % np.pi - np.pi / 2
+        yaws = np.clip(yaws, -_yaw_hi, _yaw_hi)
     for i, yaw in enumerate(yaws):
         r, p, y = _down_quat_euler(yaw)
         p = p + float(pitch_seeds[i])
