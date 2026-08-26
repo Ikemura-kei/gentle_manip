@@ -463,6 +463,17 @@ poison detector.** Probed against `real_merged_shift9mm` (matching their trainin
   0.10), lulkx/600 the conservative alternative; deploy both if rig time allows.
   SUGGESTION for the local agent: make the probe's PASS/FAIL depend on the real+real row,
   with the hybrids reported as diagnostics only.
+- **RESOLVED (upstream 0cb33f5): the FAIL was SAMPLING NOISE, not OOD extrapolation.**
+  Diffusion sampling starts from random noise, so a single draw is a noisy verdict and a
+  marginal policy flips PASS/FAIL between identical runs; the probe now averages
+  `--n-samples` (default 8) and reports the spread (healthy: ±1-2 mm z, ±0.0 mm grip).
+  Under the averaged probe **avfnp PASSES all four rows** and is staged for deploy
+  alongside lulkx. My OOD argument was directionally right (don't rank on that row) but
+  the actual mechanism was measurement noise — worth remembering: a stochastic policy
+  needs a repeated-sample gate, and I should have run the probe more than once before
+  reporting a FAIL. Their second finding matters too: the probe must be fed the real
+  variant the policy TRAINED on (probing poisoned orkam with CORRECTED clouds made it
+  PASS) — our shift9 probes did use shift9mm, so those verdicts stand.
 - Deploy pairing for all shift9_preg runs: point_cloud_shift [0.009,0,0] ACTIVE.
 
 
