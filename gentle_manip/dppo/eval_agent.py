@@ -43,6 +43,13 @@ class _DiffusionPolicy:
                                "+model.network.width_traj_head=true to the eval overrides")
         if self._width_head:
             print("[eval_agent] width-trajectory HEAD active (width dim from regression head)", flush=True)
+        self._width_floor = bool(os.environ.get("GM_WIDTH_FLOOR")) and \
+            getattr(getattr(self.model, "network", None), "width_head", None) is not None
+        if os.environ.get("GM_WIDTH_FLOOR") and not self._width_floor:
+            raise RuntimeError("GM_WIDTH_FLOOR=1 but this checkpoint has no aux width_head — add "
+                               "+model.network.aux_grasp_width=true to the eval overrides")
+        if self._width_floor:
+            print("[eval_agent] width FLOOR active (policy timing, head level)", flush=True)
         rw = os.environ.get("GM_RESIDUAL_WIDTH")
         if rw:
             nz = np.load(rw)
@@ -60,6 +67,17 @@ class _DiffusionPolicy:
             traj = self.model(cond=cond, deterministic=True).trajectories.cpu().numpy()
             if self._width_head:
                 traj[:, :, -1] = self.model.network.predict_width_traj(cond).cpu().numpy()
+            if self._width_floor:
+                # WIDTH FLOOR (item 18, 2026-08-27): the policy owns the closure TIMING (its
+                # width command is the only width signal trained closed-loop); the per-episode
+                # level head owns HOW TIGHT. max() => the ramp's shape/speed is untouched and it
+                # simply STOPS at the scene-appropriate width instead of the learned constant.
+                # Only ever LOOSENS, so it cannot create a new crush mode; idempotent, so it
+                # cannot compound like the additive gripper-offset bug. Both "head drives the
+                # whole channel" variants failed (sighted copied its input; blind could not
+                # trigger closure in closed loop) — this is the decomposition that survived.
+                lvl = self.model.network.aux_predict(cond)["grasp_width"].cpu().numpy()[:, 0]
+                traj[:, :, -1] = np.maximum(traj[:, :, -1], lvl[:, None])
             if self._resid is not None:
                 s_lo, s_hi, a_lo, a_hi = self._resid
                 pred = self.model.network.aux_predict(cond)["grasp_width"].cpu().numpy()[:, 0]
