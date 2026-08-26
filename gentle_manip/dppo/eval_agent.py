@@ -132,6 +132,18 @@ class _DiffusionPolicy:
         # dump was an ad-hoc patch that vanished, leaving published probe numbers unreproducible.
         # Per-episode MIN commanded width is the statistic used (measured corr 0.471 vs 0.474 for
         # the EE-z "at grasp" definition — indistinguishable, and needs no phase detection).
+        # LATCH STEP (2026-08-26): sample the level head after N act() calls instead of at t=0.
+        # A fine sweep over the approach (job 1728924) beats t=0 on every axis — the arm has
+        # descended so the object resolves better, but occlusion has not set in yet:
+        #   latch @   0%: corr 0.624  bias +1.5mm  RMSE 5.5mm  P(over>2mm) 0.51   <- was the default
+        #   latch @  15%: corr 0.741  bias -0.4mm  RMSE 4.5mm  P(over>2mm) 0.29   <- best
+        #   latch @  50%: corr 0.251  bias -2.0mm  RMSE 7.0mm  P(over>2mm) 0.38   (occluded)
+        # The earlier "latch at t=0" conclusion compared only t=0 / closure-onset / mid-episode;
+        # t=0 won among those three, but the optimum sits between them. n_steps=75 -> 15% ~ step 11.
+        self._latch_step = int(os.environ.get("GM_WIDTH_FLOOR_LATCH_STEP", "0") or 0)
+        self._act_calls = 0
+        if self._latch_step > 0:
+            print(f"[eval_agent] floor latches after {self._latch_step} act() calls", flush=True)
         self._dump_tag = os.environ.get("GM_WIDTH_DUMP")
         self._dump_buf, self._dump_batch = [], 0
         self._dump_mm = None
@@ -169,6 +181,7 @@ class _DiffusionPolicy:
         self._flush_dump()
         self._floor_latch = None
         self._w_open = None
+        self._act_calls = 0
 
     def _flush_dump(self):
         if not self._dump_tag or not self._dump_buf:
@@ -186,6 +199,7 @@ class _DiffusionPolicy:
         self._dump_batch += 1
 
     def act(self, obs):
+        self._act_calls += 1
         with torch.no_grad():
             cond = {k: torch.from_numpy(np.asarray(obs[k])).float().to(self.device)
                     for k in self.obs_keys}
@@ -214,6 +228,8 @@ class _DiffusionPolicy:
                 if self._latch_drop is None:
                     # legacy: latch on the episode's FIRST act()
                     if self._floor_latch is None:
+                        if self._act_calls < max(self._latch_step, 1):
+                            return traj[:, : self.act_steps]        # floor not armed yet
                         self._floor_latch = self.model.network.aux_predict(cond)["grasp_width"] \
                             .cpu().numpy()[:, 0]
                 else:
