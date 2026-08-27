@@ -246,6 +246,30 @@ PATTERN (two F* values, monotonic in the predicted direction: lower threshold ->
 less success) plus a physical mechanism that predicted exactly this shape in advance.
 CANONICAL 200-ep evals with video launched (1732424/5/6 at F* = 0.5 / 1.0 / 1.5) — a claim needs n=200.
 
+### 2g. METHODOLOGICAL GAP: training-side comparisons are CONFOUNDED with run-to-run variance
+
+Three training-side interventions all came in BELOW baseline on delivered adaptation:
+
+| run | intervention | success | range | %demo |
+|---|---|---|---|---|
+| lulkx | (baseline) | 0.883 | 1.0 mm | **9%** |
+| ccpvb | aux width supervision | 0.517 | 0.3 mm | **3%** |
+| gaqcf | align-filtered data | 0.833 | 0.1 mm | **1%** |
+
+Tempting conclusion: "every training-side fix makes it worse." **But these are DIFFERENT TRAINING
+RUNS**, so the comparison is confounded with seed/run variance, and I have NO estimate of that
+variance. The baseline's 9% may itself be a lucky draw.
+
+A narrowing explanation was tested and does NOT hold: the align filter cut width sd by only 11.6%
+and the p10-p90 span by 3% — far too little to explain 9% -> 1%.
+
+**CONTROL LAUNCHED (1732445/6): probe sibling runs `dntaz` and `oqzdm` — SAME data, SAME recipe,
+different seeds.** Their spread is the noise floor against which every training-side claim must be
+judged. Until then, treat the aux-width and align "regressions" as UNRESOLVED, not established.
+
+**NOTE the contact-stop result is NOT affected**: it compares the SAME policy (lulkx@600) with only
+the inference-time controller changed — a within-run comparison, and the only clean one tonight.
+
 ### 2b. Ceilings and links
 
 | quantity | mushroom | tofu |
