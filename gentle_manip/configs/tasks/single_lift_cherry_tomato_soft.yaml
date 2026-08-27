@@ -1,0 +1,31 @@
+# [task] Soft cherry tomato lift (2.5 x 2.5 x 2.1 cm).
+# Used by: experiments/single_lift_cherry_tomato_soft_abs_action_armfocus.yaml
+# Status: experimental (multi-object synthesis SMOKE TEST, 2026-08-27)
+#
+# Cherry tomato ~2.5 cm. Firm skin over juicy locular gel; E 0.4 MPa and yield 30 kPa are literature-plausible for a firm cherry tomato, NOT measured.
+# MPM: grid 300 and substeps 330 follow the project scaling
+# (substeps ~ grid_density * sqrt(E), referenced to the mushroom's 250 / 235 at E 3e5).
+object_name: "cherry_tomato"
+object_type: "soft"
+mpm_grid_density: 300
+sim_substeps: 330
+mpm_bounds: [[0.32, -0.15, -0.03], [0.62, 0.15, 0.30]]
+
+success_z_min: 0.150
+success_z_max: 0.280
+hold_steps: 30
+success_scale: 0.2
+
+rewards:
+  stress:
+    scale: 0.2
+    cap: 1.5                 # fraction of this object's OWN yield (auto-injected)
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 0.1
+    decay: 8.0
+  lift:
+    scale: 0.1
+    grasp_gate_dist: 0.05
+    lift_target: 0.13

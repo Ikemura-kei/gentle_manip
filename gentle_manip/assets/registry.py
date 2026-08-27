@@ -96,6 +96,18 @@ OBJECT_MAP: dict[str, ObjectDef] = {
     # Raspberry ~1.5cm: the small, fragile, bumpy case. NOTE it spans only ~4 cells at the
     # mushroom task's MPM grid density (4 mm cells), so its task config must tighten mpm_bounds and
     # raise mpm_grid_density or the contact is unresolved — see docs/grasp_synthesis_v4_plan.md.
+    "cherry_tomato": ObjectDef("cherry_tomato", MATERIALS["cherry_tomato"], object_type="soft",
+                        size=(0.025, 0.025, 0.0212), default_pos=(0.47, 0.0, 0.0117),
+                        mesh_path=str(_OBJ_DIR / "cherry_tomato.obj")),
+    "tomato": ObjectDef("tomato", MATERIALS["tomato"], object_type="soft",
+                        size=(0.0642, 0.065, 0.0494), default_pos=(0.47, 0.0, 0.0259),
+                        mesh_path=str(_OBJ_DIR / "tomato.obj")),
+    "banana_chunk": ObjectDef("banana_chunk", MATERIALS["banana_chunk"], object_type="soft",
+                        size=(0.0337, 0.035, 0.0204), default_pos=(0.47, 0.0, 0.011),
+                        mesh_path=str(_OBJ_DIR / "banana_chunk.obj")),
+    "pasta_bundle": ObjectDef("pasta_bundle", MATERIALS["pasta_bundle"], object_type="soft",
+                        size=(0.06, 0.0249, 0.0249), default_pos=(0.47, 0.0, 0.0138),
+                        mesh_path=str(_OBJ_DIR / "pasta_bundle.obj")),
     "raspberry": ObjectDef("raspberry", MATERIALS["raspberry"], object_type="soft",
                            size=(0.0153, 0.0154, 0.0146), default_pos=(0.47, 0.0, 0.0082),
                            mesh_path=str(_OBJ_DIR / "raspberry.stl")),

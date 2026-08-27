@@ -1,0 +1,31 @@
+# [task] Soft pasta bundle lift (6.0 x 2.5 x 2.5 cm).
+# Used by: experiments/single_lift_pasta_bundle_soft_abs_action_armfocus.yaml
+# Status: experimental (multi-object synthesis SMOKE TEST, 2026-08-27)
+#
+# A bundle of ~7 COOKED strands, 6 cm long. Cooked pasta is very soft (dry pasta is ~GPa and not MPM-tractable): E 0.03 MPa / yield 10 kPa. Elongation 2.4 -- an intermediate case between the compact objects and the parked banana.
+# MPM: grid 260 and substeps 110 follow the project scaling
+# (substeps ~ grid_density * sqrt(E), referenced to the mushroom's 250 / 235 at E 3e5).
+object_name: "pasta_bundle"
+object_type: "soft"
+mpm_grid_density: 260
+sim_substeps: 220
+mpm_bounds: [[0.29, -0.18, -0.03], [0.65, 0.18, 0.30]]
+
+success_z_min: 0.150
+success_z_max: 0.280
+hold_steps: 30
+success_scale: 0.2
+
+rewards:
+  stress:
+    scale: 0.2
+    cap: 1.5                 # fraction of this object's OWN yield (auto-injected)
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 0.1
+    decay: 8.0
+  lift:
+    scale: 0.1
+    grasp_gate_dist: 0.065
+    lift_target: 0.13

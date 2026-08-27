@@ -410,6 +410,60 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-27 (smoke test) — FOUR NEW OBJECTS through the all-auto recipe: cherry tomato, tomato,
+banana CHUNK, pasta bundle. All synthesize; two needed fixes, both found and applied.**
+
+**Meshes.** Procedural for the tomatoes and the pasta bundle (`scratchpad/make_meshes.py`:
+oblate spheroids with optional lobes; a 7-strand bundle union'd and voxel-remeshed into one
+solid), and the **banana chunk cut from the REAL banana scan** (two-plane cut through the thick
+middle, scaled to 35 mm). Procedural was chosen over sourcing meshes online for reliability inside
+the time box and because the nominal extent can be set exactly — **these are shape-class probes for
+the SYNTHESIS pipeline, not calibrated food models. Real scans (e.g. via the TripoSG path already
+used for the banana/shrimps) should replace them before any of these is used for real collection.**
+All materials are literature-plausible, NOT measured.
+
+| object | extents | E | yield | nominal source |
+|---|---|---|---|---|
+| cherry_tomato | 2.5 x 2.5 x 2.1 cm | 0.4 MPa | 30 kPa | procedural oblate |
+| tomato | 6.4 x 6.5 x 4.9 cm | 0.3 MPa | 25 kPa | procedural, 5-lobed |
+| banana_chunk | 3.4 x 3.5 x 2.0 cm | 0.25 MPa | 25 kPa | **cut from the real banana scan** |
+| pasta_bundle | 6.0 x 2.5 x 2.5 cm | 0.12 MPa | 15 kPa | procedural 7-strand bundle |
+
+**Results (8-episode smoke tests, all-auto recipe, unchanged otherwise):**
+
+| object | demonstrator success | stress med | % of yield | align | min_pad |
+|---|---|---|---|---|---|
+| cherry_tomato | **13/16 = 81 %** | 17.3 kPa | 58 % | 0.94 | 19.6 mm2 |
+| banana_chunk | **12/16 = 75 %** | 9.7 kPa | 39 % | 0.82 | 14.8 mm2 |
+| tomato | **10/16 = 62 %** | 8.1 kPa | 32 % | 0.96 | 68.0 mm2 |
+| pasta_bundle | **8/16 = 50 %** | 6.2 kPa | 41 % | 0.86 | 38.8 mm2 |
+
+**BANANA CHUNK IS THE HEADLINE: 75 %, against the full banana's 0-12 %.** Same material, same
+source mesh, cut compact (elongation **1.72** vs the full banana's **5.12**). This is INDEPENDENT
+confirmation of the parked-banana diagnosis — the blocker was thin+elongated geometry falling
+outside the contact model's small-strain validity, not anything about bananas. **If a banana
+category is ever wanted, use chunks.**
+
+**FIX 1 — pasta bundle: 0 % -> 50 %, caused by my material guess, not by shape.** At the first
+guess (E 0.03 MPa, "cooked pasta") NOTHING lifted in 12 synthesized grasps, and the failure did
+not look like the banana's: contact area was LARGE (52.9 mm2), align 0.76, stress only 31 % of
+yield — i.e. every metric said the grasp was good and it still failed. That pattern says material,
+not geometry. Refirmed to **E 0.12 MPa / yield 15 kPa** ("al dente" bundle, substeps 110 -> 220)
+and it went to 50 %. **Lesson: an E chosen too soft produces grasps that look perfect on every
+synthesis metric and simply squash out.** Worth remembering when adding any new soft object.
+
+**OPEN — tomato at 62 % is the weak one.** Its failures are not low-contact (min_pad 57.5 on
+failures vs 71.8 on lifts — both large) and align is high (0.93/0.96). The likely cause is SIZE:
+at 6.5 cm the fruit needs 70-75 mm grasp widths against an 88 mm gripper opening, so there is very
+little margin and the pads sit on a strongly curved surface. Not diagnosed further; if a large
+round object is wanted, this is the case to look at.
+
+**Also noted:** 8 real scanned SHRIMP meshes already exist in `obj_meshes/shrimps/selected/`
+(shrimp1-8, TripoSG output, most watertight). Not tested here for time; shrimp is curved and
+elongated (~0.24-0.35 thickness ratio) so it is a good future test of where the elongation limit
+actually bites.
+
+
 **2026-08-27 (resolved) — CONFIRMED against the ACTUALLY EXECUTED poses: the FEM contact model
 cannot score ANY of the grasps that lift the banana. It is a VALIDITY-DOMAIN limit, not a bug.**
 

@@ -1,0 +1,31 @@
+# [task] Soft banana chunk lift (3.4 x 3.5 x 2.0 cm).
+# Used by: experiments/single_lift_banana_chunk_soft_abs_action_armfocus.yaml
+# Status: experimental (multi-object synthesis SMOKE TEST, 2026-08-27)
+#
+# A ~3.5 cm SEGMENT cut from the thick middle of the real banana scan. Same material as `banana`. Elongation 1.72 vs the full banana's 5.12 -- the point of this object is to test whether a COMPACT piece of banana avoids the contact-model validity limit that got the full banana parked (see DEVLOG 2026-08-27).
+# MPM: grid 300 and substeps 290 follow the project scaling
+# (substeps ~ grid_density * sqrt(E), referenced to the mushroom's 250 / 235 at E 3e5).
+object_name: "banana_chunk"
+object_type: "soft"
+mpm_grid_density: 300
+sim_substeps: 290
+mpm_bounds: [[0.31, -0.16, -0.03], [0.63, 0.16, 0.30]]
+
+success_z_min: 0.150
+success_z_max: 0.280
+hold_steps: 30
+success_scale: 0.2
+
+rewards:
+  stress:
+    scale: 0.2
+    cap: 1.5                 # fraction of this object's OWN yield (auto-injected)
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 0.1
+    decay: 8.0
+  lift:
+    scale: 0.1
+    grasp_gate_dist: 0.055
+    lift_target: 0.13
