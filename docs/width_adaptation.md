@@ -363,6 +363,19 @@ policy_env.py ~L254) -> serve_env -> SimEnvClient -> venv info -> the policy ada
 deploy the gripper's own force/current feedback provides it, so this is NOT privileged information
 at deployment — only the sim plumbing makes it look that way.
 
+## 4d. THIRD CATEGORY: raspberry is TOO SLOW to collect in time (2026-08-27)
+
+Smoke (job 1730025, 60 eps) runs at **7.8 FPS across 8 envs (~1 FPS/env)** — far slower than the
+mushroom collections. A full 650-episode raspberry set would take **20+ hours**, which does not fit
+the deadline, and a partial set is worse than none for a generalist claim. Likely cause: a 15 mm
+object at the task's MPM grid density costs many substeps per unit of useful motion.
+
+DECISION: do NOT launch the full raspberry collection. The generalist teaser stands on
+**mushroom + tofu** (1068 eps, job 1730005). If a third category is wanted later, **strawberry**
+(30.5 mm local cross-section) is the pragmatic pick — less size contrast than raspberry's 13.2 mm,
+but compact and much cheaper to simulate. The raspberry smoke is still being finished for its
+viability + collection-rate numbers, which are cheap now and useful for future planning.
+
 ## 5. Queued ideas, highest value first
 
 1. ~~Condition the width head on the grasp pose~~ **REFUTED 2026-08-27 (job 1728668).**
