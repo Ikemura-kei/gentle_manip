@@ -410,6 +410,62 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-27 (pinch filter + tomato size) — TWO user catches, both fixed: the auto area floor still
+admitted PINCHES, and the tomato was sized past the gripper's comfortable range.**
+
+**1. Pinch / strange-grasp filter.** User flagged `banana_chunk .../26-08-27-qrp/.../ep0004_env3_
+success_grasp.png`: **align 0.541, grip 0.83 N, width 35.1 mm** on a 33.7 x 35 x 20.4 mm object —
+jaws nearly fully open, fingertips catching the top corner, contact patches tiny and on the upper
+edge. A textbook pinch that the `area_min="auto"` floor let through, because when the whole
+feasible pool is mediocre the "upper half by area" is still mediocre.
+
+Fix: the auto selection now keeps the upper half by **BOTH contact area AND alignment**, then takes
+the best score. `align` is the right second signal — it is already computed, and it discriminates
+strongly (banana chunk: lifts averaged **0.83** vs **0.53** for failures). Both criteria are
+POOL-RELATIVE medians, so this stays scale-free and adds no fitted constant; if the two together
+empty the set it falls back to the area criterion alone rather than returning nothing.
+
+Measured on the banana chunk, three runs (before / before / after):
+
+| run | align med | align min | grasps < 0.6 | success |
+|---|---|---|---|---|
+| qym (before) | 0.82 | 0.41 | 2 | 12/16 |
+| qrp (before, the flagged pinch) | 0.80 | **0.52** | **4** | 11/16 |
+| **ofx (after)** | **0.86** | **0.60** | **1** | 11/16 |
+
+Bad grasps cut without costing yield.
+
+**2. Tomato size vs the GRIPPER's limit — a real hardware constraint, quantified.** The gripper
+opens **88 mm** physically, and the planner bounds width at **79 mm**. So:
+
+| tomato size | width needed | margin under 79 mm | demonstrator success |
+|---|---|---|---|
+| 6.5 cm (first guess) | ~65 mm | 14 mm | 57-62 % |
+| **6.0 cm (adopted)** | ~60 mm | **19 mm** | **81-89 %** |
+| 7.5 cm (real local size) | ~75 mm | **4 mm** | not viable |
+
+**A realistically-sized 7-8 cm tomato is effectively out of range for this hand** — 4 mm of margin
+leaves no room for the pads to indent, which is why the larger versions performed worst. 6 cm is
+the user's call and it lifts the tomato from ~60 % to ~85 %. **If a realistic whole tomato is ever
+needed, it is a gripper problem, not a synthesis problem.** The cherry tomato (2.5 cm) is the
+realistic tomato category for this rig.
+
+**Current cross-object state (8-episode smoke tests, all-auto + yaw/squeeze/align filters):**
+
+| object | success | align med | align min | < 0.6 | stress % of yield |
+|---|---|---|---|---|---|
+| mushroom | **8/8 = 100 %** | 0.94 | 0.94 | 0 | 30 % |
+| tomato (6 cm) | **13/16 = 81 %** | 0.96 | 0.90 | 0 | 31 % |
+| cherry_tomato | **6/8 = 75 %** | 0.94 | 0.86 | 0 | 52 % |
+| banana_chunk | 11/16 = 69 % | 0.86 | 0.60 | 1 | 43 % |
+| pasta_bundle | 10/24 = 42 % | 0.85 | 0.46 | 2 | 46 % |
+
+Alignment is now high everywhere (median 0.85-0.96) and sub-0.6 grasps are rare. **pasta_bundle at
+42 % is the weakest and still has the worst alignment floor (0.46)** — it is the elongated one, and
+the natural next suspect is the same thin/elongated regime that got the full banana parked, though
+it is nowhere near as severe.
+
+
 **2026-08-27 (occlusion + squeeze) — USER CAUGHT A REAL GAP: the 60 deg camera-azimuth bound is a
 SHAPED PENALTY, and at 60 deg a SMALL object is COMPLETELY hidden by the gripper. Added a HARD
 yaw bound and a size-scaled squeeze, both auto.**

@@ -939,8 +939,19 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
             if _safe:
                 _pool = _safe
         if _pool:
-            _med = float(np.median([res["min_pad_area"] for _, _, res in _pool]))
-            _fat = [(x, sc, res) for (x, sc, res) in _pool if res["min_pad_area"] >= _med]
+            # Keep the upper half by BOTH contact area AND alignment, then take the best score.
+            # Area alone still admits PINCHES: a fingertip catch on a top edge can clear the area
+            # median while gripping a corner. `align` is the discriminator there -- measured on the
+            # banana chunk, lifts averaged align 0.83 vs 0.53 for failures, and the pinch the user
+            # flagged (ep0004_env3) scored align 0.541 with the jaws nearly fully open. Both are
+            # POOL-RELATIVE medians, so this stays scale-free and adds no fitted constant; if one
+            # criterion empties the set we fall back to the other rather than returning nothing.
+            _med_a = float(np.median([res["min_pad_area"] for _, _, res in _pool]))
+            _med_g = float(np.median([res.get("align", 0.0) or 0.0 for _, _, res in _pool]))
+            _fat = [(x, sc, res) for (x, sc, res) in _pool
+                    if res["min_pad_area"] >= _med_a and (res.get("align", 0.0) or 0.0) >= _med_g]
+            if not _fat:                                   # both filters together were too strict
+                _fat = [(x, sc, res) for (x, sc, res) in _pool if res["min_pad_area"] >= _med_a]
             if _fat:
                 _bx, _bs, _br = max(_fat, key=lambda t: t[1])
                 best = {"x": np.asarray(_bx, float).copy(), "score": _bs, "res": _br}
