@@ -370,7 +370,14 @@ mushroom collections. A full 650-episode raspberry set would take **20+ hours**,
 the deadline, and a partial set is worse than none for a generalist claim. Likely cause: a 15 mm
 object at the task's MPM grid density costs many substeps per unit of useful motion.
 
-DECISION: do NOT launch the full raspberry collection. The generalist teaser stands on
+**SMOKE PASSED (26-08-27-yxu): 95.2% success, 0 fallbacks, 60 eps in 133 min (2.2 min/ep).**
+Raspberry grasping is VIABLE and clean — the only obstacle is rate. Width distribution is the
+point: **16.9 +- 4.0 mm** vs mushroom 31.5 +- 7.1 and tofu ~42, i.e. THREE cleanly separated width
+regimes, which is exactly the pressure the generalist hypothesis needs (no single mean serves 17,
+32 and 42 mm). Its corr(width, scale) is only +0.346 (vs 0.84 / 0.79) — a near-spherical small
+object whose width is less determined by scale.
+DECISION: 650 eps would take 24h and is out. A 200-episode set (~7h) IS affordable and gives a
+genuine 3-category teaser — LAUNCHED. Do NOT launch the full 650. The generalist teaser stands on
 **mushroom + tofu** (1068 eps, job 1730005). If a third category is wanted later, **strawberry**
 (30.5 mm local cross-section) is the pragmatic pick — less size contrast than raspberry's 13.2 mm,
 but compact and much cheaper to simulate. The raspberry smoke is still being finished for its
