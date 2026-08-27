@@ -157,6 +157,21 @@ class _DiffusionPolicy:
             net.cfg_width_only = bool(int(os.environ.get("GM_CFG_WIDTH_ONLY", "0") or 0))
             print(f"[eval_agent] CFG active: scale={cfg_scale} width_only={net.cfg_width_only}",
                   flush=True)
+        # ---- CONTACT-TRIGGERED WIDTH STOP (2026-08-27) ------------------------------------
+        # GM_CONTACT_STOP_N=F*: hold the width the moment measured contact force exceeds F*.
+        # DIFFERENT IN KIND from the floor: the floor turns a size PREDICTION into a width by
+        # CLAMPING, so prediction error stops the gripper in the wrong place and drops the object —
+        # ten configurations traced one Pareto curve because of that. Here PHYSICS sets the width:
+        # it stops where the object actually is, so width ~= size - indent(F*), tracking size with
+        # slope ~1, and there is NO prediction to be wrong.
+        # NOT privileged at deployment: the real gripper reports force/current. In sim it arrives
+        # via the harness `observe_info` hook and never enters the policy's observation.
+        self._contact_stop_n = float(os.environ.get("GM_CONTACT_STOP_N", "0") or 0)
+        self._held_width = None       # (n_env,) latched command once contact fires; NaN = not yet
+        self._last_contact = None
+        if self._contact_stop_n > 0:
+            print(f"[eval_agent] CONTACT STOP active: hold width at contact_force > "
+                  f"{self._contact_stop_n} N", flush=True)
         self._dump_tag = os.environ.get("GM_WIDTH_DUMP")
         self._dump_buf, self._dump_batch = [], 0
         self._dump_mm = None
@@ -195,6 +210,14 @@ class _DiffusionPolicy:
         self._floor_latch = None
         self._w_open = None
         self._act_calls = 0
+        self._held_width = None
+        self._last_contact = None
+
+    def observe_info(self, info):
+        """Harness hook: receive the step info (contact force). Never reaches the policy net."""
+        cf = info.get("contact_force") if isinstance(info, dict) else None
+        if cf is not None:
+            self._last_contact = np.asarray(cf, np.float32).reshape(-1)
 
     def _flush_dump(self):
         if not self._dump_tag or not self._dump_buf:
@@ -270,6 +293,26 @@ class _DiffusionPolicy:
                 u = 2 * (w_phys - 0.0) / (0.088 - 0.0 + 1e-6) - 1              # -> derive space
                 w_act = 2 * (u - a_lo) / (a_hi - a_lo + 1e-6) - 1              # -> npz units (match dataset)
                 traj[:, :, -1] = traj[:, :, -1] + w_act[:, None]
+        if self._contact_stop_n > 0:
+            n_env = traj.shape[0]
+            if self._held_width is None:
+                self._held_width = np.full(n_env, np.nan, np.float64)
+            if self._last_contact is None and self._act_calls == 8:
+                # NO-OP GUARD: if contact never reaches us the controller does nothing and the run
+                # looks like a clean negative. Fail loudly instead (this exact class produced the
+                # fake 'blind' result and nearly wasted the CFG run).
+                raise RuntimeError(
+                    "GM_CONTACT_STOP_N is set but no contact_force has arrived after 8 steps — "
+                    "check that the task/backend populates SimFeedback.extra['contact_force'] and "
+                    "that the harness observe_info hook is wired")
+            if self._last_contact is not None:
+                # latch the CURRENT commanded width the first step contact exceeds F*
+                fire = np.isnan(self._held_width) & (self._last_contact[:n_env] > self._contact_stop_n)
+                if fire.any():
+                    self._held_width[fire] = traj[fire, 0, -1]
+            hold = ~np.isnan(self._held_width)
+            if hold.any():   # after contact: stop closing further; the OBJECT dictated the width
+                traj[:, :, -1] = np.where(hold[:, None], self._held_width[:, None], traj[:, :, -1])
         if self._dump_tag:
             # Record EE-z alongside the commanded width. Episode-MIN width alone is not
             # trustworthy: a policy that goes OOD and closes the gripper in mid-air produces a

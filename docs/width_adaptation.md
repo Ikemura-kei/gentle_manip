@@ -346,7 +346,17 @@ it into a drop. That is the qualitative difference from the floor.
 CANNOT stop on contact; this can. Testable by perturbing mid-grasp or varying stiffness at fixed
 geometry.
 
-**IMPLEMENTATION (not done — multi-file, deliberately not attempted unattended at 00:30):**
+**IMPLEMENTED 2026-08-27 (jobs 1731308/1731309, F* = 0.5 / 1.5 N bracketing the demonstrator's
+2.1 +- 1.5 N).** Four minimal edits: `policy_env` emits `contact_force` in the step info (reusing
+the sim_feedback already fetched — no extra physics round-trip); `genesis_venv` aggregates it as
+the chunk MAX (contact ONSET is what matters); `harness` gains an OPT-IN `observe_info` hook that
+is protocol-neutral (no change to metrics, and the policy NETWORK still sees only its declared obs
+keys); `eval_agent` latches the commanded width the first step force exceeds F*. Plus a NO-OP GUARD
+that raises if no contact arrives within 8 steps — which immediately caught B13 (rpc.py drops
+un-whitelisted info keys) in 3 minutes instead of two 40-minute false negatives.
+
+ORIGINAL note:
+~~IMPLEMENTATION (not done — multi-file, deliberately not attempted unattended at 00:30):~~
 contact force exists in sim (`sf.extra["contact_force"]`, `CONTACT_FORCE_THRESH_N`) but only
 surfaces as a PRIVILEGED OBS. It must be threaded into the step `info` (like `stress_max`,
 policy_env.py ~L254) -> serve_env -> SimEnvClient -> venv info -> the policy adapter. At REAL

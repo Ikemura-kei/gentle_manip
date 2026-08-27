@@ -213,6 +213,12 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
                 for j in range(n):
                     act_buf[j].append(_a2[j].copy())
             obs, reward, _term, _trunc, info = venv.step(action)
+            # Optional, PROTOCOL-NEUTRAL hook: let a policy adapter observe the step info (e.g. a
+            # contact-triggered width controller reading `contact_force`). Does NOT change the eval
+            # protocol, the metrics, or what the POLICY NETWORK sees — the adapter still feeds the
+            # model only its declared obs keys. Policies without the hook are unaffected.
+            if hasattr(policy, "observe_info"):
+                policy.observe_info(info)
             ep_reward += np.asarray(reward, float).reshape(n)
             succ = np.asarray(info.get("success", np.zeros(n, bool))).reshape(n).astype(bool)
             final = succ

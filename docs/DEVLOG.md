@@ -2251,6 +2251,18 @@ recalibrated or the metric fixed. TODO, not done tonight.
 LESSON: when a gate fails, run it on a KNOWN-GOOD input before believing it. Without that control
 a valid experiment would have been abandoned on a broken check.
 
+**B13. `envs/rpc.py` WHITELISTS the step-info keys — a new per-step signal vanishes silently.**
+Wiring a contact-triggered width controller, `contact_force` was computed correctly in
+`genesis_worker` (unconditionally, for soft AND rigid), surfaced by `sim_backend`, and emitted by
+`policy_env` — then DROPPED crossing the sim-server boundary, because `rpc.py` ships only an
+explicit list (`success`, `obj_z`, `stress_*`). No error, no warning; the controller simply never
+fired. FIX: add the key to BOTH sides (server `resp[...]` ~L151 and client rebuild ~L262).
+RULE: **any new per-step signal needs an explicit rpc entry or it disappears without error.**
+Same silent-drop class as B1 (the normalization default).
+CAUGHT BY: a deliberate no-op guard in the controller (raise if no contact after 8 steps). Cost 3
+minutes instead of two 40-minute probes reporting a FALSE NEGATIVE on the most promising mechanism.
+LESSON REINFORCED: every new mechanism ships with an assertion that it is actually running.
+
 Earlier, same class: the `--gripper-offset-m` feedback bug (additive bias on an observed channel),
 the residual-width two-space unit bug, and the fake "blind" run (sed patched `nc.` while the
 trainer read `net_cfg.`). All three are unit/plumbing mismatches that produced plausible numbers.

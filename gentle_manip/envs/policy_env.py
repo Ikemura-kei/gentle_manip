@@ -249,6 +249,18 @@ class PolicyEnv:
         if obj_z is not None:
             for i in range(self.num_envs):
                 infos[i]["obj_z"] = float(obj_z[i])
+        # CONTACT FORCE in the step info (2026-08-27) — for a contact-TRIGGERED width controller.
+        # The floor family failed structurally: it converts a size PREDICTION into a width by
+        # clamping, so prediction error stops the gripper in the wrong place and the object drops.
+        # Closing until CONTACT instead lets PHYSICS set the width (width ~= size - indent(F*)),
+        # so there is no prediction to be wrong. Already computed for the privileged obs; this only
+        # surfaces it in `info` so a controller can see it without it entering the policy's OBS.
+        # NOT privileged at deployment: the real gripper reports force/current directly.
+        cf_ = None if sim_feedback is None else sim_feedback.extra.get("contact_force")
+        if cf_ is not None:
+            cf_ = np.asarray(cf_, dtype=np.float32).reshape(-1)
+            for i in range(self.num_envs):
+                infos[i]["contact_force"] = float(cf_[i])
         if stress is not None:
             for i in range(self.num_envs):
                 infos[i]["stress_max"] = float(stress["max"][i])

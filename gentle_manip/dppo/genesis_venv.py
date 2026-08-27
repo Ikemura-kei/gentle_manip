@@ -171,6 +171,7 @@ class GenesisMultiStepVecEnv:
         reward = np.zeros(self.n_envs, np.float32)
         success = np.zeros(self.n_envs, bool)       # last sub-step's success (current state)
         obj_z = None                                # last sub-step's object height (diagnostic)
+        c_max = None                                # contact force: chunk MAX (for a contact stop)
         s_max, s_sum, s_cnt = None, None, 0         # von-Mises over the chunk (soft body)
         s_t10, s_t20 = None, None                   # top-10%/20% particle tail (chunk-max)
         for t in range(a.shape[1]):                 # execute the action chunk, sum reward
@@ -182,6 +183,9 @@ class GenesisMultiStepVecEnv:
             success = np.array([bool(d.get("success", False)) for d in sub_info])
             if sub_info and "obj_z" in sub_info[0]:
                 obj_z = np.array([d["obj_z"] for d in sub_info], np.float32)
+            if sub_info and "contact_force" in sub_info[0]:
+                cf = np.array([d["contact_force"] for d in sub_info], np.float32)
+                c_max = cf if c_max is None else np.maximum(c_max, cf)   # chunk max: contact ONSET
             if sub_info and "stress_max" in sub_info[0]:
                 sm = np.array([d["stress_max"] for d in sub_info], np.float32)
                 s_max = sm if s_max is None else np.maximum(s_max, sm)
@@ -203,6 +207,8 @@ class GenesisMultiStepVecEnv:
         info: dict = {"success": success}           # per-env eval signals
         if obj_z is not None:
             info["obj_z"] = obj_z
+        if c_max is not None:
+            info["contact_force"] = c_max
         if s_max is not None:
             info["stress_max"], info["stress_mean"] = s_max, s_sum / s_cnt
             if s_t10 is not None:

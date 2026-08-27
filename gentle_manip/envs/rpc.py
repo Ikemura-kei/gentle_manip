@@ -148,6 +148,8 @@ def serve_env(env, host: str = "127.0.0.1", port: int = 5555, ready_msg: str = "
                         }
                         if info and "obj_z" in info[0]:            # object height (diagnostic; any task)
                             resp["obj_z"] = [float(i["obj_z"]) for i in info]
+                        if info and "contact_force" in info[0]:   # gripper<->object contact (N)
+                            resp["contact_force"] = [float(i["contact_force"]) for i in info]
                         if info and "stress_max" in info[0]:      # soft body: per-env von-Mises
                             for key in ("stress_max", "stress_mean", "stress_top10", "stress_top20"):
                                 if key in info[0]:
@@ -259,6 +261,9 @@ class SimEnvClient:
         if header.get("obj_z") is not None:                                  # diagnostic (any task)
             for k, d in enumerate(info):
                 d["obj_z"] = float(header["obj_z"][k])
+        if header.get("contact_force") is not None:                          # contact-stop control
+            for k, d in enumerate(info):
+                d["contact_force"] = float(header["contact_force"][k])
         if header.get("stress_max") is not None:                            # soft body only
             for key in ("stress_max", "stress_mean", "stress_top10", "stress_top20"):
                 vals = header.get(key)
