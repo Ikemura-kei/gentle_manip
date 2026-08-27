@@ -1,0 +1,31 @@
+# [task] Soft tomato lift (6.4 x 6.5 x 4.9 cm).
+# Used by: experiments/single_lift_tomato_soft_abs_action_armfocus.yaml
+# Status: experimental (multi-object synthesis SMOKE TEST, 2026-08-27)
+#
+# Regular tomato ~6.5 cm, 5-lobed. Softer and more bruise-prone than a cherry tomato (larger, riper). E 0.3 MPa / yield 25 kPa, literature-plausible, NOT measured.
+# MPM: grid 180 and substeps 175 follow the project scaling
+# (substeps ~ grid_density * sqrt(E), referenced to the mushroom's 250 / 235 at E 3e5).
+object_name: "tomato"
+object_type: "soft"
+mpm_grid_density: 180
+sim_substeps: 175
+mpm_bounds: [[0.27, -0.20, -0.03], [0.67, 0.20, 0.30]]
+
+success_z_min: 0.150
+success_z_max: 0.280
+hold_steps: 30
+success_scale: 0.2
+
+rewards:
+  stress:
+    scale: 0.2
+    cap: 1.5                 # fraction of this object's OWN yield (auto-injected)
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 0.1
+    decay: 8.0
+  lift:
+    scale: 0.1
+    grasp_gate_dist: 0.075
+    lift_target: 0.13

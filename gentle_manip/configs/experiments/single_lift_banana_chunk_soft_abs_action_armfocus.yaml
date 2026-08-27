@@ -1,0 +1,21 @@
+# [experiment] banana_chunk lift, njhbz-style armfocus setup (multi-object synthesis smoke test).
+# Used by: collect_demos_synth_v3 (2026-08-27)
+# Status: experimental
+#
+# Mirrors single_lift_banana_soft_abs_action_armfocus except task + dr.
+task: single_lift_banana_chunk_soft
+action: abs_pose_abs_gripper
+dr: soft_orientation_realws_banana_chunk
+augmentation: l515_noise
+
+obs: superset_soft_armfocus
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400

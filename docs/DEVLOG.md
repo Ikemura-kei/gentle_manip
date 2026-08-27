@@ -80,6 +80,22 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
 
 ## Conclusions to date (2026-08-23)
 
+**Multi-object grasp synthesis (2026-08-27).** ONE auto recipe now covers four objects with no
+per-object parameters — `--grasp-area-min-mm2 auto --grasp-width-max-mm auto`, with E / density /
+yield resolved from the object's own material (previously ALL objects silently used the
+mushroom's 3e5 / 1000, which corrupted both stress AND grip force per object):
+
+| object | demonstrator success | stress vs yield | align |
+|---|---|---|---|
+| mushroom | 16/16 = 100 % | 29 % | 0.94 |
+| raspberry | 16/16 = 100 % | 40 % | 0.89 |
+| tofu | 23/24 = 96 % | 15 % | 0.98 |
+| strawberry | 22/24 = 92 % | 60 % | 0.92 |
+
+Tofu needed no special handling. Strawberry at 60 % of yield is the closest to bruising and is
+worth watching. **The banana is PARKED** — see Open questions; it is a contact-model validity
+limit, not a tuning gap.
+
 1. **7d euler-abs ≈ 10d rot6d** in sim (0.84 vs 0.88) once the euler encoding carries a
    frame offset and commanded-target derivation → the compact action is (nearly) free.
 2. **Abs ≈ delta in sim**; abs chosen for real deployment because it re-anchors to an
@@ -144,6 +160,21 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
    `qjzsf/state_500-1000` (real-only DPPO abs).
 
 ## Open questions (gates before further building)
+
+- **~~Can the banana be added as a multi-object category?~~ PARKED (2026-08-27, user decision:
+  "give banana up").** Not a tuning problem and not worth more effort: the FEM contact model
+  scores **0/8** of the grasps that demonstrably lift it (`degenerate` 5/8, `no_contact` 3/8),
+  because it evaluates contact against the NOMINAL undeformed mesh and the banana's working
+  grasps need ~54 % compression — outside small-strain validity (`max_indent` 0.01 m). The model
+  is correct within its assumptions; the banana violates them. **Do not re-attempt via seeding,
+  CMA budget, width caps or area floors — all four were tried and cannot work, because the
+  target grasps are unscoreable, not merely unfound.** Reopening this requires a contact model
+  evaluated in the DEFORMED configuration plus a large-deformation stress model (the linear FEM's
+  stress is untrustworthy at 54 % strain), which is a project in itself.
+  Stopgap if ever needed: the geometric heuristic (centre, closing perpendicular to the longest
+  axis) lifts it 80 % at 26 mm with 11 % compression — see the 2026-08-27 log entries.
+  **The other four objects are unaffected and READY**: mushroom 100 %, raspberry 100 %, tofu 96 %,
+  strawberry 92 % under the all-auto recipe.
 
 - **Real-robot validation of the whole foundation** — nothing above is real-verified yet.
 - **~~Does real co-training help in real?~~ ANSWERED (2026-08-23, real-robot runs): YES.**
@@ -378,6 +409,158 @@ running" — replacing any whose experiments have since finished.**
 ---
 
 ## Log
+
+**2026-08-27 (smoke test) — FOUR NEW OBJECTS through the all-auto recipe: cherry tomato, tomato,
+banana CHUNK, pasta bundle. All synthesize; two needed fixes, both found and applied.**
+
+**Meshes.** Procedural for the tomatoes and the pasta bundle (`scratchpad/make_meshes.py`:
+oblate spheroids with optional lobes; a 7-strand bundle union'd and voxel-remeshed into one
+solid), and the **banana chunk cut from the REAL banana scan** (two-plane cut through the thick
+middle, scaled to 35 mm). Procedural was chosen over sourcing meshes online for reliability inside
+the time box and because the nominal extent can be set exactly — **these are shape-class probes for
+the SYNTHESIS pipeline, not calibrated food models. Real scans (e.g. via the TripoSG path already
+used for the banana/shrimps) should replace them before any of these is used for real collection.**
+All materials are literature-plausible, NOT measured.
+
+| object | extents | E | yield | nominal source |
+|---|---|---|---|---|
+| cherry_tomato | 2.5 x 2.5 x 2.1 cm | 0.4 MPa | 30 kPa | procedural oblate |
+| tomato | 6.4 x 6.5 x 4.9 cm | 0.3 MPa | 25 kPa | procedural, 5-lobed |
+| banana_chunk | 3.4 x 3.5 x 2.0 cm | 0.25 MPa | 25 kPa | **cut from the real banana scan** |
+| pasta_bundle | 6.0 x 2.5 x 2.5 cm | 0.12 MPa | 15 kPa | procedural 7-strand bundle |
+
+**Results (8-episode smoke tests, all-auto recipe, unchanged otherwise):**
+
+| object | demonstrator success | stress med | % of yield | align | min_pad |
+|---|---|---|---|---|---|
+| cherry_tomato | **13/16 = 81 %** | 17.3 kPa | 58 % | 0.94 | 19.6 mm2 |
+| banana_chunk | **12/16 = 75 %** | 9.7 kPa | 39 % | 0.82 | 14.8 mm2 |
+| tomato | **10/16 = 62 %** | 8.1 kPa | 32 % | 0.96 | 68.0 mm2 |
+| pasta_bundle | **8/16 = 50 %** | 6.2 kPa | 41 % | 0.86 | 38.8 mm2 |
+
+**BANANA CHUNK IS THE HEADLINE: 75 %, against the full banana's 0-12 %.** Same material, same
+source mesh, cut compact (elongation **1.72** vs the full banana's **5.12**). This is INDEPENDENT
+confirmation of the parked-banana diagnosis — the blocker was thin+elongated geometry falling
+outside the contact model's small-strain validity, not anything about bananas. **If a banana
+category is ever wanted, use chunks.**
+
+**FIX 1 — pasta bundle: 0 % -> 50 %, caused by my material guess, not by shape.** At the first
+guess (E 0.03 MPa, "cooked pasta") NOTHING lifted in 12 synthesized grasps, and the failure did
+not look like the banana's: contact area was LARGE (52.9 mm2), align 0.76, stress only 31 % of
+yield — i.e. every metric said the grasp was good and it still failed. That pattern says material,
+not geometry. Refirmed to **E 0.12 MPa / yield 15 kPa** ("al dente" bundle, substeps 110 -> 220)
+and it went to 50 %. **Lesson: an E chosen too soft produces grasps that look perfect on every
+synthesis metric and simply squash out.** Worth remembering when adding any new soft object.
+
+**OPEN — tomato at 62 % is the weak one.** Its failures are not low-contact (min_pad 57.5 on
+failures vs 71.8 on lifts — both large) and align is high (0.93/0.96). The likely cause is SIZE:
+at 6.5 cm the fruit needs 70-75 mm grasp widths against an 88 mm gripper opening, so there is very
+little margin and the pads sit on a strongly curved surface. Not diagnosed further; if a large
+round object is wanted, this is the case to look at.
+
+**Also noted:** 8 real scanned SHRIMP meshes already exist in `obj_meshes/shrimps/selected/`
+(shrimp1-8, TripoSG output, most watertight). Not tested here for time; shrimp is curved and
+elongated (~0.24-0.35 thickness ratio) so it is a good future test of where the elongation limit
+actually bites.
+
+
+**2026-08-27 (resolved) — CONFIRMED against the ACTUALLY EXECUTED poses: the FEM contact model
+cannot score ANY of the grasps that lift the banana. It is a VALIDITY-DOMAIN limit, not a bug.**
+
+The previous entry left the mechanism unconfirmed because the probe pose was reconstructed rather
+than executed. Redone properly: poses taken from the RECORDED episodes of the scripted run that
+lifted 8/8 (ee_pos + ee_quat + gripper_width at the grasp instant, object orientation from that
+env's `dr_params.csv` row), i.e. exactly what the simulator ran.
+
+| status assigned to poses that ALL LIFTED | count |
+|---|---|
+| `degenerate` | 5/8 |
+| `no_contact` | 3/8 |
+| **`ok`** | **0/8** |
+
+**Not one of the eight working grasps is scoreable.** All receive the infinite-penalty score. This
+closes the question for good: no seeding, budget, width cap or area floor could ever have made CMA
+pick them.
+
+**The mechanism, and why it is NOT a defect to "fix" casually.** The executed grasps close to
+**8.5 mm on an 18.6 mm-thick banana** — 54 % compression. `indent_from_width` evaluates contact
+against the **NOMINAL, UNDEFORMED mesh**, so it sees the pads buried ~10 mm inside solid material
+and stamps `degenerate` (past `max_indent` = 0.01 m, the small-strain validity limit). The real MPM
+body simply deforms and conforms. The model is behaving CORRECTLY within its assumptions; the
+banana's working grasps are outside those assumptions.
+
+**This is why the compact objects are unaffected.** Mushroom / tofu / strawberry / raspberry lift at
+92-100 % because their working grasps involve only a few mm of deformation on a ~30 mm body —
+comfortably inside small strain. Only the banana (thin + needing large deformation to get grip) sits
+outside. The synthesis pipeline is sound on 4 of 5 objects; it has a scope limit, not a corruption.
+
+**Practical route that works TODAY, without touching the contact model:** the geometric heuristic
+(object centre, top-down, closing perpendicular to the longest axis) lifts the banana **80 % at
+26 mm with only 11 % compression** — usable, gentle demo data. Where the FEM metric is valid
+(compact objects) use CMA+FEM; where it is not, use the heuristic. The open design question is how
+to DECIDE between them automatically without inventing another fitted threshold: a thickness-vs-
+`max_indent` test misfires (raspberry is 14.3 mm thick yet grasps fine at small indentation), so the
+signal probably has to come from the search result itself, not from a shape statistic.
+
+**A real contact-model fix would mean evaluating contact in the DEFORMED configuration** (iterate
+deform -> re-check) rather than against the nominal mesh, and a large-deformation-capable stress
+model, since the linear FEM's stress numbers are not trustworthy at 54 % strain either. That is a
+substantial piece of work, not a tuning change.
+
+
+**2026-08-27 (later still) — WHY the banana's good grasp is never chosen: the FEM metric marks it
+INFEASIBLE. Seeding CMA with it does nothing; the defect is the CONTACT MODEL, not the search.**
+
+Follow-up to the scripted-grasp result. Tried the obvious fix first — force the FIRST CMA start to
+be the pose we know works (object centre, top-down, closing PERPENDICULAR to the longest axis),
+always on and NOT gated on an elongation threshold (on a compact object the long axis is
+near-arbitrary, so it is just one more sensible top-down seed; elongation for reference: mushroom
+1.09, strawberry 1.23, raspberry 1.06, banana 5.12).
+
+**It changed nothing — the banana run came back BIT-IDENTICAL** (env0 22632 Pa / 54.2 mm, same as
+before the seed). CMA simply optimises away from the seed. So the search initialisation was never
+the problem.
+
+**Scoring the known-good grasp directly shows why** (banana flat at nominal pose, correct TCP z
+built the same way the seed loop does):
+
+| grasp | score | status | stress |
+|---|---|---|---|
+| long-axis centre, w = 18 / 22 / 26 / 30 / 34 mm | -1.3e8 | **`degenerate`** | inf |
+| CMA winner, w = 79 mm | -47 393 | `ok` | 19.6 kPa |
+
+**Every width of the grasp that lifts 80-100 % is stamped `degenerate` and given an
+infinite-penalty score, so CMA can never select it.** No amount of seeding, budget escalation or
+width capping could ever have found it — which retrospectively explains why none of those levers
+moved lift success while they all moved synthesis feasibility.
+
+`degenerate` comes from `width_grasp.indent_from_width`: it fires when a jaw indents deeper than
+`max_indent` (default **0.01 m**), the small-strain validity limit of the FEM contact model. And
+the successful scripted grasp compressed the banana from 18.6 mm to 8.5 mm — **~10 mm of total
+indentation, exactly at that limit**. That is the shape of the problem: **for a THIN SOFT object
+the grasps that actually hold sit outside the contact model's validity domain, while everything
+inside it is too loose to lift.**
+
+**UNRESOLVED / do not over-read.** Raising `max_indent` to 0.02 did NOT clear the status, and the
+implied indentation works out to ~146 mm — larger than the banana itself. So the pose reconstructed
+in the probe is probably NOT the pose that actually executed (the executor CLIPS tcp z into the
+workspace, and the scripted run's raw z was below the table — see the earlier caveat). The exact
+`degenerate` trigger therefore still needs confirming against the pose that really ran. What is
+solid is the ranking result: the metric rejects the known-good family and accepts the
+known-to-fail one.
+
+**Status of the attempted fix: REVERTED.** The long-axis seed is provably inert here (bit-identical
+output) and it perturbs `yaws[0]` for every other object for no benefit, so it was not kept. It
+becomes the right change only AFTER the contact model can score such a grasp.
+
+**Where to go next** — the work is in `smgrasp/width_grasp.py`, not in the search:
+1. Confirm the `degenerate` trigger against the ACTUALLY EXECUTED pose (log the post-clip tcp from
+   a scripted run and score exactly that).
+2. The indent is measured to the EXTREME boundary point inside the rectangular pad footprint. On a
+   CURVED body a lengthwise pad spans the crescent's curvature, so that extreme is far away and the
+   model infers a huge burial. A first-contact/penetration-depth measure would not.
+3. Only then re-add the long-axis seed.
+
 
 **2026-08-27 (later) — DECISIVE: the banana failure is the SYNTHESIZED POSE, not the physics.
 A hand-scripted centre grasp lifts it 80-100 %; CMA manages ~12 %.** User's proposed experiment:
