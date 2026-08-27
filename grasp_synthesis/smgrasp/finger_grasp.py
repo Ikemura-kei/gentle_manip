@@ -387,6 +387,7 @@ def score_finger_grasp(obj, x_tcp, *, cam_pos=None, cam_azimuth_max_deg=None, **
     return r
 
 
+YIELD_SAFETY = 0.8            # auto area floor keeps the grasp under this fraction of yield
 LOCAL_XSEC_TO_WIDTH = 2.3     # width cap = this x the local cross-section (see local_cross_section)
 
 
@@ -655,6 +656,7 @@ def _down_quat_euler(yaw: float) -> np.ndarray:
 def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                       table_z: float = 0.0, ground_buf: float = 0.0035, obj_size: float = 0.03,
                       width_max: Optional[float] = None,
+                      yield_stress: Optional[float] = None,
                       bbox_margin: float = 1.2, z_lift=(0.02, 0.12), sigma: float = 0.15, maxfevals: int = 400,
                       n_starts: int = 6, g: float = 9.81, accel: float = 0.0, max_indent: float = 0.01,
                       obj_sdf=None, pen_tol: float = 0.003, table_tol: float = 0.002,
@@ -700,7 +702,21 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
     for _name, _val, _legacy in (("w_peak", w_peak, 0.0), ("w_area", w_area, 0.0)):
         _fwd, _v = _resolve_w(_val, _legacy)
         if _fwd: aln[_name] = _v
-    aln.update(w_com=w_com, w_tilt=w_tilt, w_occ=w_occ, area_min=area_min,
+    # AREA FLOOR. "auto" derives it from what THIS object can actually achieve instead of a
+    # per-object constant (mushroom 20 / strawberry 15 / raspberry 4 / banana 20 mm2 were all
+    # hand-set). Rationale, measured on the banana over 76 synthesized grasps (2026-08-26): contact
+    # area is the strongest predictor of whether a grasp LIFTS -- min_pad 37.4 mm2 on lifts vs 24.4
+    # on failures, and 0/16 lifts below 15 mm2 (a pinch on a flat object never lifts), while stress
+    # does NOT discriminate (18.4 vs 18.5 kPa). But a hard floor set too HIGH is also wrong: it is
+    # satisfied by pressing harder (area grows with indentation), so area_min 35 gave 2/8 feasible
+    # at 32-38 kPa, over the 25 kPa yield. "auto" therefore searches with NO floor and then keeps
+    # only the upper half of the feasible pool by contact area -- scale-free, no fitted constant,
+    # and it cannot force a squeeze because it only ever SELECTS among grasps already found.
+    _area_auto = isinstance(area_min, str)
+    if _area_auto and area_min != "auto":
+        raise ValueError(f"area_min must be a number or 'auto' (got {area_min!r})")
+    aln.update(w_com=w_com, w_tilt=w_tilt, w_occ=w_occ,
+               area_min=0.0 if _area_auto else area_min,
                execute_offset=execute_offset)
     if cam_pos is not None:
         # cam_pos always -> the azimuth AUDIT is computed; the bound only bites when max is set.
@@ -907,6 +923,28 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
     # the perturbed grasp still holds and stays within tolerance (so every recorded demo is still gentle).
     # `seed` is per-env in the collector, so each env samples independently -> a broad dataset. Default
     # (diversity_tol=0, jitter=0) is a NO-OP: `sel_*` stays `best` -> bit-identical to the argmax path.
+    # "auto" area floor: re-select the best-scoring grasp among those in the UPPER HALF of the
+    # feasible pool by worst-pad contact area. Falls back to the raw argmax if the pool carries no
+    # area info (nothing feasible, or every candidate lacks min_pad_area).
+    if _area_auto and feasible:
+        _pool = [(x, sc, res) for (x, sc, res) in feasible
+                 if res.get("min_pad_area") is not None and res.get("stress_top10") is not None]
+        # YIELD GUARD first. Contact area and stress are coupled (area grows with indentation), so
+        # "largest contact area" alone BUYS AREA BY CRUSHING on a small soft object. Measured on the
+        # raspberry (yield 15 kPa): area-only selection ran at 165 % of yield. Restrict to grasps
+        # under YIELD_SAFETY x yield before ranking by area; if none qualify, keep the whole pool
+        # (a too-hard grasp still beats no grasp) but the caller sees the stress and can reject.
+        if yield_stress and _pool:
+            _safe = [t for t in _pool if t[2]["stress_top10"] <= YIELD_SAFETY * float(yield_stress)]
+            if _safe:
+                _pool = _safe
+        if _pool:
+            _med = float(np.median([res["min_pad_area"] for _, _, res in _pool]))
+            _fat = [(x, sc, res) for (x, sc, res) in _pool if res["min_pad_area"] >= _med]
+            if _fat:
+                _bx, _bs, _br = max(_fat, key=lambda t: t[1])
+                best = {"x": np.asarray(_bx, float).copy(), "score": _bs, "res": _br}
+
     sel_x, sel_res = best["x"], best["res"]
     if sel_x is not None and _div_on:
         drng = _drng                                                   # same stream (after the seed-yaw smear)
