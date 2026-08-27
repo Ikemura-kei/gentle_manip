@@ -38,7 +38,26 @@ near-constant width") was OVERSTATED: the policy was always partially adaptive, 
 roughly DOUBLE it (0.47 -> 0.80) rather than rescuing it from nothing. Any write-up must use 0.47
 as the reference, not 9%.
 
-**The floor is the strongest AND is vision-only** (slope 0.80, R2 0.73 — much the tightest fit).
+**THE FLOOR IS A TRADE DIAL — confirmed in the correct metric (job 1733683):**
+
+| margin | slope | %demo | success |
+|---|---|---|---|
+| baseline | 0.47 | 43% | 0.883 |
+| m2 | 0.78 | 72% | 0.450 |
+| m4 | **0.80** | 74% | 0.517 |
+| m6 | 0.63 | 58% | 0.617 |
+| m8 | **0.46** | 43% | 0.750 |
+
+Slope decays monotonically as margin recovers success, and at m8 it is back to BASELINE (0.46 vs
+0.47) — the mechanism has stopped doing anything. Best deployable trade: **+0.33 slope for -0.30
+success**. So the ORIGINAL "one-parameter trade curve" verdict was RIGHT, though it was reached
+with the wrong metric; and the later reversal ("the dismissal measured the wrong axis") was itself
+half-wrong — the tracking IS real (0.80 vs 0.47) but so is the trade.
+
+**NOTHING DEPLOYABLE CLEARS THE BAR** (adaptive AND success >= baseline). The only arms at ~0.8
+slope with ~0.83 success use the CONTACT STOP, which the real rig cannot provide (§0).
+
+**The floor is the strongest deployable adapter** (slope 0.80, R2 0.73 — much the tightest fit).
 Its cost is SUCCESS (0.517 at margin 4), not absent adaptation.
 
 **The plain generalist genuinely does NOT adapt** (0.08 / 0.22, intercepts ~30 / ~26 mm = a
