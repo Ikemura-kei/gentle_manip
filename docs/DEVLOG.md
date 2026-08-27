@@ -379,6 +379,50 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-27 (resolved) — CONFIRMED against the ACTUALLY EXECUTED poses: the FEM contact model
+cannot score ANY of the grasps that lift the banana. It is a VALIDITY-DOMAIN limit, not a bug.**
+
+The previous entry left the mechanism unconfirmed because the probe pose was reconstructed rather
+than executed. Redone properly: poses taken from the RECORDED episodes of the scripted run that
+lifted 8/8 (ee_pos + ee_quat + gripper_width at the grasp instant, object orientation from that
+env's `dr_params.csv` row), i.e. exactly what the simulator ran.
+
+| status assigned to poses that ALL LIFTED | count |
+|---|---|
+| `degenerate` | 5/8 |
+| `no_contact` | 3/8 |
+| **`ok`** | **0/8** |
+
+**Not one of the eight working grasps is scoreable.** All receive the infinite-penalty score. This
+closes the question for good: no seeding, budget, width cap or area floor could ever have made CMA
+pick them.
+
+**The mechanism, and why it is NOT a defect to "fix" casually.** The executed grasps close to
+**8.5 mm on an 18.6 mm-thick banana** — 54 % compression. `indent_from_width` evaluates contact
+against the **NOMINAL, UNDEFORMED mesh**, so it sees the pads buried ~10 mm inside solid material
+and stamps `degenerate` (past `max_indent` = 0.01 m, the small-strain validity limit). The real MPM
+body simply deforms and conforms. The model is behaving CORRECTLY within its assumptions; the
+banana's working grasps are outside those assumptions.
+
+**This is why the compact objects are unaffected.** Mushroom / tofu / strawberry / raspberry lift at
+92-100 % because their working grasps involve only a few mm of deformation on a ~30 mm body —
+comfortably inside small strain. Only the banana (thin + needing large deformation to get grip) sits
+outside. The synthesis pipeline is sound on 4 of 5 objects; it has a scope limit, not a corruption.
+
+**Practical route that works TODAY, without touching the contact model:** the geometric heuristic
+(object centre, top-down, closing perpendicular to the longest axis) lifts the banana **80 % at
+26 mm with only 11 % compression** — usable, gentle demo data. Where the FEM metric is valid
+(compact objects) use CMA+FEM; where it is not, use the heuristic. The open design question is how
+to DECIDE between them automatically without inventing another fitted threshold: a thickness-vs-
+`max_indent` test misfires (raspberry is 14.3 mm thick yet grasps fine at small indentation), so the
+signal probably has to come from the search result itself, not from a shape statistic.
+
+**A real contact-model fix would mean evaluating contact in the DEFORMED configuration** (iterate
+deform -> re-check) rather than against the nominal mesh, and a large-deformation-capable stress
+model, since the linear FEM's stress numbers are not trustworthy at 54 % strain either. That is a
+substantial piece of work, not a tuning change.
+
+
 **2026-08-27 (later still) — WHY the banana's good grasp is never chosen: the FEM metric marks it
 INFEASIBLE. Seeding CMA with it does nothing; the defect is the CONTACT MODEL, not the search.**
 
