@@ -40,6 +40,34 @@ The contact stop's -24% comes from STOPPING THE SQUEEZE (its slope is 1.7 = no a
 which DECOUPLES gentleness from width adaptation. Deployable equivalent under test:
 freeze-after-closure (`GM_WIDTH_FREEZE_MM`, action-stream only).
 
+## 0-FINAL. THE DEFINITIVE TABLE (40 distinct geometries, 200 eps, 2026-08-27)
+
+| arm | intercept | **slope** | 95% CI | %demo | R2 | success | SUSTAINED stress |
+|---|---|---|---|---|---|---|---|
+| demonstrator | — | **1.08** | — | 100% | — | 0.94 | ~11,351 (0.28x yield) |
+| **baseline lulkx** | 23.6 | **0.17** | [0.00, 0.33] | **15%** | 0.09 | **0.905** | **29,734** |
+| CFG 3.0 | 20.8 | 0.18 | [-0.15, 0.51] | 17% | 0.03 | 0.435 | 37,471 (+26%) |
+| **floor m4 (VISION only)** | 17.4 | **0.48** | **[0.37, 0.59]** | **44%** | **0.65** | 0.575 | **18,047 (-39%)** |
+
+**1. THE BASELINE BARELY ADAPTS — slope 0.17, not 0.47.** The earlier "baseline is already 43%
+adaptive" was a 12-GEOMETRY ARTIFACT. **The user's original premise was correct**: the policy
+commands a near-constant width. RETRACTED: every statement built on 0.47.
+
+**2. THE FLOOR GENUINELY ADAPTS** — slope 0.48, CI excludes BOTH zero AND the baseline, R2 0.65
+(much the tightest fit measured). It roughly TRIPLES baseline adaptation using VISION ONLY, so it
+is deployable on the real rig.
+
+**3. THE FLOOR IS THE STRONGEST GENTLENESS MECHANISM** — sustained stress -39% (29,734 -> 18,047),
+larger than the contact stop's -24%, and unlike the contact stop it needs no sensor we lack.
+
+**COST: success 0.905 -> 0.575.** The margin dial trades slope for success; re-measuring that
+frontier at 40 geometries (margins 6, 8 — jobs 1734914/5) is the remaining question for a shippable
+operating point.
+
+**METHOD NOTE for the paper:** three mechanisms changed verdict between 12 and 40 geometries.
+Width-adaptation claims need >= 40 DISTINCT OBJECT GEOMETRIES; correlation and half-split range
+cannot separate a uniform squeeze from real tracking at any sample size.
+
 ## 0-CFG. RESOLVED (40 geometries, job 1733599): CFG DOES NOT ADAPT
 
 | arm | #geo | intercept | slope | 95% CI | %demo | R2 |
