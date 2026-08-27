@@ -12,17 +12,25 @@ history in `docs/DEVLOG.md`.
 
 ## 1. Where we stand (one paragraph)
 
-The policy commands a near-constant width across a 12-46 mm object range. Nine head variants
-failed. Tonight established that this is **NOT a perception problem** (size is recoverable from
-the cloud at 0.739 mushroom / 0.842 tofu) and **NOT a demonstrator-noise problem** (width is
-0.84/0.79 determined by size, R2 0.82 once `align` is included). It is a **control** problem.
+**The size dependence was in the learned conditional all along.** Every intervention that tried to
+SUPPLY more size information failed — better encoders, better heads, sharper data, external clamps —
+and aux-width supervision (encoder size perception 0.739 -> 0.927) made adaptation strictly WORSE
+(3% vs baseline 9%). Classifier-free guidance shows why that framing was wrong: amplifying the
+conditioning at sampling time raises adaptation monotonically **2% -> 23% -> 49%** of the
+demonstrator's aperture range. The policy ENCODES size and UNDER-WEIGHTS it; it does not fail to
+represent it. So the defect is in how the objective weights the conditioning, not in perception,
+representation, or the demonstrations.
 
-Stated in the units that matter (§2a): the demonstrator spans **11.3 mm** of aperture across the
-size range; our best DEPLOYED policy (alzey) spans **1.4 mm (12%)**; our best MECHANISM (latched
-floor) spans **3.4 mm (30%)** but at 0.250 success. Target is **~8 mm (70%) at >=0.70 success**.
-So the floor is a genuine step change over anything deployed (2.4x alzey) and still well short of
-sufficient. Current effort is the control mechanism (shrinkage shift); two higher-value untested
-ideas are queued behind it (§5.1 pose-conditioned head, §5.2 align-filtered demos).
+Two mechanisms now work, on OPPOSITE axes and with COMPLEMENTARY failure modes:
+- **CFG** buys adaptation (up to 49%) but OVER-CLOSES (success 0.433, peak stress up).
+- **Contact-triggered stop** holds success exactly at baseline (0.883) with 15% range and LOWER
+  peak stress — physics sets the width, so there is no prediction to be wrong.
+Their combination is under test (CFG {1.5,3.0} x F* {1.0,1.5}). Target: adaptation >= ~30% at
+success >= 0.8, which would beat the baseline on BOTH axes and satisfy the requirement.
+
+CAVEAT: all training-side comparisons are confounded with run-to-run variance (sibling-seed control
+in flight, §2g). The CFG and contact-stop results are WITHIN-run (same checkpoint, inference-time
+only) and are not affected.
 
 ## 2. Current state of the numbers
 
