@@ -410,6 +410,35 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-27 (paper prep) — `docs/grasp_synthesis_model.md`: the synthesis model VERIFIED against
+code, plus the v3.3 delta.** Written for paper writing: every statement checked against the
+implementation, with **⚠ DO NOT CLAIM** markers wherever a natural claim would overstate the code.
+Covers the FEM formulation (CST linear tets, E=1 normalization, inertia-relief bordered solve,
+Schur-complement per-grasp solve), the contact/pad model (position control, real finger STL pad,
+normal-only prescribed displacement, flat-plane push with a fillet taper), the E-linearity, the
+holdability inequality, the full objective with every weight, the feasibility ladder, and what is
+auto vs hand-set. Appendix A is the v3.3 diff (4 bug fixes, 6 new opt-in flags, measured effect of
+each).
+
+**Two model/description mismatches found while verifying — both matter for the paper:**
+1. **Poisson ratio: every collection to date used ν = 0.33 for EVERY object.** `build_grasp_fem`
+   passed no config, so `cfg.nu` fell back to `MetricConfig`'s "copper" default, while the
+   materials declare ν 0.30-0.42 and the DR randomizes `object_nu` **for the MPM sim only**.
+   Unlike E, **ν cannot be rescaled post-hoc**. Added `--grasp-nu auto` (uses the material value)
+   but **defaulted to the historical 0.33** so existing runs stay reproducible. State ν = 0.33 in
+   the paper, or re-run first.
+2. **μ = 0.7 is one global constant**, not per-object and not randomized — same pad-object friction
+   for tofu, mushroom and a wet tomato. (`coup_friction` in the DR configs is a different thing:
+   MPM coupling friction in the simulator, not the planner's μ.)
+
+Other items the paper must not overstate, all recorded in the doc: the FEM is a **planning
+surrogate**, never run inside the sim loop and not calibrated against the MPM; it runs on a
+**voxel-remeshed proxy** (~17 % thicker than the source on a thin body); the headline stress is a
+**contact-masked top-10 %**, not a peak; FEM contact is **normal-only** (friction only via the
+scalar holdability test); and `w_occ` — the only real occlusion measure — is **0 in every run**,
+with occlusion controlled by the azimuth penalty and the hard yaw bound instead.
+
+
 **2026-08-27 (pinch filter + tomato size) — TWO user catches, both fixed: the auto area floor still
 admitted PINCHES, and the tomato was sized past the gripper's comfortable range.**
 

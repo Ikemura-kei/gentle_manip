@@ -877,6 +877,13 @@ def main() -> None:
     # Pass a value explicitly to override.
     p.add_argument("--grasp-E",           type=float, default=None,  help="object Young's modulus (Pa); default = the object's material")
     p.add_argument("--grasp-density",     type=float, default=None, help="object density (kg/m^3); default = the object's material")
+    p.add_argument("--grasp-nu", default=None,
+                   help="Poisson ratio for the grasp FEM. Default None keeps the HISTORICAL 0.33 "
+                        "(MetricConfig's 'copper' default), which every collection before "
+                        "2026-08-27 used regardless of the object. Pass 'auto' for the object's own "
+                        "material nu (0.30-0.42 across our objects). Unlike E, nu CANNOT be "
+                        "rescaled post-hoc, so switching it changes results and invalidates "
+                        "comparisons against runs made with 0.33.")
     p.add_argument("--grasp-yield",       type=float, default=None,
                    help="object von Mises yield stress (Pa); default = the object's material. Used by "
                         "--grasp-area-min-mm2 auto to keep the selected grasp UNDER yield: maximising "
@@ -1085,6 +1092,8 @@ def main() -> None:
     if args.grasp_E is None:       args.grasp_E = float(_mat.youngs_modulus)
     if args.grasp_density is None: args.grasp_density = float(_mat.density)
     if args.grasp_yield is None:   args.grasp_yield = float(_mat.von_mises_yield_stress)
+    _fem_nu = float(_mat.poisson_ratio) if str(args.grasp_nu).lower() == "auto" else (
+        None if args.grasp_nu is None else float(args.grasp_nu))
     print(f"  grasp material ({exp.task_cfg['object_name']}): E={args.grasp_E:.3g} Pa  "
           f"rho={args.grasp_density:.0f}  yield={args.grasp_yield:.3g} Pa")
     args.grasp_extra_close = _extra_close_arg(args, _god(exp.task_cfg["object_name"]))
@@ -1290,7 +1299,7 @@ def main() -> None:
         if actual_mesh != fem_mesh:
             fem_obj, fem_pad_geo, fem_meta = fg.build_grasp_fem(
                 actual_mesh, voxel_div=args.grasp_voxel_div, target_tets=args.grasp_target_tets,
-                use_gpu=args.grasp_gpu)
+                use_gpu=args.grasp_gpu, nu=_fem_nu)
             fem_mesh = actual_mesh
             print(f"  FEM: {fem_meta['tets']} tets, ndof={fem_meta['ndof']}, gpu={fem_meta['gpu']}")
         all_best_x = []

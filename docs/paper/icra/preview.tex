@@ -1,0 +1,52 @@
+% ---------------------------------------------------------------------------
+% Fast preview of intro_icra.tex ALONE, in the real ICRA class.
+% Not the submission file --- that is root.tex. This exists so the Introduction
+% can be iterated on without rebuilding the whole paper.
+%
+%   bash build.sh            one-shot build -> preview.pdf
+%   bash build.sh --watch    rebuild whenever intro_icra.tex changes
+%   bash build.sh root       build the real paper (root.tex) instead
+% ---------------------------------------------------------------------------
+\documentclass[letterpaper, 10pt, conference]{ieeeconf}
+\IEEEoverridecommandlockouts
+\overrideIEEEmargins
+
+\usepackage{graphics}
+\usepackage{mathptmx}
+\usepackage{times}
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+\title{\LARGE \bf Sim-to-Real Gentle Manipulation of Food}
+\author{PREVIEW BUILD --- Introduction + Related Work}
+
+\begin{document}
+\maketitle
+\thispagestyle{empty}
+\pagestyle{empty}
+
+% Placeholder for Fig. 1 (the coverage-failure map, PAPER_TODO A4). Keeps the
+% \ref resolving and shows how much column space the real figure will consume.
+\begin{figure}[t]
+  \centering
+  \framebox[0.92\columnwidth]{\rule{0pt}{3.4cm}\parbox{0.8\columnwidth}{\centering
+    \textbf{Fig.~1 placeholder}\\[2pt]
+    \footnotesize Coverage-failure map: hardware failures of the 50-real-demo
+    policy vs.\ (workspace location $\times$ object size), misgrasp and
+    over/under-squeeze as distinct markers. \\ \texttt{PAPER\_TODO A4}}}
+  \caption{Placeholder --- replace with the real coverage-failure map.}
+  \label{fig:coverage}
+\end{figure}
+
+\input{intro_icra}
+
+\input{related_icra}
+
+\section{METHOD}
+\subsection{Stress-aware grasp synthesis}\label{sec:method:synth}
+\textit{(not part of this preview --- see \texttt{docs/paper/method.tex})}
+
+\bibliographystyle{IEEEtran}
+\bibliography{IEEEabrv, reference}
+
+\end{document}

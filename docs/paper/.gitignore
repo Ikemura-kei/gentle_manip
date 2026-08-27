@@ -3,3 +3,12 @@ main.pdf
 *.log
 *.out
 *.toc
+
+# ICRA scratch draft (local kickstart only; the real doc lives in Overleaf)
+*.zip
+icra/*.aux
+icra/*.log
+icra/*.bbl
+icra/*.blg
+icra/*.out
+icra/preview.pdf

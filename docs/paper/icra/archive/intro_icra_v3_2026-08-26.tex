@@ -1,0 +1,80 @@
+% ---------------------------------------------------------------------------
+% INTRODUCTION --- v3 (2026-08-26). Register calibrated against DextrAH-G's
+% actual introduction (arXiv:2407.02274v2), fetched verbatim.
+%
+% Structural moves borrowed from it:
+%   P1  vivid hook -> why it matters -> "However, existing methods..." -> "Moreover,"
+%   P2  what existing approaches do -> "While effective, ..." -> what is actually needed
+%   P3  "Encouragingly, ..." the enabling trend -> "However, ..." what it still misses
+%   P4  "To address these challenges, we propose \method: ..." -> contributions as
+%       INLINE NUMBERED CLAUSES in a single sentence (not an itemize --- this is
+%       what DextrAH-G does and it is much more compact), closing on a
+%       forward-looking phrase.
+%
+% Application-paper ordering: the capability leads, the planner is machinery.
+% Claim is deliberately "a framework that supports multi-object gentle grasping",
+% NOT "grasp anything" --- it degrades gracefully if the generalist underperforms.
+%
+% Previous versions in archive/. v1 = pre-literature-sweep; v2 = with citations
+% but ML-register and itemized contributions.
+% ---------------------------------------------------------------------------
+\newcommand{\method}{\textsc{Method}}   % TODO: name the framework
+
+\section{INTRODUCTION}
+
+Handling delicate food is a skill people exercise without thought, yet it remains difficult
+for robots. Automating it matters to food processing, agriculture, and assistive settings,
+where produce tears, cracks, and bruises under modest compression and the damage is
+irreversible~\cite{zhu2025deformable,blanco2024t,wang2025damageless}. A successful grasp must
+be right in two respects at once: where and in what orientation the fingers close, and how far
+they close. Both depend on the item's pose, size, shape, and stiffness. These properties
+vary continuously within a single food category and change entirely across categories, so a
+policy that handles one item well need not handle its neighbour. Stiffness is the most awkward
+of them to train against. Whatever a robot can perceive of ripeness, the mapping from
+appearance to the grip an item needs has to be learned from demonstrations that span the
+range, and unlike pose or size, stiffness cannot be dialled in on real hardware: each specimen
+contributes one sample at whatever value it happens to have, unmeasured, so covering the range
+means sourcing and grading produce rather than simply asking for it.
+
+Existing approaches (see Section~\ref{sec:related}) address this largely through hardware and
+sensing. Compliant and pneumatic end-effectors bound contact pressure
+mechanically~\cite{wang2024softgripper}, and tactile or force-controlled grippers close the
+loop on contact at run time, handling delicate items well~\cite{kang2026learning,vtam}. While
+effective, these methods change what the robot can \emph{observe} rather than where its
+\emph{supervision} comes from: the policies are learned by imitation from human demonstrations
+recorded on real hardware, one item and one pose at a time. Stress-aware grasp planning targets
+the damaging quantity directly~\cite{pan2020stressmin}, and finite-element simulation can
+evaluate grasp outcomes on deformable objects at scale~\cite{defgraspsim}, but neither has been
+used to supply the demonstrations a policy trains on. Acquiring broad coverage of the physical
+variation therefore remains a human-labour problem.
+
+Encouragingly, recent work establishes both that coverage is what matters and that it can be
+manufactured. Lin \emph{et al.} show that policy generalisation follows a power law in the
+number of environments and objects, and that demonstrations per object saturate quickly:
+diversity, not count, is what buys generalisation~\cite{lin2025datascaling}. Precision sharpens
+the requirement, since for high-precision tasks the number of demonstrations needed grows
+super-exponentially as the tolerance tightens, against a limit precision that itself depends on
+the quality of the expert~\cite{curseofprecision}. Data-generation systems already multiply a
+few hundred human demonstrations into tens of thousands by adapting them to new object
+placements~\cite{mandlekar2023mimicgen}. However, such adaptation is geometric, and the
+dimension that matters most here cannot be reached by transforming a trajectory: material
+stiffness is invisible to a geometric transform, and it cannot be collected on real hardware
+either, since one physical specimen cannot be presented at several stiffnesses.
+
+To address these challenges, we propose \method, a framework that generates gentle
+demonstrations autonomously in simulation and distils them into a single policy covering many
+fragile food categories. Our key observation is that internal stress, the quantity that
+determines whether an item is damaged and which no sensor on our robot reports, is computed
+exactly inside a deformable simulator; we therefore treat gentleness as a planning objective
+rather than a sensed signal. The main contributions of this work include: 1) a stress-aware
+grasp planner built on a width-controlled, distributed-pad contact model, whose linearity in
+Young's modulus makes randomised material coverage essentially free, 2) an autonomous
+demonstration generator that produces gentle, successful grasps across randomised object pose,
+size, shape, and material with no human demonstration, 3) a category-conditioned policy trained
+on those demonstrations and co-trained with a small slice of real
+teleoperation~\cite{simrealcotrain}, acting on a point cloud from a single external depth
+camera---a modality we adopt for its narrow appearance gap between simulation and reality
+rather than for any perceptual advantage---with no tactile or force sensing in the loop, and
+4) real-robot evaluation across
+\textbf{[TODO: $N$ categories, headline success rate]} fragile food categories, a step towards
+general gentle manipulation of everyday food.

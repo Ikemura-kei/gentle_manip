@@ -1,0 +1,81 @@
+% ---------------------------------------------------------------------------
+% RELATED WORK --- v1 (2026-08-26).
+%
+% Ordered to match the strands the Introduction forward-references, so that
+% "(see Section II)" in P2 actually pays off:
+%   A. gentle / damage-free handling of fragile objects   (hardware strand)
+%   B. contact sensing for delicate manipulation          (sensing strand)
+%   C. grasp quality for deformable objects               (stress-aware strand)
+%   D. demonstration data: coverage and automatic generation
+%   E. sim-to-real for deformable manipulation
+%
+% Register: ICRA/DextrAH-G. Each subsection states what the line achieves, then
+% one sentence on what it leaves open for us. NO dismissals --- every strand is
+% credited with what it actually does. See PAPER_TODO "Related-work positioning".
+%
+% Sources and verification status: docs/paper/related_work.md. Entries marked
+% [STUB - FILL IN] in reference.bib are the user's own keys, not yet filled.
+% ---------------------------------------------------------------------------
+\section{RELATED WORK}
+\label{sec:related}
+
+\subsection{Gentle manipulation of fragile objects}
+Damage-free handling of fragile produce is a long-standing goal in agricultural and food
+automation, and remains open across the pre- and post-harvest
+pipeline~\cite{wang2025damageless}. A large part of the effort is mechanical: compliant,
+pneumatic, and enveloping end-effectors bound contact pressure by construction, so that a
+grasp is gentle whether or not the robot reasons about
+it~\cite{wang2024softgripper,zhu2025deformable}. This is effective and complementary to our
+work, but compliance is a fixed property of the hardware; it does not choose where on an item
+to close, which is one of the two quantities a gentle grasp must get right.
+
+\subsection{Contact sensing for delicate manipulation}
+A second line equips the robot to perceive contact as it happens. Kang \emph{et al.} pair a
+low-cost force-controlled parallel jaw with a reactive policy and report reliable handling of
+chips, tofu, and cherry tomatoes~\cite{kang2026learning}, and video-tactile models attain high
+success on contact-rich tasks by fusing tactile streams with
+vision~\cite{vtam}. Deformation-based tactile sensing has a known blind spot in the very
+regime we target---it requires measurable indentation to produce a signal---which the tactile
+community is itself addressing with deformation-independent
+designs~\cite{lighttact}. Our work is orthogonal to this line rather than competing with it:
+contact feedback supplies run-time adaptation that offline supervision does not, and a
+force-controlled gripper trained on stress-planned demonstrations would be a natural
+combination. What contact sensing does not change is where supervision comes from; these
+policies are trained by imitation from human demonstrations collected on real hardware, and
+Kang \emph{et al.} build a dedicated teleoperation device for exactly that purpose.
+
+\subsection{Grasp quality for deformable objects}
+Classical grasp metrics score whether an object can be held against external wrenches, which
+says little about whether holding it causes damage. Pan \emph{et al.} address this with a
+stress-minimising metric that accounts for object material and indicates fragile
+regions~\cite{pan2020stressmin}. Their formulation assumes point contacts and general
+multi-contact grasps; a two-pad parallel jaw on a smooth rounded object falls outside that
+regime, and in our implementation the resistible-wrench hull becomes degenerate, so the metric
+does not discriminate among candidate grasps on our objects (Section~\ref{sec:method:synth}).
+Finite-element simulation has also been used to characterise grasp outcomes on deformables at
+scale: DefGraspSim evaluates parallel-jaw grasps across a large object set and reports stress,
+deformation, and stability metrics with good sim-to-real
+correspondence~\cite{defgraspsim}. That work \emph{evaluates} grasps; we use the same physics
+to \emph{search} for them, and then to generate the demonstrations a policy trains on.
+
+\subsection{Demonstration data: coverage and generation}
+How much data an imitation policy needs, and of what kind, has been studied directly. Lin
+\emph{et al.} find that generalisation follows a power law in the number of environments and
+objects while demonstrations per object saturate quickly, so diversity dominates
+count~\cite{lin2025datascaling}; for high-precision tasks the requirement grows
+super-exponentially as the tolerance tightens~\cite{curseofprecision}. Since diversity is
+expensive to collect by hand, a growing body of work generates it. MimicGen adapts a few
+hundred human demonstrations into tens of thousands by transforming them to new object
+placements~\cite{mandlekar2023mimicgen}, and related systems extend the idea to dexterous and
+dynamic settings. These systems reuse the grasps a human chose and adapt them geometrically.
+Our demonstrator instead plans each grasp from a physics objective, so it can select a grip
+for an object configuration no human has demonstrated.
+
+\subsection{Sim-to-real for deformable manipulation}
+Transferring deformable-object skills from simulation is difficult because contact and
+material dynamics are hard to model~\cite{yin2021modeling,arriola2020modeling}, and early work
+established the basic feasibility of sim-to-real reinforcement learning in this
+setting~\cite{blanco2024t}. Rather than pursue zero-shot transfer, we adopt sim-and-real
+co-training, in which a small slice of real demonstrations accompanies a large simulated
+set~\cite{simrealcotrain}; we use a point cloud from a single depth camera for the same
+reason, its appearance gap between simulation and reality being narrower than that of RGB.
