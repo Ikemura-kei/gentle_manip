@@ -410,6 +410,60 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-27 (occlusion + squeeze) — USER CAUGHT A REAL GAP: the 60 deg camera-azimuth bound is a
+SHAPED PENALTY, and at 60 deg a SMALL object is COMPLETELY hidden by the gripper. Added a HARD
+yaw bound and a size-scaled squeeze, both auto.**
+
+User flagged `cherry_tomato .../26-08-27-pqs/videos/ep0004_env3_success.mp4` as showing ~90 deg yaw
+with the object occluded. Audit of what actually executed:
+
+- The azimuth bound **was applied and WAS holding** — max achieved azimuth across every run was
+  60.0-60.6 deg, never near 90. So the mechanism works.
+- **But it is a shaped penalty on the CLOSING-AXIS angle**, and it says nothing about whether the
+  gripper BODY covers the object. Frame extraction from that video confirms the 25 mm tomato is
+  fully hidden behind the fingers at the grasp and lift. **19-25 % of grasps sat exactly AT the
+  60 deg bound** — i.e. the optimum was outside and they were parked at the most-occluding pose
+  still allowed.
+- **This matters for the POLICY, not just the video:** `single_lift.py` builds ONE camera,
+  `cam_ext` at the calibrated L515 pose, and `superset_soft_armfocus` takes its point cloud from
+  `cameras: ["cam_ext"]`. The render camera IS the observation camera.
+- Occlusion risk scales INVERSELY with object size, exactly as the user predicted: over-60 deg rate
+  was cherry tomato (25 mm) 25 %, mushroom (33 mm) 19 %, banana chunk (35 mm) 12 %, tomato (65 mm)
+  **0 %**. A big object is only ever partially covered; a small one vanishes.
+
+**Fixes — two new auto params, each on the descriptor that fits its physics:**
+- `--grasp-yaw-max-deg auto` — a HARD structural bound (unlike the azimuth penalty), interpolating
+  30 deg at 25 mm -> 75 deg at 65 mm on the object's **LARGEST** extent. Largest, because what
+  matters is how much of the object's SILHOUETTE a finger can hide.
+  **First attempt used the SMALLEST extent and that was wrong**: it handed the 60 mm-long,
+  25 mm-thick pasta bundle the TIGHTEST bound (30 deg) and cost it half its yield (50 % -> ~17 %).
+  Corrected to largest extent, pasta recovered to 44 %.
+- `--grasp-extra-close auto` — the fixed 5 mm squeeze is 15 % of the 33 mm mushroom it was tuned on
+  but 24 % of a 21 mm cherry tomato and 34 % of a 15 mm raspberry. auto = 5 mm x (smallest extent /
+  33 mm), clipped [2, 6] mm, on the **SMALLEST** extent because that is the grasp direction. The
+  mushroom is unchanged at 4.8 mm. (The separate `FIRM_EXTRA_CLOSE_M` = 2.5 mm is still a constant
+  and is NOT scaled — a known remaining gap.)
+
+**Result — occlusion fixed, no yield lost, squeeze gentle:**
+
+| object | success before -> after | azimuth max before -> after | compression med |
+|---|---|---|---|
+| mushroom | 100 % -> **100 %** | 60.6 -> **52.5** | ~0 % |
+| cherry_tomato | 81 % -> **80 %** | 60.5 -> **39.2** | **4 %** (max 18 %) |
+| banana_chunk | 75 % -> **80 %** | 60.6 -> **38.3** | ~0 % |
+| tomato | 62 % -> 57 % | 60.0 -> 60.1 (bound 75) | ~0 % |
+| pasta_bundle | 50 % -> 44 % | (bound 69.4) | ~0 % |
+
+The small objects that used to vanish now stay well inside the cone (cherry 60.5 -> 39.2 deg), and
+nothing lost yield beyond noise. **Over-squeeze is NOT a problem at these settings** — the cherry
+tomato sits at 4 % median compression (18 % worst), versus the 54 % the full banana needed.
+
+**Caveat on the compression column:** it is `1 - width_at_peak / smallest nominal extent`, so it
+goes NEGATIVE when the grasp is across a wider axis than the smallest one (pasta -148 %, banana
+chunk -43 %). Those negatives are an artefact of the denominator, not real numbers — only the
+non-negative values (cherry, mushroom) are meaningful as stated.
+
+
 **2026-08-27 (smoke test) — FOUR NEW OBJECTS through the all-auto recipe: cherry tomato, tomato,
 banana CHUNK, pasta bundle. All synthesize; two needed fixes, both found and applied.**
 
