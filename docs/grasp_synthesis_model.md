@@ -250,10 +250,48 @@ The one number that decides whether the surrogate is justified. Previously only 
 was recorded (`rho +0.10`, in a `finger_grasp` docstring). Measured properly on 10 successful
 mushroom episodes with `priv_stress` recorded:
 
-**Spearman rho = +0.842 (p = 0.002), Pearson r = +0.795 (p = 0.006).**
+**OBSERVATIONAL result (scene varied): Spearman rho = +0.842 (p = 0.002).**
+**CONTROLLED result (scene FIXED, only the grasp varied): Spearman rho = +0.000 (p = 1.0).**
 
-**The RANKING is strong — which is what a planner needs.** The surrogate reliably orders grasps by
-the stress the simulator will actually produce, so using it to CHOOSE a grasp is justified.
+⚠⚠ **THE OBSERVATIONAL NUMBER IS NOT VALIDATION OF THE METRIC.** It was measured across episodes
+whose SCENE differed (scale 0.81-1.48, three mesh variants). Both quantities track object size
+(planner vs scale rho = -0.67, MPM vs scale rho = -0.89), so the agreement is largely
+"small object -> high stress", which both models get right for trivial reasons.
+
+The controlled experiment holds the scene fixed (`--scene-dr-every 0`, one scale, one mesh) and
+sweeps ONLY the commanded grasp width, which drives indentation and therefore predicted stress:
+
+| commanded width | planner predicted | MPM measured |
+|---|---|---|
+| 20.4 mm | 14.6 kPa | 1.10 x yield |
+| 29.1 mm | **44.7 kPa** | 1.06 x yield |
+| 30.8 mm | 28.0 kPa | 1.13 x yield |
+| 32.5 mm | 17.3 kPa | 1.11 x yield |
+| 34.2 mm | **11.8 kPa** | 1.10 x yield |
+
+**The planner's prediction spans 3.8x (11.8 - 44.7 kPa) while the simulator's measurement is FLAT
+at 1.05-1.13 x yield.** Rank correlation exactly zero.
+
+**Why — and it is the linear-vs-elasto-plastic mismatch from §9b, showing up exactly where
+predicted.** The MPM material is `ElastoPlastic`: once the von Mises stress reaches the yield
+surface it SATURATES, and further squeezing produces plastic flow rather than higher stress. Every
+grasp in our operating regime is at or past yield (see the table: all >= 1.05x), so the
+simulator's stress carries no information there. The linear-elastic surrogate has no yield model,
+so it keeps predicting ever-higher stress into a regime where the true stress cannot rise.
+
+**Consequences (all of which matter for the paper):**
+1. **Do NOT cite rho = 0.84 as validating the gentleness metric.** It validates only that both
+   models know a smaller object is stressed more.
+2. **At our operating point the FEM objective does not discriminate grasp gentleness** — the
+   quantity it ranks is saturated in the simulator.
+3. **Von Mises stress is the wrong gentleness measure for an elasto-plastic body past yield.** The
+   physically meaningful measure is PLASTIC deformation — permanent shape change / plastic work —
+   which neither the surrogate nor the current `priv_stress` reports.
+4. Either the operating point must move BELOW yield (gentler grasps, which the width sweep shows
+   is possible: 34 mm predicted 11.8 kPa) or the objective must target plastic strain instead.
+
+n = 12, one object (mushroom). The mechanism is physically unambiguous, but repeat on a second
+object before putting it in the paper.
 
 ⚠ **The ABSOLUTE calibration is not.** Over the same episodes:
 

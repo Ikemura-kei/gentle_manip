@@ -444,6 +444,56 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-28 — CORRECTION: the rho = 0.84 surrogate validation is a SCENE-SIZE artefact. Under a
+CONTROLLED test the FEM metric has ZERO rank correlation with simulator stress, because the MPM
+material SATURATES at yield.**
+
+User asked how the correlation was actually measured — same grasp in both, or something looser.
+Answer: same grasp (planner synthesizes, sim executes that grasp), but **observational**: the
+scene varied across the 10 episodes (scale 0.81-1.48, three mesh variants). Two follow-ups:
+
+1. **Pairing verified.** The earlier number zipped filtered CSV rows to saved episodes by index.
+   Re-derived the exact (batch, env) of every saved episode from the collector log and joined on
+   that: **identical result, rho = +0.842.** So the pairing was right (the 8-25 mm object-position
+   offsets are MPM settling drift, not mispairing).
+2. **Confound check.** planner vs `scene_scale` rho = -0.67; MPM vs `scene_scale` rho = -0.89;
+   partialling scale out left rho = +0.758 — which looked reassuring. **It was not.**
+
+**CONTROLLED experiment (the one that should have been run first):** fix the scene entirely
+(`--scene-dr-every 0`, one scale, one mesh) and sweep ONLY the commanded grasp width, which drives
+indentation and hence predicted stress. n = 12, mushroom:
+
+| commanded width | planner predicted | MPM measured |
+|---|---|---|
+| 20.4 mm | 14.6 kPa | 1.10 x yield |
+| 29.1 mm | **44.7 kPa** | 1.06 x yield |
+| 32.5 mm | 17.3 kPa | 1.11 x yield |
+| 34.2 mm | **11.8 kPa** | 1.10 x yield |
+
+**Planner spans 3.8x (11.8-44.7 kPa); the simulator is FLAT at 1.05-1.13 x yield. Spearman
+rho = +0.000 (p = 1.0), Pearson r = -0.47.**
+
+**Root cause — the linear-elastic vs ELASTO-PLASTIC mismatch flagged in the model doc, appearing
+exactly where predicted.** Genesis MPM `ElastoPlastic` saturates von Mises at the yield surface;
+past yield, squeezing harder produces plastic FLOW, not higher stress. Every grasp in our regime
+is at or past yield, so the simulator's stress carries no information there, while the surrogate
+(no yield model) keeps predicting higher stress into a regime where true stress cannot rise.
+
+**What this means:**
+- **rho = 0.84 must NOT be cited as validating the gentleness metric.** It shows only that both
+  models know a smaller object is stressed more.
+- **At the current operating point the FEM objective does not discriminate grasp gentleness.**
+- **Von Mises stress is the wrong gentleness measure for an elasto-plastic body past yield** — the
+  meaningful quantity is PLASTIC deformation (permanent shape change / plastic work), which
+  neither the surrogate nor `priv_stress` currently reports.
+- Fix direction: move the operating point BELOW yield (the sweep shows 34 mm predicts 11.8 kPa, so
+  gentler grasps exist), and/or retarget the objective at plastic strain.
+
+**Method lesson: an observational correlation across DR-varied scenes is not metric validation.**
+Hold the scene fixed and vary the thing the metric is supposed to rank. n = 12, one object —
+repeat on a second before the paper, but the mechanism is unambiguous.
+
+
 **2026-08-27 (validation) — MEASURED the FEM surrogate against the MPM simulator: ranking rho
 = +0.84, but the absolute stress is ~3x LOW and the "gentle" demos sit AT yield.**
 
