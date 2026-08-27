@@ -3282,3 +3282,36 @@ the implementation, with **"DO NOT CLAIM" markers** where a natural claim would 
 and `docs/paper/{preview_icra.tex,refs.bib,related_work.md}`. Use these when writing up the width
 results — the DO-NOT-CLAIM discipline is exactly what today's retractions (the 0.933 leakage, the
 "baseline is 43% adaptive" 12-geometry artifact) argue for.
+
+### 2026-08-27 — ⭐ MATCHED-MEAN VERDICT: the adaptive floor does NOT beat a constant
+
+40 geometries, 200 eps, lulkx@600. Each pair holds the MEAN at-grasp width fixed; the ONLY
+difference is whether the clamp level is PREDICTED per object (slope 0.48) or CONSTANT (slope ~0.17).
+
+| pair | ADAPT succ | CONST succ | d succ | ADAPT sust | CONST sust | d stress |
+|---|---|---|---|---|---|---|
+| m8 <-> cfloor 33.34 | 0.760 | **0.775** | **-0.015** | 22804 | **20590** | **+10.8%** |
+| m6 <-> cfloor 35.15 | **0.705** | 0.630 | +0.075 | 19700 | 19157 | +2.8% |
+| m4 <-> cfloor 36.82 | **0.575** | 0.520 | +0.055 | 18047 | 16221 | +11.3% |
+
+**The success difference is INCONSISTENT IN SIGN (-0.015..+0.075) while the constant is
+CONSISTENTLY lower on sustained stress (2.8-11.3% better in all three).** At m8 — the shippable
+operating point — the constant wins on BOTH.
+
+⚠ **RETRACTED, same day, one pair later:** after seeing ONLY the m6 pair I told the user
+"adaptation is not a gentleness mechanism, it is a SUCCESS mechanism." The m8 pair reverses the
+sign. **Do not draw a conclusion from the first pair of a designed comparison** — the whole point of
+running three operating points is that one pair cannot distinguish an effect from noise. This is the
+same failure mode as the 12-geometry "baseline is 43% adaptive" artifact: concluding before the
+designed sample was complete.
+
+**THE CAVEAT THAT KEEPS THIS OPEN:** the adaptive arm clamps on the POST-HOC FROZEN head — corr
+**0.667** at the latch moment. The supervised head reaches **0.850** and has NEVER been run in the
+floor. So this is a negative result for the CURRENT PREDICTOR, not for adaptation in principle. The
+decisive re-run is tebvy/neoca + floor at m6/m8 against these same constants.
+
+**Honest status if the supervised head does NOT change this:** the shippable gentleness mechanism is
+a CONSTANT floor (canonical: -41% sustained stress at 0.745 success; 40-geo m8-matched: 0.775 succ /
+20590 sust vs baseline 0.905 / 29734), and learned per-object level adaptation is a NEGATIVE RESULT
+at mushroom's ~19mm size range. It would remain necessary only ACROSS categories (15mm raspberry vs
+65mm tomato), which one constant cannot serve — that is where the generalist work has to carry it.
