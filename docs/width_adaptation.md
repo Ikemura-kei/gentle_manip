@@ -10,6 +10,36 @@ history in `docs/DEVLOG.md`.
 
 ---
 
+## 00. ⚠ THE REAL GAP (2026-08-27): THE POLICY LOSES THE DEMONSTRATOR'S GENTLENESS
+
+| | stress (Pa) | fraction of the 40 kPa mushroom yield |
+|---|---|---|
+| demonstrator (median, 653 demos) | 11,351 | **0.28x** |
+| policy SUSTAINED (`stress_top20_ttop20_mean`) | 28,060 | **0.70x** |
+| policy PEAK (`stress_max_tmax_mean`) | 53,065 | **1.33x — ABOVE YIELD** |
+
+Our demonstrations are gentle (0.3-0.5% ever exceed yield); the learned policy peaks ABOVE the
+bruising threshold. **This — not width adaptation — is the problem worth stating.** It is
+measurable, has an explicit target (0.28x yield), and matches what the user sees on the robot.
+
+NOTE the stress keys were RENAMED: `stress_peak`/`stress_mean` no longer exist. Use
+`stress_max_tmax_mean` (peak) and `stress_top20_ttop20_mean` (SUSTAINED, bruising-relevant).
+Earlier reports of "stress = 0" were my error reading obsolete keys, not a bug.
+
+**Gentleness at matched success (canonical, 200 eps):**
+
+| arm | success | peak | SUSTAINED | vs baseline |
+|---|---|---|---|---|
+| baseline lulkx | 0.820 | 53065 | 28060 | — |
+| **contact stop 1.5 N** | **0.810** | 51053 | **21241** | **-24% stress at -0.01 success** (sim-only) |
+| floor margin 0 | 0.260 | 47677 | 13973 | -50% stress, -0.56 success |
+| CFG3 alone | 0.375 | 55210 | 36884 | +31% stress |
+| CFG3 + contact | 0.735 | 53281 | 29137 | +4% stress |
+
+The contact stop's -24% comes from STOPPING THE SQUEEZE (its slope is 1.7 = no adaptation at all),
+which DECOUPLES gentleness from width adaptation. Deployable equivalent under test:
+freeze-after-closure (`GM_WIDTH_FREEZE_MM`, action-stream only).
+
 ## 0a. THE METRIC, and the numbers in it (2026-08-27)
 
 **WIDTH ADAPTATION = mm of gripper opening per mm of object size.** Regress at-grasp commanded
