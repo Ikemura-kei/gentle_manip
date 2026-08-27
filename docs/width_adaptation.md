@@ -40,6 +40,24 @@ The contact stop's -24% comes from STOPPING THE SQUEEZE (its slope is 1.7 = no a
 which DECOUPLES gentleness from width adaptation. Deployable equivalent under test:
 freeze-after-closure (`GM_WIDTH_FREEZE_MM`, action-stream only).
 
+## 0-CFG. RESOLVED (40 geometries, job 1733599): CFG DOES NOT ADAPT
+
+| arm | #geo | intercept | slope | 95% CI | %demo | R2 |
+|---|---|---|---|---|---|---|
+| CFG 3.0 | **40** | 20.8 | **0.18** | [-0.15, 0.51] | 17% | **0.03** |
+
+Object size explains **3%** of CFG's width variation and the CI includes zero. **CFG is a SQUEEZE
+KNOB, not an adaptation mechanism** — settled at 40 distinct geometries after three contradictory
+estimates at 10-12 (1.1, then 0.13, then unresolved). The fix was PROTOCOL (more geometries), not
+a new mechanism.
+
+Its stress confirms it is the wrong direction: at the same protocol CFG gives
+succ 0.435 / ever 0.765 / peak 56460 / **SUSTAINED 37471 = +34% vs baseline's 28060**.
+The 0.33 ever-minus-success gap is the lift-then-drop signature.
+
+**CFG IS OUT.** Retract the earlier "CFG works, 49% of demonstrator range" entirely — that was a
+half-split range metric inflated by a uniform 7 mm mean shift.
+
 ## 0a. THE METRIC, and the numbers in it (2026-08-27)
 
 **WIDTH ADAPTATION = mm of gripper opening per mm of object size.** Regress at-grasp commanded
