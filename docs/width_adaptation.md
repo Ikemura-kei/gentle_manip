@@ -198,6 +198,33 @@ recorded episodes — the records for this session are lost.
 **No current arm dominates the baseline.** lulkx 0.883/9%; floor margin 4 0.517/29%; margin 8
 0.750/11%. Each trades. A dominating arm needs CFG (1729257), the align retrain, or the latch arms.
 
+### 2e. DECISIVE: THE COLLAPSE IS IN THE LEARNING OBJECTIVE, NOT PERCEPTION (job 1730947)
+
+Aux-width supervision (`aux_grasp_width_weight=1.0`, run `ccpvb`) raises the encoder's size
+perception from 0.739 to **0.927** — and makes the POLICY WORSE on both axes:
+
+| arm | success | corrAT | range | %demo | gapMIN |
+|---|---|---|---|---|---|
+| baseline (lulkx) | 0.883 | +0.336 | 1.0 mm | **9%** | 3.7 |
+| aux-width (`ccpvb`) | 0.517 | +0.183 | 0.3 mm | **3%** | 10.4 |
+
+**An encoder that SEES size at 0.927 drives a policy with 3% adaptation — LESS than baseline.**
+
+This completes a clean diagnostic chain:
+1. the information IS in the cloud — 0.927 with supervision;
+2. policies do not use it — 3-9% of the demonstrator's range;
+3. making it MORE available makes things WORSE.
+
+=> **The collapse is in the LEARNING OBJECTIVE, not in perception or representation.** This rules
+out the whole "better features / better encoder / better head" family, which is most of what was
+tried in items 17-18 and most of tonight.
+
+SURVIVING CANDIDATES (only those that touch the objective or bypass it):
+- **generalist multi-object** (§4b) — makes IGNORING the conditioning costly rather than merely
+  possible. Now the top learning-side hope.
+- **contact-triggered stop** (§4c) — removes prediction from the loop entirely; physics sets width.
+- CFG (§5) — intermediate: changes how the trained conditional is SAMPLED, not what it learned.
+
 ### 2b. Ceilings and links
 
 | quantity | mushroom | tofu |
