@@ -195,6 +195,34 @@ class _DiffusionPolicy:
             self._freeze_eps = (self._freeze_eps_mm / 1000.0) * 4.0 / (0.088 * (_ah - _al + 1e-6))
             print(f"[eval_agent] FREEZE-after-closure active: eps={self._freeze_eps_mm}mm "
                   f"= {self._freeze_eps:.4f} norm", flush=True)
+        # ---- CONSTANT WIDTH OFFSET (2026-08-27) — the simplest deployable gentleness lever ----
+        # GM_WIDTH_OFFSET_MM: add a fixed offset to the commanded width (positive = WIDER grip).
+        # WHY: the contact stop's -24% sustained stress turns out to be a pure LEVEL effect — its
+        # at-grasp width is only ~1.8 mm wider than baseline (32.1 vs 30.3) and its slope is
+        # 0.05 mm/mm, i.e. NO adaptation. So the gain is reproducible by simply commanding wider,
+        # with no force sensor and no trigger logic. This is also exactly what separates alzey
+        # (gentle on the robot) from lulkx (over-squeezes): ~2.8 mm of commanded width.
+        # Applied as an ABSOLUTE offset in normalized action units (round-trip checked below).
+        self._w_offset_mm = float(os.environ.get("GM_WIDTH_FLOOR_CONST_MM", "0") or 0)
+        self._w_floor_const = 0.0
+        if self._w_offset_mm != 0.0:
+            nzp = os.environ.get("GM_WIDTH_NORM")
+            if not nzp:
+                raise RuntimeError("GM_WIDTH_OFFSET_MM needs GM_WIDTH_NORM")
+            _nz = np.load(nzp)
+            _al, _ah = float(_nz["action_min"][-1]), float(_nz["action_max"][-1])
+            # ABSOLUTE width -> FULL AFFINE conversion (mm -> u -> normalized). This is the exact
+            # distinction that caused B10: an absolute value converted with the delta SCALE FACTOR
+            # alone is silently wrong. Inverted from the dump path (u=(n+1)/2*(ah-al)+al;
+            # mm=(u+1)/2*88) so the two can never drift apart.
+            _u = self._w_offset_mm / 88.0 * 2.0 - 1.0
+            self._w_floor_const = 2.0 * (_u - _al) / (_ah - _al + 1e-6) - 1.0
+            _u_b = (self._w_floor_const + 1.0) / 2.0 * (_ah - _al + 1e-6) + _al
+            back = (_u_b + 1.0) / 2.0 * 88.0
+            if abs(back - self._w_offset_mm) > 0.01:
+                raise RuntimeError(f"floor round-trip FAILED: {self._w_offset_mm} -> {back}")
+            print(f"[eval_agent] CONSTANT WIDTH FLOOR {self._w_offset_mm:.1f}mm = "
+                  f"{self._w_floor_const:+.4f} norm (round-trip {back:.3f}mm OK)", flush=True)
         self._dump_tag = os.environ.get("GM_WIDTH_DUMP")
         self._dump_buf, self._dump_batch = [], 0
         self._dump_mm = None
@@ -350,6 +378,16 @@ class _DiffusionPolicy:
             hold = ~np.isnan(self._held_width)
             if hold.any():   # after contact: stop closing further; the OBJECT dictated the width
                 traj[:, :, -1] = np.where(hold[:, None], self._held_width[:, None], traj[:, :, -1])
+        if self._w_floor_const != 0.0:
+            # CONSTANT FLOOR (2026-08-27): w_cmd = max(w_policy, W_min), W_min a fixed constant.
+            # NOT a uniform +offset: shifting EVERY command (including the ~80mm open-gripper
+            # approach) moved the policy's own proprio observation out of distribution from t=0 and
+            # it never closed at all (at-grasp 40.4/46.4mm, 0/20 success, jobs 1738816/7). A floor
+            # leaves the approach untouched -- the command only binds once the policy closes below
+            # W_min -- so the trajectory stays in-distribution until the grasp itself.
+            # It is also the exact CONTROL for the vision floor: same clamp, constant instead of
+            # a per-object predicted level, which isolates ADAPTATION from LEVEL at matched mean.
+            traj[:, :, -1] = np.maximum(traj[:, :, -1], self._w_floor_const)
         if self._dump_tag:
             # Record EE-z alongside the commanded width. Episode-MIN width alone is not
             # trustworthy: a policy that goes OOD and closes the gripper in mid-air produces a

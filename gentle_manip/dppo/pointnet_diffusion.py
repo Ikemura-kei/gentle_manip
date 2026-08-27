@@ -78,6 +78,7 @@ class PointNetDiffusionMLP(nn.Module):
                  out_activation_type="Identity", use_layernorm=False, residual_style=True,
                  aux_contact=False, aux_object_pos=False, aux_grasp_width=False,
                  feed_width_pred=False, width_traj_head=False, width_head_blind=False,
+                 aux_width_blind=False,
                  width_head_bins=0, cond_dropout_prob=0.0, aux_hidden=128,
                  use_first_frame_context=False):
         super().__init__()
@@ -155,6 +156,19 @@ class PointNetDiffusionMLP(nn.Module):
         # channel — driven by it, the gripper crept 80->54 mm and never grasped (0.00 success).
         # Blinding forces the head to infer the width AND the closure timing from vision+pose.
         self.width_head_blind = bool(width_head_blind)
+        # aux_width_blind (2026-08-27): the same proprio mask, but for the AUXILIARY width_head.
+        # WHY: the aux head is supervised at EVERY step against the episode-MIN width, and by the
+        # back half of an episode the gripper is already AT that width — so the head can satisfy
+        # its loss by COPYING proprio instead of learning size from the cloud. Measured leakage:
+        # corr 0.998 / err 0.010 at phase 0.8-1.0 vs 0.850 at t=0 (the honest, latch-time number).
+        # A shortcut that cheap dilutes the encoder's incentive to retain size, which is the whole
+        # point of the auxiliary objective. Blinding removes it. Separate flag from
+        # width_head_blind so the trajectory head's behaviour is untouched; default False keeps
+        # every existing run bit-identical.
+        self.aux_width_blind = bool(aux_width_blind)
+        if aux_width_blind:
+            print("[PointNetDiffusionMLP] aux_width_blind=True (aux width head cannot see "
+                  "the current gripper width)", flush=True)
         if width_traj_head:                       # print RESOLVED flags — an earlier "blind"
             print(f"[PointNetDiffusionMLP] width_traj_head=True blind={self.width_head_blind} "
                   f"bins={self.width_head_bins}", flush=True)   # run was silently SIGHTED
@@ -192,7 +206,16 @@ class PointNetDiffusionMLP(nn.Module):
         if self.pos_head is not None:
             out["object_pos"] = self.pos_head(ce)
         if self.width_head is not None:
-            out["grasp_width"] = self.width_head(ce)
+            ce_w = ce
+            if self.aux_width_blind:
+                # proprio is the TAIL of cond_encoded: [visual | state_flat(To*Do)]; the gripper
+                # width is the last entry of each per-step obs vector.
+                B, To, Do = cond["state"].shape
+                ce_w = ce.clone()
+                base = ce_w.shape[-1] - To * Do
+                for i in range(To):
+                    ce_w[:, base + i * Do + (Do - 1)] = 0.0
+            out["grasp_width"] = self.width_head(ce_w)
         return out
 
     def width_traj_logits(self, cond: Dict[str, torch.Tensor]) -> torch.Tensor:

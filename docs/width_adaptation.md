@@ -766,3 +766,13 @@ Everything else is probe-only and must NOT be reported as an eval result.
 
 Append to §3 the moment a job launches or lands; move conclusions into §2/§4 and revise §5's
 ordering when a result changes the ranking. Bugs go to the DEVLOG bug ledger, not here.
+
+## 2026-08-27 — freeze NULL; contact-stop gain re-read as a LEVEL effect
+
+freeze eps=1mm: 0.825 / SUSTAINED 27217 (-3%). eps=3mm: 0.815 / 26954 (-4%). Baseline 0.820 / 28060.
+Trigger was rise-based (built for CFG's re-opening); baseline drift is DOWNWARD (-1.40mm median,
+63% decreasing) so it never fires. eps=1 vs eps=3 agreeing to noise is the tell.
+
+Contact stop: at-grasp ~32.1mm vs baseline ~30.3mm = **+1.8mm**, slope 0.05 mm/mm (NO adaptation).
+=> its -24% sustained stress is a pure LEVEL effect, reproducible with a constant offset and NO
+sensor. Testing GM_WIDTH_OFFSET_MM +2/+3 (1738755/6).
