@@ -10,27 +10,38 @@ history in `docs/DEVLOG.md`.
 
 ---
 
-## 1. Where we stand (one paragraph)
+## 1. Where we stand — WORKING MECHANISM FOUND (2026-08-27)
 
-**The size dependence was in the learned conditional all along.** Every intervention that tried to
-SUPPLY more size information failed — better encoders, better heads, sharper data, external clamps —
-and aux-width supervision (encoder size perception 0.739 -> 0.927) made adaptation strictly WORSE
-(3% vs baseline 9%). Classifier-free guidance shows why that framing was wrong: amplifying the
-conditioning at sampling time raises adaptation monotonically **2% -> 23% -> 49%** of the
-demonstrator's aperture range. The policy ENCODES size and UNDER-WEIGHTS it; it does not fail to
-represent it. So the defect is in how the objective weights the conditioning, not in perception,
-representation, or the demonstrations.
+**CFG (width-only, scale 3.0) + CONTACT-TRIGGERED STOP (F* = 1.0 N)** delivers **48% of the
+demonstrator's aperture range at 0.833 success** — 5.3x the baseline's 9% adaptation, at success
+within noise of the luckiest seed (0.883) and ABOVE the 3-seed mean (0.756).
 
-Two mechanisms now work, on OPPOSITE axes and with COMPLEMENTARY failure modes:
-- **CFG** buys adaptation (up to 49%) but OVER-CLOSES (success 0.433, peak stress up).
-- **Contact-triggered stop** holds success exactly at baseline (0.883) with 15% range and LOWER
-  peak stress — physics sets the width, so there is no prediction to be wrong.
-Their combination is under test (CFG {1.5,3.0} x F* {1.0,1.5}). Target: adaptation >= ~30% at
-success >= 0.8, which would beat the baseline on BOTH axes and satisfy the requirement.
+| arm | success | corrAT | range | %demo | gapMIN |
+|---|---|---|---|---|---|
+| baseline (lulkx@600) | 0.883 | +0.336 | 1.0 mm | 9% | 3.7 |
+| contact stop alone (1.5 N) | 0.883 | +0.406 | 1.7 mm | 15% | 1.2 |
+| CFG alone (3.0) | 0.433 | +0.386 | 5.6 mm | 49% | 4.3 |
+| **CFG 3.0 + contact stop 1.0 N** | **0.833** | **+0.532** | **5.5 mm** | **48%** | **1.0** |
+| (alzey — best REAL policy, for scale) | ~0.70 real | +0.229 | 1.4 mm | 12% | — |
 
-CAVEAT: all training-side comparisons are confounded with run-to-run variance (sibling-seed control
-in flight, §2g). The CFG and contact-stop results are WITHIN-run (same checkpoint, inference-time
-only) and are not affected.
+**NEITHER MECHANISM WORKS ALONE** — CFG loses half its success; the contact stop only reaches 15%.
+Together they keep essentially ALL the adaptation and nearly double the success.
+
+**WHY IT WORKS (the diagnosis, confirmed by construction):**
+1. The size dependence was ALWAYS in the learned conditional — the policy encodes size and
+   UNDER-WEIGHTS it at sampling. Guidance turns that weight up: 2% -> 23% -> 49%, monotonic.
+   This is why every attempt to SUPPLY more information failed; nothing was missing.
+2. Guidance's failure mode is OVER-CLOSING (success 0.433, peak stress up).
+3. The contact stop caps exactly that: closure halts where the object actually is, so PHYSICS sets
+   the final width and there is no prediction to be wrong.
+
+**EVIDENCE QUALITY: all WITHIN-RUN** (one checkpoint `bxopf@600`, only inference-time flags differ),
+so it is immune to the seed confound that invalidated the training-side comparisons (§2g, seed band
+-9%..+19%). CANONICAL 200-ep + video launched on the best point AND on CFG-alone (1732732/3) so the
+"neither alone" claim is made at eval grade.
+
+**STILL TO CONFIRM:** canonical n=200; per-category behaviour on the generalist policy; and the real
+robot, which is the only test of gentleness that counts.
 
 ## 2. Current state of the numbers
 
