@@ -830,8 +830,14 @@ def _extra_close_arg(args, obj_def):
     """'auto' -> squeeze scaled by object size (see --grasp-extra-close); a number passes through."""
     if str(args.grasp_extra_close).lower() != "auto":
         return float(args.grasp_extra_close)
+    # BASE 2 mm, not the historical 5 mm. The 5 mm was tuned for grip reliability BEFORE we knew
+    # what it did to the material: measured 2026-08-28 on the mushroom under full DR, 4.8 mm put
+    # the peak von Mises at ~1.10x yield with ~0 % of demos sub-yield, while 2 mm gave median
+    # 0.56x with 83 % sub-yield AND slightly BETTER demonstrator success (86 % vs 80 %). Past
+    # yield the MPM saturates, so the demos were all in the regime where the gentleness objective
+    # carries no information (see docs/grasp_synthesis_model.md 9c).
     smallest = float(min(obj_def.size))
-    return float(np.clip(0.005 * (smallest / 0.033), 0.002, 0.006))
+    return float(np.clip(0.002 * (smallest / 0.033), 0.001, 0.003))
 
 
 def _yaw_max_arg(args, obj_def):
@@ -1086,7 +1092,7 @@ def main() -> None:
                    help="squeeze FURTHER IN than the synthesized width by this many meters (tighter grip) "
                         "for EVERY grasp — e.g. 0.005 = close 5mm tighter. 0 (default) = no change. Use to "
                         "make grasps firmer (a too-gentle grip -> premature lift / slip before secured). "
-                        "Pass 'auto' to scale it with the object: a FIXED 5 mm is 15%% of the 33 mm "
+                        "Pass 'auto' to scale it with the object: a FIXED squeeze is 15%% of the 33 mm "
                         "mushroom it was tuned on but 24%% of a 21 mm cherry tomato and 34%% of a 15 mm "
                         "raspberry, i.e. the same knob over-squeezes small objects. auto = "
                         "5 mm * (smallest extent / 33 mm), clipped to [2, 6] mm, so the mushroom is "

@@ -444,6 +444,53 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-28 — LARGE-SCALE COLLECTION LAUNCHED (7 categories x 250 eps). One recipe change first:
+the squeeze base 5 mm -> 2 mm, because 5 mm drove EVERY demo past yield.**
+
+User asked whether synthesis is justified enough to freeze a dataset. Honest split:
+- **Justified:** as a producer of successful, diverse, quality-filtered LIFTS — 75-100 %
+  demonstrator success across 7 objects, align 0.85-0.96, pinches filtered, per-object materials,
+  mesh randomization, every grasp parameter auto-derived.
+- **NOT justified:** the GENTLENESS claim. Yesterday's controlled test showed the FEM objective has
+  zero discriminative power at the operating point, because every grasp sat at 1.05-1.13x yield
+  where the MPM saturates.
+
+Since the dataset is meant to be frozen, the operating point had to be fixed BEFORE collecting —
+otherwise "squeezing is the demos" bakes squeezing in permanently.
+
+**Found the knob: it was the EXECUTED SQUEEZE, not the synthesized width.** Fixed-scene probe:
+
+| `extra_close` | MPM peak (median) | sub-yield? | success |
+|---|---|---|---|
+| 0.0 mm | 0.68x | yes | 100 % |
+| 2.0 mm | 0.91x | yes | 100 % |
+| 4.8 mm (old auto) | 1.05-1.13x | **no** | 100 % |
+
+Confirmed under FULL DR on the mushroom (n=12, mesh-cycled): **2 mm gives median 0.56x yield with
+83 % of demos sub-yield and 86 % success, vs 4.8 mm at ~1.10x, ~0 % sub-yield, 80 % success.**
+Half the stress, most demos now genuinely sub-yield, and success slightly BETTER.
+
+**Adopted: the `--grasp-extra-close auto` base drops 5 mm -> 2 mm** (auto = 2 mm x smallest extent
+/ 33 mm, clipped [1, 3]). Resolved per object: raspberry 1.00, banana_chunk 1.24, cherry_tomato
+1.50, tofu 1.82, mushroom 1.94, strawberry 1.97, tomato 2.78 mm. The old 5 mm was tuned for grip
+reliability before we could measure what it did to the material.
+
+**Collection running:** mushroom, cherry_tomato, raspberry, tomato, banana_chunk, strawberry, tofu
+— 250 episodes each, 8 envs, `scene_dr_every 1`, **random** mesh DR (NOT `--mesh-cycle`: cycling
+is a coverage tool, random sampling is the correct DR for a real dataset; at 250 eps there are
+~30+ scene rebuilds so the pool is covered anyway). Pasta bundle excluded per user.
+
+**Nothing is hardcoded per category in the recipe.** The only per-object values are ones with no
+alternative: the registry MATERIAL (E/rho/yield — physical fact), the task MPM `grid_density` /
+`sim_substeps` (CFL stability, must scale with object size and stiffness), and the mesh pool
+(inherent to the category). Every grasp parameter — area floor, width cap, yaw bound, squeeze — is
+derived from the object at run time.
+
+**Caveat carried into training:** the gentleness metric still does not discriminate ABOVE yield,
+and 17 % of mushroom demos remain at/above it. The dataset is "successful, mostly-sub-yield lifts",
+not "provably gentlest-possible lifts". Retargeting the objective at plastic strain remains open.
+
+
 **2026-08-28 — CORRECTION: the rho = 0.84 surrogate validation is a SCENE-SIZE artefact. Under a
 CONTROLLED test the FEM metric has ZERO rank correlation with simulator stress, because the MPM
 material SATURATES at yield.**
