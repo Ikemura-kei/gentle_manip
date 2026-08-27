@@ -169,6 +169,7 @@ class PointNetDiffusionMLP(nn.Module):
         self.cond_dropout_prob = float(cond_dropout_prob)
         self.cfg_scale = 0.0            # set at EVAL only (GM_CFG_SCALE); 0 = plain conditional
         self.cfg_width_only = False     # guide only the width dim (pose stays untouched)
+        self.cfg_tighten_max = 0.0      # asymmetric clip: max eps-units guidance may TIGHTEN by
         self.null_visual = nn.Parameter(torch.zeros(self._visual_dim)) \
             if cond_dropout_prob > 0 else None
 
@@ -254,6 +255,16 @@ class PointNetDiffusionMLP(nn.Module):
             e_c = self._denoise(x, time_emb, cond_encoded, B, Ta, Da)
             e_u = self._denoise(x, time_emb, self._drop_visual(cond_encoded), B, Ta, Da)
             guided = e_u + self.cfg_scale * (e_c - e_u)
+            if self.cfg_tighten_max > 0:
+                # ASYMMETRIC CLIP on the width dim. Guidance EXTRAPOLATES past the conditional, so
+                # at scale 3 it overshoots — and for width, overshoot means closing TIGHTER
+                # (measured: ~27.8 mm mean vs ~32.0 unguided, a 4 mm systematic squeeze). Bound how
+                # far it may exceed the unguided command in the TIGHTENING direction only; the
+                # widening direction is left free, so the size-dependent VARIATION survives while
+                # the crush direction is capped. A clip, not an offset: it cannot feed back through
+                # the observed gripper width the way an additive bias does.
+                lo = e_c[:, :, -1] - self.cfg_tighten_max
+                guided[:, :, -1] = torch.maximum(guided[:, :, -1], lo)
             if self.cfg_width_only:      # amplify the cloud's effect on WIDTH only; pose untouched
                 out = e_c.clone(); out[:, :, -1] = guided[:, :, -1]
                 return out

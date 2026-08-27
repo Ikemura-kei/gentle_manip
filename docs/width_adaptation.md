@@ -10,6 +10,36 @@ history in `docs/DEVLOG.md`.
 
 ---
 
+## 0a. ⚠⚠ DECISIVE (2026-08-27, job 1733577): NO VISION-BASED ADAPTATION EXISTS YET
+
+Regressing per-episode at-grasp width on object scale SEPARATES the two effects that correlation
+and half-split "range" conflate:
+
+| arm | intercept | **slope (mm/unit-scale)** | R2 | reading |
+|---|---|---|---|---|
+| demonstrator | — | **35.7** | — | real tracking |
+| **CFG 3.0 alone (vision only)** | 23.5 | **3.8** | 0.001 | **MEAN SHIFT, no tracking** |
+| contact stop alone | 30.3 | **1.5** | 0.001 | **MEAN SHIFT, no tracking** |
+| CFG + contact stop | 10.1 | **17.9** | 0.043 | tracks size (half demonstrator) |
+
+**1. CFG is a SQUEEZE KNOB, not an adaptation mechanism.** Slope 3.8 vs 35.7, R2 0.001 — object
+size explains essentially NONE of its width variation. It closes ~7 mm tighter uniformly
+(intercept 23.5 vs 30.3). **The "2% -> 23% -> 49% of demonstrator range" reported earlier is an
+ARTIFACT**: a half-split range metric is inflated by a uniform mean shift. RETRACTED.
+
+**2. The only arm that tracks size does it through CONTACT, not vision.** Neither component tracks
+alone; together slope 17.9. Mechanism: CFG drives an aggressive over-closure and the contact stop
+cuts it off WHERE THE OBJECT IS — so the size information comes from PHYSICS AT CONTACT, not from
+the point cloud. That is the user's "cheating" objection, confirmed quantitatively, and it is not
+deployable anyway (§0).
+
+**METRIC LESSON: report SLOPE, not correlation or half-split range.** Both of the latter conflate
+"moved the mean" with "tracked the size"; a policy that squeezes everything 4 mm harder scores well
+on them while being the OPPOSITE of gentle. Slope + R2 + intercept is the honest triple.
+
+**STATUS: there is currently NO working vision-based width-adaptation mechanism.** Everything that
+looked like one was a constant squeeze or contact-driven.
+
 ## 0. ⚠ HARD DEPLOYMENT CONSTRAINT (user, 2026-08-27): NO CONTACT SENSING ON THE REAL RIG
 
 **The real XArm gripper has NO force/current feedback**, and **a soft delicate object cannot block

@@ -155,6 +155,7 @@ class _DiffusionPolicy:
                                    "was not trained with +model.network.cond_dropout_prob>0")
             net.cfg_scale = cfg_scale
             net.cfg_width_only = bool(int(os.environ.get("GM_CFG_WIDTH_ONLY", "0") or 0))
+            net.cfg_tighten_max = float(os.environ.get("GM_CFG_TIGHTEN_MAX", "0") or 0)
             print(f"[eval_agent] CFG active: scale={cfg_scale} width_only={net.cfg_width_only}",
                   flush=True)
         # ---- CONTACT-TRIGGERED WIDTH STOP (2026-08-27) ------------------------------------
@@ -172,6 +173,28 @@ class _DiffusionPolicy:
         if self._contact_stop_n > 0:
             print(f"[eval_agent] CONTACT STOP active: hold width at contact_force > "
                   f"{self._contact_stop_n} N", flush=True)
+        # ---- FREEZE-AFTER-CLOSURE (2026-08-27) — DEPLOYABLE, no contact sensing ----------
+        # GM_WIDTH_FREEZE_MM=eps: track the running MIN of the commanded width; the first step the
+        # command rises more than eps above that min, latch at the min for the rest of the episode.
+        # WHY: CFG's real failure is NOT a bad grasp — it lifts 74% of the time (ever_success 0.740)
+        # and then DROPS during the hold (success 0.375, gap 0.365, vs ~0.04 for every other arm).
+        # Guidance keeps modulating width after the grasp, so the gripper re-opens. The contact stop
+        # fixed this only incidentally, by freezing the width at contact.
+        # This achieves the same freeze from the POLICY'S OWN ACTION STREAM — no force sensor, no
+        # stall detection, nothing the real rig lacks.
+        self._freeze_eps_mm = float(os.environ.get("GM_WIDTH_FREEZE_MM", "0") or 0)
+        self._freeze_eps = 0.0
+        self._w_min = None
+        self._w_frozen = None
+        if self._freeze_eps_mm > 0:
+            nzp = os.environ.get("GM_WIDTH_NORM")
+            if not nzp:
+                raise RuntimeError("GM_WIDTH_FREEZE_MM needs GM_WIDTH_NORM")
+            _nz = np.load(nzp)
+            _al, _ah = float(_nz["action_min"][-1]), float(_nz["action_max"][-1])
+            self._freeze_eps = (self._freeze_eps_mm / 1000.0) * 4.0 / (0.088 * (_ah - _al + 1e-6))
+            print(f"[eval_agent] FREEZE-after-closure active: eps={self._freeze_eps_mm}mm "
+                  f"= {self._freeze_eps:.4f} norm", flush=True)
         self._dump_tag = os.environ.get("GM_WIDTH_DUMP")
         self._dump_buf, self._dump_batch = [], 0
         self._dump_mm = None
@@ -212,6 +235,8 @@ class _DiffusionPolicy:
         self._act_calls = 0
         self._held_width = None
         self._last_contact = None
+        self._w_min = None
+        self._w_frozen = None
 
     def observe_info(self, info):
         """Harness hook: receive the step info (contact force). Never reaches the policy net."""
@@ -293,6 +318,18 @@ class _DiffusionPolicy:
                 u = 2 * (w_phys - 0.0) / (0.088 - 0.0 + 1e-6) - 1              # -> derive space
                 w_act = 2 * (u - a_lo) / (a_hi - a_lo + 1e-6) - 1              # -> npz units (match dataset)
                 traj[:, :, -1] = traj[:, :, -1] + w_act[:, None]
+        if self._freeze_eps > 0:
+            w = traj[:, 0, -1]
+            n_env = traj.shape[0]
+            if self._w_min is None:
+                self._w_min = w.copy()
+                self._w_frozen = np.zeros(n_env, bool)
+            self._w_min = np.where(self._w_frozen, self._w_min, np.minimum(self._w_min, w))
+            fire = (~self._w_frozen) & (w > self._w_min + self._freeze_eps)
+            self._w_frozen |= fire            # closure has bottomed out -> hold it there
+            if self._w_frozen.any():
+                traj[:, :, -1] = np.where(self._w_frozen[:, None], self._w_min[:, None],
+                                          traj[:, :, -1])
         if self._contact_stop_n > 0:
             n_env = traj.shape[0]
             if self._held_width is None:
