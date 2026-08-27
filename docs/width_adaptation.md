@@ -206,7 +206,15 @@ recorded episodes — the records for this session are lost.
 **No current arm dominates the baseline.** lulkx 0.883/9%; floor margin 4 0.517/29%; margin 8
 0.750/11%. Each trades. A dominating arm needs CFG (1729257), the align retrain, or the latch arms.
 
-### 2e. DECISIVE: THE COLLAPSE IS IN THE LEARNING OBJECTIVE, NOT PERCEPTION (job 1730947)
+### 2e. [PARTIALLY RETRACTED 2026-08-27 — see 2g] aux-width supervision (job 1730947)
+
+**RETRACTION:** the claim below that this is "DECISIVE" evidence the collapse is in the learning
+objective is NOT supported. Its policy-side evidence (aux-width delivering 3% vs baseline 9%) is a
+BETWEEN-RUN comparison, and the sibling-seed control (§2g) measures a seed-noise band of **-9% to
++19%** on that metric. 3% sits inside it. What SURVIVES is the OFFLINE half: the encoder perceives
+size at 0.927 while policies deliver 3-19%, so the information is present and under-used. What does
+NOT survive: "making the information more available made it WORSE."
+
 
 Aux-width supervision (`aux_grasp_width_weight=1.0`, run `ccpvb`) raises the encoder's size
 perception from 0.739 to **0.927** — and makes the POLICY WORSE on both axes:
@@ -254,7 +262,31 @@ PATTERN (two F* values, monotonic in the predicted direction: lower threshold ->
 less success) plus a physical mechanism that predicted exactly this shape in advance.
 CANONICAL 200-ep evals with video launched (1732424/5/6 at F* = 0.5 / 1.0 / 1.5) — a claim needs n=200.
 
-### 2g. METHODOLOGICAL GAP: training-side comparisons are CONFOUNDED with run-to-run variance
+### 2g. THE SEED NOISE FLOOR — measured, and it kills the training-side comparisons
+
+**Three seeds, SAME data, SAME recipe (jobs 1732445/6):**
+
+| run | success | corrAT | range | %demo |
+|---|---|---|---|---|
+| lulkx (the "baseline" used all night) | 0.883 | +0.336 | 1.0 mm | **9%** |
+| oqzdm | 0.667 | +0.038 | -1.0 mm | **-9%** |
+| dntaz | 0.717 | +0.281 | 2.1 mm | **19%** |
+
+**Seed alone spans -9% to +19% adaptation (28 points) and 0.667-0.883 success (0.22).**
+`lulkx` is the LUCKIEST of three seeds — and every training-side comparison tonight was made
+against it.
+
+**CONSEQUENCES**
+- DEAD (inside the noise band, n=1 run each): aux-width 3%, align-filtered 1%, CFG-control 0.700.
+  None is an established regression.
+- ALIVE (WITHIN-run: same checkpoint, only inference changed, so seed variance cancels):
+  the floor's 10-point trade curve; the contact stop (15% at baseline success); and **CFG's
+  2% -> 23% -> 49% dose-response — 2.6x the TOP of the seed band, and no seed noise produces a
+  monotonic response to a guidance scale.**
+- RULE going forward: **no between-run claim without >=3 seeds.** Prefer within-run (inference-time)
+  comparisons wherever a question allows it.
+
+(superseded) ~~METHODOLOGICAL GAP: training-side comparisons are CONFOUNDED with run-to-run variance~~
 
 Three training-side interventions all came in BELOW baseline on delivered adaptation:
 
