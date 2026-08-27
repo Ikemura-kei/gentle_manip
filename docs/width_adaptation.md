@@ -503,6 +503,31 @@ genuine 3-category teaser — LAUNCHED. Do NOT launch the full 650. The generali
 but compact and much cheaper to simulate. The raspberry smoke is still being finished for its
 viability + collection-rate numbers, which are cheap now and useful for future planning.
 
+## 4e. GENERALIST (mushroom+tofu) — hypothesis NOT supported by this run (job 1730005/xktwc)
+
+| | success | corrAT | range | %demo |
+|---|---|---|---|---|
+| mushroom baseline | 0.883 | +0.336 | 1.0 mm | 9% |
+| **generalist on mushroom** | 0.783 | +0.042 | -0.6 mm | **-6%** |
+| tofu baseline (mntlf) | 0.517 | +0.281 | 2.8 mm | 28% |
+| **generalist on tofu** | 0.617 | +0.125 | 0.7 mm | **7%** |
+
+Within-category adaptation got WORSE on both. The telling detail: at-grasp width is **~33 mm for
+BOTH categories** (33.4/32.7 mushroom, 32.6/33.3 tofu) — it did not even learn the CATEGORY-level
+split that would have masqueraded as adaptation in a pooled metric. It collapsed to a single GLOBAL
+mean across both objects.
+
+POSITIVE: success on tofu IMPROVED (0.617 vs 0.517) — multi-object training helps the harder task's
+competence, just not the width collapse.
+
+CAVEAT (applied consistently): n=1 run; mushroom's -6% is INSIDE the -9%..+19% seed band (§2g).
+This does not REFUTE the hypothesis, it fails to support it. A fair test needs >=3 seeds.
+
+**FOLLOW-UPS LAUNCHED:** (a) the CONTACT STOP applied to the generalist (1732744/5) — it needs no
+special training and works on any policy; (b) the generalist RETRAINED WITH conditioning dropout
+(1732746) so CFG becomes available on it — i.e. the working mechanism (§1) applied to the
+multi-category setting, which is the actual deliverable.
+
 ## 5. Queued ideas, highest value first
 
 1. ~~Condition the width head on the grasp pose~~ **REFUTED 2026-08-27 (job 1728668).**
