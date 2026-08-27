@@ -3,6 +3,7 @@
 \usepackage{amsmath,amssymb}
 \usepackage{booktabs}
 \usepackage{parskip}
+\usepackage{natbib}          % available in the local TeX install (checked 2026-08-26)
 
 \title{Gentle Manipulation of Fragile Objects:\\
        method section and three candidate paper framings}
@@ -22,7 +23,11 @@ document is the structural companion to it.
 
 \tableofcontents
 
+\input{intro}
 \input{method}
 \input{outlines}
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
 
 \end{document}

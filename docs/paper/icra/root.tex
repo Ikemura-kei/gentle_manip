@@ -1,0 +1,267 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%2345678901234567890123456789012345678901234567890123456789012345678901234567890
+%        1         2         3         4         5         6         7         8
+
+\documentclass[letterpaper, 10 pt, conference]{ieeeconf}  % Comment this line out if you need a4paper
+
+%\documentclass[a4paper, 10pt, conference]{ieeeconf}      % Use this line for a4 paper
+
+\IEEEoverridecommandlockouts                              % This command is only needed if 
+                                                          % you want to use the \thanks command
+
+\overrideIEEEmargins                                      % Needed to meet printer requirements.
+
+%In case you encounter the following error:
+%Error 1010 The PDF file may be corrupt (unable to open PDF file) OR
+%Error 1000 An error occurred while parsing a contents stream. Unable to analyze the PDF file.
+%This is a known problem with pdfLaTeX conversion filter. The file cannot be opened with acrobat reader
+%Please use one of the alternatives below to circumvent this error by uncommenting one or the other
+%\pdfobjcompresslevel=0
+%\pdfminorversion=4
+
+% See the \addtolength command later in the file to balance the column lengths
+% on the last page of the document
+
+% The following packages can be found on http:\\www.ctan.org
+\usepackage{graphics} % for pdf, bitmapped graphics files
+\usepackage{epsfig} % for postscript graphics files
+\usepackage{mathptmx} % assumes new font selection scheme installed
+\usepackage{times} % assumes new font selection scheme installed
+\usepackage{amsmath} % assumes amsmath package installed
+\usepackage{amssymb}  % assumes amsmath package installed
+
+\title{\LARGE \bf
+Sim-to-Real Gentle Manipulation of Food
+}
+
+
+\author{Kei Ikemura, Yifei Dong, David Blanco-Mulero, ..., Florian T. Pokorny% <-this % stops a space
+\thanks{*This work was not supported by any organization}% <-this % stops a space
+\thanks{$^{1}$Albert Author is with Faculty of Electrical Engineering, Mathematics and Computer Science,
+        University of Twente, 7500 AE Enschede, The Netherlands
+        {\tt\small albert.author@papercept.net}}%
+\thanks{$^{2}$Bernard D. Researcheris with the Department of Electrical Engineering, Wright State University,
+        Dayton, OH 45435, USA
+        {\tt\small b.d.researcher@ieee.org}}%
+}
+
+
+\begin{document}
+
+
+
+\maketitle
+\thispagestyle{empty}
+\pagestyle{empty}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{abstract}
+
+
+\end{abstract}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Writing todo
+% [] Quantify human-hours saved vs teleop for equivalent coverage
+
+\section{INTRODUCTION}
+% Deformable and fragile objects manipulation (DFOM) requires gentle and reliable handling of the object, which is crucial in applications ranging from food processing and agriculture to assistive care and surgery~\cite{wang2022challenges,swann2025dexfruit,chua2021toward,masui2024vision,wang2025image}.
+Manipulation of delicate food poses major challenges, as objects can tear, crack, or bruise under excessive compression or tension~\cite{zhu2025deformable,blanco2024t}. The difficulty stems from three factors: (i) complex contact and object dynamics that are hard to model, making it difficult to assess the internal stress experienced by the object, and (ii) stringent safety constraints that require keeping the stress below damage thresholds~\cite{yin2021modeling,arriola2020modeling}. (iii) significant variations of shape, size, and other physical properties within and across object category.
+
+A major line of work that tackle this is via imitation learning. Kang et. al.~\cite{kang2026learning} .. We argue that to cover the space of variations of day-to-day food, human demonstration is impractical as it requires exponentially large amount of experience. To fill this gap, we use an MPM-based soft simulator to generate thousands of demonstrations with a proposed demonstration generator based on stress-aware grasp synthesis. Then we train an imitation learning policy on this dataset with small amount of real-world demonstration, and deploy the policy to real-world.
+
+Our contributions are:
+
+\section{RELATED WORKS}
+
+
+\section{METHOD}
+\subsection{Problem setting}
+\label{sec:method:problem}
+
+A robot arm with a parallel-jaw gripper must lift a single fragile object from a table and
+hold it, without damaging it. The object's category, pose, size, shape and material stiffness vary between episodes and are not directly observable. Perception is a single fixed external
+depth camera; there is no tactile or force sensing in the loop.
+
+At each control step $t$ the policy observes
+\begin{equation}
+  o_t \;=\; \bigl(\, \mathbf{p}_t,\; \mathbf{q}_t,\; w_t,\; \mathcal{P}_t \,\bigr),
+  \label{eq:obs}
+\end{equation}
+the end-effector position $\mathbf{p}_t\!\in\!\mathbb{R}^3$, its orientation as a unit
+quaternion $\mathbf{q}_t\!\in\!S^3$, the measured gripper width $w_t\!\in\!\mathbb{R}$, and a
+point cloud $\mathcal{P}_t\!\in\!\mathbb{R}^{N_p\times 3}$ with $N_p\!=\!1024$ points in the
+robot base frame. The action is an \emph{absolute} target pose and gripper width,
+\begin{equation}
+  a_t \;=\; \bigl(\, \mathbf{p}^{\mathrm{cmd}}_t,\; \boldsymbol{\theta}^{\mathrm{cmd}}_t,\;
+                    w^{\mathrm{cmd}}_t \,\bigr) \;\in\; \mathbb{R}^{7},
+  \label{eq:act}
+\end{equation}
+with orientation encoded as Euler angles (\S\ref{sec:method:spaces}). An episode succeeds if
+the object's centre enters a height band and remains there for $T_{\text{hold}}$ consecutive
+steps; it is \emph{gentle} to the degree that the peak internal (von~Mises) stress stays
+below the material's bruising threshold. Success is measurable on hardware; gentleness, in
+this work, is measured in simulation.
+
+\subsection{Stress-aware grasp synthesis}
+\label{sec:method:synth}
+
+The demonstrator plans, for a given object instance, a $7$-DoF grasp
+$x = (\mathbf{t}, \mathbf{r}, \omega)$: the tool-centre-point position $\mathbf{t}$, its
+orientation $\mathbf{r}$ (Euler), and the \emph{commanded} gripper width $\omega$. Planning
+happens on the mesh, outside the physics simulator.
+
+\paragraph{Width-controlled contact model.}
+A real parallel jaw is position-controlled: one commands a width and the grip force is an
+outcome. We model this directly. The object is tetrahedralised and a linear-elastic
+stiffness matrix $K$ assembled. Because the object is free-floating, $K$ is rank-deficient
+by the six rigid-body modes $R$, so all solves use an inertia-relief (bordered) system
+factored once per object,
+\begin{equation}
+  \begin{bmatrix} K & R \\ R^{\!\top} & 0 \end{bmatrix}
+  \begin{bmatrix} u \\ \alpha \end{bmatrix}
+  =\begin{bmatrix} b \\ 0 \end{bmatrix}.
+  \label{eq:inertia-relief}
+\end{equation}
+Closing to width $\omega$ indents the object by $\delta_{l},\delta_{r}$ per jaw. We prescribe
+\emph{normal-only} displacement at the contact nodes---the tangential directions stay
+free---with a rounded (parabolic) pad profile $d_i=\delta\,\bigl(1-(r_i/r_{\text{pad}})^2\bigr)$.
+Both details matter: fully-bonded contact against a flat plane clamps the surface and
+produces a mesh-dependent flat-punch edge singularity instead of bulk compression, whereas
+the normal-only rounded pad lets the material bulge and yields a physical compression zone.
+
+Under position control the displacement field is independent of Young's modulus, so stress
+and grip force are both \emph{linear} in it. We solve once at $E\!=\!1$ to obtain
+$(\sigma_1, F_1)$ and recover any material by scaling,
+\begin{equation}
+  \sigma(E) \;=\; E\,\sigma_1, \qquad F(E) \;=\; E\,F_1 ,
+  \label{eq:E-linear}
+\end{equation}
+which makes evaluating a candidate grasp across a distribution of stiffnesses essentially
+free---one FEM solve per pose, scalar arithmetic per material sample. A grasp is
+\emph{holdable} when friction at the two pads carries the object's weight with an
+acceleration margin $a$,
+\begin{equation}
+  2\,\mu\,F(E) \;\ge\; m\,g\,\bigl(1 + a/g\bigr).
+  \label{eq:hold}
+\end{equation}
+
+\paragraph{Grasp score.}
+Among holdable grasps we prefer those that deform the object least, press flush, and do not
+concentrate load on a small patch. Writing $\sigma_{\text{top10}}$ for the mean of the
+highest decile of element stresses (with elements adjacent to the contacts masked, since a
+point load produces a mesh-dependent spike there) and $\sigma_{p98}$ for the unmasked $98$th
+percentile, the objective to maximise is
+\begin{equation}
+  \begin{aligned}
+  S(x) \;=\; &-\,\sigma_{\text{top10}}(x)
+              \;-\; w_{\text{al}}\bigl(1-\mathrm{al}(x)\bigr)
+              \;-\; w_{\text{pk}}\,\sigma_{p98}(x) \\[2pt]
+             &-\; w_{\text{pr}}\,\frac{F(x)}{A_{\min}(x)}
+              \;-\; w_{\text{az}}\,\bigl[\theta_{\text{az}}(x)-\bar\theta\bigr]_{+},
+  \end{aligned}
+  \label{eq:score}
+\end{equation}
+subject to holdability~\eqref{eq:hold} and a hard floor on the contact area of the
+\emph{worst} pad, $A_{\min}(x) \ge A_{\text{floor}}$; infeasible candidates are returned on a
+shaped penalty ladder so the search retains a gradient toward feasibility. The terms encode
+distinct failure modes we observed. The alignment term $\mathrm{al}(x)$, the mean absolute
+cosine between the closing axis and the local surface normals, rejects grazing and edge
+contacts. The peak and pressure terms penalise \emph{local} damage that the masked bulk
+statistic hides. The area floor is what eliminates stem-type grasps: on our object these
+score \emph{better} on bulk stress than a correct enveloping grasp (squeezing near a stiff,
+slender part deforms the body less), so a search that optimises bulk stress alone converges
+toward them; they are separated instead by worst-pad contact area, which differs by roughly
+a factor of six between the two grasp types. Finally $\theta_{\text{az}}$ is the azimuth of
+the closing axis relative to the camera ray, bounded by $\bar\theta$ so the fingers do not
+occlude the object in the very observation the policy must act on. A shaped penalty rather
+than a hard rejection is required here: occlusion-reducing candidates otherwise sit on a flat
+infeasibility floor where a soft weight has no gradient.
+
+\paragraph{Search.}
+$S$ is optimised with CMA-ES from multiple seeds---canonical closing axes plus a yaw fan
+centred on the camera-perpendicular direction---since a single start reliably misses the
+gentle basin. The FEM factorisation is built once per object geometry and reused across all
+candidates and all envs sharing that geometry, so per-candidate cost is one Schur-complement
+back-substitution.
+
+\subsection{Demonstration generation}
+\label{sec:method:demos}
+
+Planned grasps are executed in a deformable (MPM) simulator to produce
+$(\text{observation},\text{action})$ trajectories in the same format a real teleoperation
+session would produce.
+
+\paragraph{Execution.}
+Each parallel environment runs an independent phase machine---approach, settle, close,
+firm, lift, hold---so that environments may progress at different rates and, on failure,
+rewind. Commands are still issued as one batched step; only the per-environment row varies.
+At the close$\rightarrow$firm boundary the measured contact signal is read once: a grasp that
+came out weak receives an additional closure, which recovers marginal grasps without
+introducing over-squeeze elsewhere. Slip during the lift triggers a bounded regrasp, and the
+failed attempt is retained in the demonstration by design, so recovery behaviour is
+represented in the data.
+
+\paragraph{Approach trajectory.}
+Rather than interpolating linearly from home to the grasp pose, the approach reproduces the
+structure we measured in human teleoperation: the operator aligns laterally while still well
+above the object, then descends, with orientation adjusting throughout. We implement this as
+\emph{per-axis progress} over a single phase, with no waypoint and no stop:
+\begin{equation}
+  s_{xy}(\alpha) \;=\; \mathrm{smoothstep}\!\Bigl(\min\bigl(\tfrac{\alpha}{f},\,1\bigr)\Bigr),
+  \qquad
+  s_{z}(\alpha) \;=\; \alpha ,
+  \qquad \alpha \in (0,1],
+  \label{eq:approach}
+\end{equation}
+where $f\!\sim\!\mathcal{U}[f_{\text{lo}},f_{\text{hi}}]$ is drawn per environment and sets
+how early the lateral motion completes; orientation is slerped over the full $\alpha$. The
+lateral velocity reaches zero only at its own arrival, while $z$ is still moving, so the path
+is continuous and never dwells (\S\ref{sec:method:supervision} explains why that matters).
+The phase \emph{duration} is set from the profile's arc length $L(f)$ and a reference speed,
+\begin{equation}
+  T_{\text{app}} \;=\; \mathrm{clip}\bigl(\,L(f)/v_{\text{ref}},\; T_{\min},\, T_{\max}\bigr),
+  \label{eq:duration}
+\end{equation}
+so that per-step speed is approximately constant across episodes. A fixed duration would
+instead make speed proportional to the spawn distance; measured on our demonstrations this
+produces a speed--distance correlation far outside what human teleoperation exhibits, and it
+makes the commanded action magnitude depend on where the episode started rather than on the
+current state.
+
+\section{EXPERIMENT}
+
+\section{CONCLUSIONS}
+
+
+% \addtolength{\textheight}{-12cm}   % This command serves to balance the column lengths
+%                                   % on the last page of the document manually. It shortens
+%                                   % the textheight of the last page by a suitable amount.
+%                                   % This command does not take effect until the next page
+%                                   % so it should come on the page before the last. Make
+%                                   % sure that you do not shorten the textheight too much.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\bibliographystyle{IEEEtran}
+\bibliography{IEEEabrv, reference}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section*{APPENDIX}
+
+\section*{ACKNOWLEDGMENT}
+
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+\end{document}

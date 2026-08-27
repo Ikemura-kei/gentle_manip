@@ -1,0 +1,114 @@
+% !TEX root = main.tex
+% ---------------------------------------------------------------------------
+% Introduction --- v2 (2026-08-26). Restructured from 6 paragraphs to 3 at the
+% user's request, and shortened (~1350 -> ~780 words).
+%   P1  background + the problem/challenge
+%   P2  prior work / standard solutions, and what each lacks
+%   P3  what we propose + contributions
+%
+% Positioning notes (do not lose these):
+%  * \citep{ikemura2025stressrl} is OUR OWN PRIOR ITERATION (rejected, arXiv
+%    public). P2 must state the delta from it explicitly and early, or the paper
+%    reads as incremental. Delta: stress as a GRASP-PLANNING objective at
+%    demonstration time (IL) vs a stress-penalised RL REWARD; and the problem
+%    addressed is COVERAGE across object variation, which RL per-task
+%    optimisation does not address. If the venue is double-blind, cite in third
+%    person.
+%  * \citep{pan2020stressmin} already established stress as a grasp metric. We
+%    do NOT claim that idea. Our deltas: a POSITION(width)-controlled contact
+%    model matching a real parallel jaw, the E-linearity that makes stiffness
+%    randomisation ~free, and use as a demonstration generator.
+% Deliberately NOT claimed: lead/dwell BC failure modes; "sim ranking inverts";
+% measured real gentleness; any tactile baseline comparison.
+% ---------------------------------------------------------------------------
+\section{Introduction}
+\label{sec:intro}
+
+Picking up a mushroom without bruising it is harder than it looks, and damage-free robotic
+handling of fragile produce remains an open problem in agricultural and food
+automation~\citep{wang2025damageless}. Two quantities have to be right at once. The gripper
+must close to a width that is wide enough that the object does not slip and narrow enough that
+it does not crush, and for soft produce the margin between the two is small
+\textbf{[TODO: measured drop/crush band, A2]}. It must also close in the right place and
+orientation: fingers that straddle the stem, or that close across the thin rim of the cap,
+fail or bruise at a width that would have been correct elsewhere on the same specimen. Both
+the grasp pose and the width are determined by the object's own pose, size, shape and
+stiffness, and none of these is directly available to a robot observing the scene with a depth
+camera. Pose and size are only partially visible under occlusion, shape varies continuously
+within a single produce category, and stiffness is not a geometric property at all. The task
+looks like pick-and-place but behaves like a precision problem, in which the quantities that
+must be predicted accurately are ones no sensor in the loop reports. We study this on a 7-DoF
+arm with a parallel-jaw gripper, a single fixed external depth camera, and no tactile or force
+sensing in the control loop, using the lifting of a fresh mushroom as a running example.
+
+Three lines of work address this setting, and each leaves the same thing unresolved.
+\emph{Compliant hardware} absorbs the problem mechanically: pneumatic and enveloping grippers
+limit contact pressure by construction and reduce bruising~\citep{wang2024softgripper}, but
+compliance does not decide where on the object to close, and it is a fixed property of the
+end-effector rather than a decision the robot makes per instance. \emph{Contact sensing} gives
+the policy access to grip state at execution time, and recent tactile and force-controlled
+systems handle delicate items well by this route~\citep{tfgripper,vtam}. This changes what the
+policy can observe; it does not change where its supervision comes from. Both are imitation
+learners trained on human demonstrations recorded on real hardware, and the division of labour
+inside them is telling: the force-regulation policy of \citet{tfgripper} is decoupled from
+arm-pose prediction, and the pose policy remains demonstration-learned, so contact sensing
+addresses how firmly to close but not where or how to approach. (Deformation-based tactile is
+additionally ill-conditioned in the gentle regime, since it needs measurable indentation to
+produce a signal, a limitation recognised within the tactile community
+itself~\citep{lighttact}.) \emph{Stress-aware methods} target the quantity that actually causes
+damage. \citet{pan2020stressmin} rank grasps by the internal stress a held object sustains,
+under a point-contact force-closure model. We implemented that metric and found it degenerate
+in our setting: with point contacts, two pads on a smooth organic object cannot span the
+moment axes of wrench space, so the resistible-wrench hull collapses and the metric returns
+essentially zero for \emph{every} candidate grasp on our objects, while a cube clears it
+(Section~\ref{sec:method:synth}). A parallel jaw does not make point contact, and the
+distinction is not cosmetic. In our own earlier iteration we instead trained a policy with a
+stress-penalised reward and transferred it zero-shot~\citep{ikemura2025stressrl}; extending
+its evaluation revealed that it did not adapt to changes in object orientation or size, since
+reinforcement learning must \emph{explore} that variation rather than be shown it, and is too
+sample-inefficient to cover it. Both experiences point the same way. What none of these lines
+supplies is coverage of the physical variation that determines the correct grasp in the first
+place. That variation cannot be covered by
+demonstration: a trajectory is recorded against one specimen in one pose and cannot be
+transported to another, so cost scales with the product of the varying dimensions and
+multiplies again across categories. For precision-limited tasks the requirement is
+super-exponential in the target precision, $\log N \propto 1/(P-c)$
+\citep{curseofprecision} \textbf{[TODO: verify claim and venue, C1]}, so low-data real
+collection is not merely inconvenient here but structurally inadequate. We observe exactly the
+predicted behaviour: a policy trained on 50 real mushroom demonstrations does not degrade
+uniformly on hardware but fails in a \emph{coverage-shaped} way, misgrasping at particular
+workspace locations and over- or under-squeezing at particular combinations of object size and
+location (Figure~\ref{fig:coverage}).
+
+We therefore treat coverage, rather than sensing or reward design, as the binding constraint,
+and obtain it from simulation. Simulation buys nothing unless demonstrations can be produced
+inside it without a human, which requires an operational definition of gentleness that a
+search can optimise; internal stress supplies one, being unobservable on hardware but exact in
+a deformable simulator. We score a candidate grasp by the stress it induces under a
+\emph{width-controlled, distributed-pad} contact model: a real parallel jaw commands a
+displacement over a finite pad, and the resulting force is an outcome. Replacing point
+contacts with a pad, and full wrench resistance with a friction margin sufficient to hold the
+object against gravity, removes the degeneracy above and yields a score that discriminates
+among grasps on exactly the objects where the force-closure formulation cannot. We search the
+7-DoF grasp (pose and commanded width) with CMA-ES under that score. Because the
+displacement is prescribed, stress is linear in Young's modulus, so a single finite-element
+solve per pose covers an entire distribution of stiffnesses and material randomisation becomes
+almost free. This is what turns a grasp metric into a coverage instrument: the planner runs
+over randomised pose, size, shape and material, and its demonstrations are distilled into a
+point-cloud diffusion policy acting from a single depth view, co-trained with a small slice of
+real demonstrations that calibrates the residual sensor gap. Our contributions are
+(i)~an autonomous stress-minimising demonstrator built on a width-controlled, distributed-pad
+contact model, which discriminates among parallel-jaw grasps on organic objects where the
+point-contact force-closure formulation is degenerate, and whose stiffness-linearity makes
+randomised material coverage tractable (Section~\ref{sec:method:synth})
+\textbf{[TODO: confirm the planner comparison is the paired form unaffected by the mesh-scale
+bug, C3]}; (ii)~evidence that coverage rather than demonstration count is the binding
+constraint, with a policy trained on 50 real demonstrations failing in a coverage-shaped way
+while broad simulated coverage co-trained with a small real slice outperforms both
+pure-simulation and real-only policies \textbf{[TODO: $n$ and CI, A3; confirm the run
+postdates the perception-bias correction, A6]}; and (iii)~real-robot validation across object
+poses, sizes and shapes, and across object categories, from a single depth view with no
+tactile or force sensing in the loop \textbf{[TODO: generalist run, B2 --- blocking, this is a
+stated rejection reason]}. We are explicit about the scope of the word
+\emph{gentle}: it is established here under the simulator's stress model and on hardware by
+task success, not by a direct measurement of damage \textbf{[TODO: real gentleness proxy, A1]}.

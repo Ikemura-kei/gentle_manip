@@ -410,6 +410,144 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-27 (paper prep) — `docs/grasp_synthesis_model.md`: the synthesis model VERIFIED against
+code, plus the v3.3 delta.** Written for paper writing: every statement checked against the
+implementation, with **⚠ DO NOT CLAIM** markers wherever a natural claim would overstate the code.
+Covers the FEM formulation (CST linear tets, E=1 normalization, inertia-relief bordered solve,
+Schur-complement per-grasp solve), the contact/pad model (position control, real finger STL pad,
+normal-only prescribed displacement, flat-plane push with a fillet taper), the E-linearity, the
+holdability inequality, the full objective with every weight, the feasibility ladder, and what is
+auto vs hand-set. Appendix A is the v3.3 diff (4 bug fixes, 6 new opt-in flags, measured effect of
+each).
+
+**Two model/description mismatches found while verifying — both matter for the paper:**
+1. **Poisson ratio: every collection to date used ν = 0.33 for EVERY object.** `build_grasp_fem`
+   passed no config, so `cfg.nu` fell back to `MetricConfig`'s "copper" default, while the
+   materials declare ν 0.30-0.42 and the DR randomizes `object_nu` **for the MPM sim only**.
+   Unlike E, **ν cannot be rescaled post-hoc**. Added `--grasp-nu auto` (uses the material value)
+   but **defaulted to the historical 0.33** so existing runs stay reproducible. State ν = 0.33 in
+   the paper, or re-run first.
+2. **μ = 0.7 is one global constant**, not per-object and not randomized — same pad-object friction
+   for tofu, mushroom and a wet tomato. (`coup_friction` in the DR configs is a different thing:
+   MPM coupling friction in the simulator, not the planner's μ.)
+
+Other items the paper must not overstate, all recorded in the doc: the FEM is a **planning
+surrogate**, never run inside the sim loop and not calibrated against the MPM; it runs on a
+**voxel-remeshed proxy** (~17 % thicker than the source on a thin body); the headline stress is a
+**contact-masked top-10 %**, not a peak; FEM contact is **normal-only** (friction only via the
+scalar holdability test); and `w_occ` — the only real occlusion measure — is **0 in every run**,
+with occlusion controlled by the azimuth penalty and the hard yaw bound instead.
+
+
+**2026-08-27 (pinch filter + tomato size) — TWO user catches, both fixed: the auto area floor still
+admitted PINCHES, and the tomato was sized past the gripper's comfortable range.**
+
+**1. Pinch / strange-grasp filter.** User flagged `banana_chunk .../26-08-27-qrp/.../ep0004_env3_
+success_grasp.png`: **align 0.541, grip 0.83 N, width 35.1 mm** on a 33.7 x 35 x 20.4 mm object —
+jaws nearly fully open, fingertips catching the top corner, contact patches tiny and on the upper
+edge. A textbook pinch that the `area_min="auto"` floor let through, because when the whole
+feasible pool is mediocre the "upper half by area" is still mediocre.
+
+Fix: the auto selection now keeps the upper half by **BOTH contact area AND alignment**, then takes
+the best score. `align` is the right second signal — it is already computed, and it discriminates
+strongly (banana chunk: lifts averaged **0.83** vs **0.53** for failures). Both criteria are
+POOL-RELATIVE medians, so this stays scale-free and adds no fitted constant; if the two together
+empty the set it falls back to the area criterion alone rather than returning nothing.
+
+Measured on the banana chunk, three runs (before / before / after):
+
+| run | align med | align min | grasps < 0.6 | success |
+|---|---|---|---|---|
+| qym (before) | 0.82 | 0.41 | 2 | 12/16 |
+| qrp (before, the flagged pinch) | 0.80 | **0.52** | **4** | 11/16 |
+| **ofx (after)** | **0.86** | **0.60** | **1** | 11/16 |
+
+Bad grasps cut without costing yield.
+
+**2. Tomato size vs the GRIPPER's limit — a real hardware constraint, quantified.** The gripper
+opens **88 mm** physically, and the planner bounds width at **79 mm**. So:
+
+| tomato size | width needed | margin under 79 mm | demonstrator success |
+|---|---|---|---|
+| 6.5 cm (first guess) | ~65 mm | 14 mm | 57-62 % |
+| **6.0 cm (adopted)** | ~60 mm | **19 mm** | **81-89 %** |
+| 7.5 cm (real local size) | ~75 mm | **4 mm** | not viable |
+
+**A realistically-sized 7-8 cm tomato is effectively out of range for this hand** — 4 mm of margin
+leaves no room for the pads to indent, which is why the larger versions performed worst. 6 cm is
+the user's call and it lifts the tomato from ~60 % to ~85 %. **If a realistic whole tomato is ever
+needed, it is a gripper problem, not a synthesis problem.** The cherry tomato (2.5 cm) is the
+realistic tomato category for this rig.
+
+**Current cross-object state (8-episode smoke tests, all-auto + yaw/squeeze/align filters):**
+
+| object | success | align med | align min | < 0.6 | stress % of yield |
+|---|---|---|---|---|---|
+| mushroom | **8/8 = 100 %** | 0.94 | 0.94 | 0 | 30 % |
+| tomato (6 cm) | **13/16 = 81 %** | 0.96 | 0.90 | 0 | 31 % |
+| cherry_tomato | **6/8 = 75 %** | 0.94 | 0.86 | 0 | 52 % |
+| banana_chunk | 11/16 = 69 % | 0.86 | 0.60 | 1 | 43 % |
+| pasta_bundle | 10/24 = 42 % | 0.85 | 0.46 | 2 | 46 % |
+
+Alignment is now high everywhere (median 0.85-0.96) and sub-0.6 grasps are rare. **pasta_bundle at
+42 % is the weakest and still has the worst alignment floor (0.46)** — it is the elongated one, and
+the natural next suspect is the same thin/elongated regime that got the full banana parked, though
+it is nowhere near as severe.
+
+
+**2026-08-27 (occlusion + squeeze) — USER CAUGHT A REAL GAP: the 60 deg camera-azimuth bound is a
+SHAPED PENALTY, and at 60 deg a SMALL object is COMPLETELY hidden by the gripper. Added a HARD
+yaw bound and a size-scaled squeeze, both auto.**
+
+User flagged `cherry_tomato .../26-08-27-pqs/videos/ep0004_env3_success.mp4` as showing ~90 deg yaw
+with the object occluded. Audit of what actually executed:
+
+- The azimuth bound **was applied and WAS holding** — max achieved azimuth across every run was
+  60.0-60.6 deg, never near 90. So the mechanism works.
+- **But it is a shaped penalty on the CLOSING-AXIS angle**, and it says nothing about whether the
+  gripper BODY covers the object. Frame extraction from that video confirms the 25 mm tomato is
+  fully hidden behind the fingers at the grasp and lift. **19-25 % of grasps sat exactly AT the
+  60 deg bound** — i.e. the optimum was outside and they were parked at the most-occluding pose
+  still allowed.
+- **This matters for the POLICY, not just the video:** `single_lift.py` builds ONE camera,
+  `cam_ext` at the calibrated L515 pose, and `superset_soft_armfocus` takes its point cloud from
+  `cameras: ["cam_ext"]`. The render camera IS the observation camera.
+- Occlusion risk scales INVERSELY with object size, exactly as the user predicted: over-60 deg rate
+  was cherry tomato (25 mm) 25 %, mushroom (33 mm) 19 %, banana chunk (35 mm) 12 %, tomato (65 mm)
+  **0 %**. A big object is only ever partially covered; a small one vanishes.
+
+**Fixes — two new auto params, each on the descriptor that fits its physics:**
+- `--grasp-yaw-max-deg auto` — a HARD structural bound (unlike the azimuth penalty), interpolating
+  30 deg at 25 mm -> 75 deg at 65 mm on the object's **LARGEST** extent. Largest, because what
+  matters is how much of the object's SILHOUETTE a finger can hide.
+  **First attempt used the SMALLEST extent and that was wrong**: it handed the 60 mm-long,
+  25 mm-thick pasta bundle the TIGHTEST bound (30 deg) and cost it half its yield (50 % -> ~17 %).
+  Corrected to largest extent, pasta recovered to 44 %.
+- `--grasp-extra-close auto` — the fixed 5 mm squeeze is 15 % of the 33 mm mushroom it was tuned on
+  but 24 % of a 21 mm cherry tomato and 34 % of a 15 mm raspberry. auto = 5 mm x (smallest extent /
+  33 mm), clipped [2, 6] mm, on the **SMALLEST** extent because that is the grasp direction. The
+  mushroom is unchanged at 4.8 mm. (The separate `FIRM_EXTRA_CLOSE_M` = 2.5 mm is still a constant
+  and is NOT scaled — a known remaining gap.)
+
+**Result — occlusion fixed, no yield lost, squeeze gentle:**
+
+| object | success before -> after | azimuth max before -> after | compression med |
+|---|---|---|---|
+| mushroom | 100 % -> **100 %** | 60.6 -> **52.5** | ~0 % |
+| cherry_tomato | 81 % -> **80 %** | 60.5 -> **39.2** | **4 %** (max 18 %) |
+| banana_chunk | 75 % -> **80 %** | 60.6 -> **38.3** | ~0 % |
+| tomato | 62 % -> 57 % | 60.0 -> 60.1 (bound 75) | ~0 % |
+| pasta_bundle | 50 % -> 44 % | (bound 69.4) | ~0 % |
+
+The small objects that used to vanish now stay well inside the cone (cherry 60.5 -> 39.2 deg), and
+nothing lost yield beyond noise. **Over-squeeze is NOT a problem at these settings** — the cherry
+tomato sits at 4 % median compression (18 % worst), versus the 54 % the full banana needed.
+
+**Caveat on the compression column:** it is `1 - width_at_peak / smallest nominal extent`, so it
+goes NEGATIVE when the grasp is across a wider axis than the smallest one (pasta -148 %, banana
+chunk -43 %). Those negatives are an artefact of the denominator, not real numbers — only the
+non-negative values (cherry, mushroom) are meaningful as stated.
+
 **2026-08-27 (later) — tomato meshed (12/15); `shape_consistency.py` CORRECTED TWICE in one
 session — the first two versions of my own new gate were both wrong.**
 tomato: 12/15 pass, 5 meshes in `obj_meshes/tomato/selected/`. Only tomato2 fails (0/3,

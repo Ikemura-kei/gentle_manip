@@ -100,7 +100,7 @@ OBJECT_MAP: dict[str, ObjectDef] = {
                         size=(0.025, 0.025, 0.0212), default_pos=(0.47, 0.0, 0.0117),
                         mesh_path=str(_OBJ_DIR / "cherry_tomato.obj")),
     "tomato": ObjectDef("tomato", MATERIALS["tomato"], object_type="soft",
-                        size=(0.0642, 0.065, 0.0494), default_pos=(0.47, 0.0, 0.0259),
+                        size=(0.0593, 0.060, 0.0456), default_pos=(0.47, 0.0, 0.0238),
                         mesh_path=str(_OBJ_DIR / "tomato.obj")),
     "banana_chunk": ObjectDef("banana_chunk", MATERIALS["banana_chunk"], object_type="soft",
                         size=(0.0337, 0.035, 0.0204), default_pos=(0.47, 0.0, 0.011),

@@ -805,6 +805,30 @@ def _merge_shards(run_dir: Path) -> Optional[Path]:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+def _extra_close_arg(args, obj_def):
+    """'auto' -> squeeze scaled by object size (see --grasp-extra-close); a number passes through."""
+    if str(args.grasp_extra_close).lower() != "auto":
+        return float(args.grasp_extra_close)
+    smallest = float(min(obj_def.size))
+    return float(np.clip(0.005 * (smallest / 0.033), 0.002, 0.006))
+
+
+def _yaw_max_arg(args, obj_def):
+    """'auto' -> size-scaled hard yaw bound (see --grasp-yaw-max-deg); a number passes through."""
+    if args.grasp_yaw_max_deg is None:
+        return None
+    if str(args.grasp_yaw_max_deg).lower() != "auto":
+        return float(args.grasp_yaw_max_deg)
+    # LARGEST extent, not smallest: what matters is how much of the object's SILHOUETTE a finger
+    # can hide. A 60 mm pasta bundle is only 25 mm thick but presents a large silhouette from most
+    # angles, so sizing off the thickness gave it the TIGHTEST bound (30 deg) and cost it half its
+    # yield (50 % -> ~17 %) — measured 2026-08-27. The cherry tomato is small in EVERY dimension,
+    # which is why it is the one that vanishes.
+    largest = float(max(obj_def.size))
+    t = (largest - 0.025) / (0.065 - 0.025)
+    return float(np.clip(30.0 + 45.0 * t, 30.0, 75.0))
+
+
 def _area_min_arg(args, scene_dr):
     """'auto' passes through (the planner picks the floor from its own feasible pool); a number is
     mm2 and gets the scene-DR scale^2 applied, as before."""
@@ -853,6 +877,13 @@ def main() -> None:
     # Pass a value explicitly to override.
     p.add_argument("--grasp-E",           type=float, default=None,  help="object Young's modulus (Pa); default = the object's material")
     p.add_argument("--grasp-density",     type=float, default=None, help="object density (kg/m^3); default = the object's material")
+    p.add_argument("--grasp-nu", default=None,
+                   help="Poisson ratio for the grasp FEM. Default None keeps the HISTORICAL 0.33 "
+                        "(MetricConfig's 'copper' default), which every collection before "
+                        "2026-08-27 used regardless of the object. Pass 'auto' for the object's own "
+                        "material nu (0.30-0.42 across our objects). Unlike E, nu CANNOT be "
+                        "rescaled post-hoc, so switching it changes results and invalidates "
+                        "comparisons against runs made with 0.33.")
     p.add_argument("--grasp-yield",       type=float, default=None,
                    help="object von Mises yield stress (Pa); default = the object's material. Used by "
                         "--grasp-area-min-mm2 auto to keep the selected grasp UNDER yield: maximising "
@@ -1000,7 +1031,7 @@ def main() -> None:
                         "(a banana's COM sits in a thin band: pads there bury or miss, and since all "
                         "starts share that xy, more starts/evals cannot help). Off by default -> "
                         "convex objects keep bit-identical behaviour.")
-    p.add_argument("--grasp-yaw-max-deg", type=float, default=None,
+    p.add_argument("--grasp-yaw-max-deg", type=str, default=None,
                    help="bound the TOOL yaw about the gripper's HOME orientation (yaw 0), in deg, "
                         "at CMA time — box + seed clip, folded for the parallel-jaw 180-deg "
                         "symmetry. cam_azimuth_max_deg bounds the fan about the CAMERA, which still "
@@ -1022,10 +1053,16 @@ def main() -> None:
                    help="whole-grasp contact-area REWARD (score += w_area * area) — continuous "
                         "flush-contact promotion beyond the --grasp-area-min-mm2 floor. None "
                         "(default) = legacy off.")
-    p.add_argument("--grasp-extra-close", type=float, default=0.0,
+    p.add_argument("--grasp-extra-close", type=str, default="0.0",
                    help="squeeze FURTHER IN than the synthesized width by this many meters (tighter grip) "
                         "for EVERY grasp — e.g. 0.005 = close 5mm tighter. 0 (default) = no change. Use to "
-                        "make grasps firmer (a too-gentle grip -> premature lift / slip before secured).")
+                        "make grasps firmer (a too-gentle grip -> premature lift / slip before secured). "
+                        "Pass 'auto' to scale it with the object: a FIXED 5 mm is 15%% of the 33 mm "
+                        "mushroom it was tuned on but 24%% of a 21 mm cherry tomato and 34%% of a 15 mm "
+                        "raspberry, i.e. the same knob over-squeezes small objects. auto = "
+                        "5 mm * (smallest extent / 33 mm), clipped to [2, 6] mm, so the mushroom is "
+                        "unchanged (4.8 mm) and small objects get proportionally less. NOTE the "
+                        "separate FIRM_EXTRA_CLOSE_M (2.5 mm) is still a constant and is NOT scaled.")
     args = p.parse_args()
 
     # Approach-phase length is configurable so a dataset can be collected with a shorter/longer
@@ -1055,8 +1092,16 @@ def main() -> None:
     if args.grasp_E is None:       args.grasp_E = float(_mat.youngs_modulus)
     if args.grasp_density is None: args.grasp_density = float(_mat.density)
     if args.grasp_yield is None:   args.grasp_yield = float(_mat.von_mises_yield_stress)
+    _fem_nu = float(_mat.poisson_ratio) if str(args.grasp_nu).lower() == "auto" else (
+        None if args.grasp_nu is None else float(args.grasp_nu))
     print(f"  grasp material ({exp.task_cfg['object_name']}): E={args.grasp_E:.3g} Pa  "
           f"rho={args.grasp_density:.0f}  yield={args.grasp_yield:.3g} Pa")
+    args.grasp_extra_close = _extra_close_arg(args, _god(exp.task_cfg["object_name"]))
+    print(f"  grasp extra-close: {1000*args.grasp_extra_close:.1f} mm")
+    _yaw = _yaw_max_arg(args, _god(exp.task_cfg["object_name"]))
+    if _yaw is not None:
+        print(f"  grasp yaw bound: {_yaw:.1f} deg (largest extent "
+              f"{1000*max(_god(exp.task_cfg['object_name']).size):.1f} mm)")
     spec       = task.scene_spec
     # item-5 occlusion bound: the task camera's world position, only when the knob is on
     # (None keeps the planner call byte-identical to the baseline recipe).
@@ -1254,7 +1299,7 @@ def main() -> None:
         if actual_mesh != fem_mesh:
             fem_obj, fem_pad_geo, fem_meta = fg.build_grasp_fem(
                 actual_mesh, voxel_div=args.grasp_voxel_div, target_tets=args.grasp_target_tets,
-                use_gpu=args.grasp_gpu)
+                use_gpu=args.grasp_gpu, nu=_fem_nu)
             fem_mesh = actual_mesh
             print(f"  FEM: {fem_meta['tets']} tets, ndof={fem_meta['ndof']}, gpu={fem_meta['gpu']}")
         all_best_x = []
@@ -1278,7 +1323,7 @@ def main() -> None:
                                     **({"w_peak": args.grasp_w_peak} if args.grasp_w_peak is not None else {}),
                                     **({"w_area": args.grasp_w_area} if args.grasp_w_area is not None else {}),
                                     **({"w_tilt": args.grasp_w_tilt} if args.grasp_w_tilt is not None else {}),
-                                    **({"yaw_max_deg": args.grasp_yaw_max_deg} if args.grasp_yaw_max_deg is not None else {}))
+                                    **({"yaw_max_deg": _yaw} if _yaw is not None else {}))
             if r.get("x") is None or r.get("stress_top10") is None:   # diversity found no feasible grasp;
                 print(f"  Env {i}: no feasible diverse grasp -> retry WITHOUT diversity")  # retry reliably
                 r = fg.synthesize_grasp(fem_obj, fem_pad_geo, obj_pos_all[i], obj_quat_all[i],
@@ -1294,7 +1339,7 @@ def main() -> None:
                                         **({"w_peak": args.grasp_w_peak} if args.grasp_w_peak is not None else {}),
                                         **({"w_area": args.grasp_w_area} if args.grasp_w_area is not None else {}),
                                     **({"w_tilt": args.grasp_w_tilt} if args.grasp_w_tilt is not None else {}),
-                                    **({"yaw_max_deg": args.grasp_yaw_max_deg} if args.grasp_yaw_max_deg is not None else {}))
+                                    **({"yaw_max_deg": _yaw} if _yaw is not None else {}))
             # BUDGET ESCALATION: the retry above only drops diversity; if synthesis is still empty
             # the feasible set is simply too small for this budget to land in. Double it and look
             # again (see --grasp-escalate). Runs only on the failure path, so a run whose grasps all
@@ -1319,7 +1364,7 @@ def main() -> None:
                                         **({"w_peak": args.grasp_w_peak} if args.grasp_w_peak is not None else {}),
                                         **({"w_area": args.grasp_w_area} if args.grasp_w_area is not None else {}),
                                         **({"w_tilt": args.grasp_w_tilt} if args.grasp_w_tilt is not None else {}),
-                                        **({"yaw_max_deg": args.grasp_yaw_max_deg} if args.grasp_yaw_max_deg is not None else {}))
+                                        **({"yaw_max_deg": _yaw} if _yaw is not None else {}))
             best_x = r["x"]
             if best_x is None or r.get("stress_top10") is None:       # extremely rare: still nothing ->
                 # default straight-down grasp at the object xy so the FSM never sees None (this episode may

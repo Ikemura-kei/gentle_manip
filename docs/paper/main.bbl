@@ -1,0 +1,67 @@
+\begin{thebibliography}{8}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[author~list unconfirmed(2026)]{vtam}
+TODO: author~list unconfirmed.
+\newblock {VTAM}: Video-tactile-action models for complex physical interaction
+  beyond {VLA}s.
+\newblock \emph{arXiv preprint arXiv:2603.23481}, 2026.
+
+\bibitem[Ikemura et~al.(2025)Ikemura, Dong, Blanco-Mulero, and
+  Longhini]{ikemura2025stressrl}
+Kei Ikemura, Yifei Dong, David Blanco-Mulero, and Alberta Longhini.
+\newblock Sim-to-real gentle manipulation of deformable and fragile objects
+  with stress-guided reinforcement learning.
+\newblock \emph{arXiv preprint arXiv:2510.25405}, 2025.
+
+\bibitem[Kang et~al.(2026)Kang, Tian, Lee, Huang, Li, and Kuo]{tfgripper}
+Xuhui Kang, Tongxuan Tian, Sung-Wook Lee, Binghao Huang, Yunzhu Li, and
+  Yen-Ling Kuo.
+\newblock Learning force-regulated manipulation with a low-cost
+  tactile-force-controlled gripper.
+\newblock \emph{arXiv preprint arXiv:2602.10013}, 2026.
+\newblock Project page: https://force-gripper.github.io/.
+
+\bibitem[Lin et~al.(2026)Lin, Huo, Yu, Ruppel, Chen, Francis, and
+  Zhao]{lighttact}
+Changyi Lin, Boda Huo, Mingyang Yu, Emily Ruppel, Bingqing Chen, Jonathan
+  Francis, and Ding Zhao.
+\newblock {LightTact}: A visual--tactile fingertip sensor for
+  deformation-independent contact sensing.
+\newblock In \emph{Robotics: Science and Systems (RSS)}, 2026.
+\newblock arXiv:2512.20591.
+
+\bibitem[Pan et~al.(2020)Pan, Gao, and Manocha]{pan2020stressmin}
+Zherong Pan, Xifeng Gao, and Dinesh Manocha.
+\newblock Grasping fragile objects using a stress-minimization metric.
+\newblock In \emph{IEEE/RSJ International Conference on Intelligent Robots and
+  Systems (IROS)}, 2020.
+\newblock Extended version: arXiv:1907.08749, ``Generating Optimal Grasps Under
+  A Stress-Minimizing Metric''.
+
+\bibitem[unverified(2026)]{curseofprecision}
+TODO: unverified.
+\newblock The curse of precision: A data scaling law for high-precision robotic
+  manipulation.
+\newblock \emph{TODO: unverified}, 2026.
+
+\bibitem[Wang et~al.(2024)Wang, Zhang, Liu, Li, Zhang, Knoll, Zhou, Jiang, and
+  Ying]{wang2024softgripper}
+Qingyu Wang, Youchao Zhang, Wei Liu, Qiang Li, Jianwei Zhang, Alois Knoll,
+  Mingchuan Zhou, Huanyu Jiang, and Yibin Ying.
+\newblock Toward damage-less robotic fragile fruit grasping: A closed-loop
+  force control method for pneumatic-driven soft gripper.
+\newblock \emph{Soft Robotics}, 2024.
+
+\bibitem[Wang et~al.(2025)]{wang2025damageless}
+Qingyu Wang et~al.
+\newblock Towards damage-less robotic fragile fruit grasping: A systematic
+  review on system design, end effector, and visual and tactile feedback.
+\newblock \emph{Journal of Field Robotics}, 2025.
+\newblock doi:10.1002/rob.70021.
+
+\end{thebibliography}

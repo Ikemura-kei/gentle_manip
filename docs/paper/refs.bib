@@ -1,0 +1,98 @@
+% ---------------------------------------------------------------------------
+% References. Verification status is recorded per entry --- do NOT promote an
+% entry to "verified" without checking the source yourself.
+% ---------------------------------------------------------------------------
+
+% VERIFIED 2026-08-26 (web). Correct arXiv ID is 2602.10013.
+% NOTE: an earlier draft mis-cited this as arXiv:2602.00514, which is a
+% DIFFERENT paper ("A Low-Cost Vision-Based Tactile Gripper with Pretraining
+% Learning for Contact-Rich Manipulation"). Do not reintroduce that ID.
+@article{tfgripper,
+  title        = {Learning Force-Regulated Manipulation with a Low-Cost
+                  Tactile-Force-Controlled Gripper},
+  author       = {Kang, Xuhui and Tian, Tongxuan and Lee, Sung-Wook and
+                  Huang, Binghao and Li, Yunzhu and Kuo, Yen-Ling},
+  journal      = {arXiv preprint arXiv:2602.10013},
+  year         = {2026},
+  note         = {Project page: https://force-gripper.github.io/}
+}
+
+% VERIFIED 2026-08-26 (web) for title/ID/claims. Author list NOT yet confirmed.
+@article{vtam,
+  title        = {{VTAM}: Video-Tactile-Action Models for Complex Physical
+                  Interaction Beyond {VLA}s},
+  author       = {TODO: author list unconfirmed},
+  journal      = {arXiv preprint arXiv:2603.23481},
+  year         = {2026}
+}
+
+% VERIFIED 2026-08-26 (web). RSS 2026.
+@inproceedings{lighttact,
+  title        = {{LightTact}: A Visual--Tactile Fingertip Sensor for
+                  Deformation-Independent Contact Sensing},
+  author       = {Lin, Changyi and Huo, Boda and Yu, Mingyang and
+                  Ruppel, Emily and Chen, Bingqing and Francis, Jonathan and
+                  Zhao, Ding},
+  booktitle    = {Robotics: Science and Systems (RSS)},
+  year         = {2026},
+  note         = {arXiv:2512.20591}
+}
+
+% *** UNVERIFIED *** --- PAPER_TODO item C1. Title and the log N \propto 1/(P-c)
+% claim are taken from the user; venue, authors, year and the exact form of the
+% law have NOT been checked. Verify before submission; the Introduction leans on
+% this citation for its central scaling argument.
+@article{curseofprecision,
+  title        = {The Curse of Precision: A Data Scaling Law for High-Precision
+                  Robotic Manipulation},
+  author       = {TODO: unverified},
+  journal      = {TODO: unverified},
+  year         = {2026}
+}
+
+% VERIFIED 2026-08-26 (web). OUR OWN PRIOR ITERATION (rejected; arXiv preprint public).
+% Kei Ikemura, Yifei Dong, David Blanco-Mulero, Alberta Longhini, et al.
+% Stress-penalised RL reward + curriculum (rigid proxies -> deformables), zero-shot
+% sim2real, tofu pick/push, 36.5% stress reduction vs vanilla RL.
+% *** IF THE VENUE IS DOUBLE-BLIND, cite in third person and do not reveal authorship. ***
+@article{ikemura2025stressrl,
+  title        = {Sim-to-Real Gentle Manipulation of Deformable and Fragile Objects with
+                  Stress-Guided Reinforcement Learning},
+  author       = {Ikemura, Kei and Dong, Yifei and Blanco-Mulero, David and
+                  Longhini, Alberta},
+  journal      = {arXiv preprint arXiv:2510.25405},
+  year         = {2025}
+}
+
+% VERIFIED 2026-08-26 (web). IROS 2020. The established stress-based grasp metric.
+% Force/wrench-based contact model --- contrast with our position(width)-controlled model.
+@inproceedings{pan2020stressmin,
+  title        = {Grasping Fragile Objects Using a Stress-Minimization Metric},
+  author       = {Pan, Zherong and Gao, Xifeng and Manocha, Dinesh},
+  booktitle    = {IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS)},
+  year         = {2020},
+  note         = {Extended version: arXiv:1907.08749,
+                  ``Generating Optimal Grasps Under A Stress-Minimizing Metric''}
+}
+
+% VERIFIED 2026-08-26 (web). Journal of Field Robotics 2025, doi 10.1002/rob.70021.
+% Systematic review --- use to establish that damage-less fragile grasping is an open problem.
+@article{wang2025damageless,
+  title        = {Towards Damage-Less Robotic Fragile Fruit Grasping: A Systematic Review on
+                  System Design, End Effector, and Visual and Tactile Feedback},
+  author       = {Wang, Qingyu and others},
+  journal      = {Journal of Field Robotics},
+  year         = {2025},
+  note         = {doi:10.1002/rob.70021}
+}
+
+% VERIFIED 2026-08-26 (web). Representative of the compliant-hardware strand.
+@article{wang2024softgripper,
+  title        = {Toward Damage-Less Robotic Fragile Fruit Grasping: A Closed-Loop Force
+                  Control Method for Pneumatic-Driven Soft Gripper},
+  author       = {Wang, Qingyu and Zhang, Youchao and Liu, Wei and Li, Qiang and
+                  Zhang, Jianwei and Knoll, Alois and Zhou, Mingchuan and Jiang, Huanyu and
+                  Ying, Yibin},
+  journal      = {Soft Robotics},
+  year         = {2024}
+}

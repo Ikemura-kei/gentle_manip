@@ -1,0 +1,93 @@
+% ---------------------------------------------------------------------------
+% INTRODUCTION --- ICRA draft, style-calibrated to DextrAH-G/RGB and Kang et al.
+% Drop-in replacement for \section{INTRODUCTION} in the ieeeconf template.
+% Uses the cite keys already in your draft (zhu2025deformable, blanco2024t,
+% yin2021modeling, arriola2020modeling, kang2026learning) plus the verified ones
+% in docs/paper/refs.bib (pan2020stressmin, vtam, lighttact, curseofprecision,
+% wang2025damageless, wang2024softgripper).
+%
+% Register notes (what makes this ICRA rather than NeurIPS):
+%   - short declarative sentences, one claim each; no long subordinate clauses
+%   - "However," pivot after the opening challenge sentence
+%   - enumerated (i)(ii)(iii) factors and challenges, kept parallel
+%   - headline numbers in the Introduction, not deferred to Experiments
+%   - contributions as an itemize, each one line, each mapping to a section
+%
+% PLACEHOLDER: \method --- name the system before submission. A named system
+% reads as a contribution; "our method" reads as an experiment.
+% ---------------------------------------------------------------------------
+\newcommand{\method}{\textsc{Method}}   % TODO: name it
+
+\section{INTRODUCTION}
+
+Manipulating delicate food is a core capability for automation in food processing,
+agriculture, and assistive settings, and it remains difficult for current
+robots~\cite{wang2025damageless}. Produce tears, cracks, and bruises under modest
+compression or tension, and the damage is
+irreversible~\cite{zhu2025deformable,blanco2024t}. Handling it well requires getting two
+quantities right at once: \emph{where} and in what orientation to grasp the item, and
+\emph{how far} to close the gripper. A grasp that straddles a stem or closes on a thin edge
+fails at a width that would have been correct elsewhere on the same item. Both quantities
+depend on the item's pose, size, shape, and stiffness. From a single depth view the first
+three are only partially observable and the fourth is not observable at all: two visually
+identical berries at different ripeness demand different grips. The difficulty stems from
+three factors: (i) contact and deformation dynamics are hard to model, so the internal stress
+that causes damage cannot be assessed at run
+time~\cite{yin2021modeling,arriola2020modeling}; (ii) the safety constraint is tight, since
+stress must stay below an item-dependent damage threshold; and (iii) shape, size, and
+physical properties vary enormously both within a food category and across categories.
+
+Existing approaches address the first two factors and leave the third open. Compliant and
+pneumatic end-effectors bound contact pressure mechanically~\cite{wang2024softgripper}, but
+compliance is a fixed property of the hardware and does not decide where to grasp. Tactile
+and force-controlled grippers close the loop on contact at run time and handle delicate items
+well~\cite{kang2026learning,vtam}. However, these policies are trained by imitation from human
+demonstrations collected on real hardware, so the cost of acquiring data is unchanged.
+Tactile signals are also not reliably simulatable, which closes the escape route to simulated
+data, and deformation-based sensors require measurable indentation to produce a signal at
+all~\cite{lighttact}. Stress-aware grasp planning targets the damaging quantity
+directly~\cite{pan2020stressmin}, but assumes point contacts and scores grasps by resistible
+external wrench. We implemented that metric and found it uninformative for our setting: two
+point contacts on a smooth rounded object cannot span the moment axes of wrench space, so the
+metric returns essentially zero for every candidate grasp, while a cube clears it.
+
+None of these lines supplies coverage of factor (iii), and demonstrations cannot supply it
+either. A demonstration is recorded against one item in one pose and cannot be transported to
+another, so coverage cost scales with the product of the varying dimensions and multiplies
+again across categories. For precision-limited tasks the number of demonstrations required
+grows super-exponentially as the tolerance tightens, $\log N \propto 1/(P-c)$
+\cite{curseofprecision}. We observe the consequence directly. A policy trained on 50 real
+demonstrations does not degrade uniformly on hardware; it fails in a structured way,
+misgrasping at particular workspace locations and mis-squeezing at particular object sizes
+(Fig.~\ref{fig:coverage}). The bottleneck is coverage of the physical variation, not the
+number of trajectories.
+
+We present \method, a sim-to-real pipeline that obtains that coverage from simulation rather
+than from human effort. Our key observation is that the quantity which determines gentleness
+is unavailable on hardware but exact in a deformable simulator: internal stress. We therefore
+use it as a \emph{planning objective} rather than a sensed signal. A stress-aware planner
+scores a candidate grasp by the internal stress it induces under a width-controlled,
+distributed-pad contact model, matching a real parallel jaw that commands a displacement and
+obtains a force as an outcome, and searches the $7$-DoF grasp with CMA-ES subject to holding
+the item against gravity. Because the displacement is prescribed, stress is linear in Young's
+modulus, so a single finite-element solve per grasp pose covers an entire distribution of
+stiffnesses. Randomising material therefore costs almost nothing, which is what makes the
+planner a coverage instrument rather than a grasp ranker. We run it over randomised object
+pose, size, shape, and material to generate thousands of gentle demonstrations without a human
+in the loop, distil them into a point-cloud diffusion policy acting from a single depth view,
+and co-train with a small slice of real demonstrations that calibrates the residual sensor
+gap. \textbf{[TODO: headline real-robot number + \# objects, stated here as DextrAH does.]}
+
+\noindent Our contributions are:
+\begin{itemize}
+  \item A stress-aware grasp planner built on a width-controlled, distributed-pad contact
+        model, which discriminates among parallel-jaw grasps on organic objects where the
+        point-contact force-closure formulation is degenerate.
+  \item A stiffness-linearity result that makes randomised material coverage tractable: one
+        finite-element solve per pose covers an entire stiffness distribution.
+  \item An autonomous demonstration generator that produces gentle, successful grasps across
+        randomised object pose, size, shape, and material with no human demonstration.
+  \item Real-robot validation across object poses, sizes, shapes, and categories from a single
+        depth view, with no tactile or force sensing in the loop.
+        \textbf{[TODO: multi-category run is blocking --- see PAPER\_TODO A7.]}
+\end{itemize}

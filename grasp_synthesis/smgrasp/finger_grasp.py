@@ -939,8 +939,19 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
             if _safe:
                 _pool = _safe
         if _pool:
-            _med = float(np.median([res["min_pad_area"] for _, _, res in _pool]))
-            _fat = [(x, sc, res) for (x, sc, res) in _pool if res["min_pad_area"] >= _med]
+            # Keep the upper half by BOTH contact area AND alignment, then take the best score.
+            # Area alone still admits PINCHES: a fingertip catch on a top edge can clear the area
+            # median while gripping a corner. `align` is the discriminator there -- measured on the
+            # banana chunk, lifts averaged align 0.83 vs 0.53 for failures, and the pinch the user
+            # flagged (ep0004_env3) scored align 0.541 with the jaws nearly fully open. Both are
+            # POOL-RELATIVE medians, so this stays scale-free and adds no fitted constant; if one
+            # criterion empties the set we fall back to the other rather than returning nothing.
+            _med_a = float(np.median([res["min_pad_area"] for _, _, res in _pool]))
+            _med_g = float(np.median([res.get("align", 0.0) or 0.0 for _, _, res in _pool]))
+            _fat = [(x, sc, res) for (x, sc, res) in _pool
+                    if res["min_pad_area"] >= _med_a and (res.get("align", 0.0) or 0.0) >= _med_g]
+            if not _fat:                                   # both filters together were too strict
+                _fat = [(x, sc, res) for (x, sc, res) in _pool if res["min_pad_area"] >= _med_a]
             if _fat:
                 _bx, _bs, _br = max(_fat, key=lambda t: t[1])
                 best = {"x": np.asarray(_bx, float).copy(), "score": _bs, "res": _br}
@@ -994,7 +1005,7 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
 # pose (`synthesize_grasp`) — the FEM factorization (the expensive part) is reused across all envs.
 
 def build_grasp_fem(mesh_path, *, voxel_div: int = 14, target_tets: int = 1500, prepare: bool = True,
-                    use_gpu: bool = False, gpu_max_ndof: int = None):
+                    use_gpu: bool = False, gpu_max_ndof: int = None, nu: float = None):
     """Build the FEM ElasticObject + finger pad geometry for one object mesh (once per batch). Returns
     (obj, pad_geo, meta). `use_gpu` toggles the GPU dense solver (default OFF so the metric doesn't
     starve the simulator's GPU); it self-disables above `gpu_max_ndof` (falls back to CPU sparse)."""
@@ -1005,7 +1016,19 @@ def build_grasp_fem(mesh_path, *, voxel_div: int = 14, target_tets: int = 1500, 
     _RF = str(_ROOT / "gentle_manip/assets/xarm/xarm_gripper/meshes/right_finger.STL")
     raw = trimesh.load(str(mesh_path), force="mesh")
     mesh = prepare_mesh(raw, voxel_div=voxel_div, force_remesh=True) if prepare else raw
-    obj = build_elastic_object(mesh, switches=tet_switches(mesh, target_tets=target_tets))
+    # POISSON RATIO. Historically this call passed NO config, so cfg.nu fell back to
+    # MetricConfig's default 0.33 ("copper, as in the paper") for EVERY object — while the
+    # materials declare nu 0.30-0.42 and the DR randomizes object_nu for the MPM sim. Unlike E,
+    # nu CANNOT be rescaled after the fact (it sets the Lame constants, so the whole solution
+    # changes), which is why it has to be chosen here. `nu=None` preserves the historical 0.33 so
+    # every result collected before 2026-08-27 stays reproducible; pass the object's material nu
+    # to use the physically correct value.
+    if nu is None:
+        obj = build_elastic_object(mesh, switches=tet_switches(mesh, target_tets=target_tets))
+    else:
+        from .types import MetricConfig
+        obj = build_elastic_object(mesh, MetricConfig(nu=float(nu)),
+                                   switches=tet_switches(mesh, target_tets=target_tets))
     cap = gpu_max_ndof if gpu_max_ndof is not None else wg.GPU_MAX_NDOF
     wg.use_gpu_solve(bool(use_gpu) and obj.fem.ndof <= cap)
     pad_geo = finger_pad_geometry(_LF, _RF)

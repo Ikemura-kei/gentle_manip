@@ -1,0 +1,53 @@
+% ---------------------------------------------------------------------------
+% Standalone preview wrapper for intro_icra.tex --- for fast iteration only.
+% NOT the submission file; that lives in your ICRA project (Overleaf).
+%
+% Uses the real ieeeconf class IF ieeeconf.cls is present in this directory
+% (copy it from your ICRA template to get exact column widths / page counts).
+% Otherwise falls back to a two-column article tuned to IEEE-conference
+% geometry, which is close enough for judging prose length and paragraph
+% rhythm, but is NOT byte-exact for page-limit decisions.
+%
+% Build:  bash build_icra.sh          (one shot)
+%         bash build_icra.sh --watch  (rebuild on save)
+% ---------------------------------------------------------------------------
+\IfFileExists{ieeeconf.cls}{%
+  \documentclass[letterpaper, 10pt, conference]{ieeeconf}
+  \IEEEoverridecommandlockouts
+  \overrideIEEEmargins
+}{%
+  % --- fallback: approximate IEEE conference geometry ---------------------
+  \documentclass[10pt,twocolumn,letterpaper]{article}
+  \usepackage[left=0.75in,right=0.75in,top=0.75in,bottom=1.0in,columnsep=0.25in]{geometry}
+  \setlength{\parindent}{1em}
+  \usepackage{titlesec}
+  \titleformat{\section}{\centering\normalsize\scshape}{\Roman{section}.}{0.5em}{}
+  \titleformat{\subsection}{\normalsize\itshape}{\Alph{subsection}.}{0.5em}{}
+  \renewcommand{\thesection}{\Roman{section}}
+}
+
+\usepackage{mathptmx}
+\usepackage{amsmath,amssymb}
+\usepackage{cite}
+
+\title{\LARGE \bf Sim-to-Real Gentle Manipulation of Food \\
+       \normalsize\rm (PREVIEW BUILD --- introduction only)}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+\thispagestyle{empty}
+\pagestyle{empty}
+
+\input{intro_icra}
+
+% Figure 1 is not drawn yet; this silences the undefined-reference warning so
+% real problems stay visible in the log. Delete once the real figure exists.
+\newcommand{\phantomlabel}{}
+\makeatletter\@ifundefined{r@fig:coverage}{\label{fig:coverage}}{}\makeatother
+
+\bibliographystyle{plain}
+\bibliography{refs,refs_preview_stubs}
+
+\end{document}

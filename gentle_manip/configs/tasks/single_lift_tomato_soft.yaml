@@ -1,4 +1,6 @@
-# [task] Soft tomato lift (6.4 x 6.5 x 4.9 cm).
+# [task] Soft tomato lift (5.9 x 6.0 x 4.6 cm — user-set nominal, 2026-08-27. Real local
+# tomatoes are 7-8 cm but that needs ~75 mm of grasp width against a 79 mm planner bound,
+# i.e. AT the gripper's limit; 6 cm keeps a workable ~19 mm margin.)
 # Used by: experiments/single_lift_tomato_soft_abs_action_armfocus.yaml
 # Status: experimental (multi-object synthesis SMOKE TEST, 2026-08-27)
 #
