@@ -379,6 +379,52 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-27 (later) — DECISIVE: the banana failure is the SYNTHESIZED POSE, not the physics.
+A hand-scripted centre grasp lifts it 80-100 %; CMA manages ~12 %.** User's proposed experiment:
+script a grasp at the banana's centre with the pads aligned along its long axis (closing across
+the ~18 mm width), sweep the width, and see whether it lifts. If it lifts, synthesis is the
+problem; if not, the sim dynamics are. Implemented by monkeypatching `synthesize_grasp` to return
+the scripted pose, leaving the ENTIRE v3.3 execution FSM (approach / close / firm / lift / hold /
+success test) untouched.
+
+| commanded width | lift rate | width at peak | compression |
+|---|---|---|---|
+| 12 mm | **100 %** (8/8) | 2.5 mm | 87 % |
+| 15 mm | **100 %** | 5.5 mm | 70 % |
+| 18 mm | **100 %** | 8.5 mm | 54 % |
+| 22 mm | 89 % | 12.5 mm | 33 % |
+| **26 mm** | **80 %** | 16.5 mm | **11 %** |
+| 30 mm | 67 % | 20.5 mm | ~0 % |
+| 34 mm | 30 % | 22.0 mm | ~0 % |
+
+Verified as REAL lifts, not just saved episodes: object centre rises 11.2 mm -> 146.8 mm
+(135 mm), 8/8 clear of the 50 mm bar.
+
+**Conclusions:**
+1. **The simulation can lift the banana reliably.** Every hypothesis about MPM contact / grid
+   resolution / slip as the blocker is dead.
+2. **CMA + the FEM gentleness metric are the blocker.** A one-line geometric heuristic (centre,
+   pads along the long axis) beats the whole synthesis pipeline by 7x on this object.
+3. **A GENTLE banana lift exists**: 26 mm -> 80 % success at 11 % compression. So the object is
+   not intrinsically ungraspable, and the earlier "grasp->lift transition" framing was wrong --
+   the transition is fine when the pose is right.
+4. The trade-off is smooth and monotonic (tighter = more reliable, looser = gentler), which is
+   exactly the knob the gentleness objective should be riding.
+
+**Caveat on the readout:** the scripted TCP z was computed as `com_z + FINGER_TO_TCP_Z` (copied
+from the collector's own fallback), and that constant is NEGATIVE (-0.0699), so the raw pose sits
+below the table and the FEM scorer stamped every one `STATUS=table`. The executor clips z into the
+workspace, so what actually ran was the clipped pose. **Do NOT read the `STATUS=table` output as
+evidence that the table filter rejects good grasps** -- it reflects the bad z that was handed to
+the scorer. (It does, separately, suggest the collector's fallback expression is suspect and worth
+a look.)
+
+**Next step (not yet implemented):** feed this heuristic into synthesis rather than replacing it --
+seed CMA with the centre / long-axis-perpendicular pose at a width near the local cross-section,
+and replace the fixed-45 mm fallback grasp with it. Both are minimal changes and both are strictly
+better than what is there now.
+
+
 **2026-08-27 — CROSS-OBJECT recipe: ALL-AUTO grasp params work on mushroom / strawberry /
 raspberry / tofu with NO per-object tuning. Banana remains the sole outlier. Plus a REAL BUG:
 every non-mushroom collection had been planning grasps with the MUSHROOM's material.**
