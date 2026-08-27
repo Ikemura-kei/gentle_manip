@@ -805,6 +805,14 @@ def _merge_shards(run_dir: Path) -> Optional[Path]:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+def _area_min_arg(args, scene_dr):
+    """'auto' passes through (the planner picks the floor from its own feasible pool); a number is
+    mm2 and gets the scene-DR scale^2 applied, as before."""
+    if str(args.grasp_area_min_mm2).lower() == "auto":
+        return "auto"
+    return float(args.grasp_area_min_mm2) * 1e-6 * float(scene_dr["scale"]) ** 2
+
+
 def _width_max_arg(args, scene_dr):
     """'auto' passes straight through (the planner derives it from the mesh, which is already the
     DR-deformed one); a numeric value is mm and gets the scene-DR scale applied, like area_min."""
@@ -836,8 +844,20 @@ def main() -> None:
     p.add_argument("--maxfevals",  type=int, default=1145,
                    help="CMA-ES function evaluations per env per batch")
     # ── v3 FEM gentleness synthesis ──
-    p.add_argument("--grasp-E",           type=float, default=3e5,  help="object Young's modulus (Pa)")
-    p.add_argument("--grasp-density",     type=float, default=1000.0, help="object density (kg/m^3)")
+    # E / density / yield DEFAULT TO THE OBJECT'S OWN MATERIAL (resolved from the registry after the
+    # experiment loads). They used to default to 3e5 / 1000 — the MUSHROOM's values — for every
+    # object, so every non-mushroom collection planned grasps with the wrong material. That is not
+    # cosmetic: the FEM is linear in E (sigma = E*sigma_1, F = E*F_1), so BOTH the predicted stress
+    # AND the grip force were wrong per object. On the raspberry (true E 1e5) the planner believed
+    # it had 3x the grip it actually had, and reported 24.8 kPa where the true figure is ~8.3 kPa.
+    # Pass a value explicitly to override.
+    p.add_argument("--grasp-E",           type=float, default=None,  help="object Young's modulus (Pa); default = the object's material")
+    p.add_argument("--grasp-density",     type=float, default=None, help="object density (kg/m^3); default = the object's material")
+    p.add_argument("--grasp-yield",       type=float, default=None,
+                   help="object von Mises yield stress (Pa); default = the object's material. Used by "
+                        "--grasp-area-min-mm2 auto to keep the selected grasp UNDER yield: maximising "
+                        "contact area alone over-squeezes small soft objects (measured on the "
+                        "raspberry, whose yield is 15 kPa).")
     p.add_argument("--grasp-mu",          type=float, default=0.7,  help="pad-object friction coefficient")
     p.add_argument("--grasp-accel",       type=float, default=9.81,
                    help="lift-acceleration safety margin (m/s^2): holdability needs 2*mu*grip >= m*(g+accel), "
@@ -939,7 +959,7 @@ def main() -> None:
                         "uniform [F_LO, F_HI] (real median 0.60; recipe 0.45 0.75). xy converges "
                         "early (smoothstep) while z descends linearly — continuous, no stopping. "
                         "Default None = straight-line approach (bit-identical to v3/v3.1).")
-    p.add_argument("--grasp-area-min-mm2", type=float, default=0.0,
+    p.add_argument("--grasp-area-min-mm2", type=str, default="0",
                    help="v3.3 anti-stem/pinch HARD floor: reject grasps whose WORST pad grips less "
                         "than this many mm^2 of object surface (v4 anti-pinch floor in the FEM "
                         "planner; auto-scaled by scene scale^2). Measured: stem grasp 8 mm^2 vs "
@@ -1029,6 +1049,14 @@ def main() -> None:
     # ── Load everything from the experiment config (same as training / eval) ──
     exp        = Experiment.load(args.experiment)
     task       = SingleLiftTask(exp.task_cfg)
+    # Resolve the grasp material from the OBJECT (see --grasp-E) unless explicitly overridden.
+    from gentle_manip.assets.registry import get_object_def as _god
+    _mat = _god(exp.task_cfg["object_name"]).material
+    if args.grasp_E is None:       args.grasp_E = float(_mat.youngs_modulus)
+    if args.grasp_density is None: args.grasp_density = float(_mat.density)
+    if args.grasp_yield is None:   args.grasp_yield = float(_mat.von_mises_yield_stress)
+    print(f"  grasp material ({exp.task_cfg['object_name']}): E={args.grasp_E:.3g} Pa  "
+          f"rho={args.grasp_density:.0f}  yield={args.grasp_yield:.3g} Pa")
     spec       = task.scene_spec
     # item-5 occlusion bound: the task camera's world position, only when the knob is on
     # (None keeps the planner call byte-identical to the baseline recipe).
@@ -1242,7 +1270,8 @@ def main() -> None:
                                     jitter_pos=args.grasp_jitter_pos, w_align=args.grasp_align,
                                     pitch_seed_deg=args.grasp_pitch_seed_deg,
                                     cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg,
-                                    area_min=args.grasp_area_min_mm2 * 1e-6 * float(scene_dr['scale']) ** 2,
+                                    area_min=_area_min_arg(args, scene_dr),
+                                    yield_stress=args.grasp_yield,
                                     w_press=(args.grasp_w_press or None),
                                     medial_seeds=int(args.grasp_medial_seeds),
                                     **({"width_max": _width_max_arg(args, scene_dr)} if args.grasp_width_max_mm else {}),
@@ -1257,7 +1286,8 @@ def main() -> None:
                                         table_z=args.table_z, maxfevals=args.maxfevals,
                                         n_starts=args.grasp_n_starts, seed=cma_seed + 7, accel=args.grasp_accel,
                                         cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg,
-                                        area_min=args.grasp_area_min_mm2 * 1e-6 * float(scene_dr['scale']) ** 2,
+                                        area_min=_area_min_arg(args, scene_dr),
+                                        yield_stress=args.grasp_yield,
                                         w_press=(args.grasp_w_press or None),
                                         medial_seeds=int(args.grasp_medial_seeds),
                                         **({"width_max": _width_max_arg(args, scene_dr)} if args.grasp_width_max_mm else {}),
@@ -1281,7 +1311,8 @@ def main() -> None:
                                         n_starts=args.grasp_n_starts * mult,
                                         seed=cma_seed + 13 * _esc, accel=args.grasp_accel,
                                         cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg,
-                                        area_min=args.grasp_area_min_mm2 * 1e-6 * float(scene_dr['scale']) ** 2,
+                                        area_min=_area_min_arg(args, scene_dr),
+                                        yield_stress=args.grasp_yield,
                                         w_press=(args.grasp_w_press or None),
                                         medial_seeds=int(args.grasp_medial_seeds),
                                         **({"width_max": _width_max_arg(args, scene_dr)} if args.grasp_width_max_mm else {}),

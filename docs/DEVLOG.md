@@ -379,6 +379,67 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-27 — CROSS-OBJECT recipe: ALL-AUTO grasp params work on mushroom / strawberry /
+raspberry / tofu with NO per-object tuning. Banana remains the sole outlier. Plus a REAL BUG:
+every non-mushroom collection had been planning grasps with the MUSHROOM's material.**
+
+**The bug first — `--grasp-E` defaulted to 3e5 (and density to 1000) for EVERY object and was
+never derived from the material.** So every banana / strawberry / raspberry / tofu collection ever
+run planned grasps with the mushroom's stiffness. This is not cosmetic: the FEM is linear in E
+(sigma = E*sigma_1, F = E*F_1), so BOTH the predicted stress AND the GRIP FORCE were wrong per
+object. On the raspberry (true E 1e5) the planner believed it had **3x the grip it actually had**
+and reported 24.8 kPa where the truth is ~6 kPa; on the banana it assumed 20 % more grip than it
+has, i.e. it was planning grasps too loose to hold. `--grasp-E/-density/-yield` now DEFAULT to the
+object's registry material (explicit values still override) and the resolved values are printed at
+launch. **Any stress number reported for a non-mushroom object before this date is wrong.**
+
+**Two auto params, replacing the hand-set constants** (mushroom 20 / strawberry 15 / raspberry 4 /
+banana 20 mm2 area floors were all guesses):
+- `--grasp-width-max-mm auto` — 2.3 x the median LOCAL cross-section perpendicular to the long
+  axis. Inert on compact objects, binds on elongated ones. Explicitly NOT the bbox, which ranks
+  the banana largest/easiest when its graspable width is ~18 mm.
+- `--grasp-area-min-mm2 auto` — search with NO hard floor, then keep the upper half of the
+  feasible pool by worst-pad contact area. Contact area is the strongest predictor of whether a
+  grasp LIFTS (banana, 76 grasps: min_pad 37.4 mm2 on lifts vs 24.4 on failures; 0/16 lifts below
+  15 mm2), while stress does NOT discriminate. Crucially this only SELECTS among grasps already
+  found, so unlike a raised hard floor it cannot force a squeeze (area_min 35 gave 2/8 feasible at
+  32-38 kPa because area grows with indentation).
+- **YIELD GUARD** (`YIELD_SAFETY = 0.8`): area and stress are coupled, so "largest area" alone
+  over-squeezes small soft objects — measured on the raspberry at **165 % of its 15 kPa yield**.
+  The auto rule now restricts to grasps under 0.8 x yield BEFORE ranking by area.
+
+**Results — one recipe, five objects, no per-object parameters** (16 episodes each, full DR):
+
+| object | demonstrator success | stress med | peak | yield | % of yield | min_pad | align |
+|---|---|---|---|---|---|---|---|
+| mushroom | **16/16 = 100 %** | 11.6 kPa | 20.0 | 40 | 29 % | 50.4 mm2 | 0.94 |
+| tofu | **23/24 = 96 %** | 3.0 kPa | 6.0 | 20 | 15 % | 365 mm2 | 0.98 |
+| strawberry | **22/24 = 92 %** | 10.8 kPa | 18.6 | 18 | 60 % | 44.1 mm2 | 0.92 |
+| raspberry | **16/16 = 100 %** | 6.0 kPa | 7.7 | 15 | 40 % | 19.9 mm2 | 0.89 |
+| banana | **0/16 = 0 %** | — | — | 25 | — | — | ~0.55 |
+
+**Tofu needed NO special alignment or prior knowledge** — it came out at 96 % and the gentlest of
+all (15 % of yield, align 0.98), straight from the same auto recipe. Strawberry sits at 60 % of
+yield, the closest to bruising of the four that work; worth watching.
+
+**The banana still fails, now for a understood reason.** Synthesis is fine (8/8) but the AUTO width
+cap resolves to ~54 mm on the DR-scaled mesh — looser than the **40 mm** that was hand-validated —
+so grasps drift back toward the long axis (align ~0.55) and none lift. The auto descriptor is
+measured on the FEM mesh, which is voxel-remeshed and ~17 % thicker than the source for a thin
+body, and the 2.3 coefficient was fitted to one object. For the banana specifically, pass
+`--grasp-width-max-mm 40` explicitly.
+
+**Recommended cross-object recipe** (v3.3 otherwise unchanged — this is the minimal diff):
+```
+--grasp-area-min-mm2 auto --grasp-width-max-mm auto    # + explicit 40 for the banana
+```
+E / density / yield now come from the object automatically.
+
+**Open:** the banana is the one object where every lever tried (mesh fix, escalation, budget,
+azimuth, width cap, all-auto) moves synthesis or plan quality but never lift success. Its failure
+is at the grasp->lift transition. Do not collect banana data until that is understood.
+
+
 **2026-08-26 — Banana: mis-prepped MESH fixed + escalating CMA budget added. Synthesis
 feasibility much improved; end-to-end demonstrator success only 0.38 -> 0.42, so the banana is
 STILL NOT ready for collection — the bottleneck moved from synthesis to execution.**
