@@ -16,6 +16,7 @@ object_bend_deg:   [-25, 25]
 object_twist_deg:  [-20, 20]
 object_taper:      [-0.15, 0.15]
 object_axis_scale: [0.95, 1.15]
+object_mesh_pool: [cherry_tomato1, cherry_tomato2, cherry_tomato3, cherry_tomato5]   # per-scene base-mesh randomization over the photo-derived variants
 object_scale:      [0.90, 1.10]
 object_E: [3.20e+05, 4.80e+05]
 object_nu: [0.35, 0.41]

@@ -1,0 +1,50 @@
+{
+  "object": "strawberry1",
+  "tag": "photo_seed0",
+  "seed": 0,
+  "source_view": "photo",
+  "raw": {
+    "vertices": 1050770,
+    "faces": 2101868,
+    "watertight": false,
+    "components": 276
+  },
+  "floater_removal": {
+    "components_found": 276,
+    "largest_component_area_fraction": 0.99887,
+    "components_discarded": 275
+  },
+  "after_topology_clean": {
+    "vertices": 1049432,
+    "faces": 2099004,
+    "watertight": true
+  },
+  "decimation_method": "quadric (fast_simplification), staged via [209900, 20990, 12000] -> dropped 7 component(s) shed by decimation",
+  "post_decimation_components": 8,
+  "watertight_method": "pre-decimation: already watertight; post-decimation: manifold3d",
+  "scaling": {
+    "applied": false,
+    "reason": "no measurements.json -- doc section 7 says do not guess the scale. Mesh is in TripoSG's normalised frame; multiply by (longest_axis_m / longest_axis_normalised) to make it metric.",
+    "longest_axis_normalised": 1.904265
+  },
+  "clean": {
+    "vertices": 5964,
+    "faces": 11968,
+    "is_watertight": true,
+    "is_winding_consistent": true,
+    "euler_number": -20,
+    "genus": 11,
+    "components": 1,
+    "volume_normalised": 1.45983399,
+    "bbox_normalised": [
+      1.607259,
+      1.904265,
+      1.444237
+    ],
+    "volume_is_positive": true
+  },
+  "hard_failures": [
+    "euler_number is -20, not 2 (genus 11: handles or holes)"
+  ],
+  "passed": false
+}
