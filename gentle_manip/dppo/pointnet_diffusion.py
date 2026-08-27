@@ -78,7 +78,8 @@ class PointNetDiffusionMLP(nn.Module):
                  out_activation_type="Identity", use_layernorm=False, residual_style=True,
                  aux_contact=False, aux_object_pos=False, aux_grasp_width=False,
                  feed_width_pred=False, width_traj_head=False, width_head_blind=False,
-                 width_head_bins=0, cond_dropout_prob=0.0, aux_hidden=128,
+                 width_head_bins=0, cond_dropout_prob=0.0, category_embed_dim=0,
+                 aux_hidden=128,
                  use_first_frame_context=False):
         super().__init__()
         pn = dict(pointnet or {})
@@ -106,6 +107,7 @@ class PointNetDiffusionMLP(nn.Module):
         input_dim = time_dim + action_dim * horizon_steps + visual_feature_dim + ctx_dim + cond_dim + wdim
         output_dim = action_dim * horizon_steps
         model = ResidualMLP if residual_style else MLP
+        input_dim = input_dim + int(category_embed_dim)   # param, not self.* (assigned below)
         self.mlp_mean = model([input_dim] + list(mlp_dims) + [output_dim],
                               activation_type=activation_type,
                               out_activation_type=out_activation_type,
@@ -130,6 +132,15 @@ class PointNetDiffusionMLP(nn.Module):
         # multimodal (diffusion suits it) but width given the object is unimodal REGRESSION —
         # 9 probes showed the diffusion path collapses width to a constant (r~0.1) while a
         # regression head on the SAME features reaches r~0.82. It reads `_cond_encoded` =
+        # CATEGORY CONDITIONING (ported from the colleague's cross-category-dp branch, 2026-08-27).
+        # 0 (default) reproduces the unconditioned baseline EXACTLY: input_dim unchanged and no
+        # cond["category_embed"] lookup, so every existing config is unaffected. >0 expects
+        # cond["category_embed"]: (B, D) from gentle_manip.dppo.category_embedding (21-d:
+        # one-hot category + log E/yield + nominal size + aspect ratio).
+        # NOTE the size slot is the REGISTRY NOMINAL, constant per category — it fixes the
+        # BETWEEN-category width constant but carries no per-episode size, so it does not address
+        # within-category variation (see the plan §4c).
+        self.category_embed_dim = int(category_embed_dim)
         self._visual_dim = int(visual_feature_dim) * (2 if use_first_frame_context else 1)
         # [pointnet_feat (+ctx) ⊕ flattened proprio]; proprio carries the CURRENT gripper
         # width, so the head knows where it is on the closing ramp and continues it instead of
@@ -180,7 +191,13 @@ class PointNetDiffusionMLP(nn.Module):
         feat = _encode_clouds(self.backbone, cond["point_cloud"], self.pc_cond_steps)
         if self.use_first_frame_context:
             feat = torch.cat([feat, _encode_clouds(self.backbone, cond["first_point_cloud"], 1)], dim=-1)
-        return torch.cat([feat, state], dim=-1)
+        parts = [feat, state]
+        if self.category_embed_dim > 0:
+            ce = cond["category_embed"]
+            if ce.dim() == 3:            # (B, To, D) from a live env's obs-history windowing
+                ce = ce[:, -1]           # constant per episode -- any step is equivalent
+            parts.append(ce.view(ce.shape[0], -1))
+        return torch.cat(parts, dim=-1)
 
     def aux_predict(self, cond: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """Auxiliary predictions from the conditioning feature only (no noise/time). Returns the

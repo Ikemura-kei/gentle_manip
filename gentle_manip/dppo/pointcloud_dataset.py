@@ -151,3 +151,37 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
         t = (torch.rand(3, device=dev) * 2 - 1) * self.jit_trans
         c = pc.reshape(-1, 3).mean(0)                                # centroid pivot
         return ((pc - c) @ R.T) + c + t
+
+
+class StitchedSequencePointCloudCategoryDataset(StitchedSequencePointCloudDataset):
+    """Adds conditions["category_embed"] from convert_demos.py's --category-embed output.
+    PORTED from the colleague's cross-category-dp branch (2026-08-27) — feature only; our
+    synthesis and the rest of this file are unchanged.
+
+    The embedding is constant within an episode (object identity does not change mid-episode),
+    so unlike point_cloud it needs NO temporal windowing — just the value at the current step.
+
+    NOTE the embedding's size slot is the REGISTRY NOMINAL per category, so this conditions the
+    BETWEEN-category width constant and carries no per-episode size. Within-category size
+    variation (16% CV, ~19mm span) is NOT addressed by it.
+    """
+
+    def __init__(self, dataset_path, horizon_steps=64, cond_steps=1, pc_cond_steps=1,
+                 max_n_episodes=10000, device="cuda:0", **kw):
+        super().__init__(dataset_path, horizon_steps=horizon_steps, cond_steps=cond_steps,
+                         pc_cond_steps=pc_cond_steps, max_n_episodes=max_n_episodes,
+                         device=device, **kw)
+        data = np.load(dataset_path, allow_pickle=False)
+        if "category_embed" not in data.files:
+            raise KeyError(f"{dataset_path} has no 'category_embed' — convert with "
+                           "convert_demos.py --category-embed")
+        total = int(np.sum(data["traj_lengths"][:max_n_episodes]))
+        self.category_embeds = torch.from_numpy(
+            data["category_embed"][:total]).float().to(device)
+
+    def __getitem__(self, idx):
+        batch = super().__getitem__(idx)
+        start, _ = self.indices[idx]
+        conditions = dict(batch.conditions)
+        conditions["category_embed"] = self.category_embeds[start]   # (EMBED_DIM,)
+        return Batch(batch.actions, conditions)
