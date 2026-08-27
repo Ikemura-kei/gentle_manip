@@ -2354,6 +2354,18 @@ CAUGHT BY: a deliberate no-op guard in the controller (raise if no contact after
 minutes instead of two 40-minute probes reporting a FALSE NEGATIVE on the most promising mechanism.
 LESSON REINFORCED: every new mechanism ships with an assertion that it is actually running.
 
+**B14. `collect_demos_synth_v3.sbatch` had NO `EXTRA_ARGS` passthrough — flags silently ignored.**
+It builds its arg list from NAMED env vars only, so any flag without a dedicated variable is
+dropped without warning. Two raspberry collections ran believing they used
+`--grasp-area-min-mm2 / --grasp-width-max-mm / --grasp-yaw-max-deg` and in fact used DEFAULTS.
+(The v1 sbatch has the passthrough; v3 never did.) FIXED: passthrough added.
+CONSEQUENCE: the raspberry SMOKE's 95.2% success is not a measurement of the intended recipe — it
+used defaults AND the mushroom-material bug. Treat it only as evidence raspberry is graspable.
+Third instance tonight of the same class (B1 NORM default, B13 rpc info whitelist): **a value is
+accepted, silently discarded, and the run completes looking healthy.**
+RULE: after launching with new flags, ECHO THE RESOLVED COMMAND and grep for them — do not assume
+a variable was consumed.
+
 Earlier, same class: the `--gripper-offset-m` feedback bug (additive bias on an observed channel),
 the residual-width two-space unit bug, and the fake "blind" run (sed patched `nc.` while the
 trainer read `net_cfg.`). All three are unit/plumbing mismatches that produced plausible numbers.

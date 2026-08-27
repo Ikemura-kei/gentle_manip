@@ -63,6 +63,14 @@ export MUJOCO_GL=egl
 COLLECT_LOG=$REPO/logs/slumr_logs/${SLURM_JOB_ID:-local}_collect.log
 : > "$COLLECT_LOG"
 
+# EXTRA_ARGS passthrough (2026-08-27). Without it this sbatch SILENTLY IGNORED any flag not
+# backed by a named env var — two raspberry collections ran with defaults while appearing to use
+# --grasp-area-min-mm2/--grasp-width-max-mm/--grasp-yaw-max-deg. Same silent-drop class as the
+# rpc info whitelist (B13) and the NORM default (B1): the run completes and looks fine.
+if [ -n "${EXTRA_ARGS:-}" ]; then
+    # shellcheck disable=SC2206
+    ARGS+=($EXTRA_ARGS)
+fi
 echo "[sbatch] launching: python grasp_synthesis/collect_demos_synth_v3.py ${ARGS[*]}"
 uv run --project envs/sim_arrhenius --no-sync python grasp_synthesis/collect_demos_synth_v3.py \
     "${ARGS[@]}" 2>&1 | tee "$COLLECT_LOG"
