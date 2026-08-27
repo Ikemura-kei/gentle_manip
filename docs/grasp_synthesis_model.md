@@ -211,6 +211,69 @@ heuristics, not derived quantities. `FIRM_EXTRA_CLOSE_M = 2.5 mm` is still a har
 Objects where the pipeline works well are precisely those whose lifting grasps deform the body a
 few mm on a ~30 mm scale — comfortably inside small strain.
 
+## 9b. Why not Genesis's own FEM + contact coupler? (verified 2026-08-27)
+
+Genesis **does** ship a full FEM dynamics solver (`genesis/engine/solvers/fem_solver.py` — implicit
+integration, Newton iterations, PCG) and **two proper contact couplers**
+(`couplers/sap_coupler.py`, `couplers/ipc_coupler/`, plus a legacy one). **We use none of them.**
+Three distinct models are in play, and the paper must not blur them:
+
+| model | role | used? |
+|---|---|---|
+| Genesis **MPM** (`gs.materials.MPM.ElastoPlastic`) | the actual demo simulator | **yes** — this is what produces the data |
+| Genesis **FEM + IPC/SAP coupler** | would be the physically principled contact model | **no** — never instantiated |
+| our **`smgrasp` FEM** | quasi-static grasp SCORING surrogate | **yes** — planning only |
+
+**The justification is cost, and it is real.** The surrogate is evaluated ~1145 x n_starts
+(~7k-35k) times per grasp search, per environment. A dynamic FEM+IPC solve per candidate is
+several orders of magnitude too slow. The E = 1 normalization (§4) further makes the entire
+material-DR sweep free — a scalar multiply instead of a re-solve — which is impossible in a
+nonlinear dynamic solver.
+
+**But ours is NOT a contact model, and should never be described as one.** Differences from what
+Genesis's coupler does:
+1. **Quasi-static, not dynamic.** No time integration; lift acceleration is a scalar margin (§5).
+2. **Contact set fixed on the UNDEFORMED mesh.** IPC/SAP resolve the contact set iteratively as the
+   body deforms; ours picks the nodes once from the nominal geometry and never updates them. This
+   is exactly what mis-scored the banana (§9.1).
+3. **Normal-only, frictionless.** IPC handles friction inside the contact solve; ours has friction
+   only as the post-hoc scalar inequality in §5.
+4. **Linear elastic vs ELASTO-PLASTIC.** The simulator's material yields; **the surrogate has no
+   yield model at all** — yet "gentleness" is defined by the yield stress. The surrogate cannot
+   represent the very phenomenon the objective targets; it can only report an elastic stress that
+   we compare to yield afterwards.
+5. **Small-strain, used far outside it** (§9.1).
+
+## 9c. Surrogate-vs-simulator agreement — MEASURED (2026-08-27)
+
+The one number that decides whether the surrogate is justified. Previously only the PRE-fix value
+was recorded (`rho +0.10`, in a `finger_grasp` docstring). Measured properly on 10 successful
+mushroom episodes with `priv_stress` recorded:
+
+**Spearman rho = +0.842 (p = 0.002), Pearson r = +0.795 (p = 0.006).**
+
+**The RANKING is strong — which is what a planner needs.** The surrogate reliably orders grasps by
+the stress the simulator will actually produce, so using it to CHOOSE a grasp is justified.
+
+⚠ **The ABSOLUTE calibration is not.** Over the same episodes:
+
+| | planner predicted | MPM measured |
+|---|---|---|
+| range | 6.8 - 18.8 kPa | 20.7 - 46.4 kPa |
+| vs the mushroom's 40 kPa yield | ~17-47 % | **52 - 116 %, median ~100 %** |
+
+Two things follow, both of which matter for the paper:
+- **Every "stress as % of yield" figure reported from the planner is roughly 3x too low.** They are
+  surrogate predictions, not simulator measurements.
+- **By the simulator's own measure the "gentle" demos sit AT the yield stress** (median peak ~1.0x
+  yield). Do NOT claim the demonstrations are sub-yield without re-measuring per object.
+
+Part of the gap is DEFINITIONAL rather than error: the planner's `stress_top10` **masks out the
+contact-adjacent elements** (§6) while the MPM figure is unmasked, so the planner is deliberately
+excluding the highest-stress region. The planner's unmasked `hi_1` would be the like-for-like
+comparison and has not been checked. Either way the ranking result stands and the absolute claim
+does not.
+
 ## 10. Current cross-object results
 
 8-episode smoke tests, full DR, all-auto recipe (2026-08-27):

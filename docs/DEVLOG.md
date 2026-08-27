@@ -444,6 +444,57 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-27 (validation) — MEASURED the FEM surrogate against the MPM simulator: ranking rho
+= +0.84, but the absolute stress is ~3x LOW and the "gentle" demos sit AT yield.**
+
+User asked whether our FEM and rigid-soft coupling are correct and justified given that Genesis
+ships its own. Verified in the submodule: Genesis DOES have a full FEM dynamics solver
+(`fem_solver.py`, implicit + Newton + PCG) and TWO proper contact couplers (`sap_coupler.py`,
+`ipc_coupler/`). **We use none of them** — our sim is Genesis MPM (`ElastoPlastic`), and the
+`smgrasp` FEM is a separate quasi-static SCORING surrogate. Full comparison in
+`docs/grasp_synthesis_model.md` §9b.
+
+**The justification is cost and it is real:** the surrogate runs ~7k-35k times per grasp search
+per env, and the E=1 normalization makes material DR a scalar multiply. A dynamic FEM+IPC solve
+per candidate is orders of magnitude too slow. **But ours is not a contact model** — quasi-static,
+contact set fixed on the UNDEFORMED mesh, normal-only/frictionless, linear-elastic against an
+ELASTO-PLASTIC simulator (so it has no yield model at all, while "gentleness" is defined by yield).
+
+**Measured the agreement** (the number that decides justification; only the PRE-fix `rho +0.10`
+existed before, buried in a docstring). Needed two fixes first:
+- `privileged: stress: true` was **silently ignored by the v3 collector** — `_privileged_obs_batch`
+  never mirrored the stress field that `PolicyEnv` emits, so the config asked and nothing appeared.
+  Now emitted (`priv_stress` (N,2) = [mean, top10]/yield), with `yield_stress` threaded through
+  `execute_and_collect`.
+- New `superset_soft_armfocus_stress.yaml` obs + `single_lift_mushroom_soft_armfocus_stress`
+  experiment for validation runs.
+
+**Result, 10 successful mushroom episodes: Spearman rho = +0.842 (p=0.002), Pearson r = +0.795
+(p=0.006).** The surrogate RANKS grasps by the stress the simulator will actually produce — which
+is exactly what a planner needs, so choosing grasps with it is justified.
+
+**⚠ But the absolute calibration is not, and this corrects numbers reported all week:**
+
+| | planner predicted | MPM measured |
+|---|---|---|
+| range | 6.8 - 18.8 kPa | 20.7 - 46.4 kPa |
+| vs the mushroom's 40 kPa yield | ~17-47 % | **52-116 %, median ~100 %** |
+
+1. **Every "stress as % of yield" figure I have reported came from the PLANNER and is ~3x too
+   low.** Those were surrogate predictions, not simulator measurements.
+2. **By the simulator's own measure the "gentle" demos sit AT the yield stress** (median peak
+   ~1.0x). Do not claim sub-yield demonstrations without re-measuring per object.
+
+Part of the gap is DEFINITIONAL: the planner's `stress_top10` masks out contact-adjacent elements
+while the MPM figure is unmasked, so the planner deliberately excludes the highest-stress region.
+The planner's unmasked `hi_1` is the like-for-like comparison and has NOT been checked. The
+ranking result stands either way; the absolute claim does not.
+
+**TODO before the paper:** (a) repeat this on every object, not just the mushroom; (b) compare
+`hi_1` vs the MPM figure to separate definitional offset from genuine calibration error; (c) decide
+whether the gentleness objective should be re-tuned now that the demos are known to sit at yield.
+
+
 **2026-08-27 (mesh coverage) — `--mesh-cycle` + `--n-envs 2`: forcing EVERY mesh to be sampled
 lowers two headline numbers. The earlier 100 %s were partly a sampling artefact.**
 

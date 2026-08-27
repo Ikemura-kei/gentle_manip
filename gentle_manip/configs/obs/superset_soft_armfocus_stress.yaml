@@ -1,0 +1,33 @@
+# [obs] superset_soft_armfocus + priv_stress — for validating the FEM surrogate against the MPM sim.
+# Used by: single_lift_*_soft_abs_action_armfocus_stress experiments (validation only)
+# Status: experimental (auxiliary-objective IL: denser object cloud + privileged aux labels)
+#
+# Fork of superset_soft.yaml (quat proprio, obs_dim 8) with two changes for the aux-objective work:
+#   1. Point cloud adds object_focus with arm_weight: the 1024-point budget is soft-weighted toward
+#      the object (arm-body points at 0.15x, object + finger-safe near-EE SPHERE at full weight), so
+#      the object is denser — helps BOTH the policy and the aux predictors (contact / object position).
+#   2. Privileged fields are exactly the AUX LABELS (training-time only, recorded by the collector):
+#      priv_object_pos = object COM (3D regression target); priv_contact = PROPER binary gripper-object
+#      contact (geometric finger<->particle proximity — NOT a stress proxy: a soft object stresses
+#      under its own weight with nothing touching it). Heuristic focus (points + ee_pos), no CAD/FK.
+# Train + deploy consistently with this obs.
+include_joint_pos: false
+include_joint_vel: false
+quat_noise_std: 0.003
+privileged:
+  stress: true              # priv_stress (N,2) [mean, top10]/yield — MPM-MEASURED, for the
+                            # surrogate-vs-simulator correlation check (see docs/grasp_synthesis_model.md)
+  object_pos: true          # AUX LABEL: object position (COM) — 3D regression target
+  contact: true             # AUX LABEL: proper binary gripper-object contact (geometric, not stress)
+point_cloud:
+  cameras: ["cam_ext"]
+  crop_min: [0.2, -0.215, 0.004]
+  crop_max: [0.71,   0.215,  0.45]
+  max_points: 1024
+  outlier_removal:
+    voxel_size: 0.01
+    min_neighbors: 23
+  object_focus:
+    z_lo: 0.15          # keep points below this at full weight (table + resting object)
+    r_ee: 0.13          # finger-safe SPHERE radius around the EE (gripper + grasped/lifted object)
+    arm_weight: 0.15    # arm-body points sampled at 0.15x (budget -> object, helps aux predictors)

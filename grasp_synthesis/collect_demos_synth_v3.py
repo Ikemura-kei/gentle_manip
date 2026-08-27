@@ -284,7 +284,8 @@ def _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir, mesh_cycle=None):
 
 # ── Privileged obs (sim-only state-teacher fields) ────────────────────────────
 
-def _privileged_obs_batch(object_center, object_quat, dr_vec, priv_cfg, contact_force=None) -> dict:
+def _privileged_obs_batch(object_center, object_quat, dr_vec, priv_cfg, contact_force=None,
+                          von_mises=None, yield_stress=None) -> dict:
     """Sim-only privileged fields from raw worker state — mirrors
     PolicyEnv._privileged_obs exactly, but sourced from GenesisWorker state
     (object_center + object_quat + contact_force) since this collector bypasses PolicyEnv.
@@ -294,6 +295,15 @@ def _privileged_obs_batch(object_center, object_quat, dr_vec, priv_cfg, contact_
     Returns a dict of (N, ...) arrays for whichever priv fields the config enables.
     """
     out = {}
+    # STRESS was declared in the obs configs but NEVER mirrored here, so a config asking for
+    # `privileged: stress: true` was SILENTLY IGNORED by this collector (PolicyEnv honours it;
+    # this file bypasses PolicyEnv and must mirror it — see the CLAUDE.md note). Emitting it now:
+    # (N,2) = [mean, top10] / yield, the same normalization PolicyEnv uses.
+    if getattr(priv_cfg, "stress", False) and von_mises is not None and yield_stress:
+        vm = np.asarray(von_mises, np.float32)
+        out["priv_stress"] = np.stack([vm.mean(axis=1) / float(yield_stress),
+                                       _stress_top10(vm) / float(yield_stress)], axis=1
+                                      ).astype(np.float32)
     oc = np.asarray(object_center, dtype=np.float32)                    # (N, 3)
     if priv_cfg.object_pos:
         out["priv_object_pos"] = oc
@@ -437,6 +447,7 @@ def execute_and_collect(
     record_video: bool = False,
     priv_cfg=None,                 # PrivilegedConfig or None — sim-only state-teacher fields
     dr_vec=None,                   # (2,) [scale, bend_deg] for priv_object_dr_params
+    yield_stress=None,             # Pa — normalizer for priv_stress (None = stress not emitted)
     extra_close: float = 0.0,      # squeeze this many meters TIGHTER than the synthesized width (all grasps)
     approach_xy_finish=None,       # v3.2: (lo, hi) per-env xy-progress finish fraction; None = straight line
     approach_speed=None,           # v3.3: m/step — per-env approach DURATION = dist/speed (constant
@@ -650,7 +661,8 @@ def execute_and_collect(
                 oq = np.tile(np.array([1., 0, 0, 0], np.float32), (num_envs, 1))  # deployable student
             next_obs_batch.update(_privileged_obs_batch(           # uses point_cloud, not this)
                 state["object_center"], oq, dr_vec, priv_cfg,
-                contact_force=state.get("contact_force")))
+                contact_force=state.get("contact_force"),
+                von_mises=state.get("von_mises_stress"), yield_stress=yield_stress))
         next_obs_list = [{k: next_obs_batch[k][i] for k in next_obs_batch}
                          for i in range(num_envs)]
 
@@ -1313,6 +1325,7 @@ def main() -> None:
         if priv_cfg is not None:
             init_obs_batch.update(_privileged_obs_batch(
                 obj_pos_all, obj_quat_all, dr_vec, priv_cfg,
+                von_mises=init_state.get("von_mises_stress"), yield_stress=args.grasp_yield,
                 contact_force=init_state.get("contact_force")))
 
         # ── Per-env FEM gentleness grasp synthesis (v3) ──
@@ -1429,7 +1442,7 @@ def main() -> None:
                 approach_xy_finish=args.approach_xy_finish, approach_rng=approach_rng,
             approach_speed=args.approach_speed,
                 trim_max_run=args.held_run_max, trim_keep=args.held_run_keep,
-            )
+                yield_stress=args.grasp_yield)
             consec_batch_aborts = 0
         except Exception as e:
             # Some scene draws are systematically unstable (solver NaN mid-episode even after a
