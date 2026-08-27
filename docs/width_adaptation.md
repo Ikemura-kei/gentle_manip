@@ -225,6 +225,27 @@ SURVIVING CANDIDATES (only those that touch the objective or bypass it):
 - **contact-triggered stop** (§4c) — removes prediction from the loop entirely; physics sets width.
 - CFG (§5) — intermediate: changes how the trained conditional is SAMPLED, not what it learned.
 
+### 2f. CONTACT-TRIGGERED STOP BEATS THE FLOOR FRONTIER (jobs 1731308/9, 2026-08-27)
+
+**First mechanism all night to improve adaptation WITHOUT paying success.**
+
+| arm | success | corrAT | range | %demo | gapMIN |
+|---|---|---|---|---|---|
+| baseline | 0.883 | +0.336 | 1.0 mm | 9% | 3.7 |
+| floor margin 4 | 0.517 | +0.511 | 3.2 mm | 29% | 0.4 |
+| **contact stop F*=0.5 N** | 0.800 | +0.482 | 2.2 mm | **19%** | 1.1 |
+| **contact stop F*=1.5 N** | **0.883** | +0.406 | 1.7 mm | **15%** | 1.2 |
+
+At IDENTICAL baseline success (0.883) it delivers 15% vs baseline's 9%; at 0.800 it gives 19%
+where the floor frontier would give <11%. Both points sit ABOVE that frontier. `gapMIN` also
+IMPROVED (1.2 vs baseline 3.7) — FEWER mid-air closures, the opposite of the feared artifact.
+
+**STATISTICAL HONESTY: not established at n=60.** corr SE ~0.13, so 0.406 vs 0.336 is ~0.5 SE;
+the range difference is ~0.7 +- 1.4 mm. NEITHER is individually significant. What persuades is the
+PATTERN (two F* values, monotonic in the predicted direction: lower threshold -> more adaptation,
+less success) plus a physical mechanism that predicted exactly this shape in advance.
+CANONICAL 200-ep evals with video launched (1732424/5/6 at F* = 0.5 / 1.0 / 1.5) — a claim needs n=200.
+
 ### 2b. Ceilings and links
 
 | quantity | mushroom | tofu |
