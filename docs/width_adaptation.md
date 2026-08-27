@@ -10,41 +10,43 @@ history in `docs/DEVLOG.md`.
 
 ---
 
-## 0a. MEASURE SLOPE, NOT CORRELATION — and aggregate per GEOMETRY (2026-08-27)
+## 0a. THE METRIC, and the numbers in it (2026-08-27)
 
-**The metric was wrong all campaign.** corr(width, size) and half-split "range" both conflate a
-MEAN SHIFT with genuine SIZE TRACKING: a policy that squeezes everything 4 mm harder scores well on
-both while being the opposite of gentle. The honest decomposition regresses per-episode at-grasp
-width on object scale and reports **intercept (mean shift) + SLOPE (tracking) + R2**.
-Demonstrator slope = **35.7 mm per unit scale**; a pure mean shift has slope ~0.
+**WIDTH ADAPTATION = mm of gripper opening per mm of object size.** Regress at-grasp commanded
+width on object size, **one point per DISTINCT GEOMETRY** (episodes in a batch share the object, so
+they are not independent). Report slope + 95% CI + intercept. 1.00 = opens exactly in proportion;
+0 = constant width. **Demonstrator = 1.08.**
 
-**Second correction: episodes are NOT independent.** `obj_scale` is constant within a batch (all
-envs share the rebuilt geometry), so effective n is the number of DISTINCT GEOMETRIES (10-12),
-not episodes (60-200). Un-aggregated slopes were wildly inconsistent across protocols (CFG 3.0:
-36.8 at probe vs 4.2 canonical). Aggregate per geometry, then regress, and report a 95% CI.
+Everything previously reported — corr(width,size), "% of demonstrator RANGE", half-split tables —
+is SUPERSEDED. Correlation gives direction not magnitude; half-split range is inflated by a uniform
+mean shift; per-episode regression triple-counts correlated samples. All three were used and all
+three misled.
 
-**Corrected table (per-geometry aggregation, 95% CI):**
-
-| arm | #geo | intercept | slope | R2 | 95% CI | verdict |
+| arm | intercept | **slope** | 95% CI | %demo | R2 | verdict |
 |---|---|---|---|---|---|---|
-| baseline | 12 | 11.9 | 15.5 | 0.351 | [3.6, 27.5] | uncertain |
-| **floor m4 (VISION head)** | 12 | 5.6 | **26.5** | **0.733** | **[17.5, 35.6]** | **TRACKS** |
-| CFG 3.0 (probe) | 12 | -15.3 | 36.8 | 0.477 | [15.0, 58.6] | tracks, wide CI |
-| CFG 3.0 (canonical) | 10 | 23.0 | 4.2 | 0.019 | [-14.5, 22.9] | uncertain |
-| contact stop (canonical) | 10 | 30.1 | 1.7 | 0.017 | [-6.4, 9.8] | uncertain |
+| demonstrator | — | **1.08** | — | 100% | — | — |
+| baseline (lulkx@600) | 11.9 | **0.47** | [0.11, 0.83] | **43%** | 0.35 | uncertain |
+| **floor m4 (VISION only)** | 5.6 | **0.80** | [0.53, 1.08] | 74% | **0.73** | **ADAPTS** |
+| generalist + CFG + contact (mush) | -3.6 | 0.83 | [0.19, 1.47] | 77% | 0.35 | ADAPTS |
+| generalist + CFG + contact (tofu) | 0.3 | 0.81 | [0.29, 1.32] | 75% | 0.44 | ADAPTS |
+| plain generalist (mushroom) | 30.0 | **0.08** | [-0.30, 0.45] | 7% | 0.01 | no adaptation |
+| plain generalist (tofu) | 25.8 | 0.22 | [-0.21, 0.65] | 20% | 0.08 | no adaptation |
 
-**CONSEQUENCES**
-1. **The FLOOR tracks size, and it is VISION-based** (slope 26.5, R2 0.733, CI excludes 0 and
-   reaches the demonstrator's 35.7). Retiring the floor family on a correlation/range "trade curve"
-   was measuring the wrong axis. Its real cost is SUCCESS (0.517 at margin 4), not absent tracking.
-2. **CFG is UNRESOLVED**, not settled: its two protocols disagree with overlapping CIs. Both the
-   earlier "49% of demonstrator range" AND the later "squeeze knob, no tracking" verdict were
-   premature. What IS solid is its INTERCEPT: ~7 mm tighter, the over-squeeze seen in
-   `canon_cfg3_only/render/batch39_env4.mp4` (closure overshoots to 14.7 mm on a ~30 mm object;
-   17% of episodes close below 15 mm).
-3. **Precision is now the binding constraint, and it is a PROTOCOL issue, not a mechanism issue.**
-   SLOPE PROTOCOL adopted: 200 eps at `scene_group_size=1` -> **40 distinct geometries** (vs 10-12).
-   Running for baseline / floor m4 / CFG 3.0 (1733597/8/9).
+**⚠ BIGGEST CORRECTION — THE BASELINE IS ALREADY 43% ADAPTIVE (slope 0.47), not 9%.** The
+half-split metric grossly understated it. The campaign's founding premise ("the policy commands a
+near-constant width") was OVERSTATED: the policy was always partially adaptive, and the mechanisms
+roughly DOUBLE it (0.47 -> 0.80) rather than rescuing it from nothing. Any write-up must use 0.47
+as the reference, not 9%.
+
+**The floor is the strongest AND is vision-only** (slope 0.80, R2 0.73 — much the tightest fit).
+Its cost is SUCCESS (0.517 at margin 4), not absent adaptation.
+
+**The plain generalist genuinely does NOT adapt** (0.08 / 0.22, intercepts ~30 / ~26 mm = a
+near-constant grip). The user's multi-object hypothesis is not supported, now in a trusted metric.
+
+**PRECISION:** 12 geometries -> wide CIs (genfull spans [0.19, 1.47] and cannot be separated from
+either the floor or the baseline). 40-geometry runs (200 eps @ scene_group_size=1) are in flight;
+do NOT rank arms until those land.
 
 ## 0. ⚠ HARD DEPLOYMENT CONSTRAINT## 0. ⚠ HARD DEPLOYMENT CONSTRAINT (user, 2026-08-27): NO CONTACT SENSING ON THE REAL RIG
 
