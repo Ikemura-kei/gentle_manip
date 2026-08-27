@@ -270,6 +270,30 @@ judged. Until then, treat the aux-width and align "regressions" as UNRESOLVED, n
 **NOTE the contact-stop result is NOT affected**: it compares the SAME policy (lulkx@600) with only
 the inference-time controller changed — a within-run comparison, and the only clean one tonight.
 
+### 2h. CFG WORKS — 49% of demonstrator range (jobs 1732352/3/4, 2026-08-27)
+
+| arm | success | corrAT | range | %demo | peak stress |
+|---|---|---|---|---|---|
+| baseline | 0.883 | +0.336 | 1.0 mm | 9% | 53.5k |
+| contact stop 1.5 N | 0.883 | +0.406 | 1.7 mm | 15% | 51.6k |
+| CFG control (scale 0) | 0.700 | +0.299 | 0.3 mm | 2% | 52.2k |
+| CFG scale 1.5 | 0.650 | +0.323 | 2.6 mm | **23%** | 53.2k |
+| **CFG scale 3.0** | 0.433 | +0.386 | **5.6 mm** | **49%** | 55.9k |
+
+**Guidance amplifies width adaptation MONOTONICALLY and HUGELY: 2% -> 23% -> 49%** — 5x any other
+mechanism and over half the demonstrator's full range.
+
+**This settles the conditioning question.** The size information IS in the learned conditional; the
+policy encodes it and UNDER-USES it. Guidance extracts it. That is the conditioning-collapse
+diagnosis confirmed by a mechanism built from it — and it means the objective's problem is
+under-WEIGHTING the conditioning, not failing to represent size.
+
+COST: success 0.433 at scale 3.0, and peak stress RISES (55.9k vs 53.5k) — it OVER-CLOSES.
+
+**SYNTHESIS LAUNCHED (1732514-7): CFG x contact stop.** Their failure modes are complementary —
+guidance supplies width VARIATION but over-squeezes; the contact stop's entire function is halting
+closure when the object is reached. Grid: CFG scale {1.5, 3.0} x F* {1.0, 1.5}.
+
 ### 2b. Ceilings and links
 
 | quantity | mushroom | tofu |
