@@ -379,6 +379,60 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-27 (later still) — WHY the banana's good grasp is never chosen: the FEM metric marks it
+INFEASIBLE. Seeding CMA with it does nothing; the defect is the CONTACT MODEL, not the search.**
+
+Follow-up to the scripted-grasp result. Tried the obvious fix first — force the FIRST CMA start to
+be the pose we know works (object centre, top-down, closing PERPENDICULAR to the longest axis),
+always on and NOT gated on an elongation threshold (on a compact object the long axis is
+near-arbitrary, so it is just one more sensible top-down seed; elongation for reference: mushroom
+1.09, strawberry 1.23, raspberry 1.06, banana 5.12).
+
+**It changed nothing — the banana run came back BIT-IDENTICAL** (env0 22632 Pa / 54.2 mm, same as
+before the seed). CMA simply optimises away from the seed. So the search initialisation was never
+the problem.
+
+**Scoring the known-good grasp directly shows why** (banana flat at nominal pose, correct TCP z
+built the same way the seed loop does):
+
+| grasp | score | status | stress |
+|---|---|---|---|
+| long-axis centre, w = 18 / 22 / 26 / 30 / 34 mm | -1.3e8 | **`degenerate`** | inf |
+| CMA winner, w = 79 mm | -47 393 | `ok` | 19.6 kPa |
+
+**Every width of the grasp that lifts 80-100 % is stamped `degenerate` and given an
+infinite-penalty score, so CMA can never select it.** No amount of seeding, budget escalation or
+width capping could ever have found it — which retrospectively explains why none of those levers
+moved lift success while they all moved synthesis feasibility.
+
+`degenerate` comes from `width_grasp.indent_from_width`: it fires when a jaw indents deeper than
+`max_indent` (default **0.01 m**), the small-strain validity limit of the FEM contact model. And
+the successful scripted grasp compressed the banana from 18.6 mm to 8.5 mm — **~10 mm of total
+indentation, exactly at that limit**. That is the shape of the problem: **for a THIN SOFT object
+the grasps that actually hold sit outside the contact model's validity domain, while everything
+inside it is too loose to lift.**
+
+**UNRESOLVED / do not over-read.** Raising `max_indent` to 0.02 did NOT clear the status, and the
+implied indentation works out to ~146 mm — larger than the banana itself. So the pose reconstructed
+in the probe is probably NOT the pose that actually executed (the executor CLIPS tcp z into the
+workspace, and the scripted run's raw z was below the table — see the earlier caveat). The exact
+`degenerate` trigger therefore still needs confirming against the pose that really ran. What is
+solid is the ranking result: the metric rejects the known-good family and accepts the
+known-to-fail one.
+
+**Status of the attempted fix: REVERTED.** The long-axis seed is provably inert here (bit-identical
+output) and it perturbs `yaws[0]` for every other object for no benefit, so it was not kept. It
+becomes the right change only AFTER the contact model can score such a grasp.
+
+**Where to go next** — the work is in `smgrasp/width_grasp.py`, not in the search:
+1. Confirm the `degenerate` trigger against the ACTUALLY EXECUTED pose (log the post-clip tcp from
+   a scripted run and score exactly that).
+2. The indent is measured to the EXTREME boundary point inside the rectangular pad footprint. On a
+   CURVED body a lengthwise pad spans the crescent's curvature, so that extreme is far away and the
+   model infers a huge burial. A first-contact/penetration-depth measure would not.
+3. Only then re-add the long-axis seed.
+
+
 **2026-08-27 (later) — DECISIVE: the banana failure is the SYNTHESIZED POSE, not the physics.
 A hand-scripted centre grasp lifts it 80-100 %; CMA manages ~12 %.** User's proposed experiment:
 script a grasp at the banana's centre with the pads aligned along its long axis (closing across
