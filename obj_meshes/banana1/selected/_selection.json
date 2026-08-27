@@ -1,0 +1,34 @@
+[
+  {
+    "image": "IMG20260824145616",
+    "tag": "IMG20260824145616_seed0",
+    "passed": false,
+    "faces": 12000,
+    "euler": 0,
+    "genus": 1,
+    "watertight": true,
+    "winding_consistent": true,
+    "n_candidates": 3,
+    "n_passing": 0,
+    "photo_aspect": 0.6606,
+    "shape_rel_error": 0.0292,
+    "shape_ok": true,
+    "longest_axis_normalised": 1.903001
+  },
+  {
+    "image": "IMG20260824145624",
+    "tag": "IMG20260824145624_seed1",
+    "passed": true,
+    "faces": 11982,
+    "euler": 2,
+    "genus": 0,
+    "watertight": true,
+    "winding_consistent": true,
+    "n_candidates": 3,
+    "n_passing": 1,
+    "photo_aspect": 0.6584,
+    "shape_rel_error": 0.0026,
+    "shape_ok": true,
+    "longest_axis_normalised": 1.902984
+  }
+]

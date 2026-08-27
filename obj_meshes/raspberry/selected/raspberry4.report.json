@@ -1,0 +1,48 @@
+{
+  "object": "raspberry",
+  "tag": "raspberry4_seed2",
+  "seed": 2,
+  "source_view": "raspberry4",
+  "raw": {
+    "vertices": 961796,
+    "faces": 1923250,
+    "watertight": false,
+    "components": 376
+  },
+  "floater_removal": {
+    "components_found": 376,
+    "largest_component_area_fraction": 0.98303,
+    "components_discarded": 375
+  },
+  "after_topology_clean": {
+    "vertices": 944390,
+    "faces": 1888780,
+    "watertight": true
+  },
+  "decimation_method": "quadric (fast_simplification), staged via [188878, 18887, 12000] -> dropped 3 component(s) shed by decimation",
+  "post_decimation_components": 4,
+  "watertight_method": "pre-decimation: already watertight; post-decimation: already watertight",
+  "scaling": {
+    "applied": false,
+    "reason": "no measurements.json -- doc section 7 says do not guess the scale. Mesh is in TripoSG's normalised frame; multiply by (longest_axis_m / longest_axis_normalised) to make it metric.",
+    "longest_axis_normalised": 1.90449
+  },
+  "clean": {
+    "vertices": 5996,
+    "faces": 11988,
+    "is_watertight": true,
+    "is_winding_consistent": true,
+    "euler_number": 2,
+    "genus": 0,
+    "components": 1,
+    "volume_normalised": 1.64875381,
+    "bbox_normalised": [
+      1.90449,
+      1.445218,
+      1.39841
+    ],
+    "volume_is_positive": true
+  },
+  "hard_failures": [],
+  "passed": true
+}

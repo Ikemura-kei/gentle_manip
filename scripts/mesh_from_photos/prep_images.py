@@ -128,7 +128,7 @@ def main() -> None:
     in_dir, out_dir = Path(args.input_dir), Path(args.output_dir) / "prepped"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    exts = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
+    exts = {".jpg", ".jpeg", ".png", ".webp", ".avif", ".bmp", ".tif", ".tiff"}
     photos = sorted(p for p in in_dir.iterdir()
                     if p.suffix.lower() in exts and not p.name.startswith("_"))
     if not photos:

@@ -410,6 +410,81 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-27 (later) — tomato meshed (12/15); `shape_consistency.py` CORRECTED TWICE in one
+session — the first two versions of my own new gate were both wrong.**
+tomato: 12/15 pass, 5 meshes in `obj_meshes/tomato/selected/`. Only tomato2 fails (0/3,
+euler -15/1/0) — its calyx is DRIED, brown, papery sepals lying flat and thin against the
+fruit (parallel sheets). tomato4's raised green calyx arms are rounded/tubular and stand
+clear -> passed 3/3. **Thinness alone is not the predictor; PARALLEL PROXIMITY is.**
+(Prediction was half right: called tomato2 and tomato4; tomato4 was wrong.)
+
+**Correction A — the sorted-extent metric was wrong for OBLATE objects.** v1 compared
+(2nd-largest / largest extent) against the photo's min/max silhouette aspect. For a
+wide/wide/short object that ratio saturates near 1.0 regardless of flatness, so all three
+tomato2 seeds were flagged at ~25% when they are in fact correct. TripoSG emits +X = image
+right, +Y = image up, +Z = depth (verified: mushroom1/back_seed0 mesh X/Y = 0.918 vs photo
+W/H = 0.918). The right in-plane test is **mesh X/Y vs photo W/H**, not sorted extents.
+
+**Correction B — in-plane aspect ALONE cannot catch a depth hallucination.**
+`cherry_tomato1_seed1` (bbox [0.52,0.58,1.90], a ROD from a round tomato) has in-plane
+X/Y = 0.901 vs photo 1.009 — only 11% off, it PASSES the in-plane test. The rod extends
+into DEPTH, which no silhouette test can see. Needs a second test: **depth ratio
+Z / max(X,Y)**, which puts it at 3.27.
+
+**Correction C — the depth test must be ONE-SIDED.** A first cut used
+DEPTH_LO=0.35 and falsely flagged 18 of 24 shrimps plus the selected banana. For an
+elongated or curled object max(X,Y) is the LENGTH and Z is the THICKNESS, so a flat shrimp
+curl legitimately measures 0.20-0.30. HIGH depth is implausible for single-view
+reconstruction; LOW depth is normal. Bounds now 0.02-2.5.
+
+**Final state:** 114 candidates audited, exactly **1** silent failure —
+`cherry_tomato1_seed1` (depth 3.27), correctly demoted; cherry_tomato1 now selects seed0.
+The earlier shrimp4 re-selection is REVERTED: with the corrected in-plane metric seed1
+scores 23.7% (not 50%), inside tolerance, so seed1 (euler 2) is chosen again over seed2.
+**Lesson: a new validation gate needs its own calibration set before its verdicts are
+trusted — mine produced 2 false positives and 1 false negative across three iterations,
+and each was only caught by checking flagged meshes against their renders.**
+
+**2026-08-27 — cherry_tomato + raspberry meshed; TWO corrections to the failure model and a
+NEW GATE (`shape_consistency.py`).** Pass rates: cherry_tomato **16/18**, raspberry **12/18**
+(one mesh per image; `selected/`). `obj_images/tomato/` is EMPTY — not run.
+
+**Correction 1 — the mechanism is PARALLEL surfaces, not "thin detail" or "crevices".**
+I predicted raspberry would be the worst object yet (druplets + hollow core + styles) and
+cherry-tomato calyxes would fail like the strawberry. Both wrong. Raspberry scored 12/18
+with only mild failures (euler 0/-2/1, never the shrimp's -64), and all three calyx-bearing
+tomatoes passed 3/3. Why: druplets are CONVEX bumps whose inter-lobe valleys are V-shaped —
+the surfaces DIVERGE. A tomato calyx lies flat against the fruit. The catastrophic cases
+(shrimp tail fan, strawberry sepals, mushroom3's torn stem) are all roughly-PARALLEL sheets
+separated by less than a voxel. Refined rule: **bumpy convex geometry is cheap; thin
+parallel geometry is not.** The only cherry_tomato failures were image 5 — a thin curved
+stem PROTRUDING, i.e. genuinely thin, not a calyx.
+
+**Correction 2 — the section 6 gates cannot detect a geometrically WRONG mesh, and one
+shipped.** All section 6 checks are TOPOLOGICAL. `cherry_tomato1_seed1` passed every one of
+them (watertight, euler 2, genus 0, 12000 faces, positive volume, 1 component) while being a
+**3.63:1 ROD generated from a photo of a round tomato, with 13x too little volume**
+(bbox [0.52,0.58,1.90] vs its siblings' [1.91,1.84,1.87]). Caught only because the turntable
+normalises by max vertex radius, so it rendered visibly small.
+
+**NEW: `scripts/mesh_from_photos/shape_consistency.py`** — compares the mesh's silhouette
+proportion (2nd-largest / largest extent) against the input photo's alpha-bbox aspect;
+flags > 25% relative error. Calibration on known-good meshes: mushroom1/back_seed0 agrees to
+1%, front_seed0 to 6%, so 25% is loose and still catches the rod by a mile. Audited all 99
+candidates → exactly **2 silent failures**: `cherry_tomato1_seed1` (69% off) and
+**`shrimp4_seed1` (50% off) — which had been SELECTED and delivered.** It was shrimp4's only
+euler-passing seed, so the old ranking picked the least faithful of its three.
+
+**`select_per_image.py` ranking changed: shape consistency is now the PRIMARY key, above the
+section 6 gates.** Justification: genus > 0 does not block tetgen (closed + manifold +
+self-intersection-free is what a tet mesher needs), whereas wrong shape is fatal. shrimp4
+re-selected seed1 → **seed2** (shape err 14.2%, euler -7) over seed1 (50%, euler 2). Every
+`selected/README.md` now carries a shape-err column. It is a SCREEN not a proof — it only
+sees silhouette proportions, so a wrong mesh that preserves aspect ratio still passes.
+
+Also: `.avif` added to the prep extension filter — `raspberry4/6` would have been silently
+skipped, same class of bug as shrimp6's `.webp`. Filter now jpg/jpeg/png/webp/avif/bmp/tif/tiff.
+
 **2026-08-27 (smoke test) — FOUR NEW OBJECTS through the all-auto recipe: cherry tomato, tomato,
 banana CHUNK, pasta bundle. All synthesize; two needed fixes, both found and applied.**
 
@@ -2711,3 +2786,361 @@ test had just shown a sighted head useless) but launched no replacement, leaving
 training for 2h against a hard deadline. When killing a disproved arm, launch its replacement
 in the SAME action.
 
+
+### 2026-08-27 — Freeze-after-closure is a NULL result, and the contact stop's gain is a LEVEL effect
+
+**Result (canonical, 200 eps, lulkx@600):**
+
+| arm | success | peak | SUSTAINED | vs baseline |
+|---|---|---|---|---|
+| baseline | 0.820 | 53065 | 28060 | — |
+| freeze eps=1mm | 0.825 | 52467 | 27217 | **-3%** |
+| freeze eps=2mm | 0.825 | 52814 | 27082 | **-3.5%** |
+| freeze eps=3mm | 0.815 | 52633 | 26954 | **-4%** |
+| contact stop 1.5N | 0.810 | 51053 | 21241 | -24% (NOT deployable) |
+
+**Why the freeze failed — the trigger was aimed at the wrong failure mode.** `GM_WIDTH_FREEZE_MM`
+latches when the command RISES above its running minimum. That was designed against *CFG's*
+failure (re-opening -> lift-then-drop). The BASELINE does the opposite: measured post-grasp drift
+(`.agent_tmp/drift_check.py`, 30 episodes x 3 runs) is **median -1.40mm, 63% DECREASING vs 13%
+increasing** — it keeps squeezing. A rise-triggered latch almost never fires, which is exactly why
+all three eps values (1/2/3mm) give indistinguishable results. **LESSON: a mechanism debugged against one policy's
+failure mode must have that failure mode re-verified on the policy it is being applied to.** Same
+class of error as assuming the contact stop would transfer.
+
+**The bigger correction — the contact stop never adapted, it just gripped WIDER.**
+Its at-grasp width is ~32.1mm vs baseline ~30.3mm (**+1.8mm**) and its slope is 0.05 mm/mm, i.e.
+NO width adaptation. So the entire -24% sustained-stress gain is a **LEVEL effect**, not a
+stopping-the-squeeze effect and not adaptation. This matters because a level shift needs no sensor
+at all: it is reproducible by simply commanding a constant offset. It also independently reproduces
+the alzey-vs-lulkx story (alzey commands ~2.8mm wider and is the gentlest policy on the real robot).
+
+**ADOPTED:** `GM_WIDTH_OFFSET_MM` in `dppo/eval_agent.py` — constant absolute offset on the
+commanded width, converted with the DELTA scale factor (no affine term) and guarded by the same
+round-trip assertion that caught B10. Testing +2/+3mm (jobs 1738755/6). If ~-20% sustained stress
+lands at ~0.80 success, this is the deployable gentleness mechanism: **no sensor, no trigger logic,
+one number**, and it is directly testable on the real rig against the over-squeeze the user reported.
+
+**Open question this raises for the paper:** if a constant offset captures most of the gentleness
+gain, then width ADAPTATION is worth only the residual — the part a constant cannot cover, which is
+exactly the wide-size-range case (§4c). That is an honest and much simpler story than the one we
+started with, and it is falsifiable by the offset sweep.
+
+**B15 (2026-08-27, LOUD — cost 2 min).** Relaunching a lulkx eval without
+`GM_EXTRA_OVERRIDES="action_dim=7 env_name=<v33b_shift9>"` builds a 10-d action model against a
+7-d checkpoint: `size mismatch ... mlp_mean.layers.2.weight [28] vs [40]` (28 = 7x4 horizon,
+40 = 10x4). **Failed instantly and unmistakably**, which is the contrast worth recording: the
+same class of omission on NORM (B1) was SILENT and cost a whole sweep. A shape check is a free
+guard; a scale check is not. When cloning a launch, copy the FULL override set — the sbatch echoes
+`extra=...` on every run, so diff that line against the run you are replicating.
+Second gotcha: `GM_EXTRA_OVERRIDES` contains a SPACE, so it cannot ride inside
+`--export=ALL,VAR=...` (sbatch splits on commas and the shell on spaces) — export it into the
+environment and use a bare `--export=ALL`. Same family as the arms.txt/commas issue.
+
+### 2026-08-27 — GRIP LEVEL EXPLAINS ~95% OF GENTLENESS. Adaptation explains ~none of it.
+
+Sustained stress regressed on AT-GRASP WIDTH, fitted within protocol groups:
+
+| group | n | Pa per mm | r | R2 |
+|---|---|---|---|---|
+| canonical 200ep (baseline, contact x3, freeze x2) | 6 | **-3468** | -0.988 | **0.976** |
+| probe 60ep (all mechanisms) | 7 | -1659 | -0.940 | 0.884 |
+| **floor margin family alone (ONE mechanism, 4 levels)** | 4 | **-1714** | -0.974 | **0.949** |
+
+**The mechanism does not matter; the resulting LEVEL does.** Contact stop, freeze, floor and
+baseline all sit on one curve. In particular the FLOOR's gentleness is fully accounted for by the
+mean width it produces (R2 0.949 within its own family) — **its width ADAPTATION (slope 0.48) buys
+no measurable stress reduction beyond the level shift.** That is the strongest evidence yet that we
+were optimising the wrong variable for four days.
+
+**Two slopes differ 2x** (-3468 canonical over a 2.3mm span vs -1714 probe/floor over 8mm) =>
+diminishing returns: the first mm of extra width is worth more than the eighth. Do not extrapolate
+the canonical slope past ~3mm.
+
+**PRE-REGISTERED PREDICTION for the running offset arms (1738816/7), recorded BEFORE they land:**
++2mm -> sustained 20,700-24,200 (-14% to -26%); +3mm -> 17,700-22,500 (-20% to -37%). Success stays
+~0.80 IF level is the only thing changing (contact 1.5N holds 0.810 at +1.5mm wider). A large
+success DROP at +2/3mm would falsify "level is sufficient" and mean the contact stop's timing
+matters after all.
+
+**THE DECISIVE EXPERIMENT, and it is already running.** floor m8 reaches width 33.66 / stress 21840
+/ succ 0.750 (probe). A +3mm constant offset lands at ~33.6 — THE SAME MEAN WIDTH with NO adaptation
+(slope ~0.17 vs the floor's 0.48). Canonical arms for both are in flight (1734915 floor m8,
+1738817 offset+3). **If they match on stress AND success, width adaptation contributes nothing at
+mushroom's size range and the shippable answer is one constant.** If the floor wins, adaptation
+earns its place. Either outcome is a clean, publishable answer to the question the campaign opened
+with — and it is a MATCHED-MEAN comparison, which nothing we ran before this was.
+
+**B16 (2026-08-27, LOUD, caught by the degenerate watchdog in 15 min).** A UNIFORM constant offset
+on the commanded width (`GM_WIDTH_OFFSET_MM`) gives **0/20 success** at +2mm and +3mm. NOT a units
+bug — the dump confirms the magnitude was applied exactly (traj max 80.00 -> 82.00 at +2mm,
+-> 83.00 at +3mm). The failure is **CLOSED-LOOP FEEDBACK**: the policy observes `gripper_width` in
+its own proprio, so shifting EVERY command from t=0 — including the ~80mm open-gripper approach —
+puts the observation out of distribution before the grasp begins. The gripper then never closes
+(at-grasp 40.4mm / 46.4mm vs baseline 30.6; episode-end width 78.3/83.0 vs baseline 27.6).
+
+**LESSON (generalises to the real robot): you cannot open-loop shift a channel the policy OBSERVES.**
+This is the same trap as the earlier `--gripper-offset-m` feedback bug. The contact stop escaped it
+only because it clamps LATE (at contact), leaving the approach in-distribution.
+
+**FIX — a CONSTANT FLOOR, not a shift:** `GM_WIDTH_FLOOR_CONST_MM`, `w_cmd = max(w_policy, W_min)`.
+The approach (~80mm) is far above W_min so the clamp does not bind until the policy closes past it;
+the trajectory stays in-distribution until the grasp itself. Converted with the FULL AFFINE map
+(absolute width, not a delta — the B10 distinction) and round-trip checked against the dump's
+inverse so the two cannot drift.
+
+**This also gives the campaign its cleanest experiment.** The constant floor is the exact CONTROL
+for the vision floor: identical clamp, constant vs per-object PREDICTED level. Matching the mean
+at-grasp width and comparing success + stress isolates ADAPTATION from LEVEL — the confound in
+every comparison we have run so far. The matching constant is solved on the baseline's real
+at-grasp distribution (clamping is nonlinear, so it is not simply the target mean).
+
+**Conversion validated against B10's ground truth (2026-08-27).** The new absolute-width affine map
+gives 32.84mm -> -0.3953 and 34.62mm -> -0.3426 (0.0296 norm/mm). Extrapolated to B10's documented
+case, 34.32mm -> **-0.3515**, against the -0.351 B10 records as correct. An EXACT match from an
+independent route. Note the sign: absolute widths in this range are NEGATIVE in normalized space,
+which is exactly why B10's delta-scale error (+1.016) was so destructive and why a plain range
+check could not catch it. Prefer validating a conversion against a known-correct external value
+over a self-consistency round-trip — the round-trip cannot detect a wrong target SPACE (B16).
+
+### 2026-08-27 — LEARN THE LEVEL (user steer: no hardcoded hacks)
+
+User: *"a constant level per object sounds like a hack, if it can be learned from point cloud then
+it may sound better... any hardcoded hacks will not receive welcome from reviewers."* Right, and it
+identifies a real handicap in the campaign: **every level head we have evaluated was fitted
+POST-HOC on a FROZEN encoder (corr 0.75) while a supervised encoder reaches 0.927.** We have been
+judging "can the level be predicted?" using the worst version of the predictor we could have built.
+
+Launched two arms on lulkx's exact recipe (paired reg 0.5, abs 7d, alzey obs; 600 epochs, ~3h):
+- **A `wsup_aux` (1739398)** — `aux_grasp_width_weight=1.0`, level supervision in the objective.
+- **B `wsup_feed` (1739399)** — A + `feed_width_pred=true`: the width head's DETACHED prediction is
+  concatenated onto the denoiser conditioning. **No clamp, no constant** — the policy learns to use
+  a predicted level. Training-only heads, so ZERO deployment cost and no new sensor.
+
+The constant floor is retained as the ABLATION ("why not one number?"), which is the control a
+reviewer demands, not the deliverable. Note `PairedRegDiffusionModel` already inherits
+`AuxDiffusionModel`, so this needed no new code — only overrides. `+train_dataset.aux_grasp_width`
+carries its `+val_dataset` twin (a missing twin silently validates on a different feature set).
+
+**Monitoring lesson (2026-08-27).** My arming check for the width-supervision runs grepped stdout
+for `loss_grasp_width` and fired "supervision INERT" on BOTH runs — a FALSE ALARM. `_aux_log` is
+consumed by `wandb.log` only (`train_diffusion_agent.py:88-90`) and is never printed. The runs were
+in fact correctly configured. **Verify a knob against the RESOLVED HYDRA CONFIG (or a parameter
+count), not against log text you have not confirmed is emitted.** Positive confirmation here:
+tebvy/ixjgp both show `aux_grasp_width_weight: 1.0` + train AND val `aux_grasp_width: true`, ixjgp
+adds `feed_width_pred: true`, and the param counts differ by **exactly 1024** = 1 extra input dim x
+the 1024 first hidden layer. A false "inert" alarm is cheap; the opposite error (a silent inert
+knob reported as a result) is the B1 failure and is not.
+
+**Supervision confirmed active by THREE independent routes (2026-08-27)**, after the false-alarm
+above — worth recording as the pattern to reuse when a knob's own log line is unavailable:
+1. **resolved hydra config** — `aux_grasp_width_weight: 1.0`, train AND val `aux_grasp_width: true`
+2. **parameter count** — ixjgp exceeds tebvy by exactly 1024 (= 1 `feed_width_pred` input dim x the
+   1024 first hidden layer)
+3. **loss differential vs the un-supervised twin** — lulkx (no aux) 0.7304/0.2690/0.1810/**0.1577**
+   vs tebvy 0.7800/0.3076/0.2201/**0.1964**: consistently ~+0.039 at epoch 4, which IS the width
+   MSE term. An inert override would reproduce lulkx's curve exactly.
+Route 3 is the strongest because it observes the knob's EFFECT rather than its declaration.
+
+**Planned verification at 600 epochs:** measure corr(predicted episode-min width, true) on val. The
+post-hoc frozen-encoder head reached **0.75**; a supervised encoder should approach the **0.927**
+ceiling measured by the predictability analysis. That number decides whether the learned floor has
+been handicapped all along, which is the question the user's "don't hardcode it" steer raises.
+
+### 2026-08-27 — Floor frontier at 40 geometries + protocol-matching lesson
+
+| arm | success | SUSTAINED | vs baseline | mean at-grasp |
+|---|---|---|---|---|
+| baseline | 0.905 | 29,734 | — | 30.47mm (sd 4.50) |
+| **floor m8** | **0.760** | **22,804** | **-23%** | 34.04mm |
+| floor m6 | 0.705 | 19,700 | -34% | 35.46mm |
+| floor m4 | 0.575 | 18,047 | -39% | 36.96mm |
+
+m8 is the shippable operating point; earlier reporting leaned on m4 (-0.33 success) and understated
+the mechanism.
+
+**LESSON — a matched-mean comparison must also match the PROTOCOL.** My first constant-floor
+controls ran the eval cfg default (**5 distinct geometries**) while the adaptive floor arms passed
+`n_episodes=200 scene_group_size=1` (**40 geometries**), and the constants were solved on
+PROBE-protocol (60ep) means. Both errors point the same way as B1: the run completes and reports a
+believable number that answers a different question. Caught by diffing the resolved `extra=` line
+between the two launches — **the sbatch echoes every override, so diff that line against the run
+you are matching BEFORE trusting a comparison.** Relaunched at 40 geometries with constants solved
+on the 40-geometry baseline distribution (33.34/35.15/36.82 -> means 34.04/35.46/36.96, exact).
+
+### 2026-08-27 — [CORRECTED BELOW] THE LEVEL HEAD WAS HANDICAPPED (corr 0.667 -> 0.850 at latch)
+
+Width-head correlation on the VAL split, one point per EPISODE (the label is per-episode; per-step
+rows are not independent):
+
+| head | corr | 95% CI |
+|---|---|---|
+| post-hoc fit on a FROZEN encoder (every floor result to date) | **0.75** | — |
+| **tebvy — supervised IN the objective, epoch 100/600** | **0.933** | [0.892, 0.959] |
+| ixjgp — same + `feed_width_pred`, epoch 100/600 | 0.897 | [0.837, 0.936] |
+
+**At one sixth of training the supervised head already reaches the 0.927 predictability ceiling.**
+Say "reaches", not "exceeds": 0.933 vs 0.927 is well within the CI and the two were measured under
+different protocols. **Every floor arm in this campaign clamped on a 0.75 head when 0.93 was
+available.** The information was in the cloud; we never trained the encoder to retain it. This
+directly answers the user's steer (*"if it can be learned from point cloud that may sound better"*)
+— it can, and cheaply: aux heads are training-only, so ZERO deployment cost and no new sensor.
+
+**Do NOT over-claim.** (a) Prediction quality is not policy quality — the head knowing the level
+says nothing yet about the policy ACTING on it; ixjgp (prediction fed to the denoiser, no clamp) is
+the arm that tests that. (b) In-distribution only: earlier analysis had cloud->size falling to
+0.44-0.59 on UNSEEN shapes, which is exactly the regime the multi-category generalist lives in.
+(c) n=65 val episodes.
+
+**Endgame evals once 600 lands:** (1) ixjgp plain = the no-clamp learned design; (2) tebvy + floor
+at the m6/m8 margins = the floor on a head that can actually predict; (3) both against the
+matched-mean CONSTANT floors already running. That is the full adaptation-vs-level answer with the
+learned side finally at full strength.
+
+### 2026-08-27 — ⚠ CORRECTION: the 0.933 width-head figure was PROPRIO LEAKAGE
+
+corr(pred, true grasp width) BY EPISODE PHASE, supervised head (tebvy@100), 65 val episodes:
+
+| phase | corr | mean abs err | what is happening |
+|---|---|---|---|
+| **0.0 (latch moment)** | **0.850** | 0.079 | genuine cloud-based prediction |
+| 0.2 | 0.827 | 0.085 | still genuine |
+| 0.4 | 0.621 | 0.126 | **occlusion dip** — gripper descending over the object |
+| 0.6 | 0.565 | 0.118 | occlusion dip |
+| 0.8 | **0.998** | 0.010 | **LEAKAGE — not prediction** |
+| 1.0 | **0.998** | 0.010 | **LEAKAGE** |
+
+**The late-phase 0.998 is the head reading the label off its own input.** The conditioning feature
+is [pointnet_feat (+) state] and `state` includes the CURRENT GRIPPER WIDTH; by phase 0.8 the
+gripper is already AT the episode's minimum width, which IS the label. This is precisely why
+`width_head_blind` exists in this codebase.
+
+**RETRACTED:** "corr 0.933, reaches the 0.927 ceiling" (reported earlier today). That figure was a
+MEDIAN ACROSS PHASES and therefore contaminated by leaked late samples.
+
+**The correct, deployment-relevant number is the correlation AT THE LATCH MOMENT.** The floor arms
+use the legacy latch = the episode's first `act()` (t=0), where every episode's gripper sits at the
+same open width, so proprio carries NO per-episode information and the prediction is genuinely from
+the cloud:
+- frozen post-hoc head at t=0: **0.667**
+- supervised head at t=0: **0.850**
+A real improvement that should make the floor clamp better, but NOT the ceiling.
+
+**LESSON — a per-episode label that also appears in the observation stream leaks.** Any correlation
+measured after the policy has ACTED on the quantity being predicted is contaminated. Measure a
+predictor only at (or before) the moment its output is USED. Corollary: the two contradictory latch
+comments in `eval_agent.py` ("latch at t=0, object unoccluded" vs "t=0 is the head's WORST moment,
+object far away") are now settled by measurement — **t=0 is the BEST honest moment (0.850)** and the
+mid-episode occlusion dip (0.57-0.62) is real, matching upstream a15f88c's occlusion audit.
+
+**ARM C `wsup_blind` (1742221) — remove the leakage from TRAINING, not just from measurement.**
+The leakage above is not only a measurement artifact: the aux head is supervised at EVERY step
+against the episode-MIN width, and in the back half of an episode the gripper is already AT that
+width. **The head can satisfy its loss by copying proprio instead of learning size from the cloud**
+— a shortcut that dilutes exactly the encoder incentive the auxiliary objective exists to create.
+That is a plausible reason the honest t=0 correlation is 0.850 rather than near the 0.927 ceiling.
+
+New flag `aux_width_blind` (`pointnet_diffusion.py`) zeroes the gripper-width entry of each
+per-step proprio slice before the AUX width head — reusing the mask `width_head_blind` already
+applies to the trajectory head, but as a SEPARATE flag so the trajectory head is untouched.
+Default False, so every existing run stays bit-identical. Prints its resolved state at build
+(an earlier "blind" run in this repo was silently SIGHTED — same trap).
+
+Three arms now: **A tebvy** (sighted aux), **B ijxgp** (sighted aux + feed_width_pred),
+**C wsup_blind** (blind aux). Compare on the honest t=0 correlation, then on closed-loop success
+and stress. If C >> A at t=0, the shortcut was real and blinding is the right default for any
+auxiliary head whose label also appears in the observation stream.
+
+### 2026-08-27 — CONSTANT FLOOR (canonical protocol): -41% sustained stress at 0.745 success
+
+| arm (canonical, 200 eps) | success | ever | peak | SUSTAINED | vs baseline |
+|---|---|---|---|---|---|
+| baseline lulkx | 0.820 | 0.865 | 53065 | 28060 | — |
+| contact stop 1.5N (NOT deployable) | 0.810 | 0.855 | 51053 | 21241 | -24% |
+| **constant floor 32.84mm** | **0.745** | 0.785 | 49052 | **16439** | **-41%** |
+
+**A single constant beats the contact stop on stress (-41% vs -24%) with no sensor at all**, at
+0.745 success — above the user's 0.7 bar. This is the simplest possible mechanism: one clamp,
+`w_cmd = max(w_policy, 32.84mm)`, deployable on the real rig today.
+
+It also roughly validates the pre-registered width->stress prediction: the fit said -3468 Pa/mm and
+the clamp moves mean at-grasp ~+2.9mm, predicting ~18.0k; measured 16.4k. The LEVEL model of
+gentleness holds quantitatively.
+
+**This is exactly the "hack" the user warned about**, and that is the point: it sets the bar the
+LEARNED version (tebvy/ixjgp/neoca + floor, or the no-clamp feed_width_pred design) must clear to
+justify its complexity. If a learned per-object level cannot beat one number, the honest paper
+reports the constant as the method and the learned level as a negative result.
+
+⚠ Protocol note: this is the CANONICAL protocol (5 geometries). The adaptive-vs-constant
+MATCHED-MEAN comparison is the 40-geometry set (1739549/50/51 vs 1734914/5), still running. Do not
+cross-compare the two protocols — the baselines differ (0.820 vs 0.905).
+
+### 2026-08-27 — Generalist eval was BLOCKED; three fixes to make the cond/uncond ablation possible
+
+The 3-object generalist trained fine (uncond `xaqnb` 350 epochs, val 0.0012) but **could not be
+evaluated**. Three separate gaps, each of which would have produced a wrong answer rather than an
+error:
+
+1. **`category_embed` was never wired into the eval path.** The dataset supplies it in TRAINING
+   (`StitchedSequencePointCloudCategoryDataset`), but `eval_agent` never built it, so a
+   category-conditioned checkpoint had no way to run closed-loop. Added `GM_CATEGORY=<object>` ->
+   `category_embedding.embed()` -> broadcast over the batch (identity is static per episode and
+   each eval run is ONE object, so no per-step cost). `category_embedding.py` is genesis-free
+   precisely so the harness can import it — the design anticipated this; the harness side was
+   simply never written. **It HARD-FAILS if the network wants an embedding and GM_CATEGORY is
+   unset** — otherwise the conditioned policy would run on a silently absent/garbage conditioning.
+2. **`dppo_eval.sbatch` hardcoded `REPO`** to the main checkout, so evaluating the worktree's
+   checkpoint would have `cd`'d to the MAIN repo and run the main `eval_agent` — i.e. WITHOUT the
+   category wiring, looking like a normal run. Now `REPO=${GM_REPO:-<main>}` (worktree copy).
+3. **No 7d raspberry experiment existed.** Raspberry's experiment declares
+   `action: abs_pose_abs_gripper` (10d rot6d) while the generalist is 7d; the eval sim server
+   derives its ActionPipeline FROM THE EXPERIMENT, so a 7d policy evaluated with it is a
+   mismatch. Created `single_lift_raspberry_soft_abs_action_armfocus_7d_realws.yaml` — diff vs the
+   10d original is EXACTLY one line (the action config).
+   Reassuring: the 3-object dataset BUILD already converted raspberry 10d->7d
+   (`--derive-action`/`--derive-source-action`), so the TRAINING data was consistent all along;
+   only the eval-side config was missing.
+
+Smoke-tested the embedding first (dim 21; one-hot mushroom 0 / raspberry 1 / tofu 10; registry
+sizes 33/30/15mm; pairwise L2 1.55-1.65 so categories are distinct) rather than discovering a
+KeyError two hours into a GPU eval.
+
+Uncond arm launched on all three objects (1743043/4/5, 60-ep probes). Cond arm follows when its
+training finishes.
+
+### WHERE RUN ARTIFACTS LIVE (2026-08-27) — read this before hunting for a result
+
+⚠ **The 3-object generalist lives in the WORKTREE `../gm_generalist`, NOT the main checkout.**
+That split is the single easiest thing to trip over: the main repo also holds an OLDER 2-object
+generalist (`single_lift_generalist_mushroom_tofu/{waslz,xktwc}`), so opening the main repo finds a
+plausible-looking but SUPERSEDED run.
+
+| artifact | path |
+|---|---|
+| mushroom trainings (tebvy/ixjgp/neoca) | `logs/dppo/dppo-pretrain/single_lift_mushroom_simreal_realws_noos_cmd_v33b_shift9/<id>/` |
+| 3-obj generalist (xaqnb uncond, lbjbv cond) | **`../gm_generalist/`**`logs/dppo/dppo-pretrain/single_lift_generalist_3obj/<id>/` |
+| per-run record | `<run>/.hydra/config.yaml` (AUTHORITATIVE resolved config), `<run>/config/` (env snapshot), `<run>/EXPERIMENT.md`, `<run>/checkpoint/state_N.pt` |
+| evals | `<run>/eval/<EVAL_SUBDIR>/` -> `summary.json`, `episodes.csv` (per-episode success/stress + the DR params ACTUALLY applied), `render/batchNN_envM.mp4` (one clip per episode) |
+| width dumps (input to every adaptation metric) | `.agent_tmp/<GM_WIDTH_DUMP tag>_widthcmd_b*.npz` — per-step commanded width (mm) + EE-z (m) |
+| slurm | `logs/slumr_logs/<jobid>.{out,err}` + `<jobid>_<name>_simserver.log` |
+| analysis tools | `.agent_tmp/`: `decompose_width.py` (slope+CI), `level_vs_stress.py`, `phase_vs_width.py`, `eval_width_head.py`, `pick_const_slope.py` |
+
+**`EXPERIMENT.md` is written at LAUNCH; its Final summary is filled at the END.** For a run still in
+flight, `.hydra/config.yaml` is the only trustworthy statement of what is actually running — several
+of today's bugs (B15, the protocol mismatch, the category-embed wiring) were caught by reading it
+rather than the logs.
+
+**Upstream ef19428 — ν was 0.33 for EVERY object in every collection to date** (`build_grasp_fem`
+fell back to MetricConfig's copper default; materials declare 0.30-0.42). `--grasp-nu auto` added,
+DEFAULTED to 0.33 so existing runs stay reproducible. **Impact on the width campaign: small for
+mushroom** (declared 0.35 vs 0.33 used) and our width-vs-size numbers come from RECORDED widths
+regardless. Larger unknown for tofu/raspberry — a third caveat on the 3-object generalist data,
+alongside raspberry's over-squeeze (fixed 5mm = 34% of a 15mm object, upstream a15f88c) and the
+procedural-material caveat on the 4 new objects. μ = 0.7 is also one global constant, not per-object.
+
+Also landed: `docs/grasp_synthesis_model.md` (written for paper writing, every claim checked against
+the implementation, with **"DO NOT CLAIM" markers** where a natural claim would overstate the code)
+and `docs/paper/{preview_icra.tex,refs.bib,related_work.md}`. Use these when writing up the width
+results — the DO-NOT-CLAIM discipline is exactly what today's retractions (the 0.933 leakage, the
+"baseline is 43% adaptive" 12-geometry artifact) argue for.

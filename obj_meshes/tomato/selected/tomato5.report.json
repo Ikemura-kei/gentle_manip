@@ -1,0 +1,48 @@
+{
+  "object": "tomato",
+  "tag": "tomato5_seed0",
+  "seed": 0,
+  "source_view": "tomato5",
+  "raw": {
+    "vertices": 1071761,
+    "faces": 2143750,
+    "watertight": false,
+    "components": 278
+  },
+  "floater_removal": {
+    "components_found": 278,
+    "largest_component_area_fraction": 0.99791,
+    "components_discarded": 277
+  },
+  "after_topology_clean": {
+    "vertices": 1069414,
+    "faces": 2138828,
+    "watertight": true
+  },
+  "decimation_method": "quadric (fast_simplification), staged via [213882, 21388, 12000]",
+  "post_decimation_components": 1,
+  "watertight_method": "pre-decimation: already watertight; post-decimation: already watertight",
+  "scaling": {
+    "applied": false,
+    "reason": "no measurements.json -- doc section 7 says do not guess the scale. Mesh is in TripoSG's normalised frame; multiply by (longest_axis_m / longest_axis_normalised) to make it metric.",
+    "longest_axis_normalised": 1.907641
+  },
+  "clean": {
+    "vertices": 6002,
+    "faces": 12000,
+    "is_watertight": true,
+    "is_winding_consistent": true,
+    "euler_number": 2,
+    "genus": 0,
+    "components": 1,
+    "volume_normalised": 3.39177614,
+    "bbox_normalised": [
+      1.907641,
+      1.708739,
+      1.874592
+    ],
+    "volume_is_positive": true
+  },
+  "hard_failures": [],
+  "passed": true
+}
