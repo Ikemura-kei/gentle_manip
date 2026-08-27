@@ -10,7 +10,32 @@ history in `docs/DEVLOG.md`.
 
 ---
 
-## 1. Where we stand — WORKING MECHANISM FOUND (2026-08-27)
+## 0. ⚠ HARD DEPLOYMENT CONSTRAINT (user, 2026-08-27): NO CONTACT SENSING ON THE REAL RIG
+
+**The real XArm gripper has NO force/current feedback**, and **a soft delicate object cannot block
+a position-controlled finger**, so there is no stall to detect either. MEASURED (job 1733479, demo
+data) — the stall signal is not merely weak, it is INVERTED:
+
+| phase | median lag (achieved - commanded) |
+|---|---|
+| early closing, PRE-contact | **4.85 mm** (p90 6.11) |
+| at/after grasp, CONTACT | **0.51 mm** |
+
+Lag is ~10x LARGER before contact than at it (servo lag during fast closing; by contact the command
+has stopped changing and the gripper has caught up). A threshold rule would fire in free space and
+never at contact.
+
+**CONSEQUENCE: the contact-triggered stop (§4c) and therefore the 48%/0.833 headline in §1 are
+SIM-ONLY.** They rely on `SimFeedback.extra["contact_force"]`, which has no real-robot counterpart.
+Do NOT report that combination as a deployable result.
+
+**Deployable substitute under test:** CFG (adaptation) + the VISION level-head floor (caps
+over-closing) — same complementary structure, using only the point cloud, which the real rig has.
+**Open option for the user:** the rig HAS 2x GelSight Mini finger sensors (CLAUDE.md), currently
+excluded by the tactile-free premise. If contact sensing is the key enabler, that premise is worth
+revisiting — it is a project-level decision, not a technical blocker.
+
+## 1. [SIM-ONLY — see §0] Working mechanism in simulation (2026-08-27)
 
 **CFG (width-only, scale 3.0) + CONTACT-TRIGGERED STOP (F* = 1.0 N)** delivers **48% of the
 demonstrator's aperture range at 0.833 success** — 5.3x the baseline's 9% adaptation, at success
