@@ -201,6 +201,40 @@ limit, not a tuning gap.
 
 ## Roadmap / TODO
 
+### PROPOSED (user, 2026-08-27) — hover-start demos to teach grasp RETRY
+
+Add a fraction of demos that START from a post-failure-like state instead of from home: the
+gripper **6-10 cm above the object with the WIDTH RANDOMIZED**, then execute the normal
+synthesized grasp. Rationale: BC only sees states on the expert trajectory, so after a failed
+grasp the policy is off-distribution and has never seen "hovering over the object, gripper
+partly closed, holding nothing" — exactly where a failure leaves it.
+
+**Why it should help, precisely:** the normal approach ALREADY passes through 6-10 cm above the
+object, but always with the gripper **OPEN**. The novel, genuinely-unseen state is the
+**partially-closed gripper at hover** — so the randomized WIDTH is where the value is, not the
+height. In absolute-action mode the policy commands a target pose+width directly, so it can
+recover in a single step once it has seen the state.
+
+**Three design caveats:**
+1. **Object pose mismatch.** After a real failed grasp the object is usually displaced/rotated by
+   the failed contact. Hover-starts over a PRISTINE spawn pose under-cover the true post-failure
+   distribution — consider perturbing the object slightly for these episodes.
+2. **This teaches RESTART, not RETRY.** There is no failure *detection*: the policy learns "from
+   this state, grasp", not "that attempt failed, so reopen and retry". Probably sufficient (the
+   state is the trigger), but do not claim learned failure-recovery from it alone.
+3. **Mixing fraction.** Too many mid-air starts under-represent the full approach and could
+   degrade the primary behaviour. Start around **15 %**, not half.
+
+**Verification must be at TRAINING time, not collection time** — the collector will happily
+produce these demos and their success rate says nothing about whether retry emerges. The test is
+a deploy/eval comparison against a matched no-hover-start baseline.
+
+Related: this is a cheaper cousin of the long-standing "deliberate induced failure for
+retry-coverage" idea in CLAUDE.md (v2 collector brainstorm item 3), which perturbs the grasp so a
+genuine failure+recovery is recorded. That one covers failure DETECTION too, at the cost of
+needing slip detection in the collector.
+
+
 ### Standing rule: rigorous monitoring on EVERYTHING launched (2026-08-24, user)
 
 Anything launched (training, eval, collection, chain, probe) MUST carry a rigorous health
@@ -409,6 +443,40 @@ running" — replacing any whose experiments have since finished.**
 ---
 
 ## Log
+
+**2026-08-27 (mesh coverage) — `--mesh-cycle` + `--n-envs 2`: forcing EVERY mesh to be sampled
+lowers two headline numbers. The earlier 100 %s were partly a sampling artefact.**
+
+User asked for full mesh coverage rather than trusting a uniform draw. Two changes:
+- **`--mesh-cycle`** walks `object_mesh_pool` in ORDER (round-robin), one mesh per scene rebuild,
+  instead of sampling uniformly. A uniform draw only covers the pool *in expectation*, and an
+  8-episode run rebuilds the scene once or twice — so it saw 1-2 of 4-5 meshes and a broken
+  variant could sit unnoticed. Smoke/coverage use only; real collections should keep random DR.
+- **`--n-envs 2`** (was 8) so a short run produces more batches, hence more scene rebuilds.
+
+**Results with EVERY pooled mesh exercised:**
+
+| object | success (full coverage) | meshes covered | previous (1-2 meshes) |
+|---|---|---|---|
+| raspberry | **100 %** | **5/5** | 100 % |
+| tofu | **100 %** | 1 (no pool) | 96 % |
+| strawberry | **100 %** | 1 (no pool) | 92 % |
+| cherry_tomato | **89 %** | **4/4** | 89 % |
+| banana_chunk | **86 %** | 1 (no pool) | 69-80 % |
+| **mushroom** | **80 %** | **4/4** | **100 %** |
+| **tomato** | **73 %** | **4/4** | **89 %** |
+| pasta_bundle | 43 % | 1 (no pool) | 42-50 % |
+
+**The mushroom's 100 % and the tomato's 89 % were partly SAMPLING ARTEFACTS** — both were measured
+on runs that happened to draw only the nominal/easiest mesh. Exercising all four variants gives
+80 % and 73 %. Raspberry and cherry_tomato are unchanged across full coverage, so those numbers
+were real.
+
+**Lesson: quote smoke numbers only from `--mesh-cycle` runs once a category has a mesh pool.**
+A per-category success rate measured on an unknown subset of the pool is not comparable to one
+measured on all of it. `docs/smoke_datasets.md` records the recipe per run so the two can be told
+apart.
+
 
 **2026-08-27 (object library) — 13 photo-derived fruit meshes added with PER-CATEGORY MESH
 RANDOMIZATION; procedural placeholders retired. New `docs/smoke_datasets.md` history table.**

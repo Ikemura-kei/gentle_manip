@@ -229,7 +229,7 @@ def _state_to_raw_obs(state: dict) -> RawObs:
 
 # ── Scene-level DR (object SIZE + SHAPE) ──────────────────────────────────────
 
-def _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir):
+def _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir, mesh_cycle=None):
     """Per-scene SIZE + SHAPE DR for the (rigid) object — mirrors
     SimBackend._apply_scene_dr, but BAKES the uniform scale into the exported mesh
     (not the ObjectEntry.scale field) so the CMA-ES SDF, which loads the mesh file
@@ -247,7 +247,16 @@ def _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir):
     o = nominal_spec.objects[0]
     nominal_scale = float(o.scale or 1.0)
     shp = dr_cfg.sample_shape_scale(rng)                     # {} if no shape/scale fields set
-    variant = dr_cfg.sample_mesh_variant(rng)                # base-mesh pool pick (or None);
+    if mesh_cycle is not None and dr_cfg.object_mesh_pool:
+        # DETERMINISTIC round-robin over the pool instead of a uniform draw. Random sampling only
+        # covers the pool in expectation: an 8-episode smoke test rebuilds the scene once or twice,
+        # so it sees 1-2 of 4-5 meshes and a broken variant can sit unnoticed. Cycling guarantees
+        # every mesh is exercised once per full pass. See --mesh-cycle.
+        pool = list(dr_cfg.object_mesh_pool)
+        variant = pool[mesh_cycle[0] % len(pool)]
+        mesh_cycle[0] += 1
+    else:
+        variant = dr_cfg.sample_mesh_variant(rng)            # base-mesh pool pick (or None);
                                                              # same cadence as size/shape DR
     if not shp and variant is None:
         return nominal_spec, {"scale": nominal_scale, "bend_deg": 0.0, "mesh_variant": o.name}
@@ -877,6 +886,14 @@ def main() -> None:
     # Pass a value explicitly to override.
     p.add_argument("--grasp-E",           type=float, default=None,  help="object Young's modulus (Pa); default = the object's material")
     p.add_argument("--grasp-density",     type=float, default=None, help="object density (kg/m^3); default = the object's material")
+    p.add_argument("--mesh-cycle", action="store_true",
+                   help="Walk the DR object_mesh_pool in ORDER (round-robin), one mesh per scene "
+                        "rebuild, instead of sampling it uniformly at random. Guarantees every mesh "
+                        "in the pool is exercised — a uniform draw only covers the pool in "
+                        "expectation, and a short smoke run rebuilds the scene only once or twice, "
+                        "so it can miss most of the pool (and any broken variant in it). Use for "
+                        "smoke tests and coverage checks; leave OFF for real collections, where "
+                        "random sampling is the correct DR.")
     p.add_argument("--grasp-nu", default=None,
                    help="Poisson ratio for the grasp FEM. Default None keeps the HISTORICAL 0.33 "
                         "(MetricConfig's 'copper' default), which every collection before "
@@ -1171,11 +1188,14 @@ def main() -> None:
     do_scene_dr    = args.scene_dr_every > 0 and dr_cfg.has_scene_dr()
     deform_dir     = tempfile.mkdtemp(prefix="gm_synth_deform_") if do_scene_dr else None
 
+    _mesh_cycle = [0] if args.mesh_cycle else None    # round-robin cursor (see --mesh-cycle);
+                                                     # must precede the first _make_worker() call
     def _make_worker():
         """Build a GenesisWorker; if scene DR is on, on a freshly deformed+scaled mesh.
         Returns (worker, scene_dr_dict, actual_mesh_path)."""
         if do_scene_dr:
-            spec_dr, sdr = _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir)
+            spec_dr, sdr = _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir,
+                                           mesh_cycle=_mesh_cycle)
         else:
             spec_dr, sdr = nominal_spec, {"scale": float(nominal_spec.objects[0].scale or 1.0),
                                           "bend_deg": 0.0}

@@ -10,6 +10,14 @@ so a number can always be traced back to its configuration. Newest first.
 
 | date | object | run | eps | attempts | success | drop | synthesis recipe |
 |---|---|---|---|---|---|---|---|
+| 2026-08-27 17:46 | pasta_bundle | `26-08-27-jmx` | 6 | 14 | **43%** | 0 | area=auto, wmax=auto, yaw=69, sq=3.8mm, esc=2, az=60 |
+| 2026-08-27 17:35 | strawberry | `26-08-27-sjy` | 6 | 6 | **100%** | 0 | area=auto, wmax=auto, yaw=47, sq=4.9mm, esc=2, az=60 |
+| 2026-08-27 17:29 | tofu | `26-08-27-jak` | 6 | 6 | **100%** | 0 | area=auto, wmax=auto, yaw=36, sq=4.5mm, esc=2, az=60 |
+| 2026-08-27 17:22 | banana_chunk | `26-08-27-lvx` | 6 | 7 | **86%** | 0 | area=auto, wmax=auto, yaw=41, sq=3.1mm, esc=2, az=60 |
+| 2026-08-27 17:16 | mushroom | `26-08-27-vev` | 8 | 10 | **80%** | 0 | area=auto, wmax=auto, yaw=41, sq=4.8mm, esc=2, az=60 |
+| 2026-08-27 17:06 | tomato | `26-08-27-agj` | 8 | 11 | **73%** | 0 | area=auto, wmax=auto, yaw=69, sq=6.0mm, esc=2, az=60 |
+| 2026-08-27 16:54 | raspberry_stable | `26-08-27-iye` | 10 | 10 | **100%** | 0 | area=auto, wmax=auto, yaw=30, sq=2.1mm, esc=2, az=60 |
+| 2026-08-27 16:33 | cherry_tomato | `26-08-27-pti` | 8 | 9 | **89%** | 0 | area=auto, wmax=auto, yaw=30, sq=3.7mm, esc=2, az=60 |
 | 2026-08-27 16:08 | tomato | `26-08-27-xcv` | 8 | 9 | **89%** | 0 | area=auto, wmax=auto, yaw=69, sq=6.0mm, esc=2, az=60 |
 | 2026-08-27 16:01 | raspberry_stable | `26-08-27-sny` | 8 | 8 | **100%** | 0 | area=auto, wmax=auto, sq=2.1mm, esc=2, az=60 |
 | 2026-08-27 15:49 | cherry_tomato | `26-08-27-nec` | 8 | 9 | **89%** | 0 | area=auto, wmax=auto, sq=3.7mm, esc=2, az=60 |
@@ -88,4 +96,4 @@ so a number can always be traced back to its configuration. Newest first.
 | 2026-07-27 19:19 | mushroom_rigid | `26-07-27-hfx` | 330 | 497 | **66%** | 0 | area=None |
 | 2026-07-26 19:18 | mushroom_rigid | `26-07-26-sma` | 240 | 315 | **76%** | 0 | area=None |
 
-_77 runs with >= 4 saved episodes._
+_85 runs with >= 4 saved episodes._
