@@ -10,37 +10,43 @@ history in `docs/DEVLOG.md`.
 
 ---
 
-## 0a. ⚠⚠ DECISIVE (2026-08-27, job 1733577): NO VISION-BASED ADAPTATION EXISTS YET
+## 0a. MEASURE SLOPE, NOT CORRELATION — and aggregate per GEOMETRY (2026-08-27)
 
-Regressing per-episode at-grasp width on object scale SEPARATES the two effects that correlation
-and half-split "range" conflate:
+**The metric was wrong all campaign.** corr(width, size) and half-split "range" both conflate a
+MEAN SHIFT with genuine SIZE TRACKING: a policy that squeezes everything 4 mm harder scores well on
+both while being the opposite of gentle. The honest decomposition regresses per-episode at-grasp
+width on object scale and reports **intercept (mean shift) + SLOPE (tracking) + R2**.
+Demonstrator slope = **35.7 mm per unit scale**; a pure mean shift has slope ~0.
 
-| arm | intercept | **slope (mm/unit-scale)** | R2 | reading |
-|---|---|---|---|---|
-| demonstrator | — | **35.7** | — | real tracking |
-| **CFG 3.0 alone (vision only)** | 23.5 | **3.8** | 0.001 | **MEAN SHIFT, no tracking** |
-| contact stop alone | 30.3 | **1.5** | 0.001 | **MEAN SHIFT, no tracking** |
-| CFG + contact stop | 10.1 | **17.9** | 0.043 | tracks size (half demonstrator) |
+**Second correction: episodes are NOT independent.** `obj_scale` is constant within a batch (all
+envs share the rebuilt geometry), so effective n is the number of DISTINCT GEOMETRIES (10-12),
+not episodes (60-200). Un-aggregated slopes were wildly inconsistent across protocols (CFG 3.0:
+36.8 at probe vs 4.2 canonical). Aggregate per geometry, then regress, and report a 95% CI.
 
-**1. CFG is a SQUEEZE KNOB, not an adaptation mechanism.** Slope 3.8 vs 35.7, R2 0.001 — object
-size explains essentially NONE of its width variation. It closes ~7 mm tighter uniformly
-(intercept 23.5 vs 30.3). **The "2% -> 23% -> 49% of demonstrator range" reported earlier is an
-ARTIFACT**: a half-split range metric is inflated by a uniform mean shift. RETRACTED.
+**Corrected table (per-geometry aggregation, 95% CI):**
 
-**2. The only arm that tracks size does it through CONTACT, not vision.** Neither component tracks
-alone; together slope 17.9. Mechanism: CFG drives an aggressive over-closure and the contact stop
-cuts it off WHERE THE OBJECT IS — so the size information comes from PHYSICS AT CONTACT, not from
-the point cloud. That is the user's "cheating" objection, confirmed quantitatively, and it is not
-deployable anyway (§0).
+| arm | #geo | intercept | slope | R2 | 95% CI | verdict |
+|---|---|---|---|---|---|---|
+| baseline | 12 | 11.9 | 15.5 | 0.351 | [3.6, 27.5] | uncertain |
+| **floor m4 (VISION head)** | 12 | 5.6 | **26.5** | **0.733** | **[17.5, 35.6]** | **TRACKS** |
+| CFG 3.0 (probe) | 12 | -15.3 | 36.8 | 0.477 | [15.0, 58.6] | tracks, wide CI |
+| CFG 3.0 (canonical) | 10 | 23.0 | 4.2 | 0.019 | [-14.5, 22.9] | uncertain |
+| contact stop (canonical) | 10 | 30.1 | 1.7 | 0.017 | [-6.4, 9.8] | uncertain |
 
-**METRIC LESSON: report SLOPE, not correlation or half-split range.** Both of the latter conflate
-"moved the mean" with "tracked the size"; a policy that squeezes everything 4 mm harder scores well
-on them while being the OPPOSITE of gentle. Slope + R2 + intercept is the honest triple.
+**CONSEQUENCES**
+1. **The FLOOR tracks size, and it is VISION-based** (slope 26.5, R2 0.733, CI excludes 0 and
+   reaches the demonstrator's 35.7). Retiring the floor family on a correlation/range "trade curve"
+   was measuring the wrong axis. Its real cost is SUCCESS (0.517 at margin 4), not absent tracking.
+2. **CFG is UNRESOLVED**, not settled: its two protocols disagree with overlapping CIs. Both the
+   earlier "49% of demonstrator range" AND the later "squeeze knob, no tracking" verdict were
+   premature. What IS solid is its INTERCEPT: ~7 mm tighter, the over-squeeze seen in
+   `canon_cfg3_only/render/batch39_env4.mp4` (closure overshoots to 14.7 mm on a ~30 mm object;
+   17% of episodes close below 15 mm).
+3. **Precision is now the binding constraint, and it is a PROTOCOL issue, not a mechanism issue.**
+   SLOPE PROTOCOL adopted: 200 eps at `scene_group_size=1` -> **40 distinct geometries** (vs 10-12).
+   Running for baseline / floor m4 / CFG 3.0 (1733597/8/9).
 
-**STATUS: there is currently NO working vision-based width-adaptation mechanism.** Everything that
-looked like one was a constant squeeze or contact-driven.
-
-## 0. ⚠ HARD DEPLOYMENT CONSTRAINT (user, 2026-08-27): NO CONTACT SENSING ON THE REAL RIG
+## 0. ⚠ HARD DEPLOYMENT CONSTRAINT## 0. ⚠ HARD DEPLOYMENT CONSTRAINT (user, 2026-08-27): NO CONTACT SENSING ON THE REAL RIG
 
 **The real XArm gripper has NO force/current feedback**, and **a soft delicate object cannot block
 a position-controlled finger**, so there is no stall to detect either. MEASURED (job 1733479, demo
