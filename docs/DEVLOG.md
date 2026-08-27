@@ -80,6 +80,22 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
 
 ## Conclusions to date (2026-08-23)
 
+**Multi-object grasp synthesis (2026-08-27).** ONE auto recipe now covers four objects with no
+per-object parameters — `--grasp-area-min-mm2 auto --grasp-width-max-mm auto`, with E / density /
+yield resolved from the object's own material (previously ALL objects silently used the
+mushroom's 3e5 / 1000, which corrupted both stress AND grip force per object):
+
+| object | demonstrator success | stress vs yield | align |
+|---|---|---|---|
+| mushroom | 16/16 = 100 % | 29 % | 0.94 |
+| raspberry | 16/16 = 100 % | 40 % | 0.89 |
+| tofu | 23/24 = 96 % | 15 % | 0.98 |
+| strawberry | 22/24 = 92 % | 60 % | 0.92 |
+
+Tofu needed no special handling. Strawberry at 60 % of yield is the closest to bruising and is
+worth watching. **The banana is PARKED** — see Open questions; it is a contact-model validity
+limit, not a tuning gap.
+
 1. **7d euler-abs ≈ 10d rot6d** in sim (0.84 vs 0.88) once the euler encoding carries a
    frame offset and commanded-target derivation → the compact action is (nearly) free.
 2. **Abs ≈ delta in sim**; abs chosen for real deployment because it re-anchors to an
@@ -144,6 +160,21 @@ inside x [0.29, 0.48] × y [−0.11, 0.11] (robot-base frame).
    `qjzsf/state_500-1000` (real-only DPPO abs).
 
 ## Open questions (gates before further building)
+
+- **~~Can the banana be added as a multi-object category?~~ PARKED (2026-08-27, user decision:
+  "give banana up").** Not a tuning problem and not worth more effort: the FEM contact model
+  scores **0/8** of the grasps that demonstrably lift it (`degenerate` 5/8, `no_contact` 3/8),
+  because it evaluates contact against the NOMINAL undeformed mesh and the banana's working
+  grasps need ~54 % compression — outside small-strain validity (`max_indent` 0.01 m). The model
+  is correct within its assumptions; the banana violates them. **Do not re-attempt via seeding,
+  CMA budget, width caps or area floors — all four were tried and cannot work, because the
+  target grasps are unscoreable, not merely unfound.** Reopening this requires a contact model
+  evaluated in the DEFORMED configuration plus a large-deformation stress model (the linear FEM's
+  stress is untrustworthy at 54 % strain), which is a project in itself.
+  Stopgap if ever needed: the geometric heuristic (centre, closing perpendicular to the longest
+  axis) lifts it 80 % at 26 mm with 11 % compression — see the 2026-08-27 log entries.
+  **The other four objects are unaffected and READY**: mushroom 100 %, raspberry 100 %, tofu 96 %,
+  strawberry 92 % under the all-auto recipe.
 
 - **Real-robot validation of the whole foundation** — nothing above is real-verified yet.
 - **~~Does real co-training help in real?~~ ANSWERED (2026-08-23, real-robot runs): YES.**
