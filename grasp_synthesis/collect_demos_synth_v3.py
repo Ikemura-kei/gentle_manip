@@ -845,17 +845,29 @@ def _merge_shards(run_dir: Path) -> Optional[Path]:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def _extra_close_arg(args, obj_def):
-    """'auto' -> squeeze scaled by object size (see --grasp-extra-close); a number passes through."""
+    """'auto' -> squeeze scaled by the object's MATERIAL and size (see --grasp-extra-close).
+
+    SIZE ALONE IS NOT ENOUGH. For an indentation d over a characteristic length L the induced
+    stress goes as sigma ~ E * d / L, so keeping sigma under yield requires
+
+        d  <=  K * (yield / E) * L
+
+    i.e. the squeeze must scale with the material's yield/E ratio, not just the object size.
+    That ratio varies 2.7x across our objects (tofu 2.5, mushroom 7.5, cherry tomato 13.3), so a
+    size-only rule that is gentle on one is damaging on another. Measured 2026-08-29 mid-
+    collection: with the size-only rule the mushroom came out at median 0.58x yield / 99.6%
+    sub-yield, while the cherry tomato -- stiffer E AND lower yield -- ran at median 1.18x yield
+    with only 5.8% sub-yield, i.e. essentially the whole category past yield.
+
+    K = 0.455 is calibrated on the mushroom so its squeeze is UNCHANGED at 1.94 mm, which keeps
+    the already-collected (and validated) mushroom set exactly reproducible. Everything else is
+    then derived from that object's own E and yield -- no per-category constants.
+    """
     if str(args.grasp_extra_close).lower() != "auto":
         return float(args.grasp_extra_close)
-    # BASE 2 mm, not the historical 5 mm. The 5 mm was tuned for grip reliability BEFORE we knew
-    # what it did to the material: measured 2026-08-28 on the mushroom under full DR, 4.8 mm put
-    # the peak von Mises at ~1.10x yield with ~0 % of demos sub-yield, while 2 mm gave median
-    # 0.56x with 83 % sub-yield AND slightly BETTER demonstrator success (86 % vs 80 %). Past
-    # yield the MPM saturates, so the demos were all in the regime where the gentleness objective
-    # carries no information (see docs/grasp_synthesis_model.md 9c).
-    smallest = float(min(obj_def.size))
-    return float(np.clip(0.002 * (smallest / 0.033), 0.001, 0.003))
+    m = obj_def.material
+    ratio = float(m.von_mises_yield_stress) / float(m.youngs_modulus)
+    return float(np.clip(0.455 * ratio * float(min(obj_def.size)), 0.0005, 0.003))
 
 
 def _yaw_max_arg(args, obj_def):

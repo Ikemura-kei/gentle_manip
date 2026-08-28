@@ -444,6 +444,55 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-29 — CAUGHT MID-COLLECTION: the size-only squeeze rule is GENTLE ON THE MUSHROOM AND
+DAMAGING ON THE CHERRY TOMATO. Replaced with a MATERIAL-AWARE rule; mushroom set preserved.**
+
+Routine status check on the running collection compared per-category gentleness:
+
+| object | median stress | sub-yield |
+|---|---|---|
+| mushroom (done, 250 eps) | 0.58x yield | **99.6 %** |
+| cherry_tomato (124 eps in) | **1.18x yield** | **5.8 %** |
+
+The cherry tomato was being collected in exactly the past-yield regime the whole squeeze fix
+existed to escape. **Killed the chain at 124/250 and discarded that run.**
+
+**Cause: `--grasp-extra-close auto` scaled with SIZE ONLY.** For an indentation `d` over a
+characteristic length `L`, stress goes as `sigma ~ E * d / L`, so staying under yield requires
+
+    d  <=  K * (yield / E) * L
+
+The squeeze must scale with the material's **yield/E** ratio, and that ratio varies **2.7x**
+across our objects (tofu 2.5, raspberry 6.7, mushroom 7.5, strawberry 8.3, banana_chunk 10.0,
+tomato 12.0, cherry_tomato 13.3). The cherry tomato is the worst case — the STIFFEST E (0.4 MPa)
+combined with a LOW yield (30 kPa) — so a squeeze that is gentle on a mushroom drives it well past
+yield. A size-only rule cannot express that.
+
+**Fix:** `K = 0.455`, calibrated so the MUSHROOM's squeeze is unchanged at 1.94 mm — which keeps
+the already-finished, validated mushroom set exactly reproducible and means it does NOT need
+recollecting. Every other object is then derived from its own E and yield, so this remains a
+zero-per-category-constant rule:
+
+| object | size-only (old) | material-aware (new) |
+|---|---|---|
+| mushroom | 1.94 mm | **1.94 mm** (unchanged by construction) |
+| cherry_tomato | 1.50 mm | **0.84 mm** |
+| tomato | 2.78 mm | 1.74 mm |
+| banana_chunk | 1.24 mm | 0.93 mm |
+| strawberry | 1.97 mm | 1.77 mm |
+| raspberry | 1.00 mm | 0.94 mm |
+| tofu | 1.82 mm | **3.00 mm** (very soft, yield/E = 0.4 -> tolerates MORE squeeze; clipped) |
+
+Note tofu moves the OTHER way: being soft with a relatively high yield it was being squeezed too
+LITTLE, which costs grip reliability for no gentleness benefit.
+
+**Method note — this is why per-category gentleness must be checked DURING collection, not after.**
+The mushroom's 99.6 % looked like proof the recipe was right; it was proof the recipe was right
+*for the mushroom*. A single validated object cannot certify a rule that depends on material.
+
+Chain restarted at cherry_tomato (mushroom retained). 6 categories remaining.
+
+
 **2026-08-28 — MY OWN BUG: three collection chains ran CONCURRENTLY for hours. Cause: a BRE
 alternation in a `pgrep` pattern, so every "kill" was a no-op and every "relaunch" stacked.**
 
