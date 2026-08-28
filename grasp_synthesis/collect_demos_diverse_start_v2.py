@@ -120,9 +120,13 @@ def _synth_bounds_topdown(obj_pos: np.ndarray, top_down: bool):
     """v1._synth_bounds with the roll/pitch bound tightened for a top-down grip."""
     lb, ub = v1._synth_bounds(obj_pos)
     if top_down:
-        # x = [tx, ty, tz, roll, pitch, yaw, width]; indices 3=roll, 4=pitch
-        lb[3], ub[3] = -0.16 * np.pi, 0.16 * np.pi
-        lb[4], ub[4] = -0.10 * np.pi, 0.10 * np.pi
+        # x = [tx, ty, tz, roll, pitch, yaw, width]. ONLY clamp pitch (approach tilt
+        # away from straight-down); roll is left at the full default range because the
+        # actual downward TCP orientation in this "xyz" euler convention sits near
+        # roll = +-pi, NOT near 0 -- clamping roll to a small band (the original bug)
+        # forced a sideways grip and CMA-ES could not find contact (cost 42 vs 0.001).
+        # The sky/ground penalties in grasp_cost already keep the approach top-ish.
+        lb[4], ub[4] = -0.18 * np.pi, 0.18 * np.pi
     return lb, ub
 
 
@@ -380,8 +384,8 @@ def main() -> None:
     p.add_argument("--start-modes", type=str,
                    default="home:0.25,near_object:0.30,near_ground:0.25,mid_air:0.20",
                    help="comma list mode:weight -- per-episode EE start-pose distribution")
-    p.add_argument("--top-down", dest="top_down", action="store_true", default=True,
-                   help="clamp CMA-ES roll/pitch so grasps are top-down (default on)")
+    p.add_argument("--top-down", dest="top_down", action="store_true", default=False,
+                   help="clamp CMA-ES approach PITCH so grasps stay top-ish (default OFF; the\n                         sky/ground penalties in grasp_cost already bias top-down)")
     p.add_argument("--no-top-down", dest="top_down", action="store_false")
     p.add_argument("--record-video", dest="record_video", nargs="?", type=int,
                    const=10**9, default=0,

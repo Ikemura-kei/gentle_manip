@@ -79,3 +79,15 @@ sbatch --dependency=afterok:$CID gentle_manip/scripts/arrhenius/yd_banana_pipeli
   handoff note) also pip-installed `gstaichi`; both register the same pybind11 types
   -> conflict when imported in one process. Fix: drop gstaichi entirely from the build
   script, verify `import quadrants; import genesis` instead. Resubmitting.
+- 2026-08-28 ~18:35 — smoke/diag revealed: the "banana" mesh is a 5.7cm VERTICAL
+  baton (long axis Z). Rigid: topples during settle; ungraspable top-down (finger
+  reach 7cm > baton height); CMA-ES with my roll-clamp couldn't find contact
+  (cost 42); unclamped it found valid LOW SIDE grasps (cost 0.001) that then fail
+  to lift (eccentric grip on a top-heavy smooth rigid stick -> slip). FIXES:
+  (1) new asset banana_piece_lying.obj + registry "banana_lying" = banana rotated
+      long-axis-horizontal, rests on its side (how it sits on a table IRL);
+  (2) single_lift_banana_rigid task -> object_name banana_lying;
+  (3) v2 --top-down: default OFF, and when on clamp ONLY pitch (roll must stay full
+      -- downward TCP orientation is near roll=+-pi in this euler convention, the
+      original clamp bug forced a sideways grip).
+  Re-running yd_diag_banana (A home/noDR, B home/DR, C full).
