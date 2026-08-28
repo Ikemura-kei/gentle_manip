@@ -20,7 +20,7 @@ N_EPISODES=${N_EPISODES:-500}   # full 500 fresh (6 start modes incl above_objec
 N_ENVS=${N_ENVS:-8}
 MAXFEVALS=${MAXFEVALS:-700}
 SEED=${SEED:-0}
-START_MODES=${START_MODES:-home:0.15,near_object:0.20,above_object:0.18,mid_approach:0.22,near_ground:0.13,mid_air:0.12}
+START_MODES=${START_MODES:-sweep:0.62,above:0.15,ground:0.12,air:0.11}
 
 echo "[collect] n_episodes=$N_EPISODES n_envs=$N_ENVS maxfevals=$MAXFEVALS seed=$SEED"
 echo "[collect] start_modes=$START_MODES"

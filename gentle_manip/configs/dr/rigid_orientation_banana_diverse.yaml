@@ -15,7 +15,7 @@
 # (rigid has no particles / von Mises).
 # Used by: experiments (dr:) single_lift_banana_rigid_diverse
 # Status: experimental
-object_pos_xy: 0.08
+object_pos_xy: 0.10
 robot_init_pos_xyz: 0.03
 object_yaw_deg: 180
 object_pitch_roll_deg: 14

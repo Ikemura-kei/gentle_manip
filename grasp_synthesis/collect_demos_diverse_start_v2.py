@@ -14,11 +14,12 @@ v2 adds, per the user's requirements for the rigid-banana surrogate campaign:
      data.pkl, with NO padded / duplicated / frozen frames. -> <run>/videos/
      epNNNN_envM.mp4
 
-  2. RICH end-effector start diversity (`--start-modes`, default
-     "home:0.25,near_object:0.30,near_ground:0.25,mid_air:0.20"). Instead of the
-     binary home/near-object of v1, each episode samples a start MODE that places
-     the EE (via an UNRECORDED pre-roll from home) at a diverse pose that looks
-     like where a failed first attempt would leave you:
+  2. CONTINUOUS end-effector start coverage (`--start-modes` = family weights,
+     default "sweep:0.62,above:0.15,ground:0.12,air:0.11"). The dominant "sweep"
+     family draws t~U(0,1) and starts the EE that fraction of the way from home to
+     the grasp target (lateral + orientation jitter grow with t) -- so a run
+     densely covers the ENTIRE home->object corridor, not a few fixed poses. Three
+     smaller off-corridor families cover post-failure states off the direct path:
        home        -- the classic fixed home start (no pre-roll)
        near_object -- just off the real grasp point (small random 3D offset),
                       gripper open: "aimed here, object moved / missed"
@@ -89,19 +90,19 @@ TRIM_MARGIN_STEPS  = 5
 # ── Pre-roll ──
 N_PREROLL_STEPS = 60           # unrecorded home -> start-pose steps (all non-home modes)
 
-START_MODES = ("home", "near_object", "above_object", "near_ground", "mid_air", "mid_approach")
-
-# per-mode: number of RECORDED approach steps (start-pose -> grasp target).
-# home keeps v1's full N_HOME_TO_PRE; the diverse modes start closer / need a
-# shorter, sharper redirect (which is the regrasp-approach behaviour we want).
-RECORDED_APPROACH_STEPS = {
-    "home":         v1.N_HOME_TO_PRE,
-    "near_object":  max(30, v1.N_HOME_TO_PRE // 3),
-    "near_ground":  max(40, v1.N_HOME_TO_PRE // 2),
-    "mid_air":      v1.N_HOME_TO_PRE,
-    "mid_approach": max(45, (2 * v1.N_HOME_TO_PRE) // 3),
-    "above_object": max(30, v1.N_HOME_TO_PRE // 2),
-}
+# EE start pose is sampled CONTINUOUSLY, not from a handful of discrete poses.
+# The dominant family "sweep" places the EE at a UNIFORM RANDOM fraction t~U(0,1)
+# of the way from home to the grasp target -- so across a run the start pose covers
+# the whole home->object corridor densely, with lateral + orientation jitter that
+# GROWS toward the object (a near-object start is noisier than a home start). Three
+# smaller off-corridor families cover post-failure states that are NOT on the direct
+# path: "above" (over the object, wrong height/rotation), "ground" (descended low to
+# the wrong spot), "air" (wandered off). --start-modes sets the family weights;
+# legacy keys (home/near_object/mid_approach) fold into "sweep".
+START_FAMILIES = ("sweep", "above", "ground", "air")
+_LEGACY_FAMILY = {"home": "sweep", "near_object": "sweep", "mid_approach": "sweep",
+                  "above_object": "above", "near_ground": "ground", "mid_air": "air"}
+DEFAULT_START_MODES = "sweep:0.62,above:0.15,ground:0.12,air:0.11"
 
 
 def _wxyz_to_rot(q): return Rot.from_quat([q[1], q[2], q[3], q[0]])
@@ -133,71 +134,70 @@ def _synth_bounds_topdown(obj_pos: np.ndarray, top_down: bool):
 
 
 def _parse_start_modes(spec: str) -> Tuple[np.ndarray, np.ndarray]:
-    """"home:0.25,near_object:0.30,..." -> (modes, probs) both aligned to START_MODES."""
-    weights = {m: 0.0 for m in START_MODES}
+    """"sweep:0.62,above:0.15,..." -> (families, probs). Legacy per-pose keys
+    (home/near_object/mid_approach/above_object/near_ground/mid_air) are accepted
+    and summed into their family."""
+    w = {fam: 0.0 for fam in START_FAMILIES}
     for tok in spec.split(","):
         tok = tok.strip()
         if not tok:
             continue
-        name, _, w = tok.partition(":")
+        name, _, val = tok.partition(":")
         name = name.strip()
-        if name not in weights:
-            raise ValueError(f"unknown start mode {name!r}; valid: {START_MODES}")
-        weights[name] = float(w) if w else 1.0
-    probs = np.array([weights[m] for m in START_MODES], np.float64)
+        fam = name if name in w else _LEGACY_FAMILY.get(name)
+        if fam is None:
+            raise ValueError(f"unknown start family {name!r}; valid: {START_FAMILIES} "
+                             f"(or legacy {list(_LEGACY_FAMILY)})")
+        w[fam] += float(val) if val else 1.0
+    probs = np.array([w[fam] for fam in START_FAMILIES], np.float64)
     if probs.sum() <= 0:
         raise ValueError("start-modes weights sum to 0")
-    return np.array(START_MODES), probs / probs.sum()
+    return np.array(START_FAMILIES), probs / probs.sum()
 
 
-def _start_pose_for_mode(mode: str, home_p, home_q, grasp_p, grasp_q, obj_p, rng):
-    """(start_pos (3,), start_quat wxyz (4,)) for one env's sampled start mode.
-    All non-home modes: gripper open, roughly grasp orientation."""
-    if mode == "home":
-        return home_p.copy(), home_q.copy()
-    gq = grasp_q.copy()
-    if mode == "near_object":
-        off = rng.normal(0, 1, 3).astype(np.float32)
-        off /= (np.linalg.norm(off) + 1e-8)
-        off *= rng.uniform(0.02, 0.06)
-        off[2] = abs(off[2]) + rng.uniform(0.0, 0.04)   # bias to ABOVE the grasp point
-        return _clamp_ws(grasp_p + off), gq
-    if mode == "above_object":
-        # EE hovering directly ABOVE the object centroid at a VARIED height and a
-        # VARIED orientation (yaw free, small pitch/roll tilt) -- "a first attempt
-        # descended over the object but at the wrong height / rotation".
-        h = rng.uniform(0.03, 0.20)                       # metres above the grasp point
-        xy = rng.normal(0, 1, 2).astype(np.float32) * 0.015
+def _sample_start(fam: str, home_p, home_q, grasp_p, grasp_q, obj_p, rng):
+    """(start_pos(3), start_quat wxyz(4), n_recorded_approach:int, label:str).
+    Gripper open, orientation ~ grasp orientation. `fam` in START_FAMILIES."""
+    N = v1.N_HOME_TO_PRE
+
+    def _slerp(qa, qb, t):
+        return _rot_to_wxyz(Slerp([0., 1.], Rot.concatenate(
+            [_wxyz_to_rot(qa), _wxyz_to_rot(qb)]))(float(np.clip(t, 0, 1))))
+
+    if fam == "sweep":
+        t = float(rng.random())                       # UNIFORM along home->object
+        lat = (0.008 + 0.050 * t)                      # jitter grows toward the object
+        off = rng.normal(0, 1, 3).astype(np.float32) * np.array([lat, lat, 0.5 * lat], np.float32)
+        p = home_p + t * (grasp_p - home_p) + off
+        base = _wxyz_to_rot(_slerp(home_q, grasp_q, t))
+        jit = Rot.from_rotvec(rng.normal(0, 1, 3).astype(np.float32) * (0.04 + 0.22 * t))
+        q = _rot_to_wxyz(jit * base)
+        n_appr = int(np.clip(round(N * (1.0 - 0.72 * t)), 24, N))
+        label = "home" if t < 0.15 else ("near_object" if t > 0.72 else "mid_approach")
+        return _clamp_ws(p), q, n_appr, label
+
+    if fam == "above":
+        h = rng.uniform(0.03, 0.20)
+        xy = rng.normal(0, 1, 2).astype(np.float32) * 0.02
         p = np.array([grasp_p[0] + xy[0], grasp_p[1] + xy[1], grasp_p[2] + h], np.float32)
-        tilt = Rot.from_rotvec(np.array([rng.uniform(-0.35, 0.35),
-                                         rng.uniform(-0.35, 0.35),
+        tilt = Rot.from_rotvec(np.array([rng.uniform(-0.4, 0.4), rng.uniform(-0.4, 0.4),
                                          rng.uniform(-np.pi, np.pi)], np.float32))
         q = _rot_to_wxyz(tilt * _wxyz_to_rot(grasp_q))
-        return _clamp_ws(p), q
-    if mode == "near_ground":
-        ang = rng.uniform(0, 2 * np.pi)
-        r = rng.uniform(0.05, 0.14)
-        off = np.array([r * np.cos(ang), r * np.sin(ang),
-                        rng.uniform(-0.04, 0.02)], np.float32)
-        p = grasp_p + off
-        p[2] = min(p[2], grasp_p[2] + 0.03)             # keep it LOW
-        return _clamp_ws(p), gq
-    if mode == "mid_approach":
-        # EE partway along the home->grasp path (as if a first attempt was already
-        # heading for the object): position + orientation both interpolated by the
-        # same fraction, plus a small lateral jitter so it is not exactly on the line.
-        a = rng.uniform(0.35, 0.70)
-        p = home_p + a * (grasp_p - home_p)
-        p = p + rng.normal(0, 1, 3).astype(np.float32) * np.array([0.02, 0.02, 0.015], np.float32)
-        q = _rot_to_wxyz(Slerp([0., 1.], Rot.concatenate(
-            [_wxyz_to_rot(home_q), _wxyz_to_rot(grasp_q)]))(float(a)))
-        return _clamp_ws(p), q
-    # mid_air: random point in a box around home
-    off = np.array([rng.uniform(-0.10, 0.10), rng.uniform(-0.12, 0.12),
-                    rng.uniform(-0.08, 0.06)], np.float32)
-    dq = Rot.from_rotvec(rng.normal(0, 0.15, 3))
-    q = _rot_to_wxyz(dq * _wxyz_to_rot(home_q))
-    return _clamp_ws(home_p + off), q
+        return _clamp_ws(p), q, max(28, N // 2), "above_object"
+
+    if fam == "ground":
+        ang = rng.uniform(0, 2 * np.pi); r = rng.uniform(0.05, 0.16)
+        p = grasp_p + np.array([r * np.cos(ang), r * np.sin(ang),
+                                rng.uniform(-0.04, 0.02)], np.float32)
+        p[2] = min(p[2], grasp_p[2] + 0.03)
+        return _clamp_ws(p), _rot_to_wxyz(_wxyz_to_rot(grasp_q)), max(40, N // 2), "near_ground"
+
+    # air: random point in a box around home
+    off = np.array([rng.uniform(-0.11, 0.11), rng.uniform(-0.13, 0.13),
+                    rng.uniform(-0.09, 0.07)], np.float32)
+    dq = Rot.from_rotvec(rng.normal(0, 0.18, 3))
+    return _clamp_ws(home_p + off), _rot_to_wxyz(dq * _wxyz_to_rot(home_q)), N, "mid_air"
+
 
 
 def execute_and_collect_diverse_v2(
@@ -246,13 +246,17 @@ def execute_and_collect_diverse_v2(
     start_pos  = np.zeros((num_envs, 3), np.float32)
     start_quat = np.zeros((num_envs, 4), np.float32)
     n_appr = np.zeros(num_envs, np.int64)
+    labels = []
     for i in range(num_envs):
-        sp, sq = _start_pose_for_mode(modes[i], home_pos[i], home_quat[i],
-                                      pos_b[i], quat_b[i], obj_center[i], rng)
+        sp, sq, na, lab = _sample_start(modes[i], home_pos[i], home_quat[i],
+                                        pos_b[i], quat_b[i], obj_center[i], rng)
         start_pos[i], start_quat[i] = sp, sq
-        n_appr[i] = RECORDED_APPROACH_STEPS[modes[i]]
-
-    any_preroll = any(m != "home" for m in modes)
+        n_appr[i] = na
+        labels.append(lab)
+    # per-env label (home/mid_approach/near_object/above_object/near_ground/mid_air) for
+    # video filenames + the episode "start_mode" tag; the collector's caller reads it back.
+    modes[:] = labels
+    any_preroll = any(l != "home" for l in labels)
     n_preroll_steps = N_PREROLL_STEPS if any_preroll else 0
 
     def _lerp(a, b, alpha):
@@ -263,7 +267,7 @@ def execute_and_collect_diverse_v2(
             [_wxyz_to_rot(qa), _wxyz_to_rot(qb)]))(float(np.clip(t, 0, 1))))
 
     # ── Unrecorded pre-roll: home -> start_pose ──
-    move = np.array([m != "home" for m in modes])
+    move = np.array([m != "home" for m in modes])   # modes now holds per-env labels
     for j in range(n_preroll_steps):
         a = np.where(move, np.clip((j + 1) / N_PREROLL_STEPS, 0.0, 1.0), 0.0)
         qb = np.stack([_slerp_pair(home_quat[i], start_quat[i], a[i]) for i in range(num_envs)])
@@ -404,8 +408,7 @@ def main() -> None:
     p.add_argument("--scene-dr-every", type=int, default=1)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--keep-failures", action="store_true")
-    p.add_argument("--start-modes", type=str,
-                   default="home:0.15,near_object:0.20,above_object:0.18,mid_approach:0.22,near_ground:0.13,mid_air:0.12",
+    p.add_argument("--start-modes", type=str, default=DEFAULT_START_MODES,
                    help="comma list mode:weight -- per-episode EE start-pose distribution")
     p.add_argument("--top-down", dest="top_down", action="store_true", default=False,
                    help="clamp CMA-ES approach PITCH so grasps stay top-ish (default OFF; the\n                         sky/ground penalties in grasp_cost already bias top-down)")
@@ -534,7 +537,7 @@ def main() -> None:
                 all_best_x.append(best_x)
                 print(f"  Env {i}: cost={score:.3f}  tcp={best_x[:3].round(3)}  w={best_x[6]*1e3:.1f}mm")
 
-            modes = list(np.asarray(modes_arr)[rng.choice(len(modes_arr), size=n, p=modes_p)])
+            modes = list(np.asarray(modes_arr)[rng.choice(len(modes_arr), size=n, p=modes_p)])  # families; overwritten in-place with per-env labels
             print(f"  start modes: {modes}")
 
             want_video = bool(args.record_video) and total_saved < args.record_video
