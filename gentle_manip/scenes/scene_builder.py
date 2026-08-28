@@ -97,9 +97,21 @@ def build_scene(
     # (requires env_separate_rigid=True in VisOptions). Only safe when no MPM/soft
     # objects are in the scene — the rasterizer cannot separate MPM geometry per-env,
     # so soft scenes must keep the per-env bound-camera path.
-    use_batch_render = not has_soft
-    if use_batch_render:
-        print(f"[scene_builder] all-rigid scene → batched camera rendering (env_separate_rigid=True)",
+    # Batched rendering ALSO needs genesis's Madrona batch renderer, which only ships
+    # for Linux x86-64 (no gs-madrona aarch64 wheel; genesis raises "only supported on
+    # Linux x86-64" at camera build). On aarch64 (GH200) OR with GM_NO_BATCH_RENDER=1,
+    # fall back to the per-env bound-camera path — the same one soft scenes use.
+    try:
+        from genesis.vis.batch_renderer import _MADRONA_AVAILABLE as _MADRONA_OK
+    except Exception:
+        _MADRONA_OK = False
+    use_batch_render = (not has_soft) and bool(_MADRONA_OK) and os.environ.get("GM_NO_BATCH_RENDER") != "1"
+    if (not has_soft) and not use_batch_render:
+        print("[scene_builder] all-rigid scene, but batched rendering unavailable "
+              f"(madrona={bool(_MADRONA_OK)}, GM_NO_BATCH_RENDER={os.environ.get('GM_NO_BATCH_RENDER')}) "
+              "→ per-env bound cameras", flush=True)
+    elif use_batch_render:
+        print("[scene_builder] all-rigid scene → batched camera rendering (env_separate_rigid=True)",
               flush=True)
 
     # Opt-in env overrides for cluster experiments (unset -> shared config unchanged):

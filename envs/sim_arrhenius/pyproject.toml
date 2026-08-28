@@ -62,3 +62,10 @@ torchaudio = { index = "pytorch-cu126" }
 constraint-dependencies = [
     "pymeshlab<2025",  # 2025.x requires manylinux_2_35; older wheels support manylinux_2_31
 ]
+# GH200 = aarch64 + RHEL9.8 (glibc 2.34): pymeshlab has NO compatible Linux/aarch64 wheel
+# (<2025 = x86 only; >=2025.7 needs glibc 2.35). Genesis only lazy-imports it inside
+# Mesh.remesh (isotropic remeshing) -- never hit by rigid tasks or the trimesh-only
+# mesh_deform shape DR -- so drop it on aarch64 rather than build Qt+pymeshlab from source.
+override-dependencies = [
+    "pymeshlab; platform_machine != 'aarch64'",
+]
