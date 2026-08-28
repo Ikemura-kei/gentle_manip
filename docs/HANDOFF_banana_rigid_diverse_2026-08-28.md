@@ -124,3 +124,11 @@ object) and widened object_scale DR (0.78-1.28). Fresh 500-demo rigid collection
 relaunched with all 6 start modes.
 9 in-domain object shortlist (soft, non-extreme material, mesh present, collect well):
 mushroom, banana, grape, kiwi, strawberry, tomato, cherry, raspberry, egg_boiled.
+- 2026-08-28 ~23:45 — added start modes above_object (varied height+pose over object)
+  + mid_approach; widened object_scale DR (0.78-1.28). Relaunched fresh 500-demo
+  rigid collection (1771952) + pipeline (1771953). Published standalone demo
+  showcase artifact https://claude.ai/code/artifact/5682ac2f-0b24-446f-88f1-b556778a9bbc
+  (GRACE design system; 15 rigid-banana clips across home/near_object/mid_air/
+  near_ground + aim & method writeup). GRACE itself is at the 16MB cap -- link the
+  new artifact from it manually. Loop cron updated (b8da4e7b) with the full
+  rigid->soft->9-object-generalist phase machine.
