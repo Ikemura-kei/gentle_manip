@@ -466,6 +466,7 @@ def execute_and_collect(
     priv_cfg=None,                 # PrivilegedConfig or None — sim-only state-teacher fields
     dr_vec=None,                   # (2,) [scale, bend_deg] for priv_object_dr_params
     yield_stress=None,             # Pa — normalizer for priv_stress (None = stress not emitted)
+    firm_close_m=None,             # m — material-aware BASE firm close; None = FIRM_EXTRA_CLOSE_M
     extra_close: float = 0.0,      # squeeze this many meters TIGHTER than the synthesized width (all grasps)
     approach_xy_finish=None,       # v3.2: (lo, hi) per-env xy-progress finish fraction; None = straight line
     approach_speed=None,           # v3.3: m/step — per-env approach DURATION = dist/speed (constant
@@ -519,7 +520,21 @@ def execute_and_collect(
     # Per-env firm close distance (m). SOFT firms EVERY grasp by the base amount (the grip
     # margin the old path gave all grasps); a weak grasp (low stress rise) gets set to a LARGER
     # value at the grasp->firm boundary. RIGID leaves this at base and skips firm when already firm.
-    firm_close = np.full(num_envs, FIRM_EXTRA_CLOSE_M, np.float32)
+    # FIRM CLOSE — material-aware, same scale as the base squeeze. The constants below are
+    # 2.0 mm base + 2.5 mm weak applied to EVERY soft grasp regardless of object. Measured
+    # 2026-08-29: on the cherry tomato that is 4.5 mm of extra closure on a 24.7 mm object (18 %),
+    # dwarfing the 0.84 mm base squeeze — which is why reducing the squeeze alone barely moved its
+    # sub-yield rate (5.8 % -> 6 %). Scaling firm by the same (yield/E)*L indentation budget keeps
+    # the mushroom at 1.94/2.43 mm (vs 2.0/2.5, i.e. unchanged in practice, so its collected set
+    # stays valid) while the cherry tomato drops to 0.84/1.05 mm.
+    _firm_base = FIRM_EXTRA_CLOSE_M if firm_close_m is None else float(firm_close_m)
+    # "weak" is judged by a stress RISE, and 2000 Pa is 5 % of the mushroom's 40 kPa yield but
+    # 6.7 % of the cherry tomato's 30 kPa — so the same absolute bar means different things.
+    # Express it as that same 5 % of the object's own yield (mushroom unchanged).
+    _firm_thresh = (FIRM_STRESS_THRESH_PA if not yield_stress
+                    else 0.05 * float(yield_stress))
+    _firm_weak = _firm_base * (FIRM_WEAK_EXTRA_CLOSE_M / FIRM_EXTRA_CLOSE_M)
+    firm_close = np.full(num_envs, _firm_base, np.float32)
     _has_firm  = any(n == "firm" for n, _ in PHASES)   # --n-firm 0 drops the phase: skip the check too
 
     home_pos  = np.tile(worker.robot.home_pos[None].astype(np.float32),  (num_envs, 1))
@@ -744,7 +759,7 @@ def execute_and_collect(
             if cf is not None:                        # RIGID: contact force (N). ALWAYS firm base;
                 for i in np.where(leaving_grasp)[0]:  # weak grip (force < thresh) firms base+extra.
                     if cf[i] < FIRM_FORCE_THRESH_N:
-                        firm_close[i] = FIRM_EXTRA_CLOSE_M + FIRM_WEAK_EXTRA_CLOSE_M
+                        firm_close[i] = _firm_base + _firm_weak
                         print(f"    [firm] env {i}: weak grip force {cf[i]:.2f}N < "
                               f"{FIRM_FORCE_THRESH_N}N -> closing {firm_close[i]*1000:.1f}mm (base+extra)")
                     # else: base firm close (never skip)
@@ -756,10 +771,10 @@ def execute_and_collect(
                     cur = _stress_top10(vm)
                     for i in np.where(leaving_grasp)[0]:
                         rise = float(cur[i] - rest_stress[i])
-                        if rise < FIRM_STRESS_THRESH_PA:
-                            firm_close[i] = FIRM_EXTRA_CLOSE_M + FIRM_WEAK_EXTRA_CLOSE_M
+                        if rise < _firm_thresh:
+                            firm_close[i] = _firm_base + _firm_weak
                             print(f"    [firm] env {i}: weak stress rise {rise:.0f}Pa < "
-                                  f"{FIRM_STRESS_THRESH_PA:.0f}Pa -> closing {firm_close[i]*1000:.1f}mm (base+extra)")
+                                  f"{_firm_thresh:.0f}Pa -> closing {firm_close[i]*1000:.1f}mm (base+extra)")
                         # else: firm_close stays at base -> still firms, just not extra
 
         phase_idx[rolled_over]  += advance[rolled_over]
@@ -1481,7 +1496,7 @@ def main() -> None:
                 approach_xy_finish=args.approach_xy_finish, approach_rng=approach_rng,
             approach_speed=args.approach_speed,
                 trim_max_run=args.held_run_max, trim_keep=args.held_run_keep,
-                yield_stress=args.grasp_yield)
+                yield_stress=args.grasp_yield, firm_close_m=args.grasp_extra_close)
             consec_batch_aborts = 0
         except Exception as e:
             # Some scene draws are systematically unstable (solver NaN mid-episode even after a
