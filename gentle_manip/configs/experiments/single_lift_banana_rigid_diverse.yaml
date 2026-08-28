@@ -1,0 +1,22 @@
+# [experiment] OmniReset-inspired diverse-start RIGID banana lift -- fast surrogate for
+# the soft/real banana regrasp campaign (docs/HANDOFF_banana_rigid_diverse_2026-08-28.md).
+#
+# Each demo is still ONE clean SUCCESSFUL top-down grasp+lift (no retry FSM), but the
+# STARTING configuration is heavily diversified: wide object-pose DR
+# (rigid_orientation_banana_diverse) PLUS the collector's --start-modes, which begin a
+# fraction of episodes with the EE pre-rolled (UNRECORDED) to a diverse pose -- near
+# the object, low near the ground, or a random workspace point -- as if a prior grasp
+# attempt just failed there. The recorded approach then redirects from that pose to
+# the real grasp: a single continuous successful trajectory that teaches "how to get
+# to a good grasp from anywhere", which is what a genuine second attempt needs.
+# Used by: grasp_synthesis/collect_demos_diverse_start_v2.py; DPPO train/eval
+# Status: experimental
+task: single_lift_banana_rigid
+action: delta_pose_delta_gripper
+dr: rigid_orientation_banana_diverse
+augmentation: l515_noise
+
+obs: superset_rigid
+views:
+  teacher: [privileged]
+  student: [point_cloud]
