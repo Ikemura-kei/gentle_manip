@@ -67,3 +67,8 @@ sbatch --dependency=afterok:$CID gentle_manip/scripts/arrhenius/yd_banana_pipeli
 - 2026-08-28 ~17:05 — env from scratch (no venvs/submodules/uv in my checkout). Wrote all
   artifacts, committed, submitted `yd_build_smoke` (job 1768415, PD). ikemura's working
   setup is not group-readable, so building envs/sim_arrhenius + envs/dppo_arrhenius fresh.
+- 2026-08-28 ~17:35 — job 1768582: envs/sim_arrhenius built OK (genesis import OK,
+  gstaichi 4.6.0 auto-installed, torch 2.9.1+cu126 sees GH200). envs/dppo_arrhenius
+  synced (torch 2.6.0+cu126). Smoke FAILED only on a bad check (`import dppo` — the
+  distro installs top-level `agent`/`model`/`util`, no `dppo` module). Fixed the
+  check, resubmitted (job 1768806). Venvs persist on /nobackup so re-sync is fast.
