@@ -444,6 +444,46 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-28 — "GENTLENESS-AWARE" is defensible; "provably gentle" is NOT (yet). The sub-yield
+regime restores a positive ranking trend: rho 0.00 -> +0.52, but only p = 0.085 at n = 12.**
+
+User asked whether the synthesis can be called provably gentle, and failing that whether
+"gentleness-aware" is safe. Verdict:
+
+**SAFE to claim "gentleness-aware synthesis".** Justified on three independent grounds:
+1. **By construction** — the objective explicitly contains stress terms (`-stress_top10`,
+   `-w_peak * E * hi_1`, `-w_press * pressure`), the auto area selection enforces a HARD yield
+   guard (`YIELD_SAFETY = 0.8`), and the refine round selects the widest holdable width
+   (= gentlest) among distinct poses.
+2. **By outcome** — at the adopted operating point the demos sit at median **0.56x yield** under
+   full DR with 83 % sub-yield, and 100 % sub-yield in the fixed-scene test.
+3. **By construction of the operating point** — the squeeze base was reduced 5 mm -> 2 mm
+   specifically to move the demos below yield.
+
+**NOT safe to claim "provably gentle" / "gentleness-optimal" / "minimizes damage."** The
+within-object ranking is still weak:
+
+| regime | Spearman rho | Pearson r | n | sub-yield |
+|---|---|---|---|---|
+| PAST yield (old squeeze 4.8 mm) | **0.000** (p=1.0) | -0.47 | 12 | 0 % |
+| **SUB-yield (adopted, 1.9 mm)** | **+0.517** (p=0.085) | +0.22 (p=0.49) | 12 | **100 %** |
+
+**The saturation explanation held up** — moving below yield recovers a positive rank correlation
+where there was literally none. But rho = 0.52 at p = 0.085 is a TREND, not proof, and Pearson
++0.22 says the relation is monotone-ish with outliers rather than tight. A larger sweep (n = 40)
+is running to settle whether it is real.
+
+**What "provably gentle" would actually require** (recorded so the bar is explicit):
+1. A significant within-object rank correlation in the operating regime (n >= 40; in progress).
+2. The chosen grasp shown near-optimal among FEASIBLE alternatives w.r.t. true damage — not just
+   correlated, but close to the achievable minimum.
+3. Damage measured as PLASTIC deformation (permanent shape change / plastic work), which is the
+   physically correct quantity for an elasto-plastic body; von Mises stress is the wrong axis
+   above yield and only a proxy below it.
+
+Items 2-3 are a project in themselves. Item 1 is cheap and running.
+
+
 **2026-08-28 — LARGE-SCALE COLLECTION LAUNCHED (7 categories x 250 eps). One recipe change first:
 the squeeze base 5 mm -> 2 mm, because 5 mm drove EVERY demo past yield.**
 
