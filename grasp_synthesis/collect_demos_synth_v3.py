@@ -247,6 +247,12 @@ def _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir, mesh_cycle=None):
     o = nominal_spec.objects[0]
     nominal_scale = float(o.scale or 1.0)
     shp = dr_cfg.sample_shape_scale(rng)                     # {} if no shape/scale fields set
+    # MATERIAL DR. `sample_scene` existed and this collector NEVER CALLED IT, so every demo ever
+    # collected here used the registry's nominal E/nu/rho and the object_E/nu/rho/coup_friction
+    # ranges in all the DR configs were INERT (verified 2026-08-28). Sample and bake them now.
+    # NOTE `object_yield` still cannot be randomized: ObjectEntry has no yield field, so the yield
+    # always comes from the registry material (pre-existing limitation, see CLAUDE.md).
+    mat = dr_cfg.sample_scene(rng)
     if mesh_cycle is not None and dr_cfg.object_mesh_pool:
         # DETERMINISTIC round-robin over the pool instead of a uniform draw. Random sampling only
         # covers the pool in expectation: an 8-episode smoke test rebuilds the scene once or twice,
@@ -258,7 +264,7 @@ def _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir, mesh_cycle=None):
     else:
         variant = dr_cfg.sample_mesh_variant(rng)            # base-mesh pool pick (or None);
                                                              # same cadence as size/shape DR
-    if not shp and variant is None:
+    if not shp and variant is None and not mat:
         return nominal_spec, {"scale": nominal_scale, "bend_deg": 0.0, "mesh_variant": o.name}
 
     if variant is not None:                                  # pool pick replaces the base mesh;
@@ -274,11 +280,23 @@ def _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir, mesh_cycle=None):
     dst = Path(deform_dir) / f"{Path(nominal_mesh).stem}_dr_{rng.integers(1_000_000):06d}.obj"
     mesh.export(str(dst))
 
-    new_obj  = dataclasses.replace(o, mesh_path=str(dst), scale=1.0)
+    new_obj  = dataclasses.replace(o, mesh_path=str(dst), scale=1.0,
+                                   **({"youngs_modulus": mat["E"]} if "E" in mat else {}),
+                                   **({"poisson_ratio": mat["nu"]} if "nu" in mat else {}),
+                                   **({"density": mat["rho"]} if "rho" in mat else {}))
     new_spec = dataclasses.replace(nominal_spec, objects=[new_obj, *nominal_spec.objects[1:]])
     scene_dr = {"scale": float(shp.get("scale", 1.0)),
                 "bend_deg": float(np.rad2deg(shp.get("bend", 0.0))),
-                "mesh_variant": variant if variant is not None else o.name}
+                "mesh_variant": variant if variant is not None else o.name,
+                # every remaining DR draw, recorded so the frozen dataset is reproducible
+                "twist_deg": float(np.rad2deg(shp.get("twist", 0.0))),
+                "taper": float(shp.get("taper", 0.0)),
+                "rbf": float(shp.get("rbf", 0.0)),
+                "axis_scale": float(shp.get("axis_scale", 1.0)),
+                "axis_scale_ax": int(shp.get("axis_scale_ax", -1)),
+                "mat_E": float(mat.get("E", 0.0)), "mat_nu": float(mat.get("nu", 0.0)),
+                "mat_rho": float(mat.get("rho", 0.0)),
+                "coup_friction": float(mat.get("coup_friction", 4.0))}
     return new_spec, scene_dr
 
 
@@ -1219,7 +1237,8 @@ def main() -> None:
                                           "bend_deg": 0.0}
         w = GenesisWorker(spec_dr, num_envs=args.n_envs, show_viewer=False,
                           settle_steps=settle_steps, settle_max_steps=settle_max_steps,
-                          settle_vel_thresh=settle_vel_thresh, render_obs_cameras=True)
+                          settle_vel_thresh=settle_vel_thresh, render_obs_cameras=True,
+                          coup_friction=float(sdr.get("coup_friction", 4.0)))
         return w, sdr, (w.handle.spec.objects[0].mesh_path or MUSHROOM_MESH)
 
     worker, scene_dr, actual_mesh = _make_worker()
@@ -1250,6 +1269,8 @@ def main() -> None:
                         "roll_deg", "pitch_deg", "yaw_deg", "flipped",
                         "home_dx", "home_dy", "home_dz", "scene_scale", "scene_bend_deg",
                         "mesh_variant",
+                        "twist_deg", "taper", "rbf", "axis_scale", "axis_scale_ax",
+                        "mat_E", "mat_nu", "mat_rho", "coup_friction",
                         "stress_Pa", "grip_N", "align", "pressure_Pa", "min_pad_mm2", "width_mm", "tilt_deg"])
 
     total_saved  = 0
@@ -1482,6 +1503,15 @@ def main() -> None:
                                 round(float(scene_dr.get("scale", 1.0)), 4),
                                 round(float(scene_dr.get("bend_deg", 0.0)), 2),
                                 scene_dr.get("mesh_variant", ""),
+                                round(float(scene_dr.get("twist_deg", 0.0)), 2),
+                                round(float(scene_dr.get("taper", 0.0)), 4),
+                                round(float(scene_dr.get("rbf", 0.0)), 4),
+                                round(float(scene_dr.get("axis_scale", 1.0)), 4),
+                                int(scene_dr.get("axis_scale_ax", -1)),
+                                round(float(scene_dr.get("mat_E", 0.0)), 1),
+                                round(float(scene_dr.get("mat_nu", 0.0)), 4),
+                                round(float(scene_dr.get("mat_rho", 0.0)), 1),
+                                round(float(scene_dr.get("coup_friction", 4.0)), 3),
                                 round(float(g.get("stress_top10") or 0), 1), round(float(g.get("grip") or 0), 4),
                                 round(float(g.get("align") or 0), 4), round(float(g.get("pressure") or 0), 1),
                                 round(float((g.get("min_pad_area") or 0) * 1e6), 2),

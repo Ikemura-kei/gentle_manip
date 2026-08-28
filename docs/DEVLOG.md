@@ -444,6 +444,48 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-28 — PRE-FLIGHT before the frozen collection found TWO INERT DR BLOCKS. Material DR had
+NEVER been applied by the v3 collector. Fixed, relaunched.**
+
+User asked to double-check everything and confirm all DR params are recorded before committing the
+large run. Both asks turned up real bugs:
+
+1. **MATERIAL DR WAS NEVER APPLIED.** `DRConfig.sample_scene()` (which draws E / nu / rho /
+   coup_friction) exists and `collect_demos_synth_v3.py` **never called it**. Every demo this
+   collector has ever produced used the registry's NOMINAL material, and the `object_E`,
+   `object_nu`, `object_rho`, `coup_friction` ranges in ALL SEVEN DR configs were dead text.
+   That means **zero material diversity** in every dataset collected with v3 to date — a serious
+   sim2real gap, since real produce varies in firmness far more than in shape.
+   Fixed: `sample_scene()` is now called and E/nu/rho are baked onto the `ObjectEntry`.
+2. **`coup_friction` was never passed to the sim.** `GenesisWorker` takes it (default 4.0) and the
+   collector never supplied it, so the `[3.5, 4.5]` range was equally inert. Now passed per scene.
+3. **Most DR draws were unrecorded.** `dr_params.csv` logged only `scene_scale` /
+   `scene_bend_deg`; `twist`, `taper`, `rbf`, `axis_scale` (all APPLIED) and the material draws
+   were absent, so a frozen dataset could not be reproduced or analysed along those axes. The CSV
+   now carries all of them (31 columns).
+
+**Known remaining limitation:** `object_yield` still cannot be randomized — `ObjectEntry` has no
+yield field, so yield always comes from the registry material (pre-existing, noted in CLAUDE.md).
+
+**Also added before freezing: `priv_stress` in `superset_soft_armfocus`**, so every episode carries
+a per-episode gentleness record. Needed to (a) FILTER demos that exceed yield and (b) state the
+sub-yield fraction of the ACTUAL dataset instead of a proxy sample. It is privileged-only and the
+DPPO views are explicit key lists, so it does not touch the student (point-cloud) obs or any
+converted view. The two 250-episode sets collected before this (mushroom, cherry_tomato) are
+archived under `dataset/demos/_superseded_nostress/` — still valid demos, but lacking the stress
+record and the material DR, so they are NOT part of the frozen set.
+
+**Pre-flight verified on a 6-episode run:** all 31 DR columns populate; `mat_E` 2.607e5 inside the
+mushroom's [2.0e5, 3.0e5]; `coup_friction` 4.435 inside [3.5, 4.5]; `priv_stress` present with
+median 0.51x yield and **100 % sub-yield**; `rbf` reads 0 because no config sets `object_rbf`
+(correct, not broken); all 7 experiments load with sensible auto params (squeeze 1.00-2.78 mm, yaw
+30-69 deg); 100 GB disk free against a ~5 GB need.
+
+**Note for interpreting the new runs:** material DR is ACTIVE for the first time, so per-category
+success rates are not directly comparable to the earlier smoke numbers — the task is now genuinely
+harder and more diverse.
+
+
 **2026-08-28 — "GENTLENESS-AWARE" is defensible; "provably gentle" is NOT (yet). The sub-yield
 regime restores a positive ranking trend: rho 0.00 -> +0.52, but only p = 0.085 at n = 12.**
 
