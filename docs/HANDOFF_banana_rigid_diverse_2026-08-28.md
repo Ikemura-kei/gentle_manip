@@ -72,3 +72,10 @@ sbatch --dependency=afterok:$CID gentle_manip/scripts/arrhenius/yd_banana_pipeli
   synced (torch 2.6.0+cu126). Smoke FAILED only on a bad check (`import dppo` — the
   distro installs top-level `agent`/`model`/`util`, no `dppo` module). Fixed the
   check, resubmitted (job 1768806). Venvs persist on /nobackup so re-sync is fast.
+- 2026-08-28 ~17:50 — jobs 1768582/1768806 both hit `ImportError: type "Layout" is
+  already registered` on `import genesis`. Root cause: this genesis fork commit
+  (5b13c60) imports **`quadrants`** (pre-rename taichi fork, its own declared dep,
+  cp312 aarch64 wheel exists), NOT `gstaichi`. My build script (following the stale
+  handoff note) also pip-installed `gstaichi`; both register the same pybind11 types
+  -> conflict when imported in one process. Fix: drop gstaichi entirely from the build
+  script, verify `import quadrants; import genesis` instead. Resubmitting.

@@ -21,18 +21,22 @@ step() { echo; echo "========== $* =========="; }
 step "uv sync envs/sim_arrhenius"
 uv sync --project envs/sim_arrhenius
 
-step "check gstaichi / genesis / torch-cuda (sim_arrhenius)"
-if ! uv run --project envs/sim_arrhenius --no-sync python -c "import gstaichi" 2>/dev/null; then
-  echo "[build] gstaichi missing -> uv pip install gstaichi"
-  uv pip install --python envs/sim_arrhenius/.venv/bin/python gstaichi
-fi
-uv run --project envs/sim_arrhenius --no-sync python - <<'PY' || FAIL=1
-import torch, gstaichi
+step "check genesis / quadrants / torch-cuda (sim_arrhenius)"
+# NOTE: this genesis fork commit (5b13c60) imports `quadrants` (the pre-rename taichi
+# fork), NOT `gstaichi`. quadrants==1.0.2 ships a cp312 aarch64 wheel and is genesis's
+# own declared dep, so uv sync installs it. Do NOT also install gstaichi -- both register
+# the same pybind11 types ("type Layout is already registered") when imported together.
+# (The stale handoff note about `import gstaichi as ti` describes a different fork commit.)
+uv pip uninstall --python envs/sim_arrhenius/.venv/bin/python gstaichi 2>/dev/null || true
+uv run --project envs/sim_arrhenius --no-sync python - <<'PYCHK' || FAIL=1
+import torch
 print("torch", torch.__version__, "cuda_avail", torch.cuda.is_available(),
       "dev", (torch.cuda.get_device_name(0) if torch.cuda.is_available() else None))
+import quadrants as qd
+print("quadrants OK")
 import genesis  # noqa
 print("genesis import OK")
-PY
+PYCHK
 
 step "uv sync envs/dppo_arrhenius"
 uv sync --project envs/dppo_arrhenius
