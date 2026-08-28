@@ -89,16 +89,17 @@ TRIM_MARGIN_STEPS  = 5
 # ── Pre-roll ──
 N_PREROLL_STEPS = 60           # unrecorded home -> start-pose steps (all non-home modes)
 
-START_MODES = ("home", "near_object", "near_ground", "mid_air")
+START_MODES = ("home", "near_object", "near_ground", "mid_air", "mid_approach")
 
 # per-mode: number of RECORDED approach steps (start-pose -> grasp target).
 # home keeps v1's full N_HOME_TO_PRE; the diverse modes start closer / need a
 # shorter, sharper redirect (which is the regrasp-approach behaviour we want).
 RECORDED_APPROACH_STEPS = {
-    "home":        v1.N_HOME_TO_PRE,
-    "near_object": max(30, v1.N_HOME_TO_PRE // 3),
-    "near_ground": max(40, v1.N_HOME_TO_PRE // 2),
-    "mid_air":     v1.N_HOME_TO_PRE,
+    "home":         v1.N_HOME_TO_PRE,
+    "near_object":  max(30, v1.N_HOME_TO_PRE // 3),
+    "near_ground":  max(40, v1.N_HOME_TO_PRE // 2),
+    "mid_air":      v1.N_HOME_TO_PRE,
+    "mid_approach": max(45, (2 * v1.N_HOME_TO_PRE) // 3),
 }
 
 
@@ -168,10 +169,19 @@ def _start_pose_for_mode(mode: str, home_p, home_q, grasp_p, grasp_q, obj_p, rng
         p = grasp_p + off
         p[2] = min(p[2], grasp_p[2] + 0.03)             # keep it LOW
         return _clamp_ws(p), gq
+    if mode == "mid_approach":
+        # EE partway along the home->grasp path (as if a first attempt was already
+        # heading for the object): position + orientation both interpolated by the
+        # same fraction, plus a small lateral jitter so it is not exactly on the line.
+        a = rng.uniform(0.35, 0.70)
+        p = home_p + a * (grasp_p - home_p)
+        p = p + rng.normal(0, 1, 3).astype(np.float32) * np.array([0.02, 0.02, 0.015], np.float32)
+        q = _rot_to_wxyz(Slerp([0., 1.], Rot.concatenate(
+            [_wxyz_to_rot(home_q), _wxyz_to_rot(grasp_q)]))(float(a)))
+        return _clamp_ws(p), q
     # mid_air: random point in a box around home
     off = np.array([rng.uniform(-0.10, 0.10), rng.uniform(-0.12, 0.12),
                     rng.uniform(-0.08, 0.06)], np.float32)
-    # small orientation perturbation from home
     dq = Rot.from_rotvec(rng.normal(0, 0.15, 3))
     q = _rot_to_wxyz(dq * _wxyz_to_rot(home_q))
     return _clamp_ws(home_p + off), q
@@ -382,7 +392,7 @@ def main() -> None:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--keep-failures", action="store_true")
     p.add_argument("--start-modes", type=str,
-                   default="home:0.25,near_object:0.30,near_ground:0.25,mid_air:0.20",
+                   default="home:0.18,near_object:0.24,mid_approach:0.24,near_ground:0.18,mid_air:0.16",
                    help="comma list mode:weight -- per-episode EE start-pose distribution")
     p.add_argument("--top-down", dest="top_down", action="store_true", default=False,
                    help="clamp CMA-ES approach PITCH so grasps stay top-ish (default OFF; the\n                         sky/ground penalties in grasp_cost already bias top-down)")

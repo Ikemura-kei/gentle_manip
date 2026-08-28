@@ -16,11 +16,11 @@ set -euo pipefail
 REPO=/nobackup/proj/disk/softenable-codesign26/personal/yifeid/gentle_manip
 source "$REPO/gentle_manip/scripts/arrhenius/yd_env_common.sh"
 
-N_EPISODES=${N_EPISODES:-350}   # 350 fresh + ~168 salvaged from the NaN-crashed 1769529
+N_EPISODES=${N_EPISODES:-400}   # fresh (incl mid_approach mode) + ~168 salvaged from 1769529
 N_ENVS=${N_ENVS:-8}
 MAXFEVALS=${MAXFEVALS:-700}
 SEED=${SEED:-0}
-START_MODES=${START_MODES:-home:0.25,near_object:0.30,near_ground:0.25,mid_air:0.20}
+START_MODES=${START_MODES:-home:0.18,near_object:0.24,mid_approach:0.24,near_ground:0.18,mid_air:0.16}
 
 echo "[collect] n_episodes=$N_EPISODES n_envs=$N_ENVS maxfevals=$MAXFEVALS seed=$SEED"
 echo "[collect] start_modes=$START_MODES"

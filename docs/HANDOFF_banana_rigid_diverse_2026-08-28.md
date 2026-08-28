@@ -106,3 +106,9 @@ sbatch --dependency=afterok:$CID gentle_manip/scripts/arrhenius/yd_banana_pipeli
   (skip+rebuild, <=12 consec). 168 emz shards salvageable (videos intact).
   Relaunching: collect 350 fresh + merge emz(168); pipeline converts from the
   PARENT dir (all data.pkl).
+- 2026-08-28 ~20:45 — user: add demos with EE start BETWEEN home and near-object.
+  Added v2 start mode "mid_approach" (EE interpolated 0.35-0.70 along home->grasp,
+  orientation slerped by the same fraction + small jitter -- "a first attempt was
+  already heading for the object, then corrected"). New default start-modes:
+  home:0.18 near_object:0.24 mid_approach:0.24 near_ground:0.18 mid_air:0.16.
+  Cancelled 1771862/1771863 (only 4 demos in); fresh N_EPISODES=400.
