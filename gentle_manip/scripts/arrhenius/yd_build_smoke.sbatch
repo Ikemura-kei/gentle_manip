@@ -36,7 +36,7 @@ PY
 
 step "uv sync envs/dppo_arrhenius"
 uv sync --project envs/dppo_arrhenius
-uv run --project envs/dppo_arrhenius --no-sync python -c "import torch; print('dppo torch', torch.__version__, torch.cuda.is_available()); import dppo" || FAIL=1
+uv run --project envs/dppo_arrhenius --no-sync python -c "import torch, agent, model, util; print('dppo torch', torch.__version__, torch.cuda.is_available(), '| dppo pkgs OK')" || FAIL=1
 
 if [ "$FAIL" != 0 ]; then echo; echo "SMOKE RESULT: FAIL (env build)"; exit 1; fi
 
