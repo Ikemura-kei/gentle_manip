@@ -132,3 +132,10 @@ mushroom, banana, grape, kiwi, strawberry, tomato, cherry, raspberry, egg_boiled
   near_ground + aim & method writeup). GRACE itself is at the 16MB cap -- link the
   new artifact from it manually. Loop cron updated (b8da4e7b) with the full
   rigid->soft->9-object-generalist phase machine.
+- 2026-08-29 ~00:05 — user: EE start must CONTINUOUSLY cover home->near-object, not a
+  few discrete poses. Rewrote v2 sampler: "sweep" family (weight 0.62) draws
+  t~U(0,1), EE starts that fraction along home->grasp with lateral+orientation
+  jitter growing with t and recorded-approach length shrinking with t -> dense
+  coverage of the whole corridor. Off-corridor families above/ground/air (0.38
+  total) cover post-failure states off the path. object_pos_xy 0.08->0.10.
+  --start-modes now = family weights. Relaunched collect 1772322 / pipeline 1772323.
