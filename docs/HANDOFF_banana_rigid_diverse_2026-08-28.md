@@ -112,3 +112,15 @@ sbatch --dependency=afterok:$CID gentle_manip/scripts/arrhenius/yd_banana_pipeli
   already heading for the object, then corrected"). New default start-modes:
   home:0.18 near_object:0.24 mid_approach:0.24 near_ground:0.18 mid_air:0.16.
   Cancelled 1771862/1771863 (only 4 demos in); fresh N_EPISODES=400.
+
+## 2026-08-28 ~21:05 — EXPANDED SCOPE (user, leaving 24h, run nonstop)
+User goal: a DIRECT (not specialist->distill) GENERALIST regraspable DP3 policy over
+9 in-domain objects x 500 diverse-start demos each, cross-category, beating the
+non-regraspable baseline on 3 metrics (success / gentleness-stress / combined score).
+Path: (1) finish rigid-banana proof; (2) if eval shows genuine regrasp -> switch to
+SOFT banana, recollect+retrain+eval; (3) scale to the 9-object generalist.
+Also: added start mode "above_object" (varied height 3-20cm + varied pose over the
+object) and widened object_scale DR (0.78-1.28). Fresh 500-demo rigid collection
+relaunched with all 6 start modes.
+9 in-domain object shortlist (soft, non-extreme material, mesh present, collect well):
+mushroom, banana, grape, kiwi, strawberry, tomato, cherry, raspberry, egg_boiled.
