@@ -39,6 +39,7 @@ dependencies = [
     "pyyaml",  # YAML config loading
     "matplotlib",
     "pygame",  # keyboard teleop for the in-process sim viewer (examples/sim_teleop_keyboard.py)
+    "cma",     # CMA-ES optimizer for grasp synthesis (grasp_synthesis/synth_utils.py)
     # torch — cu126 aarch64 (GH200); see header note to change for your HW.
     "torch==2.9.1",
     "torchvision==0.24.1",

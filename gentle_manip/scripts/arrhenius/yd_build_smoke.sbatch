@@ -54,6 +54,7 @@ env -u PYTHONPATH -u ROS_DISTRO MUJOCO_GL=egl uv run --project envs/sim_arrheniu
   --record-video --out-dir "$SMOKE_DEMOS" || FAIL=1
 RUN=$(ls -dt "$SMOKE_DEMOS"/single_lift_banana_rigid/* 2>/dev/null | head -1 || true)
 echo "[smoke] collection run dir: $RUN"
+if [ -z "$RUN" ] || [ ! -f "$RUN/data.pkl" ]; then echo "SMOKE RESULT: FAIL (collection produced no data.pkl)"; exit 1; fi
 ls -la "$RUN" "$RUN/videos" 2>/dev/null || true
 [ -f "$RUN/data.pkl" ] || { echo "[smoke] no data.pkl"; FAIL=1; }
 NVID=$(ls "$RUN/videos"/*.mp4 2>/dev/null | wc -l || echo 0); echo "[smoke] videos: $NVID"
