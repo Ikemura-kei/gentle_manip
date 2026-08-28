@@ -89,7 +89,7 @@ TRIM_MARGIN_STEPS  = 5
 # ── Pre-roll ──
 N_PREROLL_STEPS = 60           # unrecorded home -> start-pose steps (all non-home modes)
 
-START_MODES = ("home", "near_object", "near_ground", "mid_air", "mid_approach")
+START_MODES = ("home", "near_object", "above_object", "near_ground", "mid_air", "mid_approach")
 
 # per-mode: number of RECORDED approach steps (start-pose -> grasp target).
 # home keeps v1's full N_HOME_TO_PRE; the diverse modes start closer / need a
@@ -100,6 +100,7 @@ RECORDED_APPROACH_STEPS = {
     "near_ground":  max(40, v1.N_HOME_TO_PRE // 2),
     "mid_air":      v1.N_HOME_TO_PRE,
     "mid_approach": max(45, (2 * v1.N_HOME_TO_PRE) // 3),
+    "above_object": max(30, v1.N_HOME_TO_PRE // 2),
 }
 
 
@@ -161,6 +162,18 @@ def _start_pose_for_mode(mode: str, home_p, home_q, grasp_p, grasp_q, obj_p, rng
         off *= rng.uniform(0.02, 0.06)
         off[2] = abs(off[2]) + rng.uniform(0.0, 0.04)   # bias to ABOVE the grasp point
         return _clamp_ws(grasp_p + off), gq
+    if mode == "above_object":
+        # EE hovering directly ABOVE the object centroid at a VARIED height and a
+        # VARIED orientation (yaw free, small pitch/roll tilt) -- "a first attempt
+        # descended over the object but at the wrong height / rotation".
+        h = rng.uniform(0.03, 0.20)                       # metres above the grasp point
+        xy = rng.normal(0, 1, 2).astype(np.float32) * 0.015
+        p = np.array([grasp_p[0] + xy[0], grasp_p[1] + xy[1], grasp_p[2] + h], np.float32)
+        tilt = Rot.from_rotvec(np.array([rng.uniform(-0.35, 0.35),
+                                         rng.uniform(-0.35, 0.35),
+                                         rng.uniform(-np.pi, np.pi)], np.float32))
+        q = _rot_to_wxyz(tilt * _wxyz_to_rot(grasp_q))
+        return _clamp_ws(p), q
     if mode == "near_ground":
         ang = rng.uniform(0, 2 * np.pi)
         r = rng.uniform(0.05, 0.14)
@@ -392,7 +405,7 @@ def main() -> None:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--keep-failures", action="store_true")
     p.add_argument("--start-modes", type=str,
-                   default="home:0.18,near_object:0.24,mid_approach:0.24,near_ground:0.18,mid_air:0.16",
+                   default="home:0.15,near_object:0.20,above_object:0.18,mid_approach:0.22,near_ground:0.13,mid_air:0.12",
                    help="comma list mode:weight -- per-episode EE start-pose distribution")
     p.add_argument("--top-down", dest="top_down", action="store_true", default=False,
                    help="clamp CMA-ES approach PITCH so grasps stay top-ish (default OFF; the\n                         sky/ground penalties in grasp_cost already bias top-down)")

@@ -17,13 +17,9 @@ source "$REPO/gentle_manip/scripts/arrhenius/yd_env_common.sh"
 
 ENV_NAME=single_lift_banana_rigid_diverse_pcd
 CFG_DIR=$REPO/gentle_manip/dppo/cfg/$ENV_NAME
-# Convert from the PARENT category dir so ALL run dirs' data.pkl are used (the fresh
-# resilient run + the salvaged 168 from the NaN-crashed 1769529). convert_demos recurses.
-DEMO_RUN=${DEMO_RUN:-$REPO/dataset/demos/single_lift_banana_rigid}
-echo "[pipe] demo source: $DEMO_RUN"
-N_PKL=$(find "$DEMO_RUN" -name data.pkl | wc -l)
-echo "[pipe] data.pkl files found: $N_PKL"
-[ "$N_PKL" -ge 1 ] || { echo "[pipe] no data.pkl under $DEMO_RUN"; exit 1; }
+DEMO_RUN=${DEMO_RUN:-$(cat "$REPO/logs/slurm_logs/last_banana_collect_run.txt")}
+echo "[pipe] demo run: $DEMO_RUN"
+[ -f "$DEMO_RUN/data.pkl" ] || { echo "[pipe] MISSING $DEMO_RUN/data.pkl"; exit 1; }
 
 echo; echo "========== convert -> $DPPO_DATA_DIR/$ENV_NAME =========="
 uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.convert_demos \

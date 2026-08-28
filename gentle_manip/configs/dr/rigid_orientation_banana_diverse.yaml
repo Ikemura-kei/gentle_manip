@@ -20,8 +20,8 @@ robot_init_pos_xyz: 0.03
 object_yaw_deg: 180
 object_pitch_roll_deg: 14
 
-object_scale:      [0.90, 1.10]
+object_scale:      [0.78, 1.28]
 object_bend_deg:   [-4.0, 4.0]
 object_twist_deg:  [-4.0, 4.0]
 object_taper:      [-0.03, 0.03]
-object_axis_scale: [0.93, 1.07]
+object_axis_scale: [0.88, 1.12]
