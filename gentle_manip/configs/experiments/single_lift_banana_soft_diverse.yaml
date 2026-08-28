@@ -1,0 +1,15 @@
+# [experiment] OmniReset-inspired diverse-start SOFT (MPM) banana lift on the lying
+# mesh -- Phase 3 of the regrasp campaign (after the rigid surrogate proof). Same
+# continuous EE-start sweep + wide object DR as the rigid run, but deformable banana
+# + stress-aware reward/obs.
+# Used by: grasp_synthesis/collect_demos_diverse_start_v2.py; DPPO train/eval
+# Status: experimental
+task: single_lift_banana_soft_diverse
+action: delta_pose_delta_gripper
+dr: food_shape_banana_soft_diverse
+augmentation: l515_noise
+
+obs: superset_soft
+views:
+  teacher: [privileged]
+  student: [point_cloud]

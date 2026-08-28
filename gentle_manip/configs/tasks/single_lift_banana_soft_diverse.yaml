@@ -1,0 +1,21 @@
+# [task] Soft-MPM banana single-lift on the LYING mesh (banana_lying) for the
+# diverse-start regrasp campaign. Mirrors single_lift_banana_soft.yaml (reward /
+# success band / MPM stability) but object_name -> banana_lying (long axis
+# horizontal, rests on its side -- the vertical baton is unstable + ungraspable
+# top-down, see the rigid campaign handoff).
+# Used by: experiments (task:) single_lift_banana_soft_diverse
+# Status: experimental
+success_z_min: 0.175
+success_z_max: 0.275
+hold_steps: 30
+object_name: "banana_lying"
+object_type: "soft"
+
+sim_substeps: 220
+mpm_grid_density: 250
+success_scale: 0.2
+
+rewards:
+  stress:      {scale: 0.2, cap: 1.5, mean_weight: 0.2, top10_weight: 0.8}
+  dist_to_obj: {scale: 0.1, decay: 8.0}
+  lift:        {scale: 0.1, grasp_gate_dist: 0.079, lift_target: 0.16}
