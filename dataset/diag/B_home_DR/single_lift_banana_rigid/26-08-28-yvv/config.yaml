@@ -1,0 +1,36 @@
+task_name: single_lift_banana_rigid
+description: ''
+source: cmaes_synth_diverse_start_v2
+git_commit: 025356f
+experiment: single_lift_banana_rigid_diverse
+control:
+  n_envs: 6
+  maxfevals: 600
+  n_episodes: 6
+  scene_dr_every: 1
+  seed: 0
+  start_modes: home:1.0
+  top_down: false
+  success_height: 0.1
+  success_hold_steps: 10
+  n_preroll_steps: 60
+dr:
+  object_pos_xy: 0.08
+  robot_init_pos_xyz: 0.03
+  object_yaw_deg: 180
+  object_pitch_roll_deg: 14
+  object_scale:
+  - 0.9
+  - 1.1
+  object_bend_deg:
+  - -6.0
+  - 6.0
+  object_twist_deg:
+  - -4.0
+  - 4.0
+  object_taper:
+  - -0.05
+  - 0.05
+  object_axis_scale:
+  - 0.93
+  - 1.07

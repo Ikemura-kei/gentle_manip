@@ -91,3 +91,11 @@ sbatch --dependency=afterok:$CID gentle_manip/scripts/arrhenius/yd_banana_pipeli
       -- downward TCP orientation is near roll=+-pi in this euler convention, the
       original clamp bug forced a sideways grip).
   Re-running yd_diag_banana (A home/noDR, B home/DR, C full).
+- 2026-08-28 ~18:50 — diag 1769435 on banana_lying: A(home/noDR)=60%, B(home/DR)=75%,
+  **C(full diverse start modes + DR)=80% CMA success**. Grasps are clean top-down
+  (roll ~= -pi confirmed), near_object/near_ground/mid_air starts all produce
+  successful redirect trajectories, videos write. Skipped re-running build+smoke
+  (only the grasp-success step was ever failing, now fixed; its maxfevals=150 is
+  too low anyway). LAUNCHED full chain:
+    collection  job 1769529  (yd_banana_collect, 500 demos, n-envs 8, maxfevals 700)
+    pipeline    job 1769530  (yd_banana_pipeline, afterok:1769529 -> convert+BC+eval100)
