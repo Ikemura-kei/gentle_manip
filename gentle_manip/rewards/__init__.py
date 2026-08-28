@@ -7,6 +7,7 @@ from gentle_manip.envs.raw_obs import RawObs
 from gentle_manip.rewards.distance import DistToGoalReward, DistToObjReward
 from gentle_manip.rewards.lift import LiftReward
 from gentle_manip.rewards.placement import PlacementReward
+from gentle_manip.rewards.regrasp import RegraspReward
 from gentle_manip.rewards.stress import StressReward
 
 _REWARD_MAP = {
@@ -15,6 +16,7 @@ _REWARD_MAP = {
     "dist_to_goal": DistToGoalReward,
     "lift": LiftReward,
     "placement": PlacementReward,
+    "regrasp": RegraspReward,
 }
 
 

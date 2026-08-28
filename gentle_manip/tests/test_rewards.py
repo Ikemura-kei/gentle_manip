@@ -7,6 +7,7 @@ from gentle_manip.rewards import CompositeReward, build_reward_fn
 from gentle_manip.rewards.distance import DistToGoalReward, DistToObjReward
 from gentle_manip.rewards.lift import LiftReward
 from gentle_manip.rewards.placement import PlacementReward
+from gentle_manip.rewards.regrasp import RegraspReward
 from gentle_manip.rewards.stress import StressReward
 
 
@@ -196,6 +197,66 @@ def test_placement_above_threshold_negative():
     fb = make_feedback(num_envs=2, obj_z=0.1)  # 0.08 above threshold
     out = r(fb, make_raw_obs(num_envs=2))
     np.testing.assert_allclose(out, -0.08, rtol=1e-5)
+
+
+# ── RegraspReward ──────────────────────────────────────────────────────────────
+
+def _raw_obs_with_width(num_envs, ee_pos, width):
+    return RawObs(
+        ee_pos=ee_pos,
+        ee_quat=np.tile([1, 0, 0, 0], (num_envs, 1)).astype(np.float32),
+        gripper_width=np.full(num_envs, width, dtype=np.float32),
+        joint_pos=None,
+        joint_vel=None,
+        depth_images={},
+        rgb_images={},
+        camera_intrinsics={},
+        camera_extrinsics={},
+        tactile_images={},
+    )
+
+
+def test_regrasp_no_reward_without_prior_attempt():
+    # EE moves toward the object and gripper closes, but never HAD a failed
+    # attempt+reopen first -- should stay silent (this is just a normal first grasp).
+    r = RegraspReward(scale=1.0, grasp_gate_dist=0.2, close_width_thresh=0.03, reopen_width_thresh=0.07)
+    fb = make_feedback(num_envs=1, obj_z=0.1)
+    r.reset(fb)
+    ee_far = np.array([[0.4, 0.0, 0.3]], dtype=np.float32)
+    out1 = r(fb, _raw_obs_with_width(1, ee_far, 0.08))
+    ee_near = np.array([[0.4, 0.0, 0.1]], dtype=np.float32)
+    out2 = r(fb, _raw_obs_with_width(1, ee_near, 0.01))  # approaches + closes (first attempt)
+    np.testing.assert_allclose(out1, 0.0)
+    np.testing.assert_allclose(out2, 0.0)  # not armed yet -- no prior failed attempt
+
+
+def test_regrasp_arms_after_close_then_reopen_and_rewards_second_approach():
+    r = RegraspReward(scale=1.0, grasp_gate_dist=0.2, close_width_thresh=0.03, reopen_width_thresh=0.07)
+    fb = make_feedback(num_envs=1, obj_z=0.1)
+    r.reset(fb)
+    ee_near = np.array([[0.4, 0.0, 0.1]], dtype=np.float32)
+
+    # step 1: close near object (first attempt)
+    out1 = r(fb, _raw_obs_with_width(1, ee_near, 0.01))
+    np.testing.assert_allclose(out1, 0.0)
+
+    # step 2: reopen without success -> arms, but the reopen step itself isn't rewarded
+    out2 = r(fb, _raw_obs_with_width(1, ee_near, 0.08))
+    np.testing.assert_allclose(out2, 0.0)
+    assert r._armed[0]
+
+    # step 3: re-approach (closer) and re-close -> should now be rewarded
+    ee_closer = np.array([[0.4, 0.0, 0.1]], dtype=np.float32)  # already at object; vary width only
+    out3 = r(fb, _raw_obs_with_width(1, ee_closer, 0.02))
+    assert out3[0] > 0.0
+
+
+def test_regrasp_output_shape_batch():
+    r = RegraspReward()
+    fb = make_feedback(num_envs=4, obj_z=0.1)
+    r.reset(fb)
+    out = r(fb, make_raw_obs(num_envs=4))
+    assert out.shape == (4,)
 
 
 # ── CompositeReward / build_reward_fn ─────────────────────────────────────────

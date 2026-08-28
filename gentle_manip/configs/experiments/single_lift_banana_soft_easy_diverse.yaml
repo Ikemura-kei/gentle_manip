@@ -1,0 +1,21 @@
+# [experiment] OmniReset-inspired diverse-start variant of single_lift_banana_soft_easy:
+# same task/action/obs, but WIDE object-pose DR (food_shape_banana_soft_easy_wide) --
+# each demo is still a single clean SUCCESSFUL attempt (no retry logic), but starting
+# from a diverse object pose (as if bumped/rolled after a fall) and, in the collector,
+# sometimes an end-effector start near the object instead of always home. The bet:
+# dense coverage of "what a post-failure state looks like" lets a BC policy trained on
+# ONLY clean successes implicitly know what to do if it ever lands near one of these
+# states at test time, without ever needing an explicit multi-attempt demonstration --
+# see docs/cross_category_specialist_log.md for the TIDE/ReTVL/RL-finetune attempts
+# this supersedes (none produced a genuine successful second-attempt regrasp).
+# Used by: grasp_synthesis/collect_demos_diverse_start.py
+# Status: experimental
+task: single_lift_banana_soft
+action: delta_pose_delta_gripper
+dr: food_shape_banana_soft_easy_wide
+augmentation: l515_noise
+
+obs: superset_soft
+views:
+  teacher: [privileged]
+  student: [point_cloud]

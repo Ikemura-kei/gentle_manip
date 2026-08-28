@@ -1,0 +1,27 @@
+# [experiment] RL-finetune variant of single_lift_banana_soft_easy: identical
+# action/dr/augmentation/obs composition, only the task swaps to
+# single_lift_banana_soft_retry (adds the `regrasp` reward term -- see that task
+# file's header for why). Used to PPO-finetune a BC-pretrained banana specialist
+# with a reward for genuinely re-approaching/re-closing on a second attempt,
+# after TIDE (inference-time monitor) and ReTVL (value-weighted BC, both the
+# hard-pruned v1 and non-destructive weighted-sampling v2) failed to fix the
+# regrasp-hover problem -- see docs/cross_category_specialist_log.md.
+# Used by: DPPO PPO finetune (gentle_manip.dppo.train with a ft_ppo_diffusion_pointnet config)
+# Status: experimental
+task: single_lift_banana_soft_retry
+action: delta_pose_delta_gripper
+dr: food_shape_banana_soft_easy
+augmentation: l515_noise
+
+obs: superset_soft
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+
+rl:
+  random_steps: 200
+  training_starts: 400
+  batch_size: 256
+  discount: 0.92
+  utd_ratio: 2
+  critic_lr: 1.0e-4

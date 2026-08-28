@@ -1,0 +1,45 @@
+# [task] Soft-MPM banana single-lift, RL-finetune variant: identical to
+# single_lift_banana_soft.yaml (same object/success band/sim params) plus an
+# additional `regrasp` reward term that rewards re-approaching + re-closing the
+# gripper after a failed first attempt. Isolated into its own task file (rather than
+# editing the shared single_lift_banana_soft.yaml) so this experimental RL-only
+# shaping term can't change reward/gentleness metrics for the existing demo
+# collection / canonical eval pipelines that reference the original task.
+# Used by: single_lift_banana_soft_retry experiment -> DPPO PPO finetune (priority
+# #3 of the banana regrasp-hover overnight campaign, after TIDE and ReTVL both
+# failed to produce genuine second-attempt regrasps -- see
+# docs/cross_category_specialist_log.md).
+# Status: experimental
+success_z_min: 0.175
+success_z_max: 0.275
+hold_steps: 30
+object_name: "banana"
+object_type: "soft"
+
+sim_substeps: 220
+mpm_grid_density: 250
+
+success_scale: 0.2
+
+rewards:
+  stress:
+    scale: 0.2
+    cap: 1.5
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 0.1
+    decay: 8.0
+  lift:
+    scale: 0.1
+    grasp_gate_dist: 0.079
+    lift_target: 0.16
+  regrasp:
+    scale: 0.5  # deliberately larger than the other shaping terms -- this is the
+      # ONE signal meant to break the BC-inherited hover local optimum, so it needs
+      # to dominate near the retry decision point rather than be a minor nudge.
+    grasp_gate_dist: 0.079
+    close_width_thresh: 0.035  # real banana grasps bottom out ~0.03m (verified
+      # against 50 recorded demo episodes: gripper_width min=0.0299, p5=0.0315)
+    reopen_width_thresh: 0.07  # ~0.95 * the 0.08m fully-open width (matches the
+      # GRIPPER_OPEN_FRAC convention in retvl_retry_labeling.py)

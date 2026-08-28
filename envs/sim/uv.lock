@@ -508,6 +508,7 @@ dependencies = [
     { name = "cvxpy" },
     { name = "genesis-world" },
     { name = "gentle-manip" },
+    { name = "gstaichi" },
     { name = "gymnasium" },
     { name = "mapbox-earcut" },
     { name = "matplotlib" },
@@ -532,6 +533,7 @@ requires-dist = [
     { name = "cvxpy" },
     { name = "genesis-world", editable = "../../third_party/genesis" },
     { name = "gentle-manip", editable = "../../" },
+    { name = "gstaichi" },
     { name = "gymnasium" },
     { name = "mapbox-earcut" },
     { name = "matplotlib" },
@@ -587,6 +589,26 @@ version = "0.0.7.post2"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/98/66/f37ae87d648cdd0e51de56b5afae42d3daf31e78a26443da87795963c7f3/gs_madrona-0.0.7.post2-cp312-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:9ade022b34caffba60fca29d71b3322067abe4b7aaecf0e8aa3b231a2d676038", size = 63885535, upload-time = "2026-01-06T14:25:59.861Z" },
+]
+
+[[package]]
+name = "gstaichi"
+version = "4.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cffi" },
+    { name = "colorama" },
+    { name = "dill" },
+    { name = "numpy" },
+    { name = "pydantic" },
+    { name = "rich" },
+    { name = "setuptools" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/06/63/484e26fab64ac9167ee9c2963fa27551e2e67ef13d05f74de0addc18c36e/gstaichi-4.6.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:3d6b2ab3859a9e70d3a5afb4e354a5b9c949754f218cbf85035639462f2c052a", size = 30434267, upload-time = "2025-12-30T14:21:42.968Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/2a/099f29274a0b8a806fed1d929963b36d4240ce4cf1abd9e820ff43afd453/gstaichi-4.6.0-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_34_aarch64.whl", hash = "sha256:5430c1980fa0f7752fc0ecddd8f4b0bbcca92600af16f2ed832480e5fb18acf1", size = 41632936, upload-time = "2025-12-30T14:22:56.71Z" },
+    { url = "https://files.pythonhosted.org/packages/d7/72/9f19293e3a9e0166a8b5d64f24bb75e343ab937f211eb022c87a9ef64521/gstaichi-4.6.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:6f16710f1af5967b0c303e7bf9055380cb07c3b71fb97963e85d50276d70489b", size = 44633363, upload-time = "2025-12-30T14:22:51.582Z" },
+    { url = "https://files.pythonhosted.org/packages/b5/ea/71e562b09307b7095c07cb702ac50f006133c1f148e2d0606ff793cce82b/gstaichi-4.6.0-cp312-cp312-win_amd64.whl", hash = "sha256:6e8cf212c8558cfe397e58450402c2d676bd47aaecb5aea013b142bef4a62a3f", size = 56173952, upload-time = "2025-12-30T14:13:41.726Z" },
 ]
 
 [[package]]

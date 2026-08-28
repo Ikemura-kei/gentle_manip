@@ -61,6 +61,14 @@ dataset/tactile_dp3/
 # DPPO-converted npz for the retry-specialist campaign (dppo_data_retry/) — same
 # derived-data role as dataset/dppo/ above, just a separate dir for this campaign
 dppo_data_retry/
+# DPPO-converted npz for the OmniReset-inspired diverse-start campaign (2026-08-28)
+# — same derived-data role as dataset/dppo/ above. NOT in git; transfer separately
+# (rsync/scp) when migrating to another machine/cluster. See
+# docs/HANDOFF_cluster_migration_2026-08-28.md.
+dppo_data_diverse/
+# Legacy standalone-DP3 zarr conversion (experimental, not the active training path
+# -- see docs/dppo_dp3_training_recipe.md §0). Large binary, not in git.
+dataset/dp3/
 # tetgen tet-mesher scratch output (written to cwd during FEM build_grasp_fem)
 _skipped.face
 _skipped.node
@@ -99,3 +107,8 @@ paper_writing.txt
 # periodically on this box and has twice wiped the in-progress GRACE report
 # build script + rendered videos mid-campaign, 2026-08-19)
 .report_scratch/
+
+# third_party/reactive_diffusion_policy (~18GB, checked 2026-08-28) is a plain local
+# checkout, NOT a git submodule (not in .gitmodules) -- safety net so it can never be
+# swept into a commit by a broad `git add`.
+third_party/reactive_diffusion_policy/

@@ -25,6 +25,13 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "gentle-manip",
     "genesis-world",
+    # gstaichi: the third_party/genesis fork's genesis/__init__.py does
+    # `import gstaichi as ti`, but its own pyproject.toml still pins the
+    # old pre-rename dependency name (`quadrants==1.0.2`), which does NOT
+    # expose a `gstaichi` importable module -- a real gap in the fork's
+    # current commit (discovered 2026-08-28), not just this env's drift.
+    # Pinned here explicitly so `uv sync` doesn't silently drop it again.
+    "gstaichi",
     "pytest",
     "numpy",
     "gymnasium",

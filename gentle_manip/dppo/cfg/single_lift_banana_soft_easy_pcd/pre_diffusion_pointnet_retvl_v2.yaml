@@ -1,0 +1,100 @@
+# [dppo-pretrain] ReTVL v2: BC-pretrain on the FULL, unfragmented 150-direct+50-regrasp
+# banana set, with per-timestep Eq10 alpha values used as WeightedRandomSampler weights
+# instead of v1's hard chunk-deletion (which broke cond_steps history continuity right
+# at the regrasp decision boundary -- see docs/cross_category_specialist_log.md).
+# Used by: third_party/dppo/script/run.py (TrainDiffusionAgentReTVL) via gentle_manip.dppo.train
+# Status: experimental (banana regrasp-hover fix, 2026-08-26)
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${logdir}
+  callbacks:
+    experiment_snapshot:
+      _target_: gentle_manip.dppo.hydra_snapshot.ExperimentSnapshot
+_target_: gentle_manip.dppo.train_diffusion_agent_retvl.TrainDiffusionAgentReTVL
+
+name: ${env}_pre_diffusion_pointnet_retvl_v2_ta${horizon_steps}_td${denoising_steps}
+logdir: ${oc.env:DPPO_LOG_DIR}/dppo-pretrain/${env}/${exp_id:}
+train_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/train.npz
+val_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/val.npz
+retvl_alpha_train_npz: /home/yif/Documents/KTH/git/gentle_manip/logs/retvl/banana/v2/alpha_npz/train.npz
+experiment: single_lift_banana_soft_easy
+
+seed: 42
+device: cuda:0
+env: single_lift_banana_soft_easy_pcd
+obs_dim: 8
+action_dim: 7
+denoising_steps: 20
+horizon_steps: 4
+cond_steps: 8
+pc_cond_steps: 4
+n_points: 1024
+visual_feature_dim: 256
+
+wandb:
+  entity: ${oc.env:DPPO_WANDB_ENTITY,null}
+  project: gentle-manip-${env}
+  run: ${exp_id:}
+  group: dppo-pretrain
+
+train:
+  n_epochs: 1000
+  batch_size: 128
+  learning_rate: 1e-4
+  weight_decay: 1e-6
+  lr_scheduler:
+    first_cycle_steps: ${train.n_epochs}
+    warmup_steps: 100
+    min_lr: 1e-5
+  epoch_start_ema: 10
+  update_ema_freq: 5
+  save_model_freq: 25
+  val_freq: 10
+  early_stop_patience: 20
+  early_stop_min_delta: 1e-4
+
+model:
+  _target_: model.diffusion.diffusion.DiffusionModel
+  predict_epsilon: True
+  denoised_clip_value: 1.0
+  network:
+    _target_: gentle_manip.dppo.pointnet_diffusion.PointNetDiffusionMLP
+    action_dim: ${action_dim}
+    horizon_steps: ${horizon_steps}
+    cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+    pc_cond_steps: ${pc_cond_steps}
+    visual_feature_dim: ${visual_feature_dim}
+    time_dim: 16
+    mlp_dims: [512, 512, 512]
+    activation_type: ReLU
+    residual_style: True
+    pointnet:
+      in_channels: 3
+      use_layernorm: True
+      final_norm: layernorm
+  horizon_steps: ${horizon_steps}
+  obs_dim: ${obs_dim}
+  action_dim: ${action_dim}
+  denoising_steps: ${denoising_steps}
+  device: ${device}
+
+ema:
+  decay: 0.995
+
+train_dataset:
+  _target_: gentle_manip.dppo.pointcloud_dataset.StitchedSequencePointCloudDataset
+  dataset_path: ${train_dataset_path}
+  horizon_steps: ${horizon_steps}
+  cond_steps: ${cond_steps}
+  pc_cond_steps: ${pc_cond_steps}
+  device: ${device}
+
+val_dataset:
+  _target_: gentle_manip.dppo.pointcloud_dataset.StitchedSequencePointCloudDataset
+  dataset_path: ${val_dataset_path}
+  horizon_steps: ${horizon_steps}
+  cond_steps: ${cond_steps}
+  pc_cond_steps: ${pc_cond_steps}
+  device: ${device}

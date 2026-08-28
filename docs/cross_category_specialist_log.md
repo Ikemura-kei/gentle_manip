@@ -1751,3 +1751,22 @@ eliminating the cold-start bug above. Retrain + re-eval + **actual video review*
 sufficient evidence that regrasp itself works when the training mix is dominated by
 clean first-attempt demos — always sample eval videos specifically from episodes where
 the first attempt is known/likely to have failed before trusting an aggregate SR.
+
+## 2026-08-28 — Pivot: OmniReset-inspired diverse-start BC (see `docs/HANDOFF_cluster_migration_2026-08-28.md`)
+
+TIDE, ReTVL v1/v2, and PPO regrasp-reward RL finetuning (above) all failed to produce genuine
+successful second-attempt regrasp. User-directed pivot: stop trying to teach explicit
+multi-attempt retry trajectories; instead follow OmniReset (arXiv:2603.15789,
+weirdlabuw.github.io/omnireset) — translate its RL-reset-diversity insight into BC
+demo-collection: single-attempt, always-successful demos whose STARTING configuration densely
+covers post-failure states (wide object-pose DR + a fraction of episodes starting the EE
+mid-approach toward a decoy target before redirecting to the real grasp, via an unrecorded
+pre-roll). New collector `grasp_synthesis/collect_demos_diverse_start.py`; 450 new episodes
+(55.8% success) merged with the original 150 direct-grasp demos → 600-episode training set.
+BC-pretrain in progress (checkpoint `syvja/checkpoint/state_25.pt`, val loss still decreasing
+at pause, 0.0575 @ epoch 30 — not plateaued). Eval against the 41% baseline + video-verified
+genuine recovery check is the next step, not yet done. Session paused 2026-08-28 to migrate
+this campaign to a SLURM cluster — full state, exact resume commands, and two demo-video
+verification bugs (found + fixed on this campaign's own demos before any eval even ran) are
+documented in `docs/HANDOFF_cluster_migration_2026-08-28.md`. **Read that file first** before
+continuing this line of work.
