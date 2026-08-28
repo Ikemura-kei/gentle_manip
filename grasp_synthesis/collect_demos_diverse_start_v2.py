@@ -209,7 +209,7 @@ def execute_and_collect_diverse_v2(
     lift_b   = grasp_pos.copy(); lift_b[:, 2] += v1.LIFT_HEIGHT
 
     width_open = np.full(num_envs, 0.08, np.float32)
-    width_cls  = np.array([p[2] - 0.0025 for p in poses], np.float32)
+    width_cls  = np.clip(np.array([p[2] - 0.0025 for p in poses], np.float32), 0.020, 0.075)
 
     home_pos  = np.tile(worker.robot.home_pos[None].astype(np.float32),  (num_envs, 1))
     home_quat = np.tile(worker.robot.home_quat[None].astype(np.float32), (num_envs, 1))
@@ -467,94 +467,112 @@ def main() -> None:
     shard_buf: List[dict] = []
     t0 = time.time()
 
+    consec_fail = 0
     while total_saved < args.n_episodes:
         batch_idx += 1
         n = args.n_envs
-        if do_scene_dr and batch_idx > 1 and (batch_idx - 1) % args.scene_dr_every == 0:
-            worker.close()
-            worker, scene_dr, actual_mesh = _make_worker()
+        try:
+            if do_scene_dr and batch_idx > 1 and (batch_idx - 1) % args.scene_dr_every == 0:
+                worker.close()
+                worker, scene_dr, actual_mesh = _make_worker()
 
-        print(f"\n-- Batch {batch_idx}  [{total_saved}/{args.n_episodes} saved]"
-              + (f"  scale={scene_dr['scale']:.3f} bend={scene_dr['bend_deg']:+.1f}" if do_scene_dr else ""))
+            print(f"\n-- Batch {batch_idx}  [{total_saved}/{args.n_episodes} saved]"
+                  + (f"  scale={scene_dr['scale']:.3f} bend={scene_dr['bend_deg']:+.1f}" if do_scene_dr else ""))
 
-        object_dxy   = dr_cfg.sample_object_dxy(rng, n)
-        object_euler = dr_cfg.sample_object_euler(rng, n)
-        home_offset  = dr_cfg.sample_home_offset(rng, n)
-        worker.reset(object_dxy=object_dxy, object_euler=object_euler, home_offset=home_offset)
+            object_dxy   = dr_cfg.sample_object_dxy(rng, n)
+            object_euler = dr_cfg.sample_object_euler(rng, n)
+            home_offset  = dr_cfg.sample_home_offset(rng, n)
+            worker.reset(object_dxy=object_dxy, object_euler=object_euler, home_offset=home_offset)
 
-        init_state = worker.read_state()
-        raw_init = v1._state_to_raw_obs(init_state)
-        init_obs_batch = perception.process(raw_init)
-        dr_vec = np.array([float(scene_dr.get("scale", 1.0)), float(scene_dr.get("bend_deg", 0.0))], np.float32)
-        if priv_cfg is not None:
-            oq = init_state.get("object_quat")
-            if oq is None:
-                oq = np.tile(np.array([1., 0, 0, 0], np.float32), (n, 1))
-            init_obs_batch.update(v1._privileged_obs_batch(
-                init_state["object_center"], oq, dr_vec, priv_cfg,
-                contact_force=init_state.get("contact_force")))
+            init_state = worker.read_state()
+            raw_init = v1._state_to_raw_obs(init_state)
+            init_obs_batch = perception.process(raw_init)
+            dr_vec = np.array([float(scene_dr.get("scale", 1.0)), float(scene_dr.get("bend_deg", 0.0))], np.float32)
+            if priv_cfg is not None:
+                oq = init_state.get("object_quat")
+                if oq is None:
+                    oq = np.tile(np.array([1., 0, 0, 0], np.float32), (n, 1))
+                init_obs_batch.update(v1._privileged_obs_batch(
+                    init_state["object_center"], oq, dr_vec, priv_cfg,
+                    contact_force=init_state.get("contact_force")))
 
-        obj_pos_all  = init_state["object_center"].astype(np.float64)
-        obj_quat_all = init_state["object_quat"].astype(np.float64)
+            obj_pos_all  = init_state["object_center"].astype(np.float64)
+            obj_quat_all = init_state["object_quat"].astype(np.float64)
 
-        payloads = []
-        for i in range(n):
-            lb, ub = _synth_bounds_topdown(obj_pos_all[i], args.top_down)
-            payloads.append((actual_mesh, obj_pos_all[i], obj_quat_all[i],
-                             left_pts, right_pts, args.maxfevals, lb, ub, str(run_dir / "cmaes_logs")))
-        futures = [executor.submit(v1._synth_worker, pl) for pl in payloads]
-        all_best_x = []
-        for i, fut in enumerate(futures):
-            best_x, score = fut.result()
-            all_best_x.append(best_x)
-            print(f"  Env {i}: cost={score:.3f}  tcp={best_x[:3].round(3)}  w={best_x[6]*1e3:.1f}mm")
+            payloads = []
+            for i in range(n):
+                lb, ub = _synth_bounds_topdown(obj_pos_all[i], args.top_down)
+                payloads.append((actual_mesh, obj_pos_all[i], obj_quat_all[i],
+                                 left_pts, right_pts, args.maxfevals, lb, ub, str(run_dir / "cmaes_logs")))
+            futures = [executor.submit(v1._synth_worker, pl) for pl in payloads]
+            all_best_x = []
+            for i, fut in enumerate(futures):
+                best_x, score = fut.result()
+                all_best_x.append(best_x)
+                print(f"  Env {i}: cost={score:.3f}  tcp={best_x[:3].round(3)}  w={best_x[6]*1e3:.1f}mm")
 
-        modes = list(np.asarray(modes_arr)[rng.choice(len(modes_arr), size=n, p=modes_p)])
-        print(f"  start modes: {modes}")
+            modes = list(np.asarray(modes_arr)[rng.choice(len(modes_arr), size=n, p=modes_p)])
+            print(f"  start modes: {modes}")
 
-        want_video = bool(args.record_video) and total_saved < args.record_video
-        obs_bufs, act_bufs, rew_bufs, success, frame_bufs, _npr = execute_and_collect_diverse_v2(
-            worker, all_best_x, init_obs_batch, perception, action_config,
-            modes, rng, priv_cfg=priv_cfg, dr_vec=dr_vec, record_video=want_video,
-        )
-        print(f"  success: {success.tolist()}")
+            want_video = bool(args.record_video) and total_saved < args.record_video
+            obs_bufs, act_bufs, rew_bufs, success, frame_bufs, _npr = execute_and_collect_diverse_v2(
+                worker, all_best_x, init_obs_batch, perception, action_config,
+                modes, rng, priv_cfg=priv_cfg, dr_vec=dr_vec, record_video=want_video,
+            )
+            print(f"  success: {success.tolist()}")
 
-        for i in range(n):
-            if not success[i]:
-                total_failed += 1
-                if not args.keep_failures:
+            for i in range(n):
+                if not success[i]:
+                    total_failed += 1
+                    if not args.keep_failures:
+                        continue
+                obs_list = obs_bufs[i]
+                if not obs_list:
                     continue
-            obs_list = obs_bufs[i]
-            if not obs_list:
-                continue
-            keys = obs_list[0].keys()
-            episode = {
-                "observations": {k: np.stack([o[k] for o in obs_list]) for k in keys},
-                "actions": np.stack(act_bufs[i]),
-                "rewards": np.asarray(rew_bufs[i], np.float32),
-                "start_mode": modes[i],
-            }
-            shard_buf.append(episode)
-            total_saved += 1
-            ep_id = total_saved
-            if want_video and frame_bufs[i]:
-                vp = vid_dir / f"ep{ep_id:04d}_env{i}_{modes[i]}_{'ok' if success[i] else 'fail'}.mp4"
-                try:
-                    imageio.mimwrite(str(vp), frame_bufs[i], fps=30, quality=8,
-                                     macro_block_size=1)
-                except Exception as e:
-                    print(f"    [video] ep{ep_id} write failed: {e}")
-            print(f"    ep {ep_id}: env {i}  {'OK' if success[i] else 'X'}  "
-                  f"T={episode['actions'].shape[0]}  mode={modes[i]}"
-                  + (f"  vid" if (want_video and frame_bufs[i]) else ""))
+                keys = obs_list[0].keys()
+                episode = {
+                    "observations": {k: np.stack([o[k] for o in obs_list]) for k in keys},
+                    "actions": np.stack(act_bufs[i]),
+                    "rewards": np.asarray(rew_bufs[i], np.float32),
+                    "start_mode": modes[i],
+                }
+                shard_buf.append(episode)
+                total_saved += 1
+                ep_id = total_saved
+                if want_video and frame_bufs[i]:
+                    vp = vid_dir / f"ep{ep_id:04d}_env{i}_{modes[i]}_{'ok' if success[i] else 'fail'}.mp4"
+                    try:
+                        imageio.mimwrite(str(vp), frame_bufs[i], fps=30, quality=8,
+                                         macro_block_size=1)
+                    except Exception as e:
+                        print(f"    [video] ep{ep_id} write failed: {e}")
+                print(f"    ep {ep_id}: env {i}  {'OK' if success[i] else 'X'}  "
+                      f"T={episode['actions'].shape[0]}  mode={modes[i]}"
+                      + (f"  vid" if (want_video and frame_bufs[i]) else ""))
 
-            if len(shard_buf) >= args.shard_size:
-                sp = v1._write_shard(run_dir, shard_buf, task_name, shard_idx, rate_hz)
-                print(f"  shard {shard_idx} -> {sp.name}")
-                shard_idx += 1
-                shard_buf = []
-            if total_saved >= args.n_episodes:
+                if len(shard_buf) >= args.shard_size:
+                    sp = v1._write_shard(run_dir, shard_buf, task_name, shard_idx, rate_hz)
+                    print(f"  shard {shard_idx} -> {sp.name}")
+                    shard_idx += 1
+                    shard_buf = []
+                if total_saved >= args.n_episodes:
+                    break
+        except Exception as e:
+            import traceback
+            consec_fail += 1
+            print(f"  [batch {batch_idx}] FAILED ({type(e).__name__}: {e}) -- "
+                  f"skipping, rebuilding worker ({consec_fail} consecutive)", flush=True)
+            traceback.print_exc()
+            try:
+                worker.close()
+            except Exception:
+                pass
+            if consec_fail >= 12:
+                print("  [collect] 12 consecutive batch failures -- aborting", flush=True)
                 break
+            worker, scene_dr, actual_mesh = _make_worker()
+            continue
+        consec_fail = 0
 
     if shard_buf:
         v1._write_shard(run_dir, shard_buf, task_name, shard_idx, rate_hz)
