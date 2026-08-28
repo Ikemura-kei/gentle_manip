@@ -99,3 +99,10 @@ sbatch --dependency=afterok:$CID gentle_manip/scripts/arrhenius/yd_banana_pipeli
   too low anyway). LAUNCHED full chain:
     collection  job 1769529  (yd_banana_collect, 500 demos, n-envs 8, maxfevals 700)
     pipeline    job 1769530  (yd_banana_pipeline, afterok:1769529 -> convert+BC+eval100)
+- 2026-08-28 ~20:25 — collection 1769529 CRASHED at 168/500: rigid-solver NaN
+  ("invalid constraint forces"). Cause: CMA-ES sometimes returns w~10mm for a 32mm
+  banana -> scripted close crushes the rigid object. Fixes committed: width_cls
+  clamp [20,75]mm; sim_substeps 5->10; softer shape DR; v2 batch try/except
+  (skip+rebuild, <=12 consec). 168 emz shards salvageable (videos intact).
+  Relaunching: collect 350 fresh + merge emz(168); pipeline converts from the
+  PARENT dir (all data.pkl).
