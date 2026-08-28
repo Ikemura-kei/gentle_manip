@@ -15,7 +15,8 @@ set -euo pipefail
 REPO=/nobackup/proj/disk/softenable-codesign26/personal/yifeid/gentle_manip
 source "$REPO/gentle_manip/scripts/arrhenius/yd_env_common.sh"
 
-ENV_NAME=single_lift_banana_rigid_diverse_pcd
+ENV_NAME=${ENV_NAME:-single_lift_banana_rigid_diverse_pcd}
+EXPERIMENT=${EXPERIMENT:-single_lift_banana_rigid_diverse}
 CFG_DIR=$REPO/gentle_manip/dppo/cfg/$ENV_NAME
 DEMO_RUN=${DEMO_RUN:-$(cat "$REPO/logs/slurm_logs/last_banana_collect_run.txt")}
 echo "[pipe] demo run: $DEMO_RUN"
@@ -24,7 +25,7 @@ echo "[pipe] demo run: $DEMO_RUN"
 echo; echo "========== convert -> $DPPO_DATA_DIR/$ENV_NAME =========="
 uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.convert_demos \
   "$DEMO_RUN" --out "$DPPO_DATA_DIR/$ENV_NAME" \
-  --experiment single_lift_banana_rigid_diverse --view student --point-cloud --val-split 0.1
+  --experiment "$EXPERIMENT" --view student --point-cloud --val-split 0.1
 python3 -c "import numpy as np; d=np.load('$DPPO_DATA_DIR/$ENV_NAME/train.npz'); print('train', {k:d[k].shape for k in d.files})"
 
 echo; echo "========== BC pretrain =========="
@@ -91,7 +92,7 @@ echo; echo "========== canonical eval (100 episodes, per-episode video) ========
 PORT=$((5571 + ${SLURM_JOB_ID:-0} % 300))
 SRV_LOG=$REPO/logs/slurm_logs/${SLURM_JOB_ID:-local}_simserver.log
 uv run --project envs/sim_arrhenius --no-sync python -m gentle_manip.scripts.serl_sim_server \
-  --experiment single_lift_banana_rigid_diverse --view student \
+  --experiment "$EXPERIMENT" --view student \
   --num-envs 5 --render-rgb --subprocess --port "$PORT" > "$SRV_LOG" 2>&1 &
 SRV_PID=$!
 trap 'kill $SRV_PID 2>/dev/null || true' EXIT
