@@ -444,6 +444,39 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-28 — MY OWN BUG: three collection chains ran CONCURRENTLY for hours. Cause: a BRE
+alternation in a `pgrep` pattern, so every "kill" was a no-op and every "relaunch" stacked.**
+
+Checking collection progress showed impossible numbers (mushroom 237/250 "running" while
+cherry_tomato showed 250/250 complete and raspberry 128/250 — all from one supposedly SEQUENTIAL
+chain). `ps` showed **three `bigchain.sh` instances** alive at 17.8 h, 7.7 h and 7.3 h.
+
+**Root cause:** every teardown used `pgrep -f "[b]igchain\|[c]ollect_demos_synth_v3"`. `pgrep`
+takes an **ERE**, where alternation is `|`; `\|` is BRE syntax and is matched LITERALLY. So the
+pattern looked for the literal string `bigchain|collect_demos_synth_v3`, matched nothing, killed
+nothing — and each `nohup bash bigchain.sh` added another chain writing into the same dataset
+directories. The three chains were also running THREE DIFFERENT code versions (pre-stress,
+pre-material-DR, and current), so their outputs were not even mutually comparable.
+
+**Damage:** none to a frozen dataset (nothing valid had completed), but ~18 h of GPU wasted and
+every partial run had to be discarded. `data.pkl` is only written at completion, so the
+in-progress sets were unusable regardless.
+
+**Fixes:**
+1. All chains killed by explicit PID.
+2. Every partial / stale-code run dir from today deleted (8 mushroom + 1 raspberry).
+3. **`bigchain.sh` now takes an exclusive `flock`** and refuses to start if another instance holds
+   it — verified: a second launch prints "another bigchain is already running -- refusing to
+   start". A stacked chain is now impossible regardless of whether a kill worked.
+
+**Lessons, both worth keeping:**
+- **`pgrep`/`pkill` take ERE.** `\|` silently matches nothing rather than erroring, so a kill can
+  appear to succeed while doing nothing. Verify a kill with `ps` instead of trusting exit status —
+  this is the same class of failure as the earlier `pkill` self-kills.
+- **Long-running background chains need a lockfile, not just a kill-before-launch.** Kill-then-
+  relaunch is only as reliable as the kill.
+
+
 **2026-08-28 — PRE-FLIGHT before the frozen collection found TWO INERT DR BLOCKS. Material DR had
 NEVER been applied by the v3 collector. Fixed, relaunched.**
 
