@@ -103,6 +103,7 @@ uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.train
   env.specific.port="$PORT"
 
 EVAL_DIR=$(ls -dt "$RUN_DIR"/eval/* | head -1)
+uv run --project envs/sim_arrhenius --no-sync python "$REPO/gentle_manip/scripts/arrhenius/_trim_eval_clips.py" "$EVAL_DIR" 4 16 || true
 echo "[pipe] EVAL DONE (clean) -> $EVAL_DIR"
 cat "$EVAL_DIR/summary.json" 2>/dev/null || true
 echo "$EVAL_DIR" > "$REPO/logs/slurm_logs/last_banana_eval_dir.txt"
@@ -125,6 +126,7 @@ if [ -n "$REGRASP_EXPERIMENT" ] && [ -f "$REPO/gentle_manip/configs/experiments/
       base_policy_path="$BEST" ft_denoising_steps=0 experiment="$REGRASP_EXPERIMENT" \
       env.specific.port="$PORT2" logdir="$RUN_DIR/eval_regrasp/$(date +%Y-%m-%d_%H-%M-%S)" || echo "[pipe] regrasp eval failed"
     ED2=$(ls -dt "$RUN_DIR"/eval_regrasp/* 2>/dev/null | head -1)
+    uv run --project envs/sim_arrhenius --no-sync python "$REPO/gentle_manip/scripts/arrhenius/_trim_eval_clips.py" "$ED2" 4 16 || true
     echo "[pipe] REGRASP EVAL DONE -> $ED2"; cat "$ED2/summary.json" 2>/dev/null || true
     echo "$ED2" > "$REPO/logs/slurm_logs/last_banana_regrasp_eval_dir.txt"
   fi
