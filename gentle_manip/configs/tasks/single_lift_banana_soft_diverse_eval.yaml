@@ -1,0 +1,28 @@
+# [task] Soft banana diverse-start EVAL task: same object/reward/sim as
+# single_lift_banana_soft_diverse, but the success band is LOW and the hold is
+# brief -- "object lifted clear of the table near home height" counts as success
+# immediately, so the harness's early_stop_on_success freezes the env before the
+# (hold-untrained) policy can carry the object back down. Video is then trimmed to
+# the success frame post-hoc (yd_banana_eval.sbatch).
+# Used by: experiments (task:) single_lift_banana_soft_diverse_eval
+# Status: experimental
+#
+# STABILITY (2026-08-30): collection ran 250/220 (substep_dt 1.5e-4 vs CFL suggested
+# 8e-5 -> ~4% of collection batches blew up, tolerated by the collector's try/except).
+# The shared eval harness has NO per-batch skip, so one MPM NaN kills the whole eval
+# (job 1779117 died at batch 2/20). Eval therefore runs a CFL-safe point:
+# grid 200 -> suggested_dt ~1.0e-4; substeps 340 -> substep_dt 9.8e-5 < suggested. The
+# policy obs is geometric (point cloud + proprio) so lift-success transfers across the
+# grid change; gentleness is reported relative to yield, not in absolute Pa.
+success_z_min: 0.13
+success_z_max: 0.45
+hold_steps: 4
+object_name: "banana_lying"
+object_type: "soft"
+sim_substeps: 340
+mpm_grid_density: 200
+success_scale: 0.2
+rewards:
+  stress:      {scale: 0.2, cap: 1.5, mean_weight: 0.2, top10_weight: 0.8}
+  dist_to_obj: {scale: 0.1, decay: 8.0}
+  lift:        {scale: 0.1, grasp_gate_dist: 0.079, lift_target: 0.16}
