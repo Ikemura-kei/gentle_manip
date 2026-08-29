@@ -444,6 +444,61 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-29 — PER-OBJECT VERIFICATION (7 x 16 eps): 4 PASS, 3 REVIEW. The analytic squeeze rule
+is NOT sufficient; the safe indentation has to be MEASURED per object, not predicted.**
+
+User asked to stop the large collection and verify the synthesizer on every object before handing
+the big run to the cluster agent. Done, each object judged on ITS OWN material
+(PASS = sub-yield >= 80 % AND success >= 60 %):
+
+| object | success | sub-yield | verdict |
+|---|---|---|---|
+| mushroom | 100 % | **100 %** | PASS |
+| tomato | 100 % | **100 %** | PASS |
+| tofu | 76.2 % | **100 %** | PASS |
+| strawberry | 100 % | 94 % | PASS |
+| cherry_tomato | 88.9 % | **56 %** | REVIEW (gentleness) |
+| raspberry | 100 % | **19 %** | REVIEW (gentleness) |
+| banana_chunk | **53.3 %** | 100 % | REVIEW (success) |
+
+**A second unscaled constant was found and fixed on the way here.** Cutting the base squeeze alone
+moved the cherry tomato only 5.8 % -> 6 % sub-yield. Measuring the executed grasp showed why: the
+planner synthesized 25.0 mm but the gripper closed to 19.9 mm — 5.1 mm beyond plan, of which only
+0.84 mm was the squeeze. The other ~4.3 mm was the FIRM phase (`FIRM_EXTRA_CLOSE_M` 2.0 mm +
+`FIRM_WEAK_EXTRA_CLOSE_M` 2.5 mm), hard constants applied to EVERY soft grasp — 18 % of a 24.7 mm
+object. Firm now uses the same material-aware budget, and the weakness threshold is 5 % of the
+object's OWN yield instead of a flat 2000 Pa. That took the cherry tomato 6 % -> 56 %.
+
+**But the analytic rule has hit its limit.** `d ~ K*(yield/E)*L` mispredicts in BOTH directions:
+
+| object | budget as % of object | sub-yield | success | diagnosis |
+|---|---|---|---|---|
+| raspberry | 22.2 % | **19 %** | 100 % | budget still too LARGE |
+| banana_chunk | 14.8 % | 100 % | **53.3 %** | budget too SMALL |
+
+A single calibration constant cannot satisfy both: the raspberry needs less indentation than the
+formula says, the banana chunk needs more. Contact geometry (curvature, contact-patch size) enters
+the real stress and is not captured by `(yield/E)*L`.
+
+**Recommended fix — MEASURE instead of predict (not yet implemented).** A short per-object
+auto-calibration at collection start: sweep the squeeze over ~4 values on a handful of throwaway
+episodes, read the resulting peak `priv_stress` (already recorded), and pick the largest squeeze
+whose median stays under ~0.8x yield. That is fully automatic, adds no per-category constants,
+costs a few minutes per category, and directly optimises the real trade-off — gentleness AND grip
+reliability — instead of predicting one from an elastic formula that the elasto-plastic simulator
+does not obey.
+
+**Lesson (this bug class has now appeared TWICE — squeeze, then firm):** any absolute length or
+stress constant applied across objects differing in BOTH size and material is suspect. And an
+object passing tells you nothing about the others: the mushroom read 100 % sub-yield under both the
+broken and the fixed rule.
+
+**Status for the cluster handoff:** mushroom / tomato / tofu / strawberry are ready to collect now.
+cherry_tomato, raspberry and banana_chunk should wait for the auto-calibration. The existing
+250-episode mushroom set (96.5 % success, 99.6 % sub-yield, full material DR) is valid and is the
+intended supplement.
+
+
 **2026-08-29 — CAUGHT MID-COLLECTION: the size-only squeeze rule is GENTLE ON THE MUSHROOM AND
 DAMAGING ON THE CHERRY TOMATO. Replaced with a MATERIAL-AWARE rule; mushroom set preserved.**
 
