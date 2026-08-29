@@ -181,3 +181,13 @@ Evals (parallel):
 Diagnose: SR per experiment + first_success_step distribution -- LATE successes
 (fss > ~100) in the regrasp eval = genuine within-episode recovery (the whole point).
 TODO: fix the pipeline BEST= to pick best-val; investigate DPPO early-stop.
+
+## 2026-08-29 ~14:00 — RIGID REGRASP CONFIRMED (iter 2, run xkrpq / state_150)
+- CLEAN eval: SR 0.83/100; fss histogram of successes shows **20/83 LATE (fss>90)** =
+  genuine within-episode reopen+regrasp (iter 1 had 0 late).
+- REGRASP-start eval: SR 0.694/85 (sim NaN crash at batch 18; offset too aggressive).
+- The "failed" recovery-demo family is the ingredient that worked.
+- TODO carried forward: pipeline BEST= must pick best-VAL (not last/overfit) ckpt;
+  cap pretrain ~180ep for soft; soften the regrasp-eval home offset.
+-> Advancing to PHASE 3: SOFT BANANA (configs already prepped:
+   single_lift_banana_soft_diverse experiment/task/DR + _pcd cfg dir).
