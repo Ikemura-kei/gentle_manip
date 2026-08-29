@@ -23,7 +23,7 @@ TASK_DIR=${TASK_DIR:-single_lift_banana_rigid}   # output folder under dataset/d
 SCENE_DR_EVERY=${SCENE_DR_EVERY:-1}
 MAXFEVALS=${MAXFEVALS:-700}
 SEED=${SEED:-0}
-START_MODES=${START_MODES:-sweep:0.62,above:0.15,ground:0.12,air:0.11}
+START_MODES=${START_MODES:-sweep:0.44,failed:0.30,above:0.10,ground:0.09,air:0.07}
 
 echo "[collect] n_episodes=$N_EPISODES n_envs=$N_ENVS maxfevals=$MAXFEVALS seed=$SEED"
 echo "[collect] start_modes=$START_MODES"
