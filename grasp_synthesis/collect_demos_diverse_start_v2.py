@@ -250,7 +250,7 @@ def execute_and_collect_diverse_v2(
     lift_b   = grasp_pos.copy(); lift_b[:, 2] += v1.LIFT_HEIGHT
 
     width_open = np.full(num_envs, 0.08, np.float32)
-    _margin = -0.0010 if object_type == "soft" else 0.0025   # SOFT: stop 1mm BEFORE the surface (compliance holds)
+    _margin = 0.0     if object_type == "soft" else 0.0025   # SOFT: close to the nominal surface; crush gate (1.25x) catches over-squeeze
     _floor  = 0.014   if object_type == "soft" else 0.020
     width_cls  = np.clip(np.array([p[2] - _margin for p in poses], np.float32), _floor, 0.075)
 
