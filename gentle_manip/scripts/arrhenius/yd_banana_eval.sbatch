@@ -62,4 +62,7 @@ uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.train
   env.specific.port="$PORT" logdir="$LOGDIR"
 ED="$LOGDIR"
 echo "[eval] DONE -> $ED"; cat "$ED/summary.json" 2>/dev/null || true
+# trim success clips to end at the success frame (no carry-down tail)
+uv run --project envs/sim_arrhenius --no-sync python \
+  "$REPO/gentle_manip/scripts/arrhenius/_trim_eval_clips.py" "$ED" 4 16 || echo "[eval] clip trim skipped"
 echo "$ED" > "$REPO/logs/slurm_logs/last_banana_eval_dir.txt"

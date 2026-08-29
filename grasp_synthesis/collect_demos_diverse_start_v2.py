@@ -226,6 +226,9 @@ def execute_and_collect_diverse_v2(
     priv_cfg=None,
     dr_vec=None,
     record_video: bool = False,
+    object_type: str = "rigid",
+    yield_stress: Optional[float] = None,   # soft only: reject episodes whose top10 von Mises exceeds this
+    crush_frac: float = 1.15,
 ):
     """Per-env phase FSM (like collect_demos_synth_v3): every env advances through
     approach -> settle -> grasp -> lift -> hold independently, so a mode with a
@@ -247,7 +250,9 @@ def execute_and_collect_diverse_v2(
     lift_b   = grasp_pos.copy(); lift_b[:, 2] += v1.LIFT_HEIGHT
 
     width_open = np.full(num_envs, 0.08, np.float32)
-    width_cls  = np.clip(np.array([p[2] - 0.0025 for p in poses], np.float32), 0.020, 0.075)
+    _margin = 0.0005 if object_type == "soft" else 0.0025   # SOFT: barely past the surface = gentle
+    _floor  = 0.014  if object_type == "soft" else 0.020
+    width_cls  = np.clip(np.array([p[2] - _margin for p in poses], np.float32), _floor, 0.075)
 
     home_pos  = np.tile(worker.robot.home_pos[None].astype(np.float32),  (num_envs, 1))
     home_quat = np.tile(worker.robot.home_quat[None].astype(np.float32), (num_envs, 1))
@@ -306,6 +311,7 @@ def execute_and_collect_diverse_v2(
     rew_bufs:   List[List[float]]      = [[] for _ in range(num_envs)]
     frame_bufs: List[List[np.ndarray]] = [[] for _ in range(num_envs)]
     height_bufs: List[List[float]]     = [[] for _ in range(num_envs)]
+    crushed = np.zeros(num_envs, bool)   # soft: episode ever exceeded crush_frac * yield
 
     cur_obs_list = [{k: init_obs_batch[k][i] for k in init_obs_batch} for i in range(num_envs)]
     prev_pos  = start_pos.copy()
@@ -386,6 +392,12 @@ def execute_and_collect_diverse_v2(
                 state["object_center"], oq, dr_vec, priv_cfg,
                 contact_force=state.get("contact_force")))
         next_obs_list = [{k: next_obs_batch[k][i] for k in next_obs_batch} for i in range(num_envs)]
+        vm = state.get("von_mises_stress")
+        if yield_stress is not None and vm is not None:
+            vm = np.asarray(vm, np.float64)
+            k = max(1, int(round(0.10 * vm.shape[1])))
+            top10 = np.partition(vm, -k, axis=1)[:, -k:].mean(axis=1)
+            crushed |= (top10 > crush_frac * yield_stress)
         obj_z = state["object_center"][:, 2]
         for i in range(num_envs):
             if active[i]:
@@ -405,7 +417,9 @@ def execute_and_collect_diverse_v2(
 
     obj_z_final = np.array([grasp_pos[i, 2] + (height_bufs[i][-1] if height_bufs[i] else -1.0)
                             for i in range(num_envs)])
-    success = obj_z_final > (grasp_pos[:, 2] + v1.LIFT_HEIGHT * 0.5)
+    success = (obj_z_final > (grasp_pos[:, 2] + v1.LIFT_HEIGHT * 0.5)) & ~crushed
+    if crushed.any():
+        print(f"  [crush] {int(crushed.sum())} env(s) exceeded {crush_frac:.2f}x yield -> rejected")
 
     # ── Early-success trim (same cut on obs/act/rew AND frames) ──
     for i in range(num_envs):
@@ -467,6 +481,9 @@ def main() -> None:
     settle_vel_thresh = float(exp.task_cfg.get("settle_vel_thresh", 0.002))
 
     perception = PerceptionPipeline(obs_config)
+    _yield = float(task.object_yield_stress) if getattr(task, "object_yield_stress", None) else None
+    if _yield:
+        print(f"  soft crush gate: yield={_yield:.0f} Pa (reject episodes > 1.15x)")
 
     collection_config = {
         "task_name": task_name, "description": args.description,
@@ -576,6 +593,7 @@ def main() -> None:
             obs_bufs, act_bufs, rew_bufs, success, frame_bufs, _npr = execute_and_collect_diverse_v2(
                 worker, all_best_x, init_obs_batch, perception, action_config,
                 modes, rng, priv_cfg=priv_cfg, dr_vec=dr_vec, record_video=want_video,
+                object_type=task.object_type, yield_stress=_yield,
             )
             print(f"  success: {success.tolist()}")
 

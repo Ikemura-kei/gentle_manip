@@ -191,3 +191,21 @@ TODO: fix the pipeline BEST= to pick best-val; investigate DPPO early-stop.
   cap pretrain ~180ep for soft; soften the regrasp-eval home offset.
 -> Advancing to PHASE 3: SOFT BANANA (configs already prepped:
    single_lift_banana_soft_diverse experiment/task/DR + _pcd cfg dir).
+
+## 2026-08-29 ~14:30 — PHASE 3 SOFT: user feedback folded in
+Keep the ~70/30 direct-vs-failed demo ratio. Changes for the soft round:
+1. Soft body (banana_lying, MPM). Soft smoke (job 1776694, 26-08-29-sxd) PASSED --
+   genesis builds soft-MPM banana on aarch64 without pymeshlab; 3 demos in 1.9min.
+2. Eval early-termination: new single_lift_banana_soft_diverse_eval task with a LOW
+   lifted-clear success band (z 0.13-0.45, hold 4) + early_stop_on_success, so the
+   env freezes the moment the object is lifted near home (no carry-down). Plus a
+   post-eval _trim_eval_clips.py step: success clips are cut to first_success_step
+   frames (variable length, no frozen tail).
+3. Gentle grasp: v2 collector now uses a SOFT close margin of 0.5mm past the surface
+   (vs 2.5mm rigid) + a CRUSH GATE -- episodes whose top10 von Mises exceeds
+   1.15x yield (45000 Pa banana) are rejected. Eval reports SR, gentleness (peak/
+   mean stress from episodes.csv), and SR x gentleness.
+4. Start-pose coverage: sweep 0.42 (continuous home->object), above 0.16 (atop),
+   ground/air 0.06 each, failed 0.30. Object DR wide (pos 0.10, full yaw, +-14).
+5. Softened the regrasp-eval home offset ([0.04,0,-0.11] vs rigid [0.05,0,-0.14])
+   to avoid MPM NaN.

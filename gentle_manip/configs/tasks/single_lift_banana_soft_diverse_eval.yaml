@@ -1,0 +1,20 @@
+# [task] Soft banana diverse-start EVAL task: same object/reward/sim as
+# single_lift_banana_soft_diverse, but the success band is LOW and the hold is
+# brief -- "object lifted clear of the table near home height" counts as success
+# immediately, so the harness's early_stop_on_success freezes the env before the
+# (hold-untrained) policy can carry the object back down. Video is then trimmed to
+# the success frame post-hoc (yd_banana_eval.sbatch).
+# Used by: experiments (task:) single_lift_banana_soft_diverse_eval
+# Status: experimental
+success_z_min: 0.13
+success_z_max: 0.45
+hold_steps: 4
+object_name: "banana_lying"
+object_type: "soft"
+sim_substeps: 220
+mpm_grid_density: 250
+success_scale: 0.2
+rewards:
+  stress:      {scale: 0.2, cap: 1.5, mean_weight: 0.2, top10_weight: 0.8}
+  dist_to_obj: {scale: 0.1, decay: 8.0}
+  lift:        {scale: 0.1, grasp_gate_dist: 0.079, lift_target: 0.16}
