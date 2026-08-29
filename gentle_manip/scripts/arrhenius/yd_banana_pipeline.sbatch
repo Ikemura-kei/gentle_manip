@@ -109,6 +109,29 @@ uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.train
   env.specific.port="$PORT"
 
 EVAL_DIR=$(ls -dt "$RUN_DIR"/eval/* | head -1)
-echo "[pipe] EVAL DONE -> $EVAL_DIR"
+echo "[pipe] EVAL DONE (clean) -> $EVAL_DIR"
 cat "$EVAL_DIR/summary.json" 2>/dev/null || true
 echo "$EVAL_DIR" > "$REPO/logs/slurm_logs/last_banana_eval_dir.txt"
+
+# ---- 2nd eval: REGRASP experiment (arm starts low over the object) ----
+REGRASP_EXPERIMENT=${REGRASP_EXPERIMENT:-single_lift_banana_rigid_regrasp_eval}
+if [ -n "$REGRASP_EXPERIMENT" ] && [ -f "$REPO/gentle_manip/configs/experiments/$REGRASP_EXPERIMENT.yaml" ]; then
+  echo; echo "========== eval #2: $REGRASP_EXPERIMENT (regrasp start) =========="
+  cleanup 2>/dev/null || kill $SRV_PID 2>/dev/null || true; sleep 3
+  PORT2=$((5871 + ${SLURM_JOB_ID:-0} % 300))
+  SRV_LOG2=$REPO/logs/slurm_logs/${SLURM_JOB_ID:-local}_simserver2.log
+  uv run --project envs/sim_arrhenius --no-sync python -m gentle_manip.scripts.serl_sim_server \
+    --experiment "$REGRASP_EXPERIMENT" --view student --num-envs 5 --render-rgb --subprocess --port "$PORT2" > "$SRV_LOG2" 2>&1 &
+  SRV2=$!; trap 'kill $SRV2 2>/dev/null||true' EXIT
+  for _ in $(seq 1 180); do grep -q SIM_SERVER_READY "$SRV_LOG2" 2>/dev/null && break
+    kill -0 $SRV2 2>/dev/null || { tail -30 "$SRV_LOG2"; break; }; sleep 5; done
+  if grep -q SIM_SERVER_READY "$SRV_LOG2"; then
+    uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.train \
+      --config-path "$CFG_DIR" --config-name eval_diffusion_pointnet \
+      base_policy_path="$BEST" ft_denoising_steps=0 experiment="$REGRASP_EXPERIMENT" \
+      env.specific.port="$PORT2" logdir="$RUN_DIR/eval_regrasp/$(date +%Y-%m-%d_%H-%M-%S)" || echo "[pipe] regrasp eval failed"
+    ED2=$(ls -dt "$RUN_DIR"/eval_regrasp/* 2>/dev/null | head -1)
+    echo "[pipe] REGRASP EVAL DONE -> $ED2"; cat "$ED2/summary.json" 2>/dev/null || true
+    echo "$ED2" > "$REPO/logs/slurm_logs/last_banana_regrasp_eval_dir.txt"
+  fi
+fi
