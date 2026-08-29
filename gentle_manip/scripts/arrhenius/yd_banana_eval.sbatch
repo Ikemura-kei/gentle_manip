@@ -54,9 +54,12 @@ for _ in $(seq 1 180); do grep -q SIM_SERVER_READY "$SRV_LOG" 2>/dev/null && bre
   kill -0 $SRV 2>/dev/null || { tail -40 "$SRV_LOG"; exit 1; }; sleep 5; done
 grep -q SIM_SERVER_READY "$SRV_LOG" || { tail -40 "$SRV_LOG"; exit 1; }
 
+TAG=${EVAL_TAG:-$(basename "$EXPERIMENT")_${SLURM_JOB_ID:-local}}
+LOGDIR="$RUN_DIR/eval/$TAG"
 uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.train \
   --config-path "$CFG_DIR" --config-name eval_diffusion_pointnet \
-  base_policy_path="$CKPT" ft_denoising_steps=0 env.specific.port="$PORT"
-ED=$(ls -dt "$(dirname "$(dirname "$CKPT")")"/eval/* | head -1)
+  base_policy_path="$CKPT" ft_denoising_steps=0 experiment="$EXPERIMENT" \
+  env.specific.port="$PORT" logdir="$LOGDIR"
+ED="$LOGDIR"
 echo "[eval] DONE -> $ED"; cat "$ED/summary.json" 2>/dev/null || true
 echo "$ED" > "$REPO/logs/slurm_logs/last_banana_eval_dir.txt"
