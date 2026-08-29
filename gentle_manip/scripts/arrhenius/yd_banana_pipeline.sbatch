@@ -76,15 +76,9 @@ RUN_DIR=$(grep -oE '/nobackup/[^ ]+/dppo-pretrain/[^ ]+/config/' "$PRE_LOG" | he
 echo "[pipe] pretrain run dir: $RUN_DIR"
 ls -1v "$RUN_DIR"/checkpoint/state_*.pt
 
-# pick best-val checkpoint if the trainer wrote one, else the last
-BEST=$("$UV_BIN_DIR/uv" run --project envs/dppo_arrhenius --no-sync python - "$RUN_DIR" <<'PY'
-import sys, glob, os, json, re
-rd=sys.argv[1]
-# try find_best_checkpoint-style: look for a val-loss log
-cks=sorted(glob.glob(os.path.join(rd,"checkpoint","state_*.pt")), key=lambda p:int(re.findall(r'(\d+)',os.path.basename(p))[0]))
-print(cks[-1] if cks else "")
-PY
-)
+# pick the BEST-VAL checkpoint (parse the pretrain log); fall back to the last.
+BEST=$("$UV_BIN_DIR/uv" run --project envs/dppo_arrhenius --no-sync python \
+  "$REPO/gentle_manip/scripts/arrhenius/_pick_best_ckpt.py" "$RUN_DIR" "$PRE_LOG")
 echo "[pipe] eval checkpoint: $BEST"
 [ -f "$BEST" ] || { echo "[pipe] no checkpoint to eval"; exit 1; }
 
