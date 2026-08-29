@@ -225,3 +225,20 @@ coup_friction (4.5-6.0) also kept. Collect job 1779116 (26-08-29-*), ~1/min,
 (clean single_lift_banana_soft_diverse_eval + regrasp single_lift_banana_soft_regrasp_eval,
 both low lifted-clear band + early_stop + clip trim). Artifact 5682ac2f now has a
 soft-demo section (10 clips).
+
+---
+## 2026-08-29 23:15 — Phase 3 (SOFT banana) collection DONE, pipeline running
+
+- **Collection job 1779116** finished: 500/500 saved, grasp SR 54.6% (915 attempts),
+  crush-rejects 26, 7/160 batches skipped by try/except resilience. elapsed 431 min.
+  Dataset: `dataset/demos/single_lift_banana_soft_diverse/26-08-29-wyk/` (+ 500 videos,
+  start-family labels in filenames: mid_approach / near_object / above_object / failed_grasp / air).
+- **Pipeline 1779117** released, running on n97:
+  - convert OK: 450 train / 50 val episodes, state 8-dim, action 7-dim, PCD stored.
+  - BC pretrain `hytxr` running (`logs/dppo/dppo-pretrain/single_lift_banana_soft_diverse_pcd/hytxr/`),
+    ~16 s/epoch, 200 epochs → ~50 min. train loss 0.92→0.14 by epoch 13, val 0.187 @ ep10.
+  - then: pick best-val ckpt → clean eval (`single_lift_banana_soft_diverse_eval`,
+    early-stop-on-success, low lifted-clear band z 0.13–0.45, hold 4) → regrasp eval
+    (`single_lift_banana_soft_regrasp_eval`) → `_trim_eval_clips.py` on both.
+- Next gate: pretrain done → eval summary.json + episodes.csv (SR / stress-gentleness /
+  first_success_step for genuine regrasp).
