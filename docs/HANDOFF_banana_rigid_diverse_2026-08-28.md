@@ -139,3 +139,12 @@ mushroom, banana, grape, kiwi, strawberry, tomato, cherry, raspberry, egg_boiled
   coverage of the whole corridor. Off-corridor families above/ground/air (0.38
   total) cover post-failure states off the path. object_pos_xy 0.08->0.10.
   --start-modes now = family weights. Relaunched collect 1772322 / pipeline 1772323.
+- 2026-08-29 ~04:00 — collection 1772322 DONE: 500 diverse-start rigid-banana demos
+  (26-08-29-tcj), 41.7% scripted-grasp SR over 1199 attempts (continuous sweep +
+  wide DR + off-corridor modes are much harder for the scripted demonstrator than
+  the home-heavy diag's 80% -- the 500 saved are all clean successes though, just
+  biased toward start configs the scripted grasp can handle). 234min, 1 batch NaN
+  skipped/144. Converted: 450 train / 50 val, 75207 steps, obs_dim 8 / action_dim 7.
+  Pipeline 1772323 FAILED instantly on a bare `python3 -c "import numpy"` shape-check
+  line (system python has no numpy) -- fixed to run in envs/dppo_arrhenius,
+  resubmitted as 1773316 (BC pretrain -> 100-ep eval).
