@@ -350,9 +350,12 @@ def execute_and_collect_diverse_v2(
         elif ph == 4:    # lift
             a = (st + 1) / max(dur, 1)
             pos = pos_b[i] + a * (lift_b[i] - pos_b[i])
-            quat, grip = quat_b[i], width_cls[i]
+            quat = quat_b[i]
+            firm = 0.0015 if object_type == "soft" else 0.0   # progressive grip firming
+            grip = max(_floor, width_cls[i] - firm * a)
         else:            # hold
-            pos, quat, grip = lift_b[i], quat_b[i], width_cls[i]
+            firm = 0.0015 if object_type == "soft" else 0.0
+            pos, quat, grip = lift_b[i], quat_b[i], max(_floor, width_cls[i] - firm)
         return pos, quat, grip
 
     phase_idx  = np.zeros(num_envs, np.int64)
