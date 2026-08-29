@@ -242,3 +242,28 @@ soft-demo section (10 clips).
     (`single_lift_banana_soft_regrasp_eval`) → `_trim_eval_clips.py` on both.
 - Next gate: pretrain done → eval summary.json + episodes.csv (SR / stress-gentleness /
   first_success_step for genuine regrasp).
+
+---
+## 2026-08-30 00:35 — pipeline 1779117 FAILED at eval batch 2/20; diagnosed + resubmitted
+
+- Pretrain finished clean (200 ep, best val 0.0330 @ ep200 -> state_200.pt).
+- **Clean eval died at batch 2/20** with `ConnectionError: socket closed mid-message`
+  (client side). Sim server log shows clean "Exiting Genesis" at the same instant, no
+  Python traceback server-side -> the genesis MPM **worker crashed (NaN)** and the parent
+  server tore down. Root cause: the soft task ran `mpm_grid_density 250 / sim_substeps 220`
+  = `substep_dt 1.5e-4` vs CFL `suggested_dt 8e-5` (Genesis warned "might be unstable").
+  Collection tolerated this (~4% batch blowups skipped by the collector's try/except); the
+  **shared eval harness has no per-batch skip**, so one NaN kills the run.
+- First 2 batches before the crash: **clean-start SR 0.60**, `in_band 1.00` (the low
+  lifted-clear success band + early-stop is working).
+- Also: eval was **~8 min/batch** (stepping ~90 s + render/encode/diffusion overhead) ->
+  ~2.7 h/eval, untenable for a 9-object campaign.
+- **Fix (committed):**
+  - `single_lift_banana_soft_diverse_eval.yaml`: `mpm_grid_density 200`, `sim_substeps 340`
+    -> CFL-safe (`substep_dt 9.8e-5 < suggested 1.0e-4`). Geometric obs so lift-success
+    transfers; gentleness reported relative to yield.
+  - `eval_diffusion_pointnet.yaml`: `n_steps 200->150`, `max_episode_steps 800->600`.
+- **Resubmitted clean eval as job 1789727** (`yd_banana_eval`, EVAL_TAG=clean_v2, ckpt
+  state_200). Monitoring first ~3 batches for stability before submitting the regrasp eval.
+- NOT done: the regrasp eval (`single_lift_banana_soft_regrasp_eval`) — submit after clean_v2
+  proves stable.
