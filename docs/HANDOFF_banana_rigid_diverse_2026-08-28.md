@@ -214,3 +214,14 @@ Keep the ~70/30 direct-vs-failed demo ratio. Changes for the soft round:
 close margin sweep (soft): +0.5mm past surface -> ~44% crush-reject (too hard);
 -1mm before surface -> 0% crush but ~25% lift SR (too loose). Landed on **0 margin
 (at the nominal surface)** + crush gate at 1.25x yield. Collect job 1778959.
+
+## 2026-08-29 ~16:20 — soft SR bug FIXED
+Root cause of ~17% soft lift SR (latent in rigid too): CMA-ES returns a straddle
+width WIDER than the object (cost 0, no contact); [0.020,0.075] clamp too loose ->
+gripper closed on nothing. FIX: cap width_cls at min(registry short axis)+2mm.
+Soft SR -> ~50%, crush rejections ~4%. Progressive lift-firming (+1.5mm) + higher
+coup_friction (4.5-6.0) also kept. Collect job 1779116 (26-08-29-*), ~1/min,
+~8h to 500. Loop carries -> convert -> pretrain (200ep cap) -> dual eval
+(clean single_lift_banana_soft_diverse_eval + regrasp single_lift_banana_soft_regrasp_eval,
+both low lifted-clear band + early_stop + clip trim). Artifact 5682ac2f now has a
+soft-demo section (10 clips).
