@@ -229,7 +229,7 @@ def _state_to_raw_obs(state: dict) -> RawObs:
 
 # ── Scene-level DR (object SIZE + SHAPE) ──────────────────────────────────────
 
-def _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir):
+def _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir, mesh_cycle=None):
     """Per-scene SIZE + SHAPE DR for the (rigid) object — mirrors
     SimBackend._apply_scene_dr, but BAKES the uniform scale into the exported mesh
     (not the ObjectEntry.scale field) so the CMA-ES SDF, which loads the mesh file
@@ -247,9 +247,24 @@ def _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir):
     o = nominal_spec.objects[0]
     nominal_scale = float(o.scale or 1.0)
     shp = dr_cfg.sample_shape_scale(rng)                     # {} if no shape/scale fields set
-    variant = dr_cfg.sample_mesh_variant(rng)                # base-mesh pool pick (or None);
+    # MATERIAL DR. `sample_scene` existed and this collector NEVER CALLED IT, so every demo ever
+    # collected here used the registry's nominal E/nu/rho and the object_E/nu/rho/coup_friction
+    # ranges in all the DR configs were INERT (verified 2026-08-28). Sample and bake them now.
+    # NOTE `object_yield` still cannot be randomized: ObjectEntry has no yield field, so the yield
+    # always comes from the registry material (pre-existing limitation, see CLAUDE.md).
+    mat = dr_cfg.sample_scene(rng)
+    if mesh_cycle is not None and dr_cfg.object_mesh_pool:
+        # DETERMINISTIC round-robin over the pool instead of a uniform draw. Random sampling only
+        # covers the pool in expectation: an 8-episode smoke test rebuilds the scene once or twice,
+        # so it sees 1-2 of 4-5 meshes and a broken variant can sit unnoticed. Cycling guarantees
+        # every mesh is exercised once per full pass. See --mesh-cycle.
+        pool = list(dr_cfg.object_mesh_pool)
+        variant = pool[mesh_cycle[0] % len(pool)]
+        mesh_cycle[0] += 1
+    else:
+        variant = dr_cfg.sample_mesh_variant(rng)            # base-mesh pool pick (or None);
                                                              # same cadence as size/shape DR
-    if not shp and variant is None:
+    if not shp and variant is None and not mat:
         return nominal_spec, {"scale": nominal_scale, "bend_deg": 0.0, "mesh_variant": o.name}
 
     if variant is not None:                                  # pool pick replaces the base mesh;
@@ -265,17 +280,30 @@ def _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir):
     dst = Path(deform_dir) / f"{Path(nominal_mesh).stem}_dr_{rng.integers(1_000_000):06d}.obj"
     mesh.export(str(dst))
 
-    new_obj  = dataclasses.replace(o, mesh_path=str(dst), scale=1.0)
+    new_obj  = dataclasses.replace(o, mesh_path=str(dst), scale=1.0,
+                                   **({"youngs_modulus": mat["E"]} if "E" in mat else {}),
+                                   **({"poisson_ratio": mat["nu"]} if "nu" in mat else {}),
+                                   **({"density": mat["rho"]} if "rho" in mat else {}))
     new_spec = dataclasses.replace(nominal_spec, objects=[new_obj, *nominal_spec.objects[1:]])
     scene_dr = {"scale": float(shp.get("scale", 1.0)),
                 "bend_deg": float(np.rad2deg(shp.get("bend", 0.0))),
-                "mesh_variant": variant if variant is not None else o.name}
+                "mesh_variant": variant if variant is not None else o.name,
+                # every remaining DR draw, recorded so the frozen dataset is reproducible
+                "twist_deg": float(np.rad2deg(shp.get("twist", 0.0))),
+                "taper": float(shp.get("taper", 0.0)),
+                "rbf": float(shp.get("rbf", 0.0)),
+                "axis_scale": float(shp.get("axis_scale", 1.0)),
+                "axis_scale_ax": int(shp.get("axis_scale_ax", -1)),
+                "mat_E": float(mat.get("E", 0.0)), "mat_nu": float(mat.get("nu", 0.0)),
+                "mat_rho": float(mat.get("rho", 0.0)),
+                "coup_friction": float(mat.get("coup_friction", 4.0))}
     return new_spec, scene_dr
 
 
 # ── Privileged obs (sim-only state-teacher fields) ────────────────────────────
 
-def _privileged_obs_batch(object_center, object_quat, dr_vec, priv_cfg, contact_force=None) -> dict:
+def _privileged_obs_batch(object_center, object_quat, dr_vec, priv_cfg, contact_force=None,
+                          von_mises=None, yield_stress=None) -> dict:
     """Sim-only privileged fields from raw worker state — mirrors
     PolicyEnv._privileged_obs exactly, but sourced from GenesisWorker state
     (object_center + object_quat + contact_force) since this collector bypasses PolicyEnv.
@@ -285,6 +313,15 @@ def _privileged_obs_batch(object_center, object_quat, dr_vec, priv_cfg, contact_
     Returns a dict of (N, ...) arrays for whichever priv fields the config enables.
     """
     out = {}
+    # STRESS was declared in the obs configs but NEVER mirrored here, so a config asking for
+    # `privileged: stress: true` was SILENTLY IGNORED by this collector (PolicyEnv honours it;
+    # this file bypasses PolicyEnv and must mirror it — see the CLAUDE.md note). Emitting it now:
+    # (N,2) = [mean, top10] / yield, the same normalization PolicyEnv uses.
+    if getattr(priv_cfg, "stress", False) and von_mises is not None and yield_stress:
+        vm = np.asarray(von_mises, np.float32)
+        out["priv_stress"] = np.stack([vm.mean(axis=1) / float(yield_stress),
+                                       _stress_top10(vm) / float(yield_stress)], axis=1
+                                      ).astype(np.float32)
     oc = np.asarray(object_center, dtype=np.float32)                    # (N, 3)
     if priv_cfg.object_pos:
         out["priv_object_pos"] = oc
@@ -428,6 +465,8 @@ def execute_and_collect(
     record_video: bool = False,
     priv_cfg=None,                 # PrivilegedConfig or None — sim-only state-teacher fields
     dr_vec=None,                   # (2,) [scale, bend_deg] for priv_object_dr_params
+    yield_stress=None,             # Pa — normalizer for priv_stress (None = stress not emitted)
+    firm_close_m=None,             # m — material-aware BASE firm close; None = FIRM_EXTRA_CLOSE_M
     extra_close: float = 0.0,      # squeeze this many meters TIGHTER than the synthesized width (all grasps)
     approach_xy_finish=None,       # v3.2: (lo, hi) per-env xy-progress finish fraction; None = straight line
     approach_speed=None,           # v3.3: m/step — per-env approach DURATION = dist/speed (constant
@@ -481,7 +520,21 @@ def execute_and_collect(
     # Per-env firm close distance (m). SOFT firms EVERY grasp by the base amount (the grip
     # margin the old path gave all grasps); a weak grasp (low stress rise) gets set to a LARGER
     # value at the grasp->firm boundary. RIGID leaves this at base and skips firm when already firm.
-    firm_close = np.full(num_envs, FIRM_EXTRA_CLOSE_M, np.float32)
+    # FIRM CLOSE — material-aware, same scale as the base squeeze. The constants below are
+    # 2.0 mm base + 2.5 mm weak applied to EVERY soft grasp regardless of object. Measured
+    # 2026-08-29: on the cherry tomato that is 4.5 mm of extra closure on a 24.7 mm object (18 %),
+    # dwarfing the 0.84 mm base squeeze — which is why reducing the squeeze alone barely moved its
+    # sub-yield rate (5.8 % -> 6 %). Scaling firm by the same (yield/E)*L indentation budget keeps
+    # the mushroom at 1.94/2.43 mm (vs 2.0/2.5, i.e. unchanged in practice, so its collected set
+    # stays valid) while the cherry tomato drops to 0.84/1.05 mm.
+    _firm_base = FIRM_EXTRA_CLOSE_M if firm_close_m is None else float(firm_close_m)
+    # "weak" is judged by a stress RISE, and 2000 Pa is 5 % of the mushroom's 40 kPa yield but
+    # 6.7 % of the cherry tomato's 30 kPa — so the same absolute bar means different things.
+    # Express it as that same 5 % of the object's own yield (mushroom unchanged).
+    _firm_thresh = (FIRM_STRESS_THRESH_PA if not yield_stress
+                    else 0.05 * float(yield_stress))
+    _firm_weak = _firm_base * (FIRM_WEAK_EXTRA_CLOSE_M / FIRM_EXTRA_CLOSE_M)
+    firm_close = np.full(num_envs, _firm_base, np.float32)
     _has_firm  = any(n == "firm" for n, _ in PHASES)   # --n-firm 0 drops the phase: skip the check too
 
     home_pos  = np.tile(worker.robot.home_pos[None].astype(np.float32),  (num_envs, 1))
@@ -641,7 +694,8 @@ def execute_and_collect(
                 oq = np.tile(np.array([1., 0, 0, 0], np.float32), (num_envs, 1))  # deployable student
             next_obs_batch.update(_privileged_obs_batch(           # uses point_cloud, not this)
                 state["object_center"], oq, dr_vec, priv_cfg,
-                contact_force=state.get("contact_force")))
+                contact_force=state.get("contact_force"),
+                von_mises=state.get("von_mises_stress"), yield_stress=yield_stress))
         next_obs_list = [{k: next_obs_batch[k][i] for k in next_obs_batch}
                          for i in range(num_envs)]
 
@@ -705,7 +759,7 @@ def execute_and_collect(
             if cf is not None:                        # RIGID: contact force (N). ALWAYS firm base;
                 for i in np.where(leaving_grasp)[0]:  # weak grip (force < thresh) firms base+extra.
                     if cf[i] < FIRM_FORCE_THRESH_N:
-                        firm_close[i] = FIRM_EXTRA_CLOSE_M + FIRM_WEAK_EXTRA_CLOSE_M
+                        firm_close[i] = _firm_base + _firm_weak
                         print(f"    [firm] env {i}: weak grip force {cf[i]:.2f}N < "
                               f"{FIRM_FORCE_THRESH_N}N -> closing {firm_close[i]*1000:.1f}mm (base+extra)")
                     # else: base firm close (never skip)
@@ -717,10 +771,10 @@ def execute_and_collect(
                     cur = _stress_top10(vm)
                     for i in np.where(leaving_grasp)[0]:
                         rise = float(cur[i] - rest_stress[i])
-                        if rise < FIRM_STRESS_THRESH_PA:
-                            firm_close[i] = FIRM_EXTRA_CLOSE_M + FIRM_WEAK_EXTRA_CLOSE_M
+                        if rise < _firm_thresh:
+                            firm_close[i] = _firm_base + _firm_weak
                             print(f"    [firm] env {i}: weak stress rise {rise:.0f}Pa < "
-                                  f"{FIRM_STRESS_THRESH_PA:.0f}Pa -> closing {firm_close[i]*1000:.1f}mm (base+extra)")
+                                  f"{_firm_thresh:.0f}Pa -> closing {firm_close[i]*1000:.1f}mm (base+extra)")
                         # else: firm_close stays at base -> still firms, just not extra
 
         phase_idx[rolled_over]  += advance[rolled_over]
@@ -806,11 +860,29 @@ def _merge_shards(run_dir: Path) -> Optional[Path]:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def _extra_close_arg(args, obj_def):
-    """'auto' -> squeeze scaled by object size (see --grasp-extra-close); a number passes through."""
+    """'auto' -> squeeze scaled by the object's MATERIAL and size (see --grasp-extra-close).
+
+    SIZE ALONE IS NOT ENOUGH. For an indentation d over a characteristic length L the induced
+    stress goes as sigma ~ E * d / L, so keeping sigma under yield requires
+
+        d  <=  K * (yield / E) * L
+
+    i.e. the squeeze must scale with the material's yield/E ratio, not just the object size.
+    That ratio varies 2.7x across our objects (tofu 2.5, mushroom 7.5, cherry tomato 13.3), so a
+    size-only rule that is gentle on one is damaging on another. Measured 2026-08-29 mid-
+    collection: with the size-only rule the mushroom came out at median 0.58x yield / 99.6%
+    sub-yield, while the cherry tomato -- stiffer E AND lower yield -- ran at median 1.18x yield
+    with only 5.8% sub-yield, i.e. essentially the whole category past yield.
+
+    K = 0.455 is calibrated on the mushroom so its squeeze is UNCHANGED at 1.94 mm, which keeps
+    the already-collected (and validated) mushroom set exactly reproducible. Everything else is
+    then derived from that object's own E and yield -- no per-category constants.
+    """
     if str(args.grasp_extra_close).lower() != "auto":
         return float(args.grasp_extra_close)
-    smallest = float(min(obj_def.size))
-    return float(np.clip(0.005 * (smallest / 0.033), 0.002, 0.006))
+    m = obj_def.material
+    ratio = float(m.von_mises_yield_stress) / float(m.youngs_modulus)
+    return float(np.clip(0.455 * ratio * float(min(obj_def.size)), 0.0005, 0.003))
 
 
 def _yaw_max_arg(args, obj_def):
@@ -877,6 +949,14 @@ def main() -> None:
     # Pass a value explicitly to override.
     p.add_argument("--grasp-E",           type=float, default=None,  help="object Young's modulus (Pa); default = the object's material")
     p.add_argument("--grasp-density",     type=float, default=None, help="object density (kg/m^3); default = the object's material")
+    p.add_argument("--mesh-cycle", action="store_true",
+                   help="Walk the DR object_mesh_pool in ORDER (round-robin), one mesh per scene "
+                        "rebuild, instead of sampling it uniformly at random. Guarantees every mesh "
+                        "in the pool is exercised — a uniform draw only covers the pool in "
+                        "expectation, and a short smoke run rebuilds the scene only once or twice, "
+                        "so it can miss most of the pool (and any broken variant in it). Use for "
+                        "smoke tests and coverage checks; leave OFF for real collections, where "
+                        "random sampling is the correct DR.")
     p.add_argument("--grasp-nu", default=None,
                    help="Poisson ratio for the grasp FEM. Default None keeps the HISTORICAL 0.33 "
                         "(MetricConfig's 'copper' default), which every collection before "
@@ -1057,7 +1137,7 @@ def main() -> None:
                    help="squeeze FURTHER IN than the synthesized width by this many meters (tighter grip) "
                         "for EVERY grasp — e.g. 0.005 = close 5mm tighter. 0 (default) = no change. Use to "
                         "make grasps firmer (a too-gentle grip -> premature lift / slip before secured). "
-                        "Pass 'auto' to scale it with the object: a FIXED 5 mm is 15%% of the 33 mm "
+                        "Pass 'auto' to scale it with the object: a FIXED squeeze is 15%% of the 33 mm "
                         "mushroom it was tuned on but 24%% of a 21 mm cherry tomato and 34%% of a 15 mm "
                         "raspberry, i.e. the same knob over-squeezes small objects. auto = "
                         "5 mm * (smallest extent / 33 mm), clipped to [2, 6] mm, so the mushroom is "
@@ -1141,6 +1221,9 @@ def main() -> None:
                         "grasp_medial_seeds": bool(args.grasp_medial_seeds),
                         "grasp_escalate": int(args.grasp_escalate),
                         "grasp_width_max_mm": args.grasp_width_max_mm,
+                        "grasp_yaw_max_deg": args.grasp_yaw_max_deg,
+                        "grasp_yaw_max_deg_resolved": _yaw,
+                        "grasp_nu": _fem_nu,
                         "grasp_w_press": args.grasp_w_press,
                         "grasp_extra_close": args.grasp_extra_close},
         "dr": exp.dr,
@@ -1168,17 +1251,21 @@ def main() -> None:
     do_scene_dr    = args.scene_dr_every > 0 and dr_cfg.has_scene_dr()
     deform_dir     = tempfile.mkdtemp(prefix="gm_synth_deform_") if do_scene_dr else None
 
+    _mesh_cycle = [0] if args.mesh_cycle else None    # round-robin cursor (see --mesh-cycle);
+                                                     # must precede the first _make_worker() call
     def _make_worker():
         """Build a GenesisWorker; if scene DR is on, on a freshly deformed+scaled mesh.
         Returns (worker, scene_dr_dict, actual_mesh_path)."""
         if do_scene_dr:
-            spec_dr, sdr = _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir)
+            spec_dr, sdr = _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir,
+                                           mesh_cycle=_mesh_cycle)
         else:
             spec_dr, sdr = nominal_spec, {"scale": float(nominal_spec.objects[0].scale or 1.0),
                                           "bend_deg": 0.0}
         w = GenesisWorker(spec_dr, num_envs=args.n_envs, show_viewer=False,
                           settle_steps=settle_steps, settle_max_steps=settle_max_steps,
-                          settle_vel_thresh=settle_vel_thresh, render_obs_cameras=True)
+                          settle_vel_thresh=settle_vel_thresh, render_obs_cameras=True,
+                          coup_friction=float(sdr.get("coup_friction", 4.0)))
         return w, sdr, (w.handle.spec.objects[0].mesh_path or MUSHROOM_MESH)
 
     worker, scene_dr, actual_mesh = _make_worker()
@@ -1209,6 +1296,8 @@ def main() -> None:
                         "roll_deg", "pitch_deg", "yaw_deg", "flipped",
                         "home_dx", "home_dy", "home_dz", "scene_scale", "scene_bend_deg",
                         "mesh_variant",
+                        "twist_deg", "taper", "rbf", "axis_scale", "axis_scale_ax",
+                        "mat_E", "mat_nu", "mat_rho", "coup_friction",
                         "stress_Pa", "grip_N", "align", "pressure_Pa", "min_pad_mm2", "width_mm", "tilt_deg"])
 
     total_saved  = 0
@@ -1290,6 +1379,7 @@ def main() -> None:
         if priv_cfg is not None:
             init_obs_batch.update(_privileged_obs_batch(
                 obj_pos_all, obj_quat_all, dr_vec, priv_cfg,
+                von_mises=init_state.get("von_mises_stress"), yield_stress=args.grasp_yield,
                 contact_force=init_state.get("contact_force")))
 
         # ── Per-env FEM gentleness grasp synthesis (v3) ──
@@ -1406,7 +1496,7 @@ def main() -> None:
                 approach_xy_finish=args.approach_xy_finish, approach_rng=approach_rng,
             approach_speed=args.approach_speed,
                 trim_max_run=args.held_run_max, trim_keep=args.held_run_keep,
-            )
+                yield_stress=args.grasp_yield, firm_close_m=args.grasp_extra_close)
             consec_batch_aborts = 0
         except Exception as e:
             # Some scene draws are systematically unstable (solver NaN mid-episode even after a
@@ -1440,6 +1530,15 @@ def main() -> None:
                                 round(float(scene_dr.get("scale", 1.0)), 4),
                                 round(float(scene_dr.get("bend_deg", 0.0)), 2),
                                 scene_dr.get("mesh_variant", ""),
+                                round(float(scene_dr.get("twist_deg", 0.0)), 2),
+                                round(float(scene_dr.get("taper", 0.0)), 4),
+                                round(float(scene_dr.get("rbf", 0.0)), 4),
+                                round(float(scene_dr.get("axis_scale", 1.0)), 4),
+                                int(scene_dr.get("axis_scale_ax", -1)),
+                                round(float(scene_dr.get("mat_E", 0.0)), 1),
+                                round(float(scene_dr.get("mat_nu", 0.0)), 4),
+                                round(float(scene_dr.get("mat_rho", 0.0)), 1),
+                                round(float(scene_dr.get("coup_friction", 4.0)), 3),
                                 round(float(g.get("stress_top10") or 0), 1), round(float(g.get("grip") or 0), 4),
                                 round(float(g.get("align") or 0), 4), round(float(g.get("pressure") or 0), 1),
                                 round(float((g.get("min_pad_area") or 0) * 1e6), 2),

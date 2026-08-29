@@ -18,6 +18,7 @@ object_bend_deg:   [-25, 25]
 object_twist_deg:  [-20, 20]
 object_taper:      [-0.15, 0.15]
 object_axis_scale: [0.95, 1.15]
+object_mesh_pool: [raspberry1, raspberry2, raspberry3, raspberry4, raspberry5]   # per-scene base-mesh randomization over the photo-derived variants
 object_scale:      [0.80, 1.30]
 object_E: [0.8e5, 1.2e5]
 object_nu: [0.36, 0.44]

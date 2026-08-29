@@ -15,6 +15,12 @@ include_joint_pos: false
 include_joint_vel: false
 quat_noise_std: 0.003
 privileged:
+  stress: true              # priv_stress (N,2) = [mean, top10] / yield. Recorded so the FROZEN
+                            # dataset carries a PER-EPISODE gentleness record: needed to (a) filter
+                            # demos that exceed yield and (b) state the sub-yield fraction of the
+                            # actual dataset rather than of a proxy sample. Privileged-only, and the
+                            # DPPO views are explicit key lists, so this does NOT change the student
+                            # (point-cloud) obs or any converted view — it is additive metadata.
   object_pos: true          # AUX LABEL: object position (COM) — 3D regression target
   contact: true             # AUX LABEL: proper binary gripper-object contact (geometric, not stress)
 point_cloud:

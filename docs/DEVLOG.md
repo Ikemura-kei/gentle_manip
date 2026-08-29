@@ -201,6 +201,40 @@ limit, not a tuning gap.
 
 ## Roadmap / TODO
 
+### PROPOSED (user, 2026-08-27) — hover-start demos to teach grasp RETRY
+
+Add a fraction of demos that START from a post-failure-like state instead of from home: the
+gripper **6-10 cm above the object with the WIDTH RANDOMIZED**, then execute the normal
+synthesized grasp. Rationale: BC only sees states on the expert trajectory, so after a failed
+grasp the policy is off-distribution and has never seen "hovering over the object, gripper
+partly closed, holding nothing" — exactly where a failure leaves it.
+
+**Why it should help, precisely:** the normal approach ALREADY passes through 6-10 cm above the
+object, but always with the gripper **OPEN**. The novel, genuinely-unseen state is the
+**partially-closed gripper at hover** — so the randomized WIDTH is where the value is, not the
+height. In absolute-action mode the policy commands a target pose+width directly, so it can
+recover in a single step once it has seen the state.
+
+**Three design caveats:**
+1. **Object pose mismatch.** After a real failed grasp the object is usually displaced/rotated by
+   the failed contact. Hover-starts over a PRISTINE spawn pose under-cover the true post-failure
+   distribution — consider perturbing the object slightly for these episodes.
+2. **This teaches RESTART, not RETRY.** There is no failure *detection*: the policy learns "from
+   this state, grasp", not "that attempt failed, so reopen and retry". Probably sufficient (the
+   state is the trigger), but do not claim learned failure-recovery from it alone.
+3. **Mixing fraction.** Too many mid-air starts under-represent the full approach and could
+   degrade the primary behaviour. Start around **15 %**, not half.
+
+**Verification must be at TRAINING time, not collection time** — the collector will happily
+produce these demos and their success rate says nothing about whether retry emerges. The test is
+a deploy/eval comparison against a matched no-hover-start baseline.
+
+Related: this is a cheaper cousin of the long-standing "deliberate induced failure for
+retry-coverage" idea in CLAUDE.md (v2 collector brainstorm item 3), which perturbs the grasp so a
+genuine failure+recovery is recorded. That one covers failure DETECTION too, at the cost of
+needing slip detection in the collector.
+
+
 ### Standing rule: rigorous monitoring on EVERYTHING launched (2026-08-24, user)
 
 Anything launched (training, eval, collection, chain, probe) MUST carry a rigorous health
@@ -409,6 +443,397 @@ running" — replacing any whose experiments have since finished.**
 ---
 
 ## Log
+
+**2026-08-29 — CAUGHT MID-COLLECTION: the size-only squeeze rule is GENTLE ON THE MUSHROOM AND
+DAMAGING ON THE CHERRY TOMATO. Replaced with a MATERIAL-AWARE rule; mushroom set preserved.**
+
+Routine status check on the running collection compared per-category gentleness:
+
+| object | median stress | sub-yield |
+|---|---|---|
+| mushroom (done, 250 eps) | 0.58x yield | **99.6 %** |
+| cherry_tomato (124 eps in) | **1.18x yield** | **5.8 %** |
+
+The cherry tomato was being collected in exactly the past-yield regime the whole squeeze fix
+existed to escape. **Killed the chain at 124/250 and discarded that run.**
+
+**Cause: `--grasp-extra-close auto` scaled with SIZE ONLY.** For an indentation `d` over a
+characteristic length `L`, stress goes as `sigma ~ E * d / L`, so staying under yield requires
+
+    d  <=  K * (yield / E) * L
+
+The squeeze must scale with the material's **yield/E** ratio, and that ratio varies **2.7x**
+across our objects (tofu 2.5, raspberry 6.7, mushroom 7.5, strawberry 8.3, banana_chunk 10.0,
+tomato 12.0, cherry_tomato 13.3). The cherry tomato is the worst case — the STIFFEST E (0.4 MPa)
+combined with a LOW yield (30 kPa) — so a squeeze that is gentle on a mushroom drives it well past
+yield. A size-only rule cannot express that.
+
+**Fix:** `K = 0.455`, calibrated so the MUSHROOM's squeeze is unchanged at 1.94 mm — which keeps
+the already-finished, validated mushroom set exactly reproducible and means it does NOT need
+recollecting. Every other object is then derived from its own E and yield, so this remains a
+zero-per-category-constant rule:
+
+| object | size-only (old) | material-aware (new) |
+|---|---|---|
+| mushroom | 1.94 mm | **1.94 mm** (unchanged by construction) |
+| cherry_tomato | 1.50 mm | **0.84 mm** |
+| tomato | 2.78 mm | 1.74 mm |
+| banana_chunk | 1.24 mm | 0.93 mm |
+| strawberry | 1.97 mm | 1.77 mm |
+| raspberry | 1.00 mm | 0.94 mm |
+| tofu | 1.82 mm | **3.00 mm** (very soft, yield/E = 0.4 -> tolerates MORE squeeze; clipped) |
+
+Note tofu moves the OTHER way: being soft with a relatively high yield it was being squeezed too
+LITTLE, which costs grip reliability for no gentleness benefit.
+
+**Method note — this is why per-category gentleness must be checked DURING collection, not after.**
+The mushroom's 99.6 % looked like proof the recipe was right; it was proof the recipe was right
+*for the mushroom*. A single validated object cannot certify a rule that depends on material.
+
+Chain restarted at cherry_tomato (mushroom retained). 6 categories remaining.
+
+
+**2026-08-28 — MY OWN BUG: three collection chains ran CONCURRENTLY for hours. Cause: a BRE
+alternation in a `pgrep` pattern, so every "kill" was a no-op and every "relaunch" stacked.**
+
+Checking collection progress showed impossible numbers (mushroom 237/250 "running" while
+cherry_tomato showed 250/250 complete and raspberry 128/250 — all from one supposedly SEQUENTIAL
+chain). `ps` showed **three `bigchain.sh` instances** alive at 17.8 h, 7.7 h and 7.3 h.
+
+**Root cause:** every teardown used `pgrep -f "[b]igchain\|[c]ollect_demos_synth_v3"`. `pgrep`
+takes an **ERE**, where alternation is `|`; `\|` is BRE syntax and is matched LITERALLY. So the
+pattern looked for the literal string `bigchain|collect_demos_synth_v3`, matched nothing, killed
+nothing — and each `nohup bash bigchain.sh` added another chain writing into the same dataset
+directories. The three chains were also running THREE DIFFERENT code versions (pre-stress,
+pre-material-DR, and current), so their outputs were not even mutually comparable.
+
+**Damage:** none to a frozen dataset (nothing valid had completed), but ~18 h of GPU wasted and
+every partial run had to be discarded. `data.pkl` is only written at completion, so the
+in-progress sets were unusable regardless.
+
+**Fixes:**
+1. All chains killed by explicit PID.
+2. Every partial / stale-code run dir from today deleted (8 mushroom + 1 raspberry).
+3. **`bigchain.sh` now takes an exclusive `flock`** and refuses to start if another instance holds
+   it — verified: a second launch prints "another bigchain is already running -- refusing to
+   start". A stacked chain is now impossible regardless of whether a kill worked.
+
+**Lessons, both worth keeping:**
+- **`pgrep`/`pkill` take ERE.** `\|` silently matches nothing rather than erroring, so a kill can
+  appear to succeed while doing nothing. Verify a kill with `ps` instead of trusting exit status —
+  this is the same class of failure as the earlier `pkill` self-kills.
+- **Long-running background chains need a lockfile, not just a kill-before-launch.** Kill-then-
+  relaunch is only as reliable as the kill.
+
+
+**2026-08-28 — PRE-FLIGHT before the frozen collection found TWO INERT DR BLOCKS. Material DR had
+NEVER been applied by the v3 collector. Fixed, relaunched.**
+
+User asked to double-check everything and confirm all DR params are recorded before committing the
+large run. Both asks turned up real bugs:
+
+1. **MATERIAL DR WAS NEVER APPLIED.** `DRConfig.sample_scene()` (which draws E / nu / rho /
+   coup_friction) exists and `collect_demos_synth_v3.py` **never called it**. Every demo this
+   collector has ever produced used the registry's NOMINAL material, and the `object_E`,
+   `object_nu`, `object_rho`, `coup_friction` ranges in ALL SEVEN DR configs were dead text.
+   That means **zero material diversity** in every dataset collected with v3 to date — a serious
+   sim2real gap, since real produce varies in firmness far more than in shape.
+   Fixed: `sample_scene()` is now called and E/nu/rho are baked onto the `ObjectEntry`.
+2. **`coup_friction` was never passed to the sim.** `GenesisWorker` takes it (default 4.0) and the
+   collector never supplied it, so the `[3.5, 4.5]` range was equally inert. Now passed per scene.
+3. **Most DR draws were unrecorded.** `dr_params.csv` logged only `scene_scale` /
+   `scene_bend_deg`; `twist`, `taper`, `rbf`, `axis_scale` (all APPLIED) and the material draws
+   were absent, so a frozen dataset could not be reproduced or analysed along those axes. The CSV
+   now carries all of them (31 columns).
+
+**Known remaining limitation:** `object_yield` still cannot be randomized — `ObjectEntry` has no
+yield field, so yield always comes from the registry material (pre-existing, noted in CLAUDE.md).
+
+**Also added before freezing: `priv_stress` in `superset_soft_armfocus`**, so every episode carries
+a per-episode gentleness record. Needed to (a) FILTER demos that exceed yield and (b) state the
+sub-yield fraction of the ACTUAL dataset instead of a proxy sample. It is privileged-only and the
+DPPO views are explicit key lists, so it does not touch the student (point-cloud) obs or any
+converted view. The two 250-episode sets collected before this (mushroom, cherry_tomato) are
+archived under `dataset/demos/_superseded_nostress/` — still valid demos, but lacking the stress
+record and the material DR, so they are NOT part of the frozen set.
+
+**Pre-flight verified on a 6-episode run:** all 31 DR columns populate; `mat_E` 2.607e5 inside the
+mushroom's [2.0e5, 3.0e5]; `coup_friction` 4.435 inside [3.5, 4.5]; `priv_stress` present with
+median 0.51x yield and **100 % sub-yield**; `rbf` reads 0 because no config sets `object_rbf`
+(correct, not broken); all 7 experiments load with sensible auto params (squeeze 1.00-2.78 mm, yaw
+30-69 deg); 100 GB disk free against a ~5 GB need.
+
+**Note for interpreting the new runs:** material DR is ACTIVE for the first time, so per-category
+success rates are not directly comparable to the earlier smoke numbers — the task is now genuinely
+harder and more diverse.
+
+
+**2026-08-28 — "GENTLENESS-AWARE" is defensible; "provably gentle" is NOT (yet). The sub-yield
+regime restores a positive ranking trend: rho 0.00 -> +0.52, but only p = 0.085 at n = 12.**
+
+User asked whether the synthesis can be called provably gentle, and failing that whether
+"gentleness-aware" is safe. Verdict:
+
+**SAFE to claim "gentleness-aware synthesis".** Justified on three independent grounds:
+1. **By construction** — the objective explicitly contains stress terms (`-stress_top10`,
+   `-w_peak * E * hi_1`, `-w_press * pressure`), the auto area selection enforces a HARD yield
+   guard (`YIELD_SAFETY = 0.8`), and the refine round selects the widest holdable width
+   (= gentlest) among distinct poses.
+2. **By outcome** — at the adopted operating point the demos sit at median **0.56x yield** under
+   full DR with 83 % sub-yield, and 100 % sub-yield in the fixed-scene test.
+3. **By construction of the operating point** — the squeeze base was reduced 5 mm -> 2 mm
+   specifically to move the demos below yield.
+
+**NOT safe to claim "provably gentle" / "gentleness-optimal" / "minimizes damage."** The
+within-object ranking is still weak:
+
+| regime | Spearman rho | Pearson r | n | sub-yield |
+|---|---|---|---|---|
+| PAST yield (old squeeze 4.8 mm) | **0.000** (p=1.0) | -0.47 | 12 | 0 % |
+| **SUB-yield (adopted, 1.9 mm)** | **+0.517** (p=0.085) | +0.22 (p=0.49) | 12 | **100 %** |
+
+**The saturation explanation held up** — moving below yield recovers a positive rank correlation
+where there was literally none. But rho = 0.52 at p = 0.085 is a TREND, not proof, and Pearson
++0.22 says the relation is monotone-ish with outliers rather than tight. A larger sweep (n = 40)
+is running to settle whether it is real.
+
+**What "provably gentle" would actually require** (recorded so the bar is explicit):
+1. A significant within-object rank correlation in the operating regime (n >= 40; in progress).
+2. The chosen grasp shown near-optimal among FEASIBLE alternatives w.r.t. true damage — not just
+   correlated, but close to the achievable minimum.
+3. Damage measured as PLASTIC deformation (permanent shape change / plastic work), which is the
+   physically correct quantity for an elasto-plastic body; von Mises stress is the wrong axis
+   above yield and only a proxy below it.
+
+Items 2-3 are a project in themselves. Item 1 is cheap and running.
+
+
+**2026-08-28 — LARGE-SCALE COLLECTION LAUNCHED (7 categories x 250 eps). One recipe change first:
+the squeeze base 5 mm -> 2 mm, because 5 mm drove EVERY demo past yield.**
+
+User asked whether synthesis is justified enough to freeze a dataset. Honest split:
+- **Justified:** as a producer of successful, diverse, quality-filtered LIFTS — 75-100 %
+  demonstrator success across 7 objects, align 0.85-0.96, pinches filtered, per-object materials,
+  mesh randomization, every grasp parameter auto-derived.
+- **NOT justified:** the GENTLENESS claim. Yesterday's controlled test showed the FEM objective has
+  zero discriminative power at the operating point, because every grasp sat at 1.05-1.13x yield
+  where the MPM saturates.
+
+Since the dataset is meant to be frozen, the operating point had to be fixed BEFORE collecting —
+otherwise "squeezing is the demos" bakes squeezing in permanently.
+
+**Found the knob: it was the EXECUTED SQUEEZE, not the synthesized width.** Fixed-scene probe:
+
+| `extra_close` | MPM peak (median) | sub-yield? | success |
+|---|---|---|---|
+| 0.0 mm | 0.68x | yes | 100 % |
+| 2.0 mm | 0.91x | yes | 100 % |
+| 4.8 mm (old auto) | 1.05-1.13x | **no** | 100 % |
+
+Confirmed under FULL DR on the mushroom (n=12, mesh-cycled): **2 mm gives median 0.56x yield with
+83 % of demos sub-yield and 86 % success, vs 4.8 mm at ~1.10x, ~0 % sub-yield, 80 % success.**
+Half the stress, most demos now genuinely sub-yield, and success slightly BETTER.
+
+**Adopted: the `--grasp-extra-close auto` base drops 5 mm -> 2 mm** (auto = 2 mm x smallest extent
+/ 33 mm, clipped [1, 3]). Resolved per object: raspberry 1.00, banana_chunk 1.24, cherry_tomato
+1.50, tofu 1.82, mushroom 1.94, strawberry 1.97, tomato 2.78 mm. The old 5 mm was tuned for grip
+reliability before we could measure what it did to the material.
+
+**Collection running:** mushroom, cherry_tomato, raspberry, tomato, banana_chunk, strawberry, tofu
+— 250 episodes each, 8 envs, `scene_dr_every 1`, **random** mesh DR (NOT `--mesh-cycle`: cycling
+is a coverage tool, random sampling is the correct DR for a real dataset; at 250 eps there are
+~30+ scene rebuilds so the pool is covered anyway). Pasta bundle excluded per user.
+
+**Nothing is hardcoded per category in the recipe.** The only per-object values are ones with no
+alternative: the registry MATERIAL (E/rho/yield — physical fact), the task MPM `grid_density` /
+`sim_substeps` (CFL stability, must scale with object size and stiffness), and the mesh pool
+(inherent to the category). Every grasp parameter — area floor, width cap, yaw bound, squeeze — is
+derived from the object at run time.
+
+**Caveat carried into training:** the gentleness metric still does not discriminate ABOVE yield,
+and 17 % of mushroom demos remain at/above it. The dataset is "successful, mostly-sub-yield lifts",
+not "provably gentlest-possible lifts". Retargeting the objective at plastic strain remains open.
+
+
+**2026-08-28 — CORRECTION: the rho = 0.84 surrogate validation is a SCENE-SIZE artefact. Under a
+CONTROLLED test the FEM metric has ZERO rank correlation with simulator stress, because the MPM
+material SATURATES at yield.**
+
+User asked how the correlation was actually measured — same grasp in both, or something looser.
+Answer: same grasp (planner synthesizes, sim executes that grasp), but **observational**: the
+scene varied across the 10 episodes (scale 0.81-1.48, three mesh variants). Two follow-ups:
+
+1. **Pairing verified.** The earlier number zipped filtered CSV rows to saved episodes by index.
+   Re-derived the exact (batch, env) of every saved episode from the collector log and joined on
+   that: **identical result, rho = +0.842.** So the pairing was right (the 8-25 mm object-position
+   offsets are MPM settling drift, not mispairing).
+2. **Confound check.** planner vs `scene_scale` rho = -0.67; MPM vs `scene_scale` rho = -0.89;
+   partialling scale out left rho = +0.758 — which looked reassuring. **It was not.**
+
+**CONTROLLED experiment (the one that should have been run first):** fix the scene entirely
+(`--scene-dr-every 0`, one scale, one mesh) and sweep ONLY the commanded grasp width, which drives
+indentation and hence predicted stress. n = 12, mushroom:
+
+| commanded width | planner predicted | MPM measured |
+|---|---|---|
+| 20.4 mm | 14.6 kPa | 1.10 x yield |
+| 29.1 mm | **44.7 kPa** | 1.06 x yield |
+| 32.5 mm | 17.3 kPa | 1.11 x yield |
+| 34.2 mm | **11.8 kPa** | 1.10 x yield |
+
+**Planner spans 3.8x (11.8-44.7 kPa); the simulator is FLAT at 1.05-1.13 x yield. Spearman
+rho = +0.000 (p = 1.0), Pearson r = -0.47.**
+
+**Root cause — the linear-elastic vs ELASTO-PLASTIC mismatch flagged in the model doc, appearing
+exactly where predicted.** Genesis MPM `ElastoPlastic` saturates von Mises at the yield surface;
+past yield, squeezing harder produces plastic FLOW, not higher stress. Every grasp in our regime
+is at or past yield, so the simulator's stress carries no information there, while the surrogate
+(no yield model) keeps predicting higher stress into a regime where true stress cannot rise.
+
+**What this means:**
+- **rho = 0.84 must NOT be cited as validating the gentleness metric.** It shows only that both
+  models know a smaller object is stressed more.
+- **At the current operating point the FEM objective does not discriminate grasp gentleness.**
+- **Von Mises stress is the wrong gentleness measure for an elasto-plastic body past yield** — the
+  meaningful quantity is PLASTIC deformation (permanent shape change / plastic work), which
+  neither the surrogate nor `priv_stress` currently reports.
+- Fix direction: move the operating point BELOW yield (the sweep shows 34 mm predicts 11.8 kPa, so
+  gentler grasps exist), and/or retarget the objective at plastic strain.
+
+**Method lesson: an observational correlation across DR-varied scenes is not metric validation.**
+Hold the scene fixed and vary the thing the metric is supposed to rank. n = 12, one object —
+repeat on a second before the paper, but the mechanism is unambiguous.
+
+
+**2026-08-27 (validation) — MEASURED the FEM surrogate against the MPM simulator: ranking rho
+= +0.84, but the absolute stress is ~3x LOW and the "gentle" demos sit AT yield.**
+
+User asked whether our FEM and rigid-soft coupling are correct and justified given that Genesis
+ships its own. Verified in the submodule: Genesis DOES have a full FEM dynamics solver
+(`fem_solver.py`, implicit + Newton + PCG) and TWO proper contact couplers (`sap_coupler.py`,
+`ipc_coupler/`). **We use none of them** — our sim is Genesis MPM (`ElastoPlastic`), and the
+`smgrasp` FEM is a separate quasi-static SCORING surrogate. Full comparison in
+`docs/grasp_synthesis_model.md` §9b.
+
+**The justification is cost and it is real:** the surrogate runs ~7k-35k times per grasp search
+per env, and the E=1 normalization makes material DR a scalar multiply. A dynamic FEM+IPC solve
+per candidate is orders of magnitude too slow. **But ours is not a contact model** — quasi-static,
+contact set fixed on the UNDEFORMED mesh, normal-only/frictionless, linear-elastic against an
+ELASTO-PLASTIC simulator (so it has no yield model at all, while "gentleness" is defined by yield).
+
+**Measured the agreement** (the number that decides justification; only the PRE-fix `rho +0.10`
+existed before, buried in a docstring). Needed two fixes first:
+- `privileged: stress: true` was **silently ignored by the v3 collector** — `_privileged_obs_batch`
+  never mirrored the stress field that `PolicyEnv` emits, so the config asked and nothing appeared.
+  Now emitted (`priv_stress` (N,2) = [mean, top10]/yield), with `yield_stress` threaded through
+  `execute_and_collect`.
+- New `superset_soft_armfocus_stress.yaml` obs + `single_lift_mushroom_soft_armfocus_stress`
+  experiment for validation runs.
+
+**Result, 10 successful mushroom episodes: Spearman rho = +0.842 (p=0.002), Pearson r = +0.795
+(p=0.006).** The surrogate RANKS grasps by the stress the simulator will actually produce — which
+is exactly what a planner needs, so choosing grasps with it is justified.
+
+**⚠ But the absolute calibration is not, and this corrects numbers reported all week:**
+
+| | planner predicted | MPM measured |
+|---|---|---|
+| range | 6.8 - 18.8 kPa | 20.7 - 46.4 kPa |
+| vs the mushroom's 40 kPa yield | ~17-47 % | **52-116 %, median ~100 %** |
+
+1. **Every "stress as % of yield" figure I have reported came from the PLANNER and is ~3x too
+   low.** Those were surrogate predictions, not simulator measurements.
+2. **By the simulator's own measure the "gentle" demos sit AT the yield stress** (median peak
+   ~1.0x). Do not claim sub-yield demonstrations without re-measuring per object.
+
+Part of the gap is DEFINITIONAL: the planner's `stress_top10` masks out contact-adjacent elements
+while the MPM figure is unmasked, so the planner deliberately excludes the highest-stress region.
+The planner's unmasked `hi_1` is the like-for-like comparison and has NOT been checked. The
+ranking result stands either way; the absolute claim does not.
+
+**TODO before the paper:** (a) repeat this on every object, not just the mushroom; (b) compare
+`hi_1` vs the MPM figure to separate definitional offset from genuine calibration error; (c) decide
+whether the gentleness objective should be re-tuned now that the demos are known to sit at yield.
+
+
+**2026-08-27 (mesh coverage) — `--mesh-cycle` + `--n-envs 2`: forcing EVERY mesh to be sampled
+lowers two headline numbers. The earlier 100 %s were partly a sampling artefact.**
+
+User asked for full mesh coverage rather than trusting a uniform draw. Two changes:
+- **`--mesh-cycle`** walks `object_mesh_pool` in ORDER (round-robin), one mesh per scene rebuild,
+  instead of sampling uniformly. A uniform draw only covers the pool *in expectation*, and an
+  8-episode run rebuilds the scene once or twice — so it saw 1-2 of 4-5 meshes and a broken
+  variant could sit unnoticed. Smoke/coverage use only; real collections should keep random DR.
+- **`--n-envs 2`** (was 8) so a short run produces more batches, hence more scene rebuilds.
+
+**Results with EVERY pooled mesh exercised:**
+
+| object | success (full coverage) | meshes covered | previous (1-2 meshes) |
+|---|---|---|---|
+| raspberry | **100 %** | **5/5** | 100 % |
+| tofu | **100 %** | 1 (no pool) | 96 % |
+| strawberry | **100 %** | 1 (no pool) | 92 % |
+| cherry_tomato | **89 %** | **4/4** | 89 % |
+| banana_chunk | **86 %** | 1 (no pool) | 69-80 % |
+| **mushroom** | **80 %** | **4/4** | **100 %** |
+| **tomato** | **73 %** | **4/4** | **89 %** |
+| pasta_bundle | 43 % | 1 (no pool) | 42-50 % |
+
+**The mushroom's 100 % and the tomato's 89 % were partly SAMPLING ARTEFACTS** — both were measured
+on runs that happened to draw only the nominal/easiest mesh. Exercising all four variants gives
+80 % and 73 %. Raspberry and cherry_tomato are unchanged across full coverage, so those numbers
+were real.
+
+**Lesson: quote smoke numbers only from `--mesh-cycle` runs once a category has a mesh pool.**
+A per-category success rate measured on an unknown subset of the pool is not comparable to one
+measured on all of it. `docs/smoke_datasets.md` records the recipe per run so the two can be told
+apart.
+
+
+**2026-08-27 (object library) — 13 photo-derived fruit meshes added with PER-CATEGORY MESH
+RANDOMIZATION; procedural placeholders retired. New `docs/smoke_datasets.md` history table.**
+
+The cluster agent pushed 17 TripoSG meshes (cherry_tomato 6, raspberry 6, tomato 5) with its own
+usability gate (topology + photo-silhouette consistency). Taking the gate's verdict and adding a
+**category-appropriateness check it does not do** — volume within 0.5-2x the category median,
+aspect < 1.6, euler 2:
+
+| category | gate passed | we kept | dropped, and why |
+|---|---|---|---|
+| cherry_tomato | 6/6 | **4** | `4` and `6`: volume 0.42x / 0.30x the category median at aspect 1.83 / 1.97 — skinny outliers, not representative cherry tomatoes |
+| raspberry | 6/6 | **5** | `6`: euler -1 |
+| tomato | 4/5 | **4** | `2` already failed the agent's gate (euler 1) |
+
+⚠ **The euler -1 on raspberry6 was MY bug, not the agent's** — the gate correctly reported euler 2,
+and my preprocessing called `merge_vertices` + `fill_holes` on an already-watertight mesh and broke
+it. Fixed to repair only what needs it; raspberry6 stays dropped pending a re-run.
+
+Each kept mesh is uniformly scaled to its category's **already-validated** nominal extent (cherry
+tomato 25 mm, raspberry 15.4 mm, tomato 60 mm — not new guesses), recentred, and registered.
+Per-category `object_mesh_pool` in the DR config now samples the base mesh per scene. Each
+category's BASE object points at the variant whose volume is closest to the category median (the
+most representative member), since the base's `size` is what drives the auto yaw/squeeze rules.
+The procedural placeholder meshes for cherry_tomato and tomato are **retired** — those categories
+are now real scans.
+
+**Smoke tests with mesh randomization live (8 episodes each, all-auto recipe):**
+
+| category | success | meshes sampled |
+|---|---|---|
+| cherry_tomato | **89 %** | cherry_tomato1, cherry_tomato5 |
+| raspberry | **100 %** | raspberry5 |
+| tomato | **89 %** | tomato1, tomato5 |
+
+(Only 1-2 meshes are sampled in an 8-episode run because the scene rebuilds once or twice; a full
+collection exercises the whole pool.)
+
+**New: `docs/smoke_datasets.md`, auto-generated by `gentle_manip.scripts.smoke_table`.** One row
+per collection pairing the demonstrator success rate with the synthesis recipe that produced it
+(area/width/yaw/squeeze/escalation/azimuth/nu), so any number can be traced back to its
+configuration. Hand-maintained tables drift — regenerate instead. Gap found and fixed while
+building it: `grasp_yaw_max_deg` and the FEM `nu` were **not** in the config snapshot, so runs
+using the yaw bound were not distinguishable from runs without it. Both are recorded now.
+
 
 **2026-08-27 (paper prep) — `docs/grasp_synthesis_model.md`: the synthesis model VERIFIED against
 code, plus the v3.3 delta.** Written for paper writing: every statement checked against the

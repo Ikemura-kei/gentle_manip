@@ -1,0 +1,50 @@
+{
+  "object": "banana1",
+  "tag": "IMG20260824145616_seed0",
+  "seed": 0,
+  "source_view": "IMG20260824145616",
+  "raw": {
+    "vertices": 202495,
+    "faces": 405020,
+    "watertight": false,
+    "components": 30
+  },
+  "floater_removal": {
+    "components_found": 30,
+    "largest_component_area_fraction": 1.0,
+    "components_discarded": 29
+  },
+  "after_topology_clean": {
+    "vertices": 202495,
+    "faces": 404990,
+    "watertight": true
+  },
+  "decimation_method": "quadric (fast_simplification), staged via [40499, 12000]",
+  "post_decimation_components": 1,
+  "watertight_method": "pre-decimation: already watertight; post-decimation: already watertight",
+  "scaling": {
+    "applied": false,
+    "reason": "no measurements.json -- doc section 7 says do not guess the scale. Mesh is in TripoSG's normalised frame; multiply by (longest_axis_m / longest_axis_normalised) to make it metric.",
+    "longest_axis_normalised": 1.903001
+  },
+  "clean": {
+    "vertices": 6000,
+    "faces": 12000,
+    "is_watertight": true,
+    "is_winding_consistent": true,
+    "euler_number": 0,
+    "genus": 1,
+    "components": 1,
+    "volume_normalised": 0.14309866,
+    "bbox_normalised": [
+      1.220439,
+      1.903001,
+      0.320137
+    ],
+    "volume_is_positive": true
+  },
+  "hard_failures": [
+    "euler_number is 0, not 2 (genus 1: handles or holes)"
+  ],
+  "passed": false
+}

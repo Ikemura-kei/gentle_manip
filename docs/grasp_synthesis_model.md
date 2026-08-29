@@ -211,6 +211,107 @@ heuristics, not derived quantities. `FIRM_EXTRA_CLOSE_M = 2.5 mm` is still a har
 Objects where the pipeline works well are precisely those whose lifting grasps deform the body a
 few mm on a ~30 mm scale — comfortably inside small strain.
 
+## 9b. Why not Genesis's own FEM + contact coupler? (verified 2026-08-27)
+
+Genesis **does** ship a full FEM dynamics solver (`genesis/engine/solvers/fem_solver.py` — implicit
+integration, Newton iterations, PCG) and **two proper contact couplers**
+(`couplers/sap_coupler.py`, `couplers/ipc_coupler/`, plus a legacy one). **We use none of them.**
+Three distinct models are in play, and the paper must not blur them:
+
+| model | role | used? |
+|---|---|---|
+| Genesis **MPM** (`gs.materials.MPM.ElastoPlastic`) | the actual demo simulator | **yes** — this is what produces the data |
+| Genesis **FEM + IPC/SAP coupler** | would be the physically principled contact model | **no** — never instantiated |
+| our **`smgrasp` FEM** | quasi-static grasp SCORING surrogate | **yes** — planning only |
+
+**The justification is cost, and it is real.** The surrogate is evaluated ~1145 x n_starts
+(~7k-35k) times per grasp search, per environment. A dynamic FEM+IPC solve per candidate is
+several orders of magnitude too slow. The E = 1 normalization (§4) further makes the entire
+material-DR sweep free — a scalar multiply instead of a re-solve — which is impossible in a
+nonlinear dynamic solver.
+
+**But ours is NOT a contact model, and should never be described as one.** Differences from what
+Genesis's coupler does:
+1. **Quasi-static, not dynamic.** No time integration; lift acceleration is a scalar margin (§5).
+2. **Contact set fixed on the UNDEFORMED mesh.** IPC/SAP resolve the contact set iteratively as the
+   body deforms; ours picks the nodes once from the nominal geometry and never updates them. This
+   is exactly what mis-scored the banana (§9.1).
+3. **Normal-only, frictionless.** IPC handles friction inside the contact solve; ours has friction
+   only as the post-hoc scalar inequality in §5.
+4. **Linear elastic vs ELASTO-PLASTIC.** The simulator's material yields; **the surrogate has no
+   yield model at all** — yet "gentleness" is defined by the yield stress. The surrogate cannot
+   represent the very phenomenon the objective targets; it can only report an elastic stress that
+   we compare to yield afterwards.
+5. **Small-strain, used far outside it** (§9.1).
+
+## 9c. Surrogate-vs-simulator agreement — MEASURED (2026-08-27)
+
+The one number that decides whether the surrogate is justified. Previously only the PRE-fix value
+was recorded (`rho +0.10`, in a `finger_grasp` docstring). Measured properly on 10 successful
+mushroom episodes with `priv_stress` recorded:
+
+**OBSERVATIONAL result (scene varied): Spearman rho = +0.842 (p = 0.002).**
+**CONTROLLED result (scene FIXED, only the grasp varied): Spearman rho = +0.000 (p = 1.0).**
+
+⚠⚠ **THE OBSERVATIONAL NUMBER IS NOT VALIDATION OF THE METRIC.** It was measured across episodes
+whose SCENE differed (scale 0.81-1.48, three mesh variants). Both quantities track object size
+(planner vs scale rho = -0.67, MPM vs scale rho = -0.89), so the agreement is largely
+"small object -> high stress", which both models get right for trivial reasons.
+
+The controlled experiment holds the scene fixed (`--scene-dr-every 0`, one scale, one mesh) and
+sweeps ONLY the commanded grasp width, which drives indentation and therefore predicted stress:
+
+| commanded width | planner predicted | MPM measured |
+|---|---|---|
+| 20.4 mm | 14.6 kPa | 1.10 x yield |
+| 29.1 mm | **44.7 kPa** | 1.06 x yield |
+| 30.8 mm | 28.0 kPa | 1.13 x yield |
+| 32.5 mm | 17.3 kPa | 1.11 x yield |
+| 34.2 mm | **11.8 kPa** | 1.10 x yield |
+
+**The planner's prediction spans 3.8x (11.8 - 44.7 kPa) while the simulator's measurement is FLAT
+at 1.05-1.13 x yield.** Rank correlation exactly zero.
+
+**Why — and it is the linear-vs-elasto-plastic mismatch from §9b, showing up exactly where
+predicted.** The MPM material is `ElastoPlastic`: once the von Mises stress reaches the yield
+surface it SATURATES, and further squeezing produces plastic flow rather than higher stress. Every
+grasp in our operating regime is at or past yield (see the table: all >= 1.05x), so the
+simulator's stress carries no information there. The linear-elastic surrogate has no yield model,
+so it keeps predicting ever-higher stress into a regime where the true stress cannot rise.
+
+**Consequences (all of which matter for the paper):**
+1. **Do NOT cite rho = 0.84 as validating the gentleness metric.** It validates only that both
+   models know a smaller object is stressed more.
+2. **At our operating point the FEM objective does not discriminate grasp gentleness** — the
+   quantity it ranks is saturated in the simulator.
+3. **Von Mises stress is the wrong gentleness measure for an elasto-plastic body past yield.** The
+   physically meaningful measure is PLASTIC deformation — permanent shape change / plastic work —
+   which neither the surrogate nor the current `priv_stress` reports.
+4. Either the operating point must move BELOW yield (gentler grasps, which the width sweep shows
+   is possible: 34 mm predicted 11.8 kPa) or the objective must target plastic strain instead.
+
+n = 12, one object (mushroom). The mechanism is physically unambiguous, but repeat on a second
+object before putting it in the paper.
+
+⚠ **The ABSOLUTE calibration is not.** Over the same episodes:
+
+| | planner predicted | MPM measured |
+|---|---|---|
+| range | 6.8 - 18.8 kPa | 20.7 - 46.4 kPa |
+| vs the mushroom's 40 kPa yield | ~17-47 % | **52 - 116 %, median ~100 %** |
+
+Two things follow, both of which matter for the paper:
+- **Every "stress as % of yield" figure reported from the planner is roughly 3x too low.** They are
+  surrogate predictions, not simulator measurements.
+- **By the simulator's own measure the "gentle" demos sit AT the yield stress** (median peak ~1.0x
+  yield). Do NOT claim the demonstrations are sub-yield without re-measuring per object.
+
+Part of the gap is DEFINITIONAL rather than error: the planner's `stress_top10` **masks out the
+contact-adjacent elements** (§6) while the MPM figure is unmasked, so the planner is deliberately
+excluding the highest-stress region. The planner's unmasked `hi_1` would be the like-for-like
+comparison and has not been checked. Either way the ranking result stands and the absolute claim
+does not.
+
 ## 10. Current cross-object results
 
 8-episode smoke tests, full DR, all-auto recipe (2026-08-27):
