@@ -228,7 +228,7 @@ def execute_and_collect_diverse_v2(
     record_video: bool = False,
     object_type: str = "rigid",
     yield_stress: Optional[float] = None,   # soft only: reject episodes whose top10 von Mises exceeds this
-    crush_frac: float = 1.15,
+    crush_frac: float = 1.25,
 ):
     """Per-env phase FSM (like collect_demos_synth_v3): every env advances through
     approach -> settle -> grasp -> lift -> hold independently, so a mode with a
@@ -250,8 +250,8 @@ def execute_and_collect_diverse_v2(
     lift_b   = grasp_pos.copy(); lift_b[:, 2] += v1.LIFT_HEIGHT
 
     width_open = np.full(num_envs, 0.08, np.float32)
-    _margin = 0.0005 if object_type == "soft" else 0.0025   # SOFT: barely past the surface = gentle
-    _floor  = 0.014  if object_type == "soft" else 0.020
+    _margin = -0.0010 if object_type == "soft" else 0.0025   # SOFT: stop 1mm BEFORE the surface (compliance holds)
+    _floor  = 0.014   if object_type == "soft" else 0.020
     width_cls  = np.clip(np.array([p[2] - _margin for p in poses], np.float32), _floor, 0.075)
 
     home_pos  = np.tile(worker.robot.home_pos[None].astype(np.float32),  (num_envs, 1))
