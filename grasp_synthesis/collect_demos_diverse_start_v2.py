@@ -229,6 +229,7 @@ def execute_and_collect_diverse_v2(
     object_type: str = "rigid",
     yield_stress: Optional[float] = None,   # soft only: reject episodes whose top10 von Mises exceeds this
     crush_frac: float = 1.25,
+    task_name_hint: Optional[str] = None,
 ):
     """Per-env phase FSM (like collect_demos_synth_v3): every env advances through
     approach -> settle -> grasp -> lift -> hold independently, so a mode with a
@@ -250,9 +251,16 @@ def execute_and_collect_diverse_v2(
     lift_b   = grasp_pos.copy(); lift_b[:, 2] += v1.LIFT_HEIGHT
 
     width_open = np.full(num_envs, 0.08, np.float32)
-    _margin = 0.0     if object_type == "soft" else 0.0025   # SOFT: close to the nominal surface; crush gate (1.25x) catches over-squeeze
+    _margin = 0.0     if object_type == "soft" else 0.0025
     _floor  = 0.014   if object_type == "soft" else 0.020
-    width_cls  = np.clip(np.array([p[2] - _margin for p in poses], np.float32), _floor, 0.075)
+    # cap at the object's short cross-section (+2mm) so a too-wide CMA straddle still grips
+    try:
+        from gentle_manip.assets.registry import get_object_def
+        _short = float(min(get_object_def(task_name_hint).size[:2])) if task_name_hint else 0.06
+    except Exception:
+        _short = 0.06
+    _wcap = min(0.075, _short + 0.002)
+    width_cls  = np.clip(np.array([p[2] - _margin for p in poses], np.float32), _floor, _wcap)
 
     home_pos  = np.tile(worker.robot.home_pos[None].astype(np.float32),  (num_envs, 1))
     home_quat = np.tile(worker.robot.home_quat[None].astype(np.float32), (num_envs, 1))
@@ -597,6 +605,7 @@ def main() -> None:
                 worker, all_best_x, init_obs_batch, perception, action_config,
                 modes, rng, priv_cfg=priv_cfg, dr_vec=dr_vec, record_video=want_video,
                 object_type=task.object_type, yield_stress=_yield,
+                task_name_hint=task.object_name,
             )
             print(f"  success: {success.tolist()}")
 
