@@ -3315,3 +3315,2294 @@ a CONSTANT floor (canonical: -41% sustained stress at 0.745 success; 40-geo m8-m
 20590 sust vs baseline 0.905 / 29734), and learned per-object level adaptation is a NEGATIVE RESULT
 at mushroom's ~19mm size range. It would remain necessary only ACROSS categories (15mm raspberry vs
 65mm tomato), which one constant cannot serve — that is where the generalist work has to carry it.
+
+### 2026-08-27 — NOT OOD, NOT DATA AMOUNT: the generalist fails to adapt where it has the MOST data
+
+User hypothesis: the flat width fit might be an artifact of evaluating on object sizes the training
+data never covered (some plotted points do sit near the demo slope). Tested directly by comparing
+eval sizes against the training collections' own `scene_scale`, then re-fitting INSIDE the training
+range:
+
+| | train size range (successful demos, geometries) | eval range | % eval OOD | slope overall | **slope IN-RANGE** |
+|---|---|---|---|---|---|
+| mushroom | 27.1-49.2mm (653 demos, **87 geometries**) | 33.0-43.7mm | **0%** | +0.12 | **+0.12** |
+| tofu | 24.2-41.7mm (614 demos, **76 geometries**) | 24.0-35.7mm | 8% | +0.34 | **+0.37** |
+| raspberry | 15.1-19.9mm (**284 demos** across 3 dirs) | (eval pending) | — | — | — |
+
+**HYPOTHESIS REJECTED.** Mushroom has ZERO out-of-range eval episodes — the eval range is strictly
+INSIDE the training range — and restricting the fit changes the slope not at all. Tofu moves within
+noise. **The policy does not adapt precisely where it has the most data.**
+
+**Data amount is not the explanation either:** 653 mushroom demos over 87 DISTINCT geometries
+spanning a WIDER range than we evaluate. And the demonstrator's own slope in that very data is
+**+1.09** (tofu +1.06, raspberry +1.04) — the signal is unambiguously present in what the policy
+trained on. Combined with the earlier predictability result (cloud->size 0.927 with a supervised
+encoder), all three "the data is at fault" explanations are now closed:
+NOT coverage, NOT amount, NOT perceivability.
+
+The points near the demo slope are per-geometry means scattering around a FLAT line, not an
+adapting subpopulation: mushroom R2 = 0.01, i.e. object size explains 1% of width variance. The
+scatter is large (sd 4.4mm) but UNCORRELATED with size — the policy varies its grip a lot, just not
+with the object.
+
+(Count correction: raspberry is 284 successful demos across 26-08-27-{abp,yrp,yxu}, not the 61 my
+first pass reported from a single directory.)
+
+### 2026-08-27 — THE SHARPEST STATEMENT YET: same variance as the demos, none of the information
+
+Per-episode grasp width, demonstrator (`dr_params.csv` `width_mm` vs `scene_scale`) vs the
+3-object generalist, measured the same way for both. Figures:
+`docs/figures/demo_vs_policy_width.png` (3 panels, demo + policy scatter per object) and
+`docs/figures/generalist_width_vs_size.png`.
+
+| object | | slope | sd around fit | total sd | size explains |
+|---|---|---|---|---|---|
+| mushroom | demo | 1.08 | 4.33 | 8.01 | **71%** |
+| | policy | 0.11 | 7.90 | 7.91 | **0%** |
+| tofu | demo | 1.12 | 4.68 | 7.56 | **62%** |
+| | policy | 0.31 | 7.72 | 7.80 | **2%** |
+| raspberry | demo | 0.96 | 2.73 | 3.44 | **37%** |
+| | policy | -0.31 | 6.89 | 6.91 | **0%** |
+
+**The policy reproduces the demonstrations' SPREAD while discarding their STRUCTURE.** On mushroom
+the total sd is nearly identical (7.91 vs 8.01mm) yet size explains 71% of the demo's variance and
+**0%** of the policy's. On raspberry the policy's spread (6.91mm) is **2x the demonstrator's**
+(3.44mm) — it varies more than was ever demonstrated, on the most fragile object.
+
+**This is a better problem statement than "the policy does not adapt".** It says the deficit is not
+missing variance or an unlearnable behaviour: the variance is already there, it just carries no
+information. The task is to CONVERT noise into size-tracking, not to add a new capability.
+
+**"Near-constant width" was WRONG and is retracted** (user caught it from the figure): mushroom
+at-grasp is 28.4 +- 7.9mm, ranging 7-50mm. Two distinct claims were conflated — "low variance"
+(FALSE) and "variance uncorrelated with size" (TRUE). Only the second is supported. Use
+"varies widely but not with size", never "near-constant".
+
+**Corollary for the fix:** reducing sampling variance alone would yield a tight CONSTANT, not an
+adaptive grasper — unless the CONDITIONAL MEAN already tracks size, in which case averaging the
+noise away would expose it. That is exactly what `.agent_tmp/policy_stochasticity.py` (job 1748993)
+measures: K samples of the SAME observation, within-obs sd vs across-obs sd.
+
+### 2026-08-27 — IDEA (documented, NOT yet tested): tighten the demo target by ALIGN filtering
+
+User's suggestion, from reading `docs/figures/demo_vs_policy_width.png`: the demonstrator has width
+outliers too, so filtering them might help. Quantified on existing data (`.agent_tmp/demo_outliers.py`,
+`.agent_tmp/align_filter_sweep.py`) — the hypothesis holds, with one methodological correction.
+
+**The width outliers are POORLY-ALIGNED grasps, not random noise:**
+
+| object | outlier align vs inlier | corr(\|resid\|, align) | align explains of the leftover |
+|---|---|---|---|
+| mushroom | 0.788 vs 0.926 | **-0.59** | 38% |
+| raspberry | 0.563 vs 0.879 | **-0.74** | **69%** |
+| tofu | 0.867 vs 0.929 | +0.08 | 13% |
+
+**⚠ FILTER ON `align`, NEVER ON THE WIDTH RESIDUAL.** Filtering on the width residual is filtering
+on the TARGET VARIABLE — it biases the learned distribution toward whatever we decided the answer
+should be and is not defensible to a reviewer. `align` is an INPUT-SIDE quality criterion and is
+legitimate. Both remove roughly the same episodes; only one is honest.
+
+**Operating points (align threshold -> data kept, residual sd, slope):**
+
+| object | threshold | kept | residual sd | slope |
+|---|---|---|---|---|
+| mushroom | >= 0.90 | 85% (555) | 4.33 -> **2.78mm** | 1.08 (unchanged) |
+| **raspberry** | >= 0.80 | 84% (238) | 2.73 -> **1.29mm** | 0.96 -> **1.14** (toward ideal) |
+| tofu | >= 0.85 | 97% | 4.68 -> 4.56 (little) | 1.10 |
+
+Raspberry gains most — a **53% tighter target for 16% of the data** — and it is our worst object
+(success 0.583, the ONLY one whose SUSTAINED stress exceeds yield, 1.13x). Mushroom is a good trade
+too, and note that set is ALREADY align-filtered once (`26-08-25-clq-alignfilt`), so this is a
+SECOND pass. Tofu barely responds cheaply and its sweep is NON-MONOTONIC (0.90 -> 5.00, worse than
+0.85's 4.56), which suggests its collections have differently-shaped align distributions — inspect
+before filtering tofu.
+
+**UNPROVEN, and the reason this is filed as an idea rather than a plan:** a tighter target is
+plausibly easier to learn, but it is NOT established that it converts into size-tracking. The policy
+currently gets **0%** of its width variance explained by size; if the bottleneck is CONDITIONING
+rather than target noise, a cleaner target changes nothing. Cheapest test is to fold the align
+filter in alongside the aux width supervision (dataset rebuild is minutes; the retrain shares a GPU
+slot), so the two candidate fixes are evaluated together rather than serially.
+
+### 2026-08-27 — IDEA (documented, not tested): aux/pseudo-condition on METRIC SIZE, not width
+
+User's proposal. It is better supported than the width-aux we are currently training, on three
+independent grounds:
+
+1. **Literature precedent.** `docs/size_adaptation_literature.md` already contains it — line 126
+   ("regress `priv_object_dr_params[0]` (scale) from the observation"), lines 137-139 ("an
+   adaptation module regressing the privileged size vector; feed its output to the student.
+   Precedent #3/#4. **Also covers item 18's aux-head idea, since the auxiliary target is the
+   privileged scale rather than an invented one**"). And lines 163-165 warn that "final closed
+   gripper width as an auxiliary" was asserted by a search summary but is **NOT in the cited
+   paper** — i.e. the WIDTH target (tebvy/ixjgp/neoca) has the WEAKER citation of the two.
+2. **Predictability.** cloud->SIZE 0.927 vs cloud->WIDTH 0.771. Width conflates object size with
+   the demonstrator's squeeze margin and with `align`; size is a pure perceptual quantity.
+3. **Cross-category meaning.** For the generalist the target must be **METRIC size (mm)** =
+   `scene_scale x registry nominal extent`, NOT scale: a scale of 1.2 is 40mm on a mushroom and
+   18mm on a raspberry, so scale is not comparable across categories (the user made exactly this
+   point earlier: *"if metric size can be used for prediction that will be the best"*).
+
+**Cost: a dataset rebuild, NOT a re-collection.** The dppo npz carries only
+`actions/point_cloud/rewards/states/terminals/traj_lengths` — no privileged params. But
+`dr_params.csv` has `scene_scale` per episode and `dppo/add_category_embed.py` is an existing
+template for grafting a per-episode label onto a built npz from per-source episode counts.
+
+**AUX vs PSEUDO-CONDITION — the distinction that matters:** an auxiliary loss shapes the ENCODER but
+does not force the policy to USE the estimate. That is exactly the gap we are sitting in: the width
+head reaches corr 0.850 while the policy's own width stays **0%** size-explained. The
+**pseudo-condition** variant (`feed_width_pred`-style: detached prediction concatenated onto the
+denoiser conditioning) is the one that forces usage. `ixjgp` already tests that MECHANISM — swapping
+the label from width to metric size is a one-line change once the label exists.
+
+**B17 (2026-08-27) — TWO reference/normalization mistakes in one analysis. Both SILENT.**
+
+**B17a — compared the policy against the RAW DEMO CSV instead of its TRAINING TARGET.**
+⚠ **MY FIRST EXPLANATION OF THIS WAS ALSO WRONG and is retracted:** I claimed the gap was a
+"gripper-offset compensation" implied by the `shift9` in the lineage names. **There is NO gripper
+offset anywhere in this pipeline.** `shift9` is the ~9mm POINT-CLOUD x-bias correction
+(`shift_demo_clouds.py --shift 0.009 0 0`, DEVLOG item 17) and it explicitly leaves
+"proprio/actions/zero-padding untouched". I saw a name and a similar magnitude and connected them
+without checking — the exact failure this bug class is about. The user caught it.
+
+**THE REAL CAUSE (verified in code):** `dr_params.csv` `width_mm` is `g["x"][6]*1e3` = the CMA-ES
+**PLANNED** grasp width. Execution then deliberately closes further: `--grasp-extra-close` (5.0mm
+in these collections) + the FIRM phase's `FIRM_EXTRA_CLOSE_M` (2.5mm) when the grip reads weak. So
+the recorded ACTION is the plan minus ~7.5mm, BY DESIGN:
+
+| object | CMA-ES plan | plan - 7.5mm | actual train target | resid |
+|---|---|---|---|---|
+| mushroom | 40.0 | 32.5 | 31.8 | +0.7 |
+| tofu | 42.2 | 34.7 | 32.9 | +1.8 |
+| raspberry | 15.6 | 8.1 | 8.8 | -0.7 |
+
+**Corollary — the raspberry over-squeeze, quantified:** a FIXED 7.5mm squeeze on a 15.6mm plan is
+**48% compression**. That is precisely what upstream a15f88c's size-scaled
+`--grasp-extra-close auto` fixes.
+
+Reported to the user: "the policy squeezes 12-15mm
+tighter than the demonstrator". **ACTUAL, against what it was trained on: -3.4mm (mushroom),
+-5.6mm (tofu), and +4.7mm WIDER on raspberry.** The claim was ~3x overstated and reversed in sign
+for raspberry.
+
+| object | demo CSV | TRAIN TARGET | policy | true gap |
+|---|---|---|---|---|
+| mushroom | 40.0 | **31.8 +- 6.9** | 28.4 | **-3.4** |
+| tofu | 42.2 | **32.9 +- 7.2** | 27.3 | **-5.6** |
+| raspberry | 15.6 | **8.8 +- 3.0** | 13.5 | **+4.7 (WIDER)** |
+
+**B17b — decoded three source datasets with a FOURTH dataset's normalization.** While checking
+B17a I used the generalist's `action_min/max` to decode the per-object source npzs, giving tofu
+"21.1mm" (true 32.9). Caught only because 21.1mm was implausible against a 42.2mm demo. **Every
+dataset has its own normalization; a borrowed one is silently wrong, not an error.** Same family as
+B1 (NORM default) and B10 (delta scale factor on an absolute value) — this repo's single most
+recurrent bug class is *the right arithmetic applied to the wrong reference frame*.
+
+**GUARD ADDED: `.agent_tmp/width_utils.py`.** `train_target_widths(env)` loads the normalization
+sitting NEXT TO the npz it reads, so the pair cannot be mismatched; `demo_csv_widths()` carries a
+docstring stating it is NOT the training target. `plot_demo_vs_policy.py` now imports it and plots
+BOTH references — solid = demonstrator physical, dotted = TRAIN TARGET, with the measured offset
+printed per panel.
+
+**What the corrected figure shows that the wrong one hid:** the policy's flat line CROSSES the
+training target — too WIDE for small objects, too TIGHT for large ones. That is the
+constant-vs-proportional signature, and it was invisible while the reference curve sat 7-11mm too
+high (everything looked uniformly "too tight").
+
+**RULE: before quoting any policy-vs-demonstration gap, state WHICH reference — raw demo CSV or
+training target — and decode with that dataset's OWN normalization.**
+
+### 2026-08-27 — PRE-FLIGHT AUDIT of queued/planned work (user: "no more time to waste")
+
+Two real bugs found in work that had NOT yet run, both silent:
+
+**AUDIT-1 — `eval_width_head.py` (job 1750154, CANCELLED before it ran) would have re-reported the
+LEAKED metric.** It medians the head's prediction ACROSS the episode; phases 0.8-1.0 leak (the
+gripper is already AT the episode-min width, so the head reads the label off its own proprio:
+corr 0.998, err 0.010). It would have printed ~0.93 again — the exact number retracted hours
+earlier. **FIXED:** now reports the HONEST correlation at t=0 (the latch moment, where every
+episode's gripper is equally open so proprio carries no per-episode signal), and prints the leaked
+variant separately, explicitly labelled, so the two can never be confused again.
+
+**AUDIT-2 — `launch_supervised_floor.sh` hardcoded the architecture flags.** For `neoca` (blind
+aux) it would have omitted `aux_width_blind=true`, feeding the width head gripper-width input it
+was TRAINED TO HAVE ZEROED. **FIXED:** derives flags from the run's OWN `.hydra/config.yaml`,
+matching `eval_width_explain.sh`.
+
+**GENERAL RULE this exposes — which flags are self-guarding and which are not:**
+
+| flag | effect if omitted at eval |
+|---|---|
+| `feed_width_pred` | changes `input_dim` (+1) -> **shape mismatch -> LOUD** (safe) |
+| `aux_grasp_width` | head missing from state_dict -> **LOUD** (safe) |
+| **`aux_width_blind`** | only MASKS an input; no shape change -> **SILENT, wrong predictions** |
+
+**A flag that changes TENSOR SHAPES protects itself. A flag that only changes BEHAVIOUR does not —
+those must always be read from the run's own resolved config, never hardcoded at the call site.**
+This is the same lesson as B15 (shape mismatch = loud) vs B1 (wrong NORM = silent), and it is now
+the deciding criterion for whether a launch script may hardcode anything.
+
+**Cleared in the same audit:** ixjgp/tebvy plain evals use the correct lineage NORM (each
+checkpoint's own train env matches, and the sbatch's B1 pre-flight guard would refuse otherwise);
+protocol is `n_episodes=200 scene_group_size=1` = 40 geometries, matching the baseline
+(`slope_base` 0.905) they will be compared against; `gen3c_mushroom` points at an existing
+checkpoint with the category wiring present in the WORKTREE eval_agent.
+
+**AUDIT-3 (found by the job failing, NOT by my audit) — the generalist eval never passed
+`category_embed_dim`.** `gen3c_mushroom` died with `size mismatch: [1024, 593] vs [1024, 572]` —
+exactly the 21 embedding dims. I wired `GM_CATEGORY` into `eval_agent` (so the embedding is BUILT)
+but never told the eval-side network builder to allocate the input for it.
+
+**The audit gap:** I audited the jobs I had just submitted and did NOT re-audit `gen3c`, which was
+queued BEFORE the audit practice started. **An audit must cover everything currently queued, not
+just what was submitted since the last audit.**
+
+Saved by the loud-failure property: `category_embed_dim` changes `input_dim`, so it is
+self-guarding (see the flag table above). Had it been a behaviour-only flag it would have run and
+produced a plausible wrong ablation.
+
+**FIXED:** `.agent_tmp/eval_generalist.sh` now derives EVERY architecture flag
+(`category_embed_dim`, `aux_grasp_width`, `feed_width_pred`, `aux_width_blind`) from the run's own
+resolved config, and picks the per-object experiment. All three generalist launch paths
+(`eval_width_explain.sh`, `launch_supervised_floor.sh`, `eval_generalist.sh`) now share this
+derive-from-config discipline; no launch script hardcodes an arch flag any more.
+
+### 2026-08-27 — VARIANCE REDUCTION IS NOT THE LEVER: the policy is DETERMINISTIC given its obs
+
+`.agent_tmp/policy_stochasticity.py` (job 1752518), 12 samples of each of 24 real observations,
+built on the EVAL inference path (`DiffusionEval`, not the training class — the first attempt died
+in 37s because `PairedRegDiffusionModel.p_mean_var` has no `deterministic` kwarg):
+
+- **WITHIN-observation width sd = 0.01mm** (max 0.08) -> the policy returns the SAME width for the
+  same observation. **There is no sampling noise to reduce.** DDIM / temperature / sample-averaging
+  would change NOTHING. This closes the user's hypothesis that reducing variance might expose a
+  buried size signal.
+
+⚠ **The reported ACROSS-observation sd (0.02mm) is INVALID — my phase choice was wrong.** I sampled
+at phase 0.15 (mid-approach) where every episode's gripper is still OPEN and commanding the same
+thing, so that number is the open-gripper command's spread, not the grasp width's. The determinism
+result stands (it is a within-observation comparison, phase-independent); the across-observation
+number must not be quoted.
+
+**WHAT THE VALID HALF IMPLIES — a sharper problem statement.** The policy is deterministic given
+its observation, yet its at-grasp width still varies **sd 7.9mm** across episodes. Therefore that
+variance IS a function of the observation. It is **not noise — it is MIS-ATTRIBUTION**: a
+deterministic observation->width map that keys on features which are not object size (size explains
+0%). So the fix cannot be smoothing, averaging, or any variance-reduction trick; it must change
+WHAT THE MAPPING ATTENDS TO. That is exactly what the four-arm ablation
+(lulkx / tebvy / ixjgp / neoca) is testing, and it is now the ONLY live route to
+"grasp width explainable by object size".
+
+### 2026-08-27 — ⭐ THE HEAD KNOWS, THE POLICY IGNORES IT (feed_width_pred is a negative result)
+
+Four-arm ablation, identical except the mechanism (seed 43, 600 epochs, paired-reg 0.5, same data).
+PLAIN evals, no clamp, 40 distinct geometries.
+
+**Policy behaviour — the target metric:**
+
+| arm | slope | 95% CI | %demo | R2 | success | SUSTAINED |
+|---|---|---|---|---|---|---|
+| lulkx (no aux) | 0.17 | [0.00, 0.33] | 15% | 0.09 | 0.905 | 29734 |
+| **ixjgp** (aux + `feed_width_pred`) | **0.20** | [0.06, 0.33] | 18% | 0.17 | **0.795** | 28668 |
+
+**Head quality — honest t=0 (latch-moment) correlation:**
+
+| head | corr | 95% CI |
+|---|---|---|
+| frozen post-hoc | 0.667 | — |
+| tebvy (aux) | 0.755 | [0.626, 0.844] |
+| **ixjgp** (aux + fed) | **0.810** | [0.705, 0.880] |
+
+**THE FINDING: the head predicts grasp width from the cloud at r=0.81, that prediction is
+concatenated onto the denoiser's conditioning, and the POLICY STILL DOES NOT USE IT** (slope 0.20 vs
+baseline 0.17, CIs overlapping; R2 0.17). Not a perception problem, not an information-availability
+problem, not a plumbing problem. **The diffusion policy declines to condition its width on an
+explicit, accurate width estimate placed directly in its input.**
+
+Cost: **-0.11 success** (0.905 -> 0.795) for +0.03 slope. The one positive: ixjgp's slope CI
+excludes zero where the baseline's includes it, and R2 doubled — a real but small effect.
+
+**SECONDARY FINDING, and it makes `neoca` the key remaining arm: tebvy's head got WORSE with
+training — 0.850 @epoch100 -> 0.755 @600.** Consistent with the proprio-shortcut hypothesis: as
+training proceeds the head increasingly satisfies its loss by COPYING the gripper width (readable at
+late phases) rather than learning size from the cloud. `neoca` (aux_width_blind) is the only arm
+that cannot take that shortcut, so it is the cleanest test of whether a genuinely cloud-derived
+size estimate propagates any further into behaviour.
+
+### 2026-08-27 — ⭐⭐ AUXILIARY WIDTH SUPERVISION IS CLOSED. It makes a WIDER CONSTANT, not an adapter.
+
+Complete four-arm ablation. Identical except the mechanism (seed 43, 600 epochs, paired-reg 0.5,
+same dataset). PLAIN evals, no clamp, 40 distinct geometries.
+
+| arm | intercept | slope | 95% CI | R2 | success | ever | SUSTAINED |
+|---|---|---|---|---|---|---|---|
+| lulkx (no aux) | 23.6 | **0.17** | [0.00, 0.33] | 0.09 | **0.905** | 0.940 | 29734 |
+| tebvy (aux only) | 29.7 | 0.05 | [-0.08, 0.19] | 0.01 | 0.755 | 0.760 | 26490 |
+| ixjgp (aux + `feed_width_pred`) | 23.4 | 0.20 | [0.06, 0.33] | 0.17 | 0.795 | 0.850 | 28668 |
+| neoca (blind aux) | 31.3 | 0.04 | [-0.11, 0.18] | 0.01 | **0.605** | 0.785 | 26991 |
+
+**EVERY aux arm made adaptation WORSE.** And the mechanism is legible in the INTERCEPT: aux arms sit
+at 29.7 / 31.3mm vs the baseline's 23.6 while their slopes flatten to ~0.05. **Auxiliary width
+supervision does not teach sizing — it converts the policy into a WIDER CONSTANT GRIPPER.** Lower
+stress, lower success, less adaptation: the LEVEL effect again, arriving as a side effect of an
+objective aimed at something else.
+
+**Blinding did NOT rescue it** — `neoca` was the best remaining hypothesis (remove the proprio
+shortcut, force genuinely cloud-derived size) and produced the WORST success (0.605) with the
+flattest slope (0.04). **The shortcut was not the problem.**
+
+**`feed_width_pred` only repairs the damage the aux loss causes** (0.05 -> 0.20), landing back at the
+untouched baseline (0.17) at a cost of -0.11 success.
+
+**CONCLUSION: the head predicts grasp width from the cloud at r=0.81 (honest, latch-time), that
+estimate can be concatenated onto the denoiser's conditioning, and NONE of it changes the policy's
+behaviour. Auxiliary supervision — sighted, blind, or fed forward — is CLOSED as a route to
+size-explainable width.**
+
+**WHAT REMAINS UNTESTED (and why it is the next lever):** the diffusion loss on the width dim is
+dominated by the long OPEN-GRIPPER APPROACH; the handful of frames where width actually encodes the
+grasp decision contribute almost nothing to the gradient. No amount of extra INPUT fixes a LOSS that
+barely rewards using it. `pointcloud_dataset.py` already implements **`width_window_weight`**
+(per-chunk up-weighting of the width dim near closure) and it has NEVER been run. That is a
+LOSS-shaping fix rather than a conditioning fix, and it is the only untried lever that addresses the
+diagnosis directly.
+
+### 2026-08-27 — WHY width does not adapt: the width pathway is only ~15% VISUALLY SENSITIVE
+
+User asked whether the failure is (a) size unreadable from the cloud at grasp time (occlusion) or
+(b) a vision-proprioception SHORTCUT (cf. "When would Vision-Proprioception Policies Fail in
+Robotic Manipulation?"). Tested by INTERVENTION, not inference.
+
+**First, the metric was validated** (`docs/figures/atgrasp_metric_validation.png`): per-episode
+traces with the extraction window shaded. The extracted value sits at the closure plateau, gripper
+DOWN, BEFORE the lift — the metric is honest. Caveat visible in env 4: some episodes keep closing
+AFTER the grasp (34mm -> 12mm during hold), which at-grasp does not capture — that is what the
+SUSTAINED stress metric is for.
+
+**CLOUD-SWAP ABLATION (`visual_ablation.py`) — swap the whole object's cloud, keep proprio:**
+
+| phase | lulkx (within-category) | generalist (CROSS-category) |
+|---|---|---|
+| 0.0-0.2 (approach) | **0.06-0.12mm** | 0.15mm |
+| 0.4 | 0.23mm | 0.29mm |
+| **0.5 (closure)** | **1.68mm** (max 6.3) | **2.18mm** (max 11.7) |
+| 0.6 | 1.42mm | 1.35mm |
+
+Correct sizing would need **~10mm** (demonstrator slope 1.08 over a ~10mm size difference).
+Measured: **<=2.2mm ~ 15%** — the same order as the slope deficit (0.17/1.08 = 16%).
+**The width pathway barely consults vision.** This reconciles everything: the encoder CAN predict
+size (r=0.81 honest), the estimate CAN be fed to the denoiser (ixjgp), and neither matters because
+the width output does not read visual features.
+
+**It is WEAK VISUAL DEPENDENCE, not occlusion.** Sensitivity is LOWEST during the approach when the
+object is fully visible (0.06mm) and RISES at closure when the fingers occlude it (1.68mm) — the
+OPPOSITE of the occlusion prediction. The policy never learned to use vision for width; it did not
+lose it to the fingers.
+
+**REFUTED (my hypothesis): between-category width is NOT EE-height inference.** All three objects
+are grasped at the SAME height (mushroom 6.0mm, tofu 6.3, raspberry 5.7) and
+corr(width, EE-z) = **-0.000** across objects.
+
+⚠ **OPEN, and the single-step test CANNOT settle it:** these are ONE-STEP counterfactuals, but
+closure is a ~30-step CLOSED-LOOP ramp in which each command is anchored to the current gripper
+width (proprio). A 1-2mm per-step visual correction, INTEGRATED over the ramp, could well produce
+the generalist's 15mm between-category gap. So "2mm swap response" does NOT prove vision is unused
+between categories — the script's own printed interpretation overstated this. Settling it needs a
+CLOSED-LOOP swap (run full episodes with a mismatched cloud), ~40min of eval, deliberately NOT run
+tonight because it refines the story without changing the next action.
+
+**WHAT THIS IMPLIES FOR THE FIX:** if the problem were occlusion, better viewpoints or earlier
+latching would help. It is not. It is weak visual dependence, so the levers are the ones that FORCE
+it: **`cond_dropout_prob`** (randomly drop the visual conditioning in training — already implemented
+for the CFG work, standard remedy for a policy ignoring a modality) or a width path that
+STRUCTURALLY cannot see proprio. Neither has been tried against the width objective.
+
+### 2026-08-27 — ⚠ RETRACTED: three failed attempts to measure the width pathway's VISUAL SENSITIVITY
+
+User asked WHY between-category width sizing works while within-category does not — occlusion, or a
+vision-proprioception shortcut? Three offline probes were attempted; **all three are invalid and
+none of their numbers should be used.**
+
+1. **Cloud-swap** (`visual_ablation.py`) — swap another episode's cloud, keep proprio.
+   **CONFOUNDED (user caught it):** the swapped cloud carries a different OBJECT POSITION, a
+   different ARM/GRIPPER configuration and a different viewpoint, while proprio still describes the
+   original pose. The policy received a physically incoherent, off-distribution observation, so the
+   measured dwidth conflated size with pose mismatch. **RETRACTS the "1.68mm / ~15% visually
+   sensitive" figure** and everything built on it.
+2. **Fixed-phase sampling** — every probe sampled at a fixed FRACTION of the episode. Closure onset
+   is at phase 0.45-0.55 (median 0.49) and episodes run 179-302 steps, so a fixed fraction lands on
+   the APPROACH for some episodes and mid-closure for others. Symptom: the size-scaling run reported
+   **79.98mm at every scale** (gripper still fully open — nothing to be sensitive with). The same
+   error made the stochasticity test's ACROSS-observation number (0.02mm) meaningless, and may have
+   contaminated the "occlusion dip" phase curve.
+3. **Object-point scaling at closure onset** — mask = points within 5cm laterally of the EE and
+   below it. At closure that region is mostly FINGERS and TABLE: measured "object extent" came out
+   **68mm for a 33mm mushroom**, and the >=30-point filter left **n=1-2 episodes**. Meaningless.
+
+**LESSON: an offline probe of a CLOSED-LOOP policy needs its sampling point defined by the
+BEHAVIOUR (per-episode closure onset), not by episode fraction — and any "object" mask built from
+EE-relative geometry is contaminated by the gripper exactly when the grasp happens.** Doing this
+properly requires privileged object segmentation (available in sim, absent from the student cloud)
+or a CLOSED-LOOP eval with a manipulated cloud. Not a quick probe.
+
+**STILL STANDING (none of it depends on these probes):** policy slope **0.17** vs demonstrator 1.08
+at 40 geometries (200-episode closed-loop evals); width head **r=0.81** honest at the latch moment;
+the four-arm ablation (aux / aux+fed / blind-aux all fail to change behaviour and produce WIDER
+CONSTANTS); the constant floor (-41% sustained stress at 0.745 success).
+
+**OPEN: the mechanism behind between- vs within-category sizing is UNRESOLVED.**
+
+### 2026-08-27 — the width head OVERFITS: train r=0.98 vs val r=0.75-0.81 (user challenged the number)
+
+User asked whether r=0.81 holds on VALIDATION or is memorization, and how the head was trained.
+
+**How it was trained:** NOT a post-hoc probe — an auxiliary MSE inside policy training.
+Label = the episode's MIN gripper width (`states[:,-1].min()` per episode) broadcast to every step;
+head reads the shared conditioning feature `[pointnet_feat (+) state]`; `MSE x 1.0` added to the
+diffusion loss, on the TRAIN split. `val.npz` is forward-only under `torch.no_grad()` during
+training, so no gradients flow from it.
+
+**Train vs val at t=0 (`.agent_tmp/head_overfit_check.py`):**
+
+| arm | TRAIN r | VAL r | gap | shuffled-label control |
+|---|---|---|---|---|
+| tebvy | **0.986** | 0.755 | +0.232 | -0.006 |
+| ixjgp | **0.989** | 0.810 | +0.180 | +0.008 |
+| neoca (blind) | **0.977** | 0.800 | +0.177 | +0.022 |
+
+**SUBSTANTIAL OVERFITTING — the user's concern was right.** R2 goes 0.97 (train) -> ~0.60 (val).
+The script's own printed line ("small train-val gap => real generalization") is TOO GENEROUS and is
+overridden here: a 0.18-0.23 correlation gap is not small.
+
+**What survives:** (a) the correlation is REAL — shuffled-label controls sit at ~0.00, so the metric
+is sound; (b) it is GENUINELY VISUAL — `neoca`'s head is BLIND to gripper width by construction and
+still reaches **0.800 val**, as good as the sighted heads, which rules out proprio leakage as the
+source (this is the proprio-only control, obtained for free).
+
+**CLAIM WEAKENED:** "an ACCURATE size estimate handed to the policy does not change its behaviour"
+becomes **"a MODERATELY accurate estimate (val R2 ~0.6 in-distribution, and earlier work put
+cloud->size at 0.44-0.59 on UNSEEN shapes) does not change it."** A policy ignoring a noisy signal
+is a weaker indictment than one ignoring a clean signal.
+
+**But it does not rescue the mechanism:** across the three arms there is NO ordering between head
+quality and policy adaptation — ixjgp has the BEST head (0.810) and slope 0.20; tebvy has the WORST
+(0.755) and slope 0.05. If head accuracy drove policy sizing, that ordering would exist.
+
+### 2026-08-27 — USER HYPOTHESIS SUPPORTED: the shortcut explains the SPREAD, not just the flat slope
+
+User: *"the policy instead learns a multi-modal behavior based on proprioception — the demonstrator
+shows different grasp widths at similar pose (the true reason is object size but ignored) — so the
+shortcut also causes the VARIANCE of grasp width for objects of the same size."*
+
+**Quantitative support, from numbers already in hand:**
+
+| quantity | sd |
+|---|---|
+| demo width, MARGINAL | 6.93mm (npz) / 8.01mm (dr_params collection) |
+| demo width given PROPRIO (k=20 NN at the closure decision) | **6.67mm = 96% of marginal** |
+| demo width given SIZE (regression, dr_params) | **4.33mm = 62% of marginal** |
+| **POLICY width, marginal** | **7.91mm** |
+
+**Proprio carries almost no width information** (`proprio_multimodal.py`): episodes with
+near-identical ee_pos+ee_quat at the closure decision still show 91-96% of the marginal spread
+(k=10/20; small-k numbers are biased LOW by the sd estimator and should not be quoted).
+**Size does** (62%). So a proprio-only learner can do no better than the MARGINAL — and the policy's
+spread IS the marginal (7.91 vs 8.01). The shortcut therefore explains BOTH failures at once:
+no size tracking AND the ~8mm spread.
+
+⚠ **INVALID CONTROL, discarded:** I tried a same-estimator k-NN in SIZE space using a cloud-derived
+size proxy (lateral extent of low points in the first frame). The proxy reads **176mm mean for a
+33-49mm mushroom** and correlates **-0.077** with width — it measures the TABLE. The size figure
+above therefore comes from the dr_params regression, a DIFFERENT dataset and estimator; the two
+should not be quoted as a matched comparison.
+
+**ONE REFINEMENT to the hypothesis:** the policy is DETERMINISTIC given its observation (within-obs
+sd 0.01mm), so it is not stochastically sampling a multimodal conditional — it is a DETERMINISTIC
+proprio->width map whose outputs happen to span the marginal. Same spread, different mechanism, and
+it matters: a stochastic policy could be sharpened by lowering sampling temperature; a deterministic
+one cannot. This is consistent with the earlier finding that variance reduction is not a lever.
+
+**THE RUNNING SIZE SWEEPS TEST THIS DIRECTLY:** within a pinned pose context proprio is nearly
+constant across scales, so a proprio-driven width will be FLAT across the sweep while a
+cloud-using one will track. That is the cleanest form of the test and needs no proxy at all.
+
+### 2026-08-27 — ⚠⚠ RETRACTED: "the policy does not inherit the demonstrator's gentleness"
+
+Upstream 21603e0 validated the CMA-ES FEM surrogate against MPM. It RANKS grasps well
+(Spearman rho +0.842) but its ABSOLUTE scale is **~3x low**: planner 6.8-18.8 kPa vs MPM
+20.7-46.4 kPa on the same 10 mushroom episodes, **MPM median ~100% of yield**.
+
+**OUR COMPARISON MIXED THE TWO MEASUREMENT SYSTEMS.**
+- DEMO stress (11,351 Pa = "0.28x yield") came from `dr_params.csv` `stress_Pa`, which the collector
+  fills from `g["stress_top10"]` — and that key is produced by `smgrasp/lift_stress.py`, i.e. **the
+  FEM PLANNER**, not the rollout. (The collector *also* computes a `_stress_top10(vm)` from MPM
+  von Mises, but only for the internal FIRM decision; it never reaches the CSV.)
+- POLICY stress (sustained 28,060 / peak 53,065) comes from the eval harness reading **MPM
+  `von_mises_stress`** via `policy_env.py`.
+
+So "**demonstrator 0.28x yield vs policy peak 1.33x — the policy does not inherit the
+demonstrator's gentleness**", which §4d of the plan proposed as THE PAPER'S PROBLEM STATEMENT, is
+**a planner number compared against a simulator number. RETRACTED.**
+
+**Corrected, both on MPM:**
+
+| | MPM stress | x yield |
+|---|---|---|
+| demonstrator (upstream, n=10) | 20.7-46.4 kPa | 52-116%, median ~100% |
+| policy SUSTAINED | 28.1 kPa | 0.70x |
+| policy PEAK | 53.1 kPa | 1.33x |
+
+The policy's SUSTAINED stress sits INSIDE the demonstrator's range. Only its PEAK exceeds the demo
+maximum. Upstream also notes part of the gap is definitional (the planner masks contact-adjacent
+elements; the like-for-like unmasked comparison is **not yet checked**), so even the 3x is
+provisional.
+
+**SCOPE — what is and is not affected:**
+- **AFFECTED:** every DEMONSTRATOR stress figure taken from `dr_params.csv` (`stress_Pa`), including
+  the 0.28x-yield claim and the "demos are gentle, the policy is not" framing.
+- **UNAFFECTED:** all POLICY stress from eval `summary.json` (MPM) — the -41% constant floor, the
+  four-arm stress column, raspberry's above-yield SUSTAINED, and every between-arm gentleness
+  ranking. Those compare MPM against MPM.
+
+**LESSON (this is the wrong-reference-frame class again, 4th instance today):** two numbers with the
+same NAME ("stress, % of yield") came from two different MEASUREMENT SYSTEMS. Before comparing any
+two quantities, state which system produced each. A shared unit is not a shared scale.
+
+### 2026-08-27 — ⭐ CONTROLLED SIZE SWEEP (user's design): no adaptation, and a SELECTION-BIAS trap caught
+
+User designed the clean test: vary ONLY object size, closed-loop, with object pose / arm home /
+yaw PINNED per sub-env for the whole run (`GM_FIXED_SCALES`, `GM_FIXED_POSE`, `GM_FIXED_YAW_DEG`
+added to `sim_backend.py`, default OFF). Tofu, generalist xaqnb, 5 scales x 3 pose contexts x 3
+repeats = 45 episodes, every one rendered, observations dumped.
+
+**RESULT — all episodes (the honest view):**
+
+| pose context | slope | width change over the 18mm span |
+|---|---|---|
+| yaw 0 (face-on) | +0.063 | +1.1mm |
+| yaw 45 | -0.218 | -3.9mm |
+| yaw 90 | +0.534 | +9.6mm |
+| **pooled per-episode** | **+0.101** | — |
+| *demonstrator* | *1.08* | *+19.4mm* |
+
+**Even with pose PINNED, there is no demonstrator-like size tracking.** That answers the question
+the sweep was built for: pose variation was NOT masking real sensitivity.
+
+**⚠ THE TRAP — success-only analysis shows FALSE adaptation.** Restricting to successful episodes
+gives slope **+0.856 (yaw 0)** and **+0.897 (yaw 90)** — near the demonstrator's 1.08. It is
+SELECTION BIAS, a collider: size -> success <- width. Proof, from the failures:
+
+| size | ALL width | SUCCESS | FAIL |
+|---|---|---|---|
+| 24.0mm | 29.9 +- 3.6 | **25.8** (n=3) | **31.9** (n=6) |
+| 28.5mm | 34.2 +- 5.1 | **29.9** (n=3) | **36.4** (n=6) |
+| 42.0mm | 33.5 +- 5.3 | 33.5 (n=9) | — |
+
+The ALL-episode distribution is flat across sizes; at SMALL sizes the too-wide draws FAIL, so
+conditioning on success keeps the narrow ones and manufactures a slope. **This validates the
+existing choice in `decompose_width.py` to use ALL episodes** — a success-only pipeline would have
+reported adaptation that does not exist.
+
+**NEW, and it matters for shipping:** small objects fail by being gripped **TOO WIDE** (31.9mm on a
+24mm object), i.e. they are DROPPED, not crushed. **The constant floor only ever WIDENS the grip, so
+it would make small-object success WORSE.** Ship it for mushroom-sized objects only; it is the wrong
+mechanism for a multi-category setup containing raspberries.
+
+**DESIGN NOTE for the next sweep:** the within-scale repeat sd is **3.28mm** (MPM is not
+bit-reproducible), so with 3 repeats each cell mean carries ~+-1.9mm — enough to rule out a
+demonstrator-like slope (19.4mm expected) but NOT to estimate a small slope precisely. The scale
+count (5 vs 10) is not the limiting factor; REPEATS are. Use >=6 repeats per cell if the goal is a
+precise slope rather than a demonstrator-vs-flat verdict.
+
+### 2026-08-27 — 10-SCALE SWEEP: the policy IS size-sensitive, ~30% of the demonstrator (5 scales is NOT enough)
+
+Same controlled design, tofu / generalist xaqnb, pose pinned per sub-env. Comparing scale counts:
+
+| pose context | 5 scales (45 eps) | **10 scales (90 eps)** |
+|---|---|---|
+| yaw 0 (face-on) | +0.063 | **+0.259** (r +0.53) |
+| yaw 45 | **-0.218** | **+0.147** (r +0.31) |
+| yaw 90 | +0.534 | **+0.491** (r +0.72) |
+| mean | +0.13 | **+0.30** |
+| noise floor (within-scale repeat sd) | 3.28mm | 2.81mm |
+
+**5 SCALES IS NOT ENOUGH** — at 5 the contexts disagreed in SIGN (yaw 45 came out -0.218, noise);
+at 10 all three are positive and the mean roughly doubles. The extra 45 episodes change the ANSWER,
+not just the error bars. **Use 10 scales.** (Earlier note said repeats were the binding constraint;
+that was based on the 5-scale run alone and is superseded — scale count matters too.)
+
+**REFINEMENT TO THE CAMPAIGN'S CONCLUSION, in the policy's favour:** with pose properly controlled
+the generalist shows **consistent positive size sensitivity, ~0.15-0.49 (mean 0.30) = ~30% of the
+demonstrator's 1.08** — not the ~0.1 the uncontrolled 40-geometry measurements suggested. Pose
+variation WAS masking part of the signal. The policy is **UNDER-RESPONSIVE by ~3x**, not size-blind.
+Correct the earlier "no size tracking / flat" framing to "under-responsive by ~3x".
+
+**Selection bias reappears, milder:** success-only gives 0.48-0.61 vs all-episode 0.15-0.49. Same
+collider (size -> success <- width), smaller inflation because failures are rarer (67/90 succeed).
+
+**ANALYSIS BUG found and fixed (no re-run needed):** `analyze_sweep.py` binned sizes with
+`np.round(S,2)` but tested membership as `|S - bin| < 1e-6` against the RAW values. Exact for
+tofu-5's scales (24.0, 28.5, ...), broken for tofu-10's (26.001 vs bin 26.0) -> empty cells and NaN
+slopes. Fixed by rounding once and grouping on the rounded array; the tofu-5 numbers reproduce
+exactly, confirming the fix changed nothing else.
+
+### 2026-08-27 — CLARIFICATION (user caught it): "uncertain" is NOT "zero"
+
+User asked whether the controlled sweep contradicted the earlier "the tofu generalist is not width
+adaptive". It does not — **the numbers agree; my WORDING was wrong.**
+
+| arm | uncontrolled (full DR, per-geometry) | controlled sweep (pose pinned, 10 scales) |
+|---|---|---|
+| xaqnb / tofu | **0.31** CI [-0.14, 0.76], R2 0.13, verdict "uncertain" | **+0.30** (0.26 / 0.15 / 0.49) |
+| lulkx / mushroom | **0.17** CI [0.00, 0.33] | **-0.04** (-0.24 / +0.04 / +0.08) |
+| xaqnb / mushroom | 0.12 CI [-0.49, 0.74] | (running, 1758351) |
+
+**TOFU: controlling the DR changed NOTHING** — 0.31 -> 0.30. The positive result was always in the
+data; the uncontrolled CI merely spanned zero at 12 geometries. **I then spoke about that arm as
+though it were FLAT** ("the generalist does not track size within category"). The metric's own
+verdict word is "uncertain", which means *cannot be distinguished from zero* — NOT *is zero*.
+Conflating the two is how a wide-CI point estimate of 0.31 got reported as no adaptation.
+
+**MUSHROOM: controlling made it slightly WORSE** (0.17 -> -0.04), so pose variation was not hiding
+sensitivity there; if anything the uncontrolled number flattered it.
+
+**RULE going forward:** report a slope as (point estimate, CI) and say "indistinguishable from zero"
+when the CI spans it — never "flat", "no adaptation", or "size-blind", which assert the point
+estimate IS zero. Three pose contexts give the sweep mean an SE of ~0.10, so tofu's +0.30 is ~2.9
+sigma from zero: suggestive, not decisive, and still ~3.5x under the demonstrator's 1.08.
+
+### 2026-08-27 — PROPRIO-SHORTCUT ARMS (user's idea, from GAP: arXiv 2602.12032)
+
+User pointed at "When would Vision-Proprioception Policies Fail in Robotic Manipulation?"
+(Lu, Xia, Wu, Lu, Hu). Read the paper; two things matter for us.
+
+**1. Their Table 1: VISION-ONLY BEATS VISION+PROPRIO CONCATENATION on nearly every task.**
+
+| task | vision-only | concat | GAP |
+|---|---|---|---|
+| Meta-World pick-place | 91.8 | 78.4 | 94.2 |
+| RoboSuite threading | 43.6 | 33.2 | 53.0 |
+| real: press button | 18/20 | 12/20 | 20/20 |
+| real: lift lid and pour | 9/20 | 5/20 | 15/20 |
+
+**2. GAP is a GRADIENT modulation, not dropout (user corrected me on this).** Eq 5:
+
+    w_s^{j+1} = w_s^j - lambda * (1 - rho) * eta * grad_{w_s} L_BC
+
+`w_s` = parameters of the PROPRIOCEPTION CHUNK `phi_s`, which in their architecture is "an encoder
+and a temporal transformer". `rho` = motion-transition phase indicator, obtained by Change Point
+Detection on the motion representation {dp, dtheta, dg} to segment motion-CONSISTENT phases, then an
+LSTM predicting per-timestep rho supervised by those segment indices. High rho -> gradient damped.
+
+**KEY ARCHITECTURAL FACT FOR US: we have no `w_s` to damp.** `_cond_encoded` RAW-CONCATENATES the
+state (`parts = [feat, state]`) with no proprio encoder, so GAP's mechanism is not expressible until
+one exists. The standard input-side trick (`p*a + p.detach()*(1-a)`) does NOT help: it scales the
+gradient w.r.t. p, and p is an INPUT, so no parameter update changes.
+
+**AND OUR ADVANTAGE (the user's point): our demonstrator is SCRIPTED, so rho is KNOWN.** No CPD, no
+LSTM — the dataset already computes the closing/hold window for `width_window_weight`, and we reuse
+it as a binary rho.
+
+**Four arms launched on the GENERALIST (xaqnb's exact recipe, seed 42, 350 epochs, paired-reg 0.5;
+each differs in ONE thing):**
+
+| arm | job | mechanism | eval-side change |
+|---|---|---|---|
+| A vision-only | 1758631 | whole proprio zeroed | yes (`GM_BLIND_PROPRIO`) |
+| B width-blind | 1758632 | only the gripper-width channel zeroed | yes (`GM_BLIND_GRIPPER_WIDTH`) |
+| C GAP | 1758633 | `proprio_encoder` + Eq-5 damping in the known grasp window | none (gradient-only) |
+| D control | 1758634 | same encoder, `gap_damp=false` | none |
+
+**C needs D.** The encoder is an architecture change GAP requires; without D we could not tell
+damping from the extra capacity.
+
+**Implementation, verified by smoke test before spending 16 GPU-hours** (`.agent_tmp/smoke_arms.py`):
+encoder gradient damped inside the window (0.135 vs 0.230 undamped); **forward value identical, max
+diff 0.00e+00** (Eq 5 is gradient-only, so inference is untouched); D undamped (0.204); A/B ablations
+exactly as intended. Straight-through form: `h = s*h + (1-s)*h.detach()` with `s = lambda*(1-rho)`.
+
+**Gotcha worth recording:** C/D need `aux_grasp_width` + `normalization_path` on the DATASET, because
+that is the only path that builds the grasp-window mask. The model's aux WEIGHT stays 0 (no aux loss
+— that objective was shown harmful earlier today); the label is used solely to locate the window.
+Without it, C would have trained with `gap_damp=True` and no window to damp in, and produced a clean
+null that looked like a real negative result.
+
+### 2026-08-28 — upstream 8b8f4db: von Mises SATURATES past yield. Our SUSTAINED metric survives; PEAK does not.
+
+Upstream retracted its own rho=+0.84 surrogate validation: it was a SCENE-SIZE confound (planner vs
+scale rho -0.67, MPM vs scale rho -0.89). A CONTROLLED test (fixed scene, sweep only grasp width)
+gives **rho = 0.000** (Pearson -0.47). Root cause: Genesis MPM is ELASTO-PLASTIC, so von Mises
+saturates at the yield surface — past yield, squeezing produces plastic flow, not higher stress.
+Their conclusion: *von Mises is the wrong gentleness measure past yield; plastic deformation is.*
+
+**OUR DATA SHOWS THE SAME SATURATION, and it splits our two metrics cleanly:**
+
+| arm | SUSTAINED | x yield | PEAK | x yield |
+|---|---|---|---|---|
+| baseline lulkx | 29734 | 0.74 | 53470 | 1.34 |
+| floor m8 | 22804 | 0.57 | 51737 | 1.29 |
+| floor m6 | 19700 | 0.49 | 50615 | 1.27 |
+| floor m4 | 18047 | 0.45 | 49709 | 1.24 |
+| constant floor 32.84 | 16439 | 0.41 | 49052 | 1.23 |
+
+**SUSTAINED spreads 45% across mechanisms (29.7k -> 16.4k) and sits at 0.41-0.74x yield — BELOW the
+surface, still informative. PEAK spreads only 8% (53.5k -> 49.1k) and is pinned at 1.23-1.34x yield
+— the saturated regime.** The 8% peak spread is not a gentleness difference; it is the metric
+running out of range.
+
+**CONSEQUENCES FOR OUR CLAIMS:**
+- **SURVIVE** (all rest on SUSTAINED, below yield): the constant floor's -41%, the floor margin
+  frontier, the four-arm stress column, every between-arm gentleness ranking. Choosing
+  `stress_top20_ttop20` as the primary metric turns out to have been load-bearing.
+- **DO NOT USE for gentleness**: `stress_max_tmax` (PEAK). "The policy peaks at 1.33x yield" means
+  "past yield", full stop — the MAGNITUDE is not interpretable, so it cannot rank arms.
+- Raspberry's SUSTAINED at 1.13x yield is ALSO in the saturated regime -> that one number is
+  suspect, unlike the mushroom/tofu sustained figures.
+
+**Method lesson (upstream's words, and it is the third instance tonight):** *an observational
+correlation across DR-varied scenes is not metric validation.* Same family as our success-only
+selection bias and the 12-vs-40-geometry artefact: a confound that varies WITH the quantity of
+interest manufactures a correlation. The remedy in every case was the same — fix everything else and
+sweep one variable, which is exactly what the user's controlled size sweep does for width.
+
+### 2026-08-28 — 2x2 COMPLETE: the OBJECT drives size sensitivity, not multi-object training
+
+Controlled sweeps (pose pinned per sub-env, 10 scales over each object's own DR range, 90 eps):
+
+| | mushroom | tofu |
+|---|---|---|
+| **specialist** (lulkx) | **-0.04** (-0.24/+0.04/+0.08) | — |
+| **generalist** (xaqnb) | **+0.06** (+0.11/-0.04/+0.11) | **+0.30** (+0.26/+0.15/+0.49) |
+
+- **Same policy, different OBJECT: +0.06 -> +0.30** (~2.2 sigma on 3 pose contexts). Real.
+- **Same object, different TRAINING REGIME: -0.04 -> +0.06** (~0.9 sigma). **Indistinguishable
+  from noise.**
+
+**MY HYPOTHESIS THAT MULTI-OBJECT TRAINING INDUCES SIZE RESPONSIVENESS IS NOT SUPPORTED.** The tofu
+result is about TOFU: a cube's silhouette scales legibly in a point cloud, while a mushroom's
+rounded cap (plus stem) is harder to size. **The "+0.30 / under-responsive by 3x" characterisation
+therefore applies to tofu specifically, NOT to the policy in general** — the same policy is at +0.06
+on mushroom.
+
+**Consequence for the final pipeline: do NOT expect the multi-object generalist setup to deliver
+width adaptation by itself.** Whatever fixes this has to be a mechanism (the four proprio-shortcut
+arms are the current test), not a data-composition change.
+
+Figure: `docs/figures/size_sweeps_width_vs_size.png` (4 panels: the 2x2 plus the 5-scale
+under-sampling check).
+
+### 2026-08-28 — PROPRIO ABLATION IS NOT VIABLE HERE: A and B are 0/21. GAP is the only live arm.
+
+| arm | val loss @350 | mushroom success |
+|---|---|---|
+| baseline xaqnb | 0.0012 | 0.883 |
+| **A vision-only** (all proprio zeroed) | 0.0056 (4.7x) | **0.00 — killed by the degenerate watchdog at 21 eps** |
+| **B width-blind** (gripper-width channel only) | 0.0029 (2.4x) | **0.00 — same** |
+| C GAP (encoder + Eq-5 damping) | 0.0014 | (running) |
+| D encoder control | 0.0009 | (running) |
+
+**Removing proprio does not expose the shortcut — it BREAKS THE POLICY.** The val losses predicted
+it (4.7x / 2.4x worse) and the evals confirmed it: zero successes.
+
+**The surprise is B.** I argued a policy emitting ABSOLUTE width targets should not need its CURRENT
+width. It does. Most likely the gripper-width channel carries **PHASE** information — where the
+episode is in approach/close/lift — so deleting it destroys closure TIMING, not just width choice.
+That also fits the earlier observation that the policy's width command tracks its own previous
+width: it is using that channel as a clock.
+
+**CONSEQUENCE: "the policy over-relies on proprio" cannot be fixed by REMOVING proprio in this
+setup.** Proprio is load-bearing for basic function. This is why the GAP paper's vision-only result
+(which BEAT concatenation on their tasks) does not transfer: their Meta-World / RoboSuite tasks
+differ in exactly the relevant way — we use absolute pose+width commands against a
+scripted-demonstrator phase structure, so the policy has no other source of phase.
+
+**GAP is therefore the RIGHT SHAPE of intervention for us and the only live arm**: it keeps proprio
+available at INFERENCE and damps only its LEARNING inside the grasp window (Eq 5 is gradient-only,
+verified forward-identical). Its val loss (0.0014) sits next to baseline, so nothing is broken.
+D (encoder, no damping) isolates the encoder's capacity from the damping.
+
+Watchdog note: the degenerate-eval guard killed both dead arms at 25 min instead of 90, saving
+~2 GPU-hours. That guard has now paid for itself three times today (B16, A, B).
+
+### 2026-08-28 — ALL FOUR PROPRIO ARMS FAIL CLOSED-LOOP (0/21). Val loss does NOT predict success.
+
+| arm | val loss @350 | mushroom success | why |
+|---|---|---|---|
+| baseline xaqnb | 0.0012 | **0.883** | — |
+| A vision-only | 0.0056 (4.7x) | 0.00 | proprio removed -> policy loses its CLOCK |
+| B width-blind | 0.0029 (2.4x) | 0.00 | same, from ONE channel |
+| C GAP (encoder + damping) | 0.0014 | 0.00 | see below |
+| **D encoder CONTROL** | **0.0009 (BETTER than baseline)** | **0.00** | **the encoder alone** |
+
+**Load-mismatch hypothesis CHECKED AND REJECTED.** `DiffusionEval` falls back to
+`load_state_dict(strict=False)`, so a key mismatch would be SILENT and would explain D exactly.
+Verified (`.agent_tmp/check_encoder_load.py`): encoder keys present in both checkpoint and eval
+model, **0 missing, 0 unexpected**. The failures are real.
+
+**THE FINDING: BC validation loss is a weak predictor of closed-loop success — D is the clean
+demonstration.** D has LOWER val loss than the baseline and ZERO success. Val loss measures
+single-step action prediction on demonstration states; success needs 300 steps of stability under
+the policy's OWN state distribution, where representation changes compound. We have been reading
+val loss as a health check all session; it is not one.
+
+**Consequences:**
+- A/B: proprio is LOAD-BEARING (the phase/clock signal), so the shortcut cannot be removed by
+  ablation in this setup. Substantive.
+- C/D: inserting ANY learned transform between raw proprio and the denoiser destabilises closed-loop
+  control, INDEPENDENT of GAP's damping — **D is what proves this**, and it is exactly why the
+  control arm was run.
+- **GAP therefore remains UNTESTED**: its prerequisite (a proprio encoder) is not free here.
+
+**If pursued, the fix is near-IDENTITY INITIALISATION of the proprio encoder** so the policy starts
+at baseline behaviour and departs only as training justifies — standard when inserting a module into
+a working architecture, and it would make D a true no-op control. Cost: ~4h retrain + 1.5h sweep for
+C and D. NOT launched — four consecutive arms have now failed and the deadline is close; the
+alternative is to stop mechanism-hunting and write up.
+
+**Guard worth adding regardless:** `strict=False` on checkpoint load converts a structural mismatch
+into a plausible wrong answer (same family as the wrong-NORM and wrong-reference-frame bugs). An
+assert that no INFERENCE-path key is missing would keep the aux-head tolerance without the silence.
+
+### 2026-08-28 — WHY C/D FAILED (init, not architecture) — and why our GAP arm was NOT a faithful GAP test
+
+**The 0/21 was diagnosed to a bad initialisation, and the bug hunt cleared the code.** Ruled out, in
+order: port mismatch (train vs eval `_cond_encoded` **bit-identical, max diff 0.000e+00**), silent
+key drop (`strict=False`; **0 missing, 0 unexpected**), EMA not tracking the new params
+(**0.0002 relative on the encoder**; D fails with EMA *and* raw weights). All rejected.
+
+**Cause: a RANDOMLY-INITIALISED module inserted into the proprio path.** Proprio is the policy's
+closure CLOCK (established by arms A/B: removing it -> jitter at the grasp pose, user's own video
+read). A random encoder scrambles that clock at step 0, the policy learns to disregard it, vision
+cannot supply phase, and it converges to "approach, never close" — exactly the observed behaviour,
+confirmed offline on VALIDATION demo states (D flat at ~80mm where the demo goes 80 -> 36.7 -> 33).
+
+**FIX, verified:** residual encoder `h = state + MLP(state)` with the final layer ZERO-initialised
+-> **exact pass-through at init (max diff 0.000e+00)**. NOTE the first attempt — identity weights on
+both linears — was NOT a pass-through (**2.493**, barely better than random's 3.276) because
+`Mish(x) != x`. The smoke test caught that before it cost a 4h run.
+
+**⚠ AND A DEEPER PROBLEM (user asked "are you using the same setup as the paper?"): NO.**
+GAP Eq 2 is `â = (psi_s(f_s) + psi_v(f_v)) . W_share + b` — proprio and vision have SEPARATE chunks
+and SEPARATE HEADS whose outputs are SUMMED, which makes the proprio contribution SEPARABLE, so
+damping `w_s` genuinely reduces its influence. **Ours CONCATENATES `[pointnet_feat (+) proprio]`
+into ONE shared trunk, so damping a bolted-on encoder does nothing: the trunk downstream is free to
+compensate.**
+
+| | GAP | ours |
+|---|---|---|
+| fusion | separate heads psi_s, psi_v, **SUMMED** | **CONCATENATED** into one trunk |
+| w_s | encoder + temporal transformer (whole pathway) | a bolted-on 2-layer MLP |
+| rho | continuous, CPD + LSTM | binary, known grasp window |
+
+**CONSEQUENCE: our "GAP arm" cannot test GAP.** Even a clean run would only show whether damping a
+bolted-on encoder shifts width — the mechanism GAP relies on is absent. A faithful test needs the
+two-branch summed-head denoiser, which changes the BASELINE too (~10h for baseline + C + D + sweeps).
+**Recorded as scoped future work.** My earlier withdrawal of the lambda point stands and is
+unaffected: D has NO damping and failed identically, so damping never explained D.
+
+**METHOD CORRECTION with session-wide reach: epsilon-prediction val loss is NOT an action-quality
+measure.** D posted the BEST val loss of any arm (0.0009 vs baseline 0.0012) while never closing.
+The loss is dominated by predicting injected noise, and width sits at its open value ~85% of every
+episode, so a total failure on that dimension barely moves it. **Val loss was used as a health check
+all session; it is not one.** Closed-loop success is the only health signal that counts.
+
+### 2026-08-28 — VENDORED GAP + the three faithful arms; a per-split phase-file bug caught by an assert
+
+Per user instruction ("just try to use their code", "do not self reimplement", "make sure their
+things are minimally touched"), GAP is now VENDORED at `third_party/GAP/` (clone of
+GeWu-Lab/GAP, `.git` removed) with `third_party/GAP/VENDORED.md` recording the mechanism AS
+IMPLEMENTED IN THEIR CODE plus the 5 places their code differs from their paper text. We run
+their CPD (ruptures PELT + their `CostDirection`, pen=4) + LSTM phase estimator unmodified.
+
+**Three arms, one variable each, all on xaqnb's exact recipe (seed 42, 350 ep, paired-reg 0.5):**
+
+| arm | job | rho source | isolates |
+|---|---|---|---|
+| C' `gapC_faithful` | 1762867 | our known grasp window (wide) | GAP with ground-truth phase |
+| D' `gapD_control`  | 1762868 | — (GAP off, encoder on) | the encoder ALONE |
+| E  `gapE_theirphase` | 1763013 | THEIR CPD+LSTM (sparse) | faithful GAP replication |
+
+Their rho is SPARSE — `min 0.000 max 0.998 mean 0.0075, frac>0.5 0.0076` over 1248 trajs — it
+marks MOTION TRANSITIONS, not a wide window. E is therefore the arm that actually reproduces
+their method; C' tests our own prior about where the phase is.
+
+**BUG (caught at startup by an assert I had added, cost ~2 min x2, zero silent corruption):**
+`AssertionError: phase length 254340 != total steps 28042`. A phase file is computed from ONE
+npz split, but I passed it to BOTH `+train_dataset.gap_phase_json` AND `+val_dataset.gap_phase_json`.
+The generalist splits 90/10: **train 1248 trajs / 254340 steps, val 138 / 28042**. The val
+dataset's assert fired.
+
+- **First fix was WRONG** — I sliced `_ph[:max_n_episodes]`, but `max_n_episodes` defaults to
+  10000, so the slice was a no-op and the job failed identically. The arithmetic named the real
+  cause: 254340 + 28042 = 282382 and 28042 is 9.9% of it = the train/val split.
+- **Correct fix:** pass the phase to `train_dataset` ONLY. Verified safe — the network's only
+  consumer of `in_grasp_window` (`pointnet_diffusion.py:323`) is gated on
+  `self.training and proprio_dropout_prob > 0`, and E leaves dropout at the 0.0 default; the GAP
+  gradient hook reads `batch_train.conditions` only. The assert message now names the split cause.
+
+**LESSON (reusable, and it generalises past GAP):** any per-timestep side-channel file (phase,
+weights, labels) is **split-specific** — it must be handed only to the dataset built from the
+same npz. Assert `len(side_channel) == sum(traj_lengths)` at load; without it, a 9x misalignment
+would have indexed rho into the wrong timesteps and produced a plausible-but-meaningless GAP arm.
+This is the [[wrong-reference-frame-bug-class]] pattern (right arithmetic, wrong reference) caught
+LOUDLY for once, and it is the argument for keeping such asserts even when they cost a relaunch.
+
+### 2026-08-28 — ABSORBING upstream f7bb394 (sub-yield restores rho +0.52): what it changes for OUR metrics
+
+Upstream re-ran the surrogate validation in the SUB-YIELD regime after moving the squeeze base
+5mm -> 2mm: Spearman rho **0.000 (past yield) -> +0.517 (sub-yield, p=0.085, n=12)**, 100% sub-yield.
+Their verdict: **"gentleness-aware" is defensible; "provably gentle" is NOT.** n=40 sweep running.
+
+**Consequences for our side (read against our 2026-08-28 saturation entry):**
+
+1. **Our SUSTAINED metric is VINDICATED, and now for a stated reason.** `stress_top20_ttop20_mean`
+   puts our arms at **0.41-0.74x yield** — inside exactly the sub-yield band where upstream now
+   shows von Mises still carries ranking signal. Our policy-vs-policy sustained comparisons stand.
+2. **Our PEAK metric stays RETRACTED.** 1.23-1.34x yield is above the saturation point; upstream's
+   item 3 states plainly that von Mises is "the wrong axis above yield". No change — but the reason
+   is now sharper than "it saturates".
+3. **NEW future-work item, adopted from their item 3: damage should be measured as PLASTIC
+   DEFORMATION** (permanent shape change / plastic work), not von Mises, for an elasto-plastic body.
+   Every stress number in this DEVLOG is a proxy. This does not invalidate our relative rankings
+   (all arms measured on the same proxy, in the sub-yield band) but it does cap what we may CLAIM.
+4. **Claim discipline, inherited:** we may write "gentleness-aware"; we may NOT write "provably
+   gentle", "gentleness-optimal", or "minimizes damage". Add to the plan's section 8 (WHAT WE WILL
+   NOT CLAIM).
+5. **Operating-point drift to watch (NOT yet an issue):** their adopted squeeze base is now 2mm,
+   while our current generalist data was collected at 5mm extra squeeze (see the collector
+   version/squeeze confound note). The final collection will therefore sit at a GENTLER operating
+   point than the interim data our method development runs on. Our deliverable this phase is THE
+   METHOD, not the checkpoint, so this is tolerable — but any absolute stress number quoted from
+   current data must be labelled with its squeeze base, and width-vs-size SLOPES should be
+   re-measured on the final data before they go in the paper.
+
+**No merge performed** — the merge remains held per user instruction; this was read via
+`git show f7bb394` on a fetched ref, working tree untouched.
+
+### 2026-08-28 — ARM F: their GAP codebase end-to-end (only the RGB+depth branch swapped for a cloud)
+
+User: *"I meant running with their code base, is it one of the experiment? Because I am curious if
+architecture matters. Only need to adapt the RGB+depth branch to pnt cld."* C'/D'/E graft GAP's
+gradient rule onto OUR point-cloud diffusion policy; **F runs THEIR stack** — their `WorkSpace`
+trainer, `BCPolicy`, `ProEncoder`, `DeterministicMLP` head, AdamW, CosineAnnealingLR, GAP rule, and
+their CPD+LSTM phase — on our data. If GAP helps there and not here, architecture is the reason.
+
+**Job 1763402** (`logs/gap_arch/armF_full`); smoke 1763378 passed end-to-end in 68 s.
+Code: `gentle_manip/dppo/gap_arch/{gm_cloud_adapter,run_gap_arch}.py`, launcher
+`.agent_tmp/gap_arch.sbatch`. Proven params are READ FROM THEIR YAMLS at runtime, not retyped:
+lambda 0.3, horizon 9, n_obs_steps 5, batch 128, lr 3e-4, hidden_dim 512, epoch 101, seed 1,
+DeterministicMLP head, AdamW(wd 1e-4).
+
+**Exactly ONE edit to their tree** (`gap/gap.py`, `.orig` kept + diffed): `lambda = self.cfg.lambda`
+-> `lambda_ = self.cfg['lambda']`. **Their gap.py does not parse as published** — `lambda` is a
+Python reserved word. Everything else is injected by monkeypatch. Two environment stubs, both
+raising if ever called, neither touching training math: `torchvision` (module-level resnet18 import;
+F builds no ResNet) and `diffusers` (their head.py imports DDPM/DDIM schedulers, used only inside
+`ConditionalUnet1D`/`TransformerForDiffusion` — verified NOT by `DeterministicMLP`). Stubbed rather
+than installed because installing either into the shared aarch64 venv risks pulling a different
+torch build while C'/D'/E are training in it.
+
+**THREE PROPERTIES OF THEIR CODE, found by reading it and then CONFIRMED empirically by the smoke:**
+
+1. **Their `'pro' in name` filter damps the VISION branch too.** `SpatialProjection` is bound to
+   `self.projection`, and "projection" contains "pro". Smoke output:
+   `GAP damps 52/112 encoder tensors (4,504,960/8,821,376 = 51.1%)`, broken down as
+   `{'imgencoder': 2, 'proencoder': 50}` — the 2 are the visual projection's weight+bias.
+   Almost certainly unintended by the authors, but it IS their code, so F reproduces it.
+   **Our C'/D'/E match `proprio_encoder` only — truer to the PAPER, less true to the CODE.**
+   The runner prints the damped tensor list every run so this is never silently assumed.
+2. **Their `CosineAnnealingLR` is stepped PER BATCH with `T_max=cfg.epoch`**, so it is not a decay
+   at all — it is a CYCLIC LR of period `2*epoch` BATCHES. The smoke's lr_trace (T_max=2) shows the
+   period-4 cycle exactly: `[3e-4, 1.5e-4, 0, 1.5e-4, 3e-4, ...]`. At epoch=101 the full run cycles
+   every 202 batches (~1000 cycles over training). Reproduced faithfully; `lr_trace.npy` is saved.
+3. **Their validation set is a SUBSET of their training set** — train `demo_range=[0, demo_num]`,
+   valid `[0, int(0.1*demo_num)]`. So their `snapshot_valid` selects on contaminated loss. Left
+   untouched; **we will pick F's checkpoint by CLOSED-LOOP sim eval, not by their valid loss** —
+   consistent with the already-established lesson that eps-prediction val loss does not predict
+   closed-loop success.
+
+**A fourth, relevant to eval:** their `BCPolicy.get_action` does `if img.shape[0] != 1:
+img = img.unsqueeze(0)` — it assumes a SINGLE env. The canonical harness runs num_envs=5, so F's
+eval adapter must call `head.get_action(encoder(...))` directly rather than that wrapper, which
+would otherwise reshape a 5-env batch into nonsense.
+
+**Bug caught in MY adapter before it ran (not theirs):** indexing the NpzFile inside the
+per-trajectory loop (`d["point_cloud"][s:s+L]`) re-decompresses the FULL 3.1 GB member on every one
+of 1248 iterations. Arrays are now materialized once; per-trajectory slices are views, and a strict
+subset (their 10% valid set) is copied so it does not pin the whole buffer.
+
+**Caveat to state when reporting F:** their `epoch: 101` was tuned on 100-500 demos; our 1248-demo
+set makes an epoch ~2.5x larger, so F gets ~200k gradient steps vs ~79k in their hammer setup.
+Epoch count is their proven parameter and is kept; the COMPUTE is therefore not matched to theirs.
+
+### 2026-08-28 — upstream 0210ba1 (material DR NEVER applied): we have the mismatch too, but it is BOUNDED
+
+Upstream's pre-flight found `DRConfig.sample_scene()` was never called by `collect_demos_synth_v3`,
+so **every demo it ever produced used the registry NOMINAL material** — E/nu/rho/coup_friction
+ranges in all seven DR configs were dead text. Fixed upstream; collection relaunched.
+
+**VERIFIED ON OUR OWN DATA (not assumed).** `dr_params.csv` for all three generalist sources —
+mushroom `26-08-17-hwo` (688 rows), tofu `26-08-25-yhn`, raspberry `26-08-27-abp` — carries **no
+material column at all** (no mat_E/mat_nu/mat_rho/coup_friction); only `scene_scale` and
+`scene_bend_deg`. So our generalist training set has **zero material diversity**.
+
+**AND THE EVAL DOES RANDOMIZE MATERIAL.** `episodes.csv` shows mat_E 2.107e5-2.871e5,
+mat_nu 0.321-0.371, mat_rho 952-1083 (mat_yield constant 4e4 — matching upstream's known
+`ObjectEntry` limitation). That is the [[rigid-demo-eval-dr-mismatch]] class recurring on a new
+axis: **train has no material DR, eval has +-15% E.**
+
+**MEASURED IMPACT — bounded, and NOT significant in the operating regime.** Success by mat_E
+tertile across 618 evals carrying material DR:
+
+| sample | low-E | high-E | difference |
+|---|---|---|---|
+| a FAILING policy (zffwn, succ 0.00-0.09, n=1200) | 0.108 | 0.008 | **-0.100 +-0.029 (significant)** |
+| **STRONG policies (succ >= 0.30, 14 runs, n=1855)** | **0.885** | **0.855** | **-0.030 +-0.031 (NOT significant)** |
+
+My first cut used the six most recent files, which all happened to be `zffwn` — a floor-level
+policy, where a marginal difficulty shift is amplified and two of three tertiles were at 0.000.
+**The strong-policy pooled test is the relevant one**, and per-run differences scatter both ways
+(+0.092 to -0.275), consistent with noise.
+
+**CONSEQUENCES (stated precisely):**
+1. **Arm-vs-arm comparisons STAND.** Every arm carries the identical handicap and the effect is
+   bounded at ~0.03 success — far below the differences we act on (e.g. floor m8's -0.145).
+2. **Absolute success numbers are within noise of unbiased**; no re-measurement is warranted.
+3. **We may NOT claim robustness to object firmness.** The training data contained none and we
+   never tested it. Add to plan section 8.
+4. **The final collection will be genuinely harder** (material DR active for the first time), so
+   current success rates are NOT a baseline the final pipeline should be held to.
+5. Our stress-vs-yield fractions are all against a CONSTANT yield (4e4) — the yield axis has never
+   been randomized in either training or eval, so it is a fixed reference, not a source of spread.
+
+### 2026-08-28 — CORRECTION: C' is NOT a phase-guided arm. GAP's per-BATCH max destroys a dense phase.
+
+I described C' as "GAP with our known grasp window as rho". **That description is wrong in effect**,
+and the arithmetic says so before the run finishes.
+
+GAP's coefficient is `1 - lambda * max(phase)` where the max is over the **whole batch**
+(`phase_p = torch.max(batch['phase']).item()`). With batch_size 128:
+
+| arm | phase signal | batch-max behaviour | effective coefficient |
+|---|---|---|---|
+| **C'** | BINARY grasp-window flag, **52% of steps** (log: "width-window loss weight 0.0 on 52% of steps"); per-SAMPLE higher still, since the flag is `.any()` over the 4-step horizon | `1 - 0.48^128 = 1 - 1e-41` | **0.700 on EVERY batch, every epoch 0-50** |
+| **E** | THEIR CPD+LSTM rho, sparse (per-sample mean 0.0076, frac>0.5 0.0077) | mean 0.612, p10 0.000, p90 0.998 | **varies: mean 0.817, sd 0.124, range [0.70, 1.00]; 77% of batches modulated, 17% essentially unmodulated** |
+
+**So C' is a UNIFORM 30% gradient damping of the proprio encoder for epochs 0-50 — arithmetically
+just a 0.7x learning-rate multiplier on that submodule. It contains no phase guidance whatsoever.**
+E is the only genuine phase-guided replication we have, which retroactively justifies the work to
+get it running.
+
+**THIS IS A REAL METHODOLOGICAL CRITIQUE OF GAP AS IMPLEMENTED, not a bug in our port.** Taking the
+max over a batch of 128 means the coefficient saturates to its floor unless the phase signal is
+SPARSE. Their own rho is sparse (0.77% of samples above 0.5), so their implementation works for
+them; ANY dense or wide phase definition silently degenerates to a constant. A per-SAMPLE
+coefficient would not have this property. Worth stating if GAP is discussed in the writeup.
+
+**The four arms are still a well-formed set — with corrected labels:**
+- **D'** — encoder, NO damping (control)
+- **C'** — encoder + UNIFORM 0.7 damping, epochs 0-50 (*not* phase-guided)
+- **E**  — encoder + GENUINE phase-guided damping (their rho, their estimator)
+- **F**  — their entire architecture (BCPolicy + DeterministicMLP + their trainer)
+
+C' -> E now isolates exactly "does the PHASE GUIDANCE matter, given the same mechanism and the same
+lambda?" — a cleaner question than the one I originally set up, obtained for free.
+
+### 2026-08-28 — arm F eval path built and SMOKE-TESTED before the run finished
+
+`gentle_manip/dppo/gap_arch/eval_gap_arch.py` + cfg `.../eval_gap_arch.yaml` (forked from
+`eval_diffusion_pointnet.yaml`; diff is exactly `_target_`, the `model:` block, and
+`cond_steps 2 -> 5`). Same EvalSpec/venv/metrics as every other arm, per hard requirement #1.
+
+**Offline smoke (job 1763977) against the 2-epoch smoke checkpoint — ALL PASSED:**
+loaded 9,493,695 params (n_obs_steps 5, horizon 9); `act()` -> (5,4,7); actions inside [-1,1]
+(Tanh head); **a wrong history length was REJECTED loudly**; deterministic to `max|a1-a2| = 0.0`.
+
+**Two traps found and closed while wiring it, both of the silent-wrong-answer kind:**
+1. **History SPACING.** Their policy needs 5 frames at ONE-env-step spacing. Buffering across
+   `act()` calls would space them `act_steps`(=4) env steps apart — a train/eval mismatch that
+   looks like "the architecture failed". Fix: `cond_steps: 5` so the VENV stacks them at the right
+   granularity (the same mechanism our arms already rely on), plus an assert in `GapArchPolicy.act`.
+2. **NORMALIZATION guard silently skips for F.** `dppo_eval.sbatch` derives the expected dataset
+   from the checkpoint's `.hydra/config.yaml`; arm F has none, so the `-f` test fails and the guard
+   is bypassed — while the venv still uses `normalization_path` for obs/action (de)normalization.
+   Fix: `GapArchEvalAgent.__init__` re-asserts it against `task.name` stored in the snapshot's own
+   cfg. **A guard that is skipped rather than failed is worse than no guard**, because the log line
+   confirming it was never printed and its absence is easy to miss.
+
+**THE SLOPE NEEDS THE WIDTH DUMP — it does NOT come from episodes.csv.** `decompose_width.py`
+regresses `width_cmd_mm` / `ee_z_m` from `.agent_tmp/<tag>_widthcmd_b*.npz`, written by the policy
+adapter. `GapArchPolicy` now writes them, with the mm conversion COPIED character-for-character
+from `eval_agent._DiffusionPolicy._flush_dump` (verified by a comment-stripped string compare:
+normalized -> derive space via action_min/max -> mm x88). Without `GM_WIDTH_DUMP`, arm F yields
+success + stress but NO slope — i.e. nothing on this phase's target metric.
+
+**Launch recipe (once F finishes):**
+```
+GM_WIDTH_DUMP=armF \
+GM_WIDTH_NORM=$REPO/dataset/dppo/single_lift_generalist_3obj/normalization.npz \
+CKPT=<run dir>  NORM=$REPO/dataset/dppo/single_lift_generalist_3obj/normalization.npz \
+CFG_DIR=$REPO/gentle_manip/dppo/cfg/single_lift_mushroom_simreal_realws_noos_cmd_v32 \
+CFG_NAME=eval_gap_arch  SIM_EXPERIMENT=single_lift_mushroom_soft_eval \
+GM_EXTRA_OVERRIDES="model.snapshot=<run dir>/snapshot_100.pth" \
+sbatch gentle_manip/scripts/arrhenius/dppo_eval.sbatch
+```
+Then the slope: add `<tag>=<eval dir>` to `.agent_tmp/arms.txt` and run `decompose_width.py`.
+
+**Second eval smoke (job 1764143) covering the dump — PASSED:** `width_cmd_mm (12,5)` in
+[54.2, 57.3] mm, `ee_z_m` in [-0.002, 0.269] m, both physically plausible for an 88 mm gripper
+(the VALUES are meaningless — a 2-epoch checkpoint on random input — the PLUMBING is what was
+verified, including the 0-88 mm range assert).
+
+### 2026-08-28 — PRE-REGISTERED predictions for arm F (written BEFORE it finished; epoch 81/101)
+
+Recorded in advance so the reading is not fitted afterwards — the same discipline as the
+matched-mean floor experiment.
+
+**[SUPERSEDED — see the retraction entry below: this check scores 1.000 while a trivial copier scores 0.998, so it is uninformative. Repaired by an autoregressive rollout.]**
+
+**First check is OFFLINE, not the sim eval** (`.agent_tmp/armF_closure_check.py`): does F's
+commanded gripper width track the demonstrator's closing ramp on the 138 HELD-OUT val.npz
+trajectories it never trained on? This is asked first because the campaign's hardest-won lesson is
+that **a regression/eps loss does not measure action quality** — arm D had the BEST val loss of any
+arm and never closed (0/21). F's train loss is ~7e-5, which by itself means nothing.
+
+**Priors:** F's head is a UNIMODAL deterministic Tanh MLP, not a diffusion model. Mode-averaging
+was already RULED OUT as the blocker here (closure is a smooth ramp, not a multimodal choice), so
+a regressor should be *able* to represent closure. F also gets ~200k gradient steps vs their ~79k.
+
+**The three outcomes and what each licenses:**
+
+| outcome | reading | consequence |
+|---|---|---|
+| **1. F closes, success in a normal band** | their architecture works on our data; GAP's effect is then measurable INSIDE their stack | compare F(GAP) against a GAP-off F to isolate GAP within their architecture; architecture is not the blocker |
+| **2. F never closes** (travel ratio < 0.6, like arms A-D) | the "approach, never close" failure is NOT specific to our diffusion policy — it reproduces in a completely different architecture on the same data | strong evidence the cause is the DATA/objective or the proprio-vision balance, not our model. Would also retire "our architecture is the problem" |
+| **3. F closes but its width-vs-size slope stays flat (~0.1-0.2, like lulkx's 0.17)** | **the most informative outcome**: size-blind grasping survives a total change of architecture, head, trainer and loss | the defect is architecture-INDEPENDENT -> it lives in the data/objective. That would make "more/better architecture" a dead end and point the whole phase at conditioning or supervision instead |
+
+**Prediction (stated, so it can be wrong):** outcome 3 is most likely. Every mechanism tried so far
+lands on one curve where grip LEVEL explains 95-98% of stress and size explains ~1% of width; that
+pattern has survived CFG, floors, aux heads, encoders and a 2x2 object/training swap, which is the
+signature of a data property rather than a model property.
+
+**Guard against over-reading F either way:** its compute is not matched to theirs (2.5x their
+gradient steps), its LR schedule is their per-batch cyclic one, and their valid split is
+contaminated — so F is a test of ARCHITECTURE on our data, NOT a reproduction of their paper's
+numbers, and must not be reported as one.
+
+
+### 2026-08-28 — RETRACTED: my arm-F "closure is learned" check was UNINFORMATIVE (a copier scores 0.998)
+
+The offline closure check I pre-registered returned `corr(pred,true) = 1.000` (p10 1.000, p90
+1.000), travel 48.6 vs 48.5 mm, and printed "VERDICT: ramp reproduced — closure is learned".
+**That verdict is WITHDRAWN. The check cannot distinguish learning from copying.**
+
+**Measured, not argued (job 1765211).** A trivial copier — "command exactly the width you currently
+observe" — scores **corr 0.9982 (p10 0.9981, p90 0.9988), mean |error| 0.48 mm** on the same 30
+held-out episodes. Arm F scored 1.000. **F beat a no-op baseline by 0.002 correlation.**
+
+**Why the check was flawed, and it was foreseeable:**
+1. The policy OBSERVES its current gripper width, actions are ABSOLUTE, and closure is a smooth
+   ramp — so `action[i] ~= observed_width[i]` and copying is near-optimal. **This exact leakage is
+   already in this DEVLOG** ("feed 80 mm -> predicts 79.4; feed 28 -> 28.6... a copier cannot DRIVE
+   the channel"), documented for the width head. I wrote a check vulnerable to the same thing.
+2. It was TEACHER-FORCED: ground-truth width fed at every step, which is precisely the condition
+   under which a copier looks perfect and the closed-loop failure (arms A-D) is invisible.
+
+**LESSON (generalises past this arm): any predictive check on a channel the policy also OBSERVES
+must be scored against the copy baseline, not against zero.** A high correlation means nothing until
+the trivial predictor's score is known. Cheap rule: report `corr_policy` next to `corr_copier`
+always; if the gap is not large, the check is uninformative by construction.
+
+**Repair (job 1765229, `.agent_tmp/armF_autoreg_width.py`):** AUTOREGRESSIVE rollout — the observed
+gripper channel is replaced by the policy's OWN previous command, so a copier stalls at the open
+width while a driver ramps down. Arm pose and cloud stay ground-truth, so it isolates the width
+channel and is NOT a full closed loop (only the sim eval is). The action-space -> obs-space affine
+is validated first by round-tripping true actions against the achieved next-step width, because
+that conversion is the B10/B17 trap.
+
+**Unchanged:** F trained cleanly (2:00:30, final loss 5.0e-5) and the pre-registered outcome table
+still stands — it simply cannot be adjudicated by the retracted check.
+
+### 2026-08-28 — arm F: DRIVES closure (repaired check), and a CONFIG DEFAULT change for eval geometry
+
+**1. Autoregressive width rollout (job 1765229) — the repair of the retracted check.**
+The affine chain was validated first: commanded width vs ACHIEVED next-step width `mean|d| = 0.30 mm`.
+Then, with the observed gripper channel replaced by the policy's OWN previous command:
+
+| | policy | demonstrator |
+|---|---|---|
+| travel (max-min) | **64.8 mm** | 48.6 mm |
+| final / min width | **15.2 mm** | 31.4 mm |
+
+travel ratio **1.33**. **This check DISCRIMINATES** (a copier stalls near the open width at ratio
+~0), so the conclusion "arm F drives the width channel, it is not a copier" is supported — unlike
+the retracted teacher-forced version.
+
+**DO NOT yet read the 16 mm over-closure as a finding.** In this rollout the arm pose and point
+cloud stay GROUND-TRUTH while the width diverges, so proprio drifts off-distribution and errors
+compound; over-travel is an expected artefact of that setup. It is a FLAG to check against the
+closed-loop eval, not a measurement. (If it survives closed-loop, it is the over-squeeze failure
+mode this whole campaign started from — v33b over-squeezing real mushrooms.)
+
+**2. CONFIG DEFAULT CHANGED: `eval_gap_arch.yaml` scene_group_size 4 -> 1.** Caught while F's first
+eval was already running: at 200 eps / 5 envs = 40 batches, `sgs=4` yields **10 distinct
+geometries**, but the width-slope rule requires **>=40** (a 12-geometry sample reversed three
+verdicts in this campaign). Cancelled 1765317 at ~10 min, relaunched as 1765398 with sgs=1.
+
+**Verified against the established arms rather than assumed** — their `summary.json` reports
+`scene_group_size: None`, which is unusable, so the geometry count was recounted from
+`episodes.csv`: every `lulkx/eval/slope_*` arm has **40 batches / 40 unique obj_scale**. F now
+matches that protocol exactly, and the same protocol will be used for C'/D'/E so all four arms are
+comparable. The default lives in the CONFIG (with the rationale inline) rather than in an env var,
+so it cannot be forgotten on the next launch.
+
+**Also documented in that config:** do NOT set `EVAL_SUBDIR` with it — the sbatch derives its subdir
+as `dirname(dirname(CKPT))`, which assumes `<run>/checkpoint/state.pt`; arm F's flat
+`<run>/snapshot_N.pth` layout would send the output to `logs/gap_arch/eval/...`, outside the run
+dir. Pass `logdir=` in `GM_EXTRA_OVERRIDES` instead. (`eval_base` itself handles the flat layout
+correctly — it returns `p.parent` when the parent is not named `checkpoint`.)
+
+**Eval-protocol note for the four-arm table:** xaqnb's `gen3u_*` baselines are **60-episode**
+screens (success 0.883 mushroom / 0.867 tofu / 0.583 raspberry). Our own rule says 60-ep probes run
+optimistic by 0.05-0.10 on strong arms, so F's 200-ep number must NOT be differenced against them
+directly; either re-run xaqnb at 200 or label the protocol gap explicitly.
+
+### 2026-08-28 — PRACTICE CHANGE (user mandate): every eval records commands + observations
+
+**User:** *"if recording command and obs is useful, you should really remember to do it for all
+future runs."* Implemented as a DEFAULT, not a habit: `dppo_eval.sbatch` in BOTH the main repo and
+the `gm_generalist` worktree now sets `GM_WIDTH_DUMP`, `GM_OBS_DUMP` and `GM_WIDTH_NORM`
+automatically (tag `<EVAL_SUBDIR>_<jobid>`). `GM_OBS_DUMP_CLOUD=1` remains opt-in (clouds are
+large); `GM_DUMP_OFF=1` disables.
+
+**Why this was costing us:** aggregate metrics cannot diagnose BEHAVIOUR. The arm-F approach-offset
+was spotted only because the user watched render frames, and diagnosing it needed a SECOND eval
+(job 1765652) launched purely to capture obs. The width slope is likewise computed from dumps, not
+from `episodes.csv`.
+
+**Trap for any NEW policy adapter:** the dump lives in the *Policy* class, not the harness, so a new
+adapter starts with none — arm F's `GapArchPolicy` initially had neither the width nor the obs dump,
+which would have made it uncomparable on this phase's target metric. Adding a Policy adapter now
+means adding both dumps.
+
+### 2026-08-28 — GAP's proven config uses a DETERMINISTIC head, not diffusion (user asked)
+
+Their code ships BOTH heads — `cfgs/policy/head/dmm.yaml` (`DeterministicMLP`, Tanh MLP, MSE) and
+`cfgs/policy/head/diffunet.yaml` (`ConditionalUnet1D`, diffusion, `num_diffusion_iters: 5`). But the
+GAP entrypoint chains `gap.yaml -> policy: bc_policy -> head: dmm`, so **their proven GAP setting is
+the NON-diffusion head**, which is what arm F ran.
+
+**User's inference — a deterministic head is unfriendly to our multimodal data — fits the evidence
+better than my covariate-shift explanation.** Measured on held-out data, F's one-step teacher-forced
+mapping is FAITHFUL: slope(pred~true) = 1.00, variance preserved, bias 1.2 mm in x (2% of the
+62.4 mm spread). So the mapping is not shrunk. But one-step prediction gets the full history, which
+DISAMBIGUATES which approach the arm is already committed to; closed-loop from the start, an MSE
+regressor averages competing valid approaches and commands something between them — a systematic
+offset, exactly the render artefact observed.
+
+⚠ **Correction to an earlier note in this DEVLOG:** "mode averaging — premise refuted (closure is a
+smooth ramp)" was established for the WIDTH channel only. It does NOT extend to the APPROACH POSE,
+where multiple valid grasp azimuths genuinely exist in our CMA-ES demos. Mode averaging is live again
+for pose.
+
+**Test (arm F2): same everything, `head: dmm -> diffunet` — THEIR OWN diffusion head, their own
+config.** If the offset disappears, the head is the cause and "DP matters for our multimodal data"
+is demonstrated inside their codebase; if it persists, the cause is elsewhere.
+
+### 2026-08-28 — ARM F FAILS CLOSED-LOOP: 0/20, auto-killed as degenerate. Approach POSE, not closure.
+
+`armF_mushroom_canon` was killed by the degenerate guard: **success 0.00 over 20 episodes**
+(batches 1-4 all 0.00; one batch reached `ever=0.20`, i.e. it briefly lifted then dropped, so the
+pipeline is functional, not flailing). **The user spotted the cause first, from the render frames:
+the approach position is consistently offset from the object in -x.**
+
+**ADAPTER BUGS RULED OUT** (each checked, not assumed):
+| candidate | status |
+|---|---|
+| normalization mismatch | guard PASSED (`normalization OK: single_lift_generalist_3obj`) |
+| obs history length | asserted at every step; `cond_steps=5` = their `n_obs_steps` |
+| history ORDER / padding | `genesis_venv.py:114` left-pads with the EARLIEST obs (matches training's clamp-to-start); `_stacked` takes the last 5, newest last |
+| one-step action mapping | faithful on held-out data: slope(pred~true) **1.00**, variance preserved, x bias **1.2 mm** (2% of the 62.4 mm spread) |
+| can it close the gripper at all | YES — autoregressive rollout drives closure (travel ratio 1.33) |
+| shift9 / point-cloud x bias | real-backend only; the generalist set is unshifted, so sim train/eval agree |
+
+**So the failure is not "approach, never close" (arms A-D) — F CLOSES, but approaches the WRONG
+PLACE.** That distinction matters: it points at the approach POSE distribution, not the width
+channel.
+
+**Leading explanation — the user's, and it fits every measurement:** their GAP default head is
+`DeterministicMLP` (Tanh MLP + MSE), NOT diffusion. Our CMA-ES demos contain MULTIPLE VALID grasp
+azimuths per scene. One-step teacher-forced prediction is faithful because the observed history
+already reveals which approach the arm is committed to; closed-loop FROM THE START that context is
+absent, and an MSE regressor commands the AVERAGE of the valid modes — a pose that belongs to none
+of them. A constant single-axis offset is exactly what mode-averaging over a roughly bimodal
+approach distribution looks like.
+
+**PRE-REGISTRATION check:** this is closest to outcome 2 ("F never closes"), but the pre-registered
+wording was wrong in detail — F fails on APPROACH POSE, not on closure. Recording the mismatch
+rather than reinterpreting the prediction to fit.
+
+**DECISIVE TEST — arm F2 (job 1765733), already running:** identical to F except
+`head: dmm -> diffunet`, i.e. THEIR OWN `ConditionalUnet1D` diffusion head, one config line, their
+config, their code. If the offset vanishes and success recovers, "a deterministic head cannot
+represent our multimodal approach distribution" is demonstrated INSIDE their codebase. If it
+persists, the cause is elsewhere and the deterministic head is exonerated.
+
+⚠ **Do NOT yet report "their architecture fails on our data".** F confounds head (deterministic) with
+everything else in their stack. F2 separates them, and it is the comparison that licenses any claim.
+
+### 2026-08-28 — LESSON: a dependency STUB can break OTHER packages. Five jobs lost to it.
+
+Arm F2 (their diffusion head) took **five failed jobs** to launch, all traceable to ONE decision of
+mine: stubbing `torchvision` instead of installing it.
+
+| attempt | failure | real cause |
+|---|---|---|
+| 1765733 | `diffusers.DDPMScheduler stub called` | my `try: import diffusers / except: stub` **silently** swallowed a real import error and degraded |
+| 1765758 | `ValueError: torchvision.__spec__ is None` | bare `ModuleType` stubs have no `__spec__`; diffusers probes via `importlib.util.find_spec` |
+| 1765789 | `Could not import module 'PreTrainedModel'` | `transformers` (INSTALLED, 5.16.1) imports torchvision — **my fake broke it**, so diffusers' loader chain failed |
+| 1765830 | `cannot import name 'HfFolder'` | their pinned `diffusers==0.11.1` needs old `huggingface_hub`; ours is 1.28.0 and `transformers` REQUIRES >=1.5.0, so downgrading was not safe |
+| 1765875 | — | **fixed**: real `torchvision==0.21.0` (the build paired with torch 2.6.0), `--no-deps`, abort-if-torch-moves. torch identical before/after. All stubs now inert. |
+
+**THE LESSON:** a stub is not a local decision. Substituting a fake module for a real dependency
+changes the import graph for **every other package that depends on it** — here `transformers`, which
+was installed and working, and which diffusers needs. Each subsequent error looked like a NEW
+problem and was actually the same one.
+
+**RULES ADOPTED:**
+1. Prefer installing the REAL, version-matched package with `--no-deps` over stubbing, and verify the
+   critical pin (here torch) is byte-identical before/after. Stub only a leaf nothing else imports.
+2. **Never let `except: <install stub>` swallow the reason.** Print the exception and REFUSE to run
+   when the stub cannot satisfy the requested mode (`--head diffunet` now hard-fails on a stub).
+3. **Test under the deployment environment, not a clean one.** My first diffusers check passed
+   because it ran with NO stub present — it validated a configuration we never run. The re-test
+   reproduces the runner's stub environment exactly. Same class of error as the teacher-forced
+   closure check: verifying under conditions that differ from the real ones.
+
+`third_party/GAP/VENDORED.md` difference 11 updated: we run `diffusers 0.35.1` + `torchvision
+0.21.0` (torch 2.6.0), not their `0.11.1`/`0.16.0` (torch 2.1.0). Behaviourally equivalent for our
+use — their scheduler is fully pinned by explicit constructor args, and the resulting betas match
+exactly: `[0.101294, 0.279544, 0.473635, 0.724052, 0.999]`, timesteps `[4,3,2,1,0]`.
+
+### 2026-08-28 — ARM F2 LAUNCHED (job 1765979): their DIFFUSION head, one line changed from F
+
+F2 = arm F with `head: dmm -> diffunet`, i.e. THEIR `ConditionalUnet1D` (5 diffusion iters) instead
+of THEIR `DeterministicMLP`. Same encoder, same trainer, same GAP rule, same data, same proven
+params. Smoke passed (loss 1.106 -> 0.984; GAP damping identical at 52/112 tensors, confirming the
+encoder is untouched).
+
+**WHY:** F's failure is a **-28.8 mm median lateral miss** (mean -33.8, sd 19.1, NEGATIVE in 20/20
+episodes, lowest ee_z 3.1 mm so the descent is correct). Offline the same policy has a 1.2 mm bias
+at slope 1.00 — so this is a CLOSED-LOOP behaviour, not a frame bug. The user's explanation: a
+unimodal Tanh+MSE head cannot represent our multimodal approach-pose distribution and commands a
+pose belonging to no mode.
+
+**CAVEAT TO STATE WITH ANY F2 RESULT — it is not a clean single-variable test.** Their diffusion
+head is **56,892,167 params**, against F's ENTIRE model at 9,493,695. Capacity moves with the head.
+So a positive F2 licenses "their diffusion head fixes it", NOT "diffusion per se fixes it".
+A capacity-matched control would be needed for the stronger claim.
+
+**Seed-matched context (the strongest evidence so far):** xaqnb (our PointNet DIFFUSION policy)
+scores **1.00 on seeds 4200128 and 4200129 — the exact seeds where F scored 0.00**. So the task and
+data are learnable; what differs is the policy. xaqnb vs F confounds encoder+head+trainer+loss,
+which is precisely what F2 separates.
+
+### 2026-08-28 — ARM F's REAL DEFECT: the grasp position IGNORES the object. corr(ee_x, obj_dx) = 0.087
+
+**CORRECTION FIRST.** I reported F's miss as "median -28.8 mm in x, 20/20 negative". **That number is
+WITHDRAWN as a precise figure** — it used a point-cloud proxy for the object (median x of the
+lowest-20% z points) that is CONTAMINATED: at the grasp the gripper itself is at table height and
+contributes low-z points, dragging the estimate toward the arm. The t=0 variant is worse still —
+with the arm at home, the lowest-z points are dominated by the TABLE, not the object, which is why
+it produced an implausible -106 mm. Neither proxy localises the object. The qualitative observation
+(a consistent negative x offset, which the USER spotted in the renders) stands; the magnitude did not.
+
+**GROUND TRUTH instead.** `episodes.csv` records `obj_dx`, the object's actual x displacement.
+Paired with the obs dump over the same 20 episodes:
+
+| quantity | value |
+|---|---|
+| `obj_dx` range | **-174.6 to -12.2 mm** (sd 46.5 mm) — the object really does move a lot |
+| ee_x at grasp | median 350.0 mm (home 454.4 mm) |
+| **corr(ee_x@grasp, obj_dx)** | **0.087** |
+
+**F grasps at a nearly FIXED x regardless of where the object is.** That single number explains
+0/20 success completely, and it is far stronger than the offset framing: the failure is not a biased
+approach, it is an approach that does not use the object's position at all.
+
+**This is the PROPRIO-SHORTCUT pathology on the POSE channel** — the same failure mode this whole
+campaign has been chasing on the WIDTH channel ("the head learns to COPY the observed width"; a
+copier cannot DRIVE the channel). Corroborating: the commanded x is essentially the CURRENT x
+(delta -1.91 mm during approach, **+0.11 mm at the grasp** = fully stalled), while the arm drifts
+-92.7 mm by accumulating those small deltas until they vanish.
+
+**AND IT IS EXACTLY THE PATHOLOGY GAP EXISTS TO FIX** — vision-proprioception policies failing by
+over-relying on proprioception. Arm F runs GAP (lambda 0.3, epochs 0-50) and still exhibits it in
+the extreme, which is itself a result about GAP's efficacy at our scale.
+
+**METHOD LESSON (third instance today):** a derived proxy needs validation against ground truth
+BEFORE its numbers are quoted. The cloud-based object estimate looked reasonable, produced a
+plausible -28.8 mm, and was wrong. Ground truth (`obj_dx`) was in `episodes.csv` the whole time.
+Same family as the copy-baseline lesson: always ask what the trivial/known-correct reference gives.
+
+**OPEN — needs the same measurement on a policy that WORKS:** xaqnb's eval (1765506) was launched
+before dumps became default-on, so it has a width dump but NO obs dump; corr(ee_x, obj_dx) cannot be
+computed for it yet. Any future eval gets it automatically. Expectation: a working policy shows a
+high correlation. Without that pairing, the 0.087 is descriptive of F, not yet a contrast.
+
+### 2026-08-28 — ⚠ RETRACTED: "arm F ignores the object" (corr 0.087). THE PAIRING WAS BROKEN.
+
+**The user rejected the conclusion from a render (`armF_diag20/render/batch02_env1.mp4`), saying the
+arm plainly approaches different positions depending on the object. The user was right.**
+
+**How it was caught:** validate the dump<->episodes.csv pairing against a column whose answer is
+KNOWN. The arm's initial pose must equal home + `home_d{x,y,z}`:
+
+| check | measured r | required |
+|---|---|---|
+| ee_x@t0 vs home_dx | **-0.217** | ~ +1.0 |
+| ee_y@t0 vs home_dy | +0.141 | ~ +1.0 |
+| ee_z@t0 vs home_dz | +0.110 | ~ +1.0 |
+
+Standard deviations match EXACTLY (11.1 vs 11.1 mm) => right values, WRONG ORDER. A permutation
+error, not noise. **Everything derived from that pairing is withdrawn:** `corr(ee_x, obj_dx)=0.087`,
+"grasps at a nearly fixed x", and the "proprio shortcut on the pose channel" story built on it.
+
+**ALSO WITHDRAWN — every cloud-derived object position.** `object_focus` keeps points near the EE,
+so at t=0 the above-table points are THE ARM: `cloud_obj_x` mean 473.9 sd **10.7** mm against the
+arm's home 454 mm, while the true `obj_dx` sd is 46.5 mm. So the -28.8 mm and -106 mm "gaps" were
+both measuring the gripper against itself.
+
+**WHAT STILL STANDS (independent of the pairing):**
+- F's closed-loop success is **0/20** (auto-killed as degenerate) — from the harness, not my analysis.
+- Commanded x minus CURRENT x is -1.91 mm on approach and **+0.11 mm at the grasp** — per-episode,
+  no cross-file pairing involved. The policy does stop commanding motion.
+- Offline one-step mapping is faithful: slope 1.00, bias 1.2 mm.
+- **xaqnb scores 1.00 on seeds where F scores 0.00** — both from harness logs.
+- The user's render observation: the approach is visibly offset, and it DOES vary with the object.
+
+**FIX:** the obs dump now records `dump_batch` as an explicit pairing key. The deeper rule, which I
+violated: **never join two data sources on an ASSUMED correspondence — validate the join against a
+column with a known answer first.** `home_d{x,y,z}` is the perfect probe and cost one command.
+
+**This is the third proxy failure today** (copy-baseline corr, cloud object position, this join), all
+the same shape: a derived quantity that looked plausible, quoted before being checked against a
+known-correct reference.
+
+
+### 2026-08-28 — `docs/CHECKLISTS.md` created (user request)
+
+A read-BEFORE-acting companion to this DEVLOG: the DEVLOG records what happened, CHECKLISTS records
+what to do so it does not happen again. Sections scaffolded for launching training / evaluation /
+analysis / common practices (to be filled in as the user directs); the **Common Mistakes** section
+is populated now with this session's errors, each as a short paragraph with the artifact that
+proves it (job ids, dump paths, eval dirs).
+
+Recorded in persistent memory as a standing instruction: read it at the start of a task — before a
+launch, before an eval, and before quoting any number — not afterwards.
+
+### 2026-08-28 — ADOPTED PRACTICE: the "teaser eval" (user's term and design)
+
+A cheap degeneracy screen on a MID-training checkpoint so a dead run can be killed from footage
+instead of running to completion. **15 episodes = 3 batches x 5 envs, `scene_group_size=1` (fresh
+geometry every batch), EVERY episode rendered, actions+observations+clouds dumped.** Same checkpoint
+epoch across arms so teasers are mutually comparable. It is a SCREEN, not a measurement.
+
+First use: jobs 1766403/4/5 on C'/D'/E at `state_150` (of 350) ->
+`<run>/eval/teaser_e150/`. Full protocol in `docs/CHECKLISTS.md` section 2.1.
+
+**Caught while setting it up:** the eval config does NOT carry training-time architecture flags.
+C'/D'/E trained with `proprio_encoder: true`; without
+`+model.network.proprio_encoder=true` the eval builds a DIFFERENT network from the checkpoint.
+All three teasers were held until the log printed `[PointNetDiffusionMLP] proprio_encoder=True`.
+Generalised into the checklist: an eval must be verified to rebuild the TRAINED architecture.
+
+**Not teasered:** arm F2 at epoch ~10/101 — too early; an undertrained diffusion policy could look
+degenerate and trigger a false kill. Its teaser waits for ~epoch 50.
+
+### 2026-08-28 — TEASER RESULT: C' and D' are DEGENERATE and were KILLED. E WORKS. GAP's phase guidance earns its place.
+
+Teasers at `state_150` (15 eps, 3 batches, sgs=1, all rendered). **The user read the footage first:
+C'/D' approach the object correctly but NEVER CLOSE; E looked reasonable.** The numbers agree:
+
+| arm | mechanism | success | ever | sustained |
+|---|---|---|---|---|
+| **C'** `smyoy` | encoder + UNIFORM 0.7 damping | **0.000** | 0.000 | n/a |
+| **D'** `ylbjq` | encoder, NO damping (control) | **0.000** | 0.000 | n/a |
+| **E** `bwmcy` | encoder + their SPARSE phase-guided rho | **0.800** | 0.800 | 22,641 |
+
+**C' (1762867) and D' (1762868) CANCELLED at 4h36m**, freeing two GPUs. Checkpoints
+`state_{50,100,150}.pt` retained as evidence.
+
+**IT IS NOT A BUG — and the proof is E itself.** All three teasers ran the SAME eval config,
+normalization, checkpoint-loading path, `+model.network.proprio_encoder=true` override, sim
+experiment and seeds. A harness or adapter defect would have taken E down too. E grasps at 0.800.
+
+**THE RESULT:**
+- **D' (encoder, no damping) -> degenerate.** Adding the proprio encoder ALONE breaks closure,
+  reproducing the earlier A-D "approach, never close" failure at 0/21.
+- **C' (encoder + uniform 0.7 damping) -> degenerate.** Blunt damping does not rescue it.
+- **E (encoder + their sparse phase-guided damping) -> 0.800.** The modulation does something real.
+
+**This is a POSITIVE result for GAP's mechanism**, and it is the arm that only exists because the
+split-specific phase-file bug was found and fixed this morning — the faithful variant turned out to
+be the one that matters.
+
+⚠ **CONFOUND, not yet separable:** E differs from C' in BOTH targeting AND average strength (C' is
+0.700 on every batch; E averages 0.817 and sits near 1.0 most of the time). "Phase targeting matters"
+and "gentler damping matters" both explain the contrast. A uniform-0.817 arm would separate them.
+
+⚠ **SCOPE:** C'/D' are shown degenerate **at epoch 150**, not at 350. Accepted because the earlier
+proprio arms held this failure mode to their FINAL checkpoints and val loss provably does not predict
+closure — but the claim must be stated at epoch 150, not extrapolated.
+
+### 2026-08-28 — E's MULTI-OBJECT teaser: strong on mushroom, weak on raspberry (the user's recommendation paid off immediately)
+
+Same checkpoint (`state_150`), same protocol (15 eps / 3 batches / sgs=1 / all rendered):
+
+| object | demonstrator width | E success | E ever | sustained | xaqnb reference (60-ep, FINAL ckpt) |
+|---|---|---|---|---|---|
+| mushroom | ~33 mm | **0.800** | 0.800 | 22,641 | 0.883 |
+| tofu | ~42 mm | **0.467** | 0.533 | 9,289 | 0.867 |
+| raspberry | ~15 mm | **0.133** | 0.133 | 15,957 | 0.583 |
+
+**The user's recommendation to teaser MORE THAN ONE OBJECT paid off on its first use:** a
+mushroom-only screen would have reported 0.800 and hidden a 6x spread across objects. Adopted into
+`docs/CHECKLISTS.md` 2.1.
+
+**NOT degenerate anywhere** — raspberry is weak but non-zero (2/15), so the screen's verdict is
+"let it finish", not "kill".
+
+**Do NOT difference these against the xaqnb column.** Those are 60-episode runs on a FINAL
+checkpoint; these are 15-episode screens at epoch 150/350. Screen-vs-measurement AND mid-vs-final —
+comparable VERDICTS only, never numbers. The canonical 200-ep/40-geometry eval is what settles it.
+
+**Hypothesis worth testing later, not now:** success tracks object SIZE more than training-set share
+(raspberry is both the smallest at ~15 mm and the least represented at 200 demos vs tofu's 587 —
+yet tofu, the LARGEST, is mid-pack, so share alone does not explain the ordering). Relevant to the
+width-vs-size question this phase is about.
+
+### 2026-08-28 — BASELINE at the matched protocol: the generalist SUCCEEDS (0.915) with ZERO width adaptation (slope 0.02)
+
+`xaqnb/eval/gen3u_mushroom_200geo40` — 200 episodes, **40 distinct geometries**, sgs=1, mushroom.
+
+| metric | value |
+|---|---|
+| success | **0.915** (ever 0.920) |
+| SUSTAINED stress | 35,167 |
+| peak | 54,673 |
+| **width slope** | **0.02, 95% CI [-0.21, +0.25], R2 0.00, 2% of demonstrator** |
+
+**THE HEADLINE FOR THIS PHASE: a policy can be highly successful and completely size-blind.** The CI
+includes zero, so there is NO detectable width adaptation; the upper bound rules out anything above
+~23% of the demonstrator's 1.08. The mushroom SPECIALIST (lulkx) measured 0.17 [0.00, 0.33] on the
+same protocol, so the generalist is, if anything, LESS adaptive — consistent with the earlier 2x2
+finding that size sensitivity is driven by the OBJECT, not by multi-object training.
+
+**This is now the reference every GAP arm must be read against**, and it reframes what a "win" is:
+beating 0.915 on success is NOT the goal (that ceiling is already reached); moving the slope off
+0.02 without losing success is.
+
+**METHOD NOTE — short-probe bias is NOT reliably signed.** The 60-episode screen of this same
+checkpoint gave 0.883; the 200-episode run gives **0.915**. Our protocol note says 60-ep probes run
+OPTIMISTIC by 0.05-0.10 on strong arms; here it was PESSIMISTIC by 0.03. So a short probe cannot be
+corrected by assumption — only matched protocols are comparable. (Also: the old `gen3u_mushroom`
+had 12 geometries and was never valid for a slope at all.)
+
+### 2026-08-28 — CAVEAT on reading arm E: GAP's window is a fixed EPOCH RANGE, so the modulated FRACTION differs
+
+`modulation_starts=0, modulation_ends=50` in their `WorkSpace.train()` is an absolute epoch range,
+not a fraction. Our runs differ in length, so the share of training that is actually modulated does
+too:
+
+| run | epochs | GAP window | fraction of training modulated |
+|---|---|---|---|
+| their proven setup | 101 | 0-50 | **50%** |
+| arm F / F2 | 101 | 0-50 | **50%** |
+| **arm E (the one that WORKS)** | **350** | 0-50 | **14%** |
+
+**Consequences.** (1) E is not running GAP at their proven proportion — it gets ~1/4 the relative
+dose, and still rescues an arm that is degenerate without it (D' = 0.000), which if anything
+strengthens the mechanism claim. (2) Any statement of the form "E used their proven GAP settings"
+must say *their proven lambda and epoch window*, NOT their proven proportion. (3) A dose-response
+arm (window scaled to 0-175 = 50% of 350) is the clean follow-up if the mechanism is worth pursuing.
+
+Same trap as their per-batch `CosineAnnealingLR` with `T_max=cfg.epoch`: a hyperparameter defined in
+absolute units behaves differently when the run length changes. **Check every "proven" setting for
+whether it is absolute or relative before porting it to a differently-sized run.**
+
+### 2026-08-28 — CAPACITY-MATCHED control for the head comparison (F3): measured, feasible at 1.12x
+
+User asked whether to raise F2's capacity. **Direction is the opposite** — F2 is already the LARGE
+arm, and its weak teaser (0.067 at epoch ~48/101) is better explained by being half-trained. Adding
+capacity would deepen the confound, not resolve it.
+
+Measured head sizes (job 1768510), encoder is 8,821,376 params in every case:
+
+| head | head params | x MLP | TOTAL model | vs arm F total |
+|---|---|---|---|---|
+| DeterministicMLP (arm F) | 672,319 | 1.0x | **9.49 M** | — |
+| ConditionalUnet1D [256,512,1024] (arm F2) | 56,892,167 | 84.6x | 65.7 M | **6.9x** |
+| ConditionalUnet1D [64,128,256] | 7,502,471 | 11.2x | 16.3 M | 1.7x |
+| **ConditionalUnet1D [16,32,64]** | **1,825,127** | 2.7x | **10.65 M** | **1.12x** |
+
+**Proposed arm F3 = F2 with `down_dims=[16,32,64]`** — total model within 12% of arm F, because the
+shared ENCODER dominates and the head ratio barely moves the total. Config-only (`down_dims` is
+already a `ConditionalUnet1D` constructor kwarg), so their code stays untouched.
+
+**Reads:** F3 grasps where F never did => capacity excluded, HEAD TYPE (unimodal MSE vs diffusion)
+is the cause. F3 fails like F => capacity was doing the work.
+
+Held until F2 finishes and E's canonical eval lands — a control should not be designed against a
+half-trained 15-episode screen.
+
+### 2026-08-28 — VERDICT ON GAP: it rescues a degenerate arm, but does NOT beat the baseline and does NOT touch width adaptation
+
+Canonical protocol, mushroom, 200 episodes, **40 distinct geometries**, sgs=1 — E vs the matched baseline:
+
+| | success | ever | SUSTAINED | peak | intercept | **width slope** | R2 |
+|---|---|---|---|---|---|---|---|
+| xaqnb baseline | **0.915** | 0.920 | 35,167 | 54,673 | 27.3 mm | 0.02 [-0.21, +0.25] | 0.00 |
+| **E (GAP, their CPD+LSTM rho)** | 0.840 | 0.915 | **30,970** | 53,784 | 28.4 mm | **0.03 [-0.18, +0.23]** | 0.00 |
+
+**1. GAP DOES NOT IMPROVE WIDTH ADAPTATION.** 0.02 -> 0.03 with near-identical CIs and R2 0.00 both.
+The defect this phase exists to fix is completely untouched.
+
+**2. GAP COSTS SUCCESS: -0.075** (0.915 -> 0.840) against the plain generalist.
+
+**3. ITS -12% SUSTAINED STRESS IS A PURE LEVEL EFFECT, NOT ADAPTATION.** E's intercept is 1.1 mm
+WIDER (28.4 vs 27.3). At the campaign's measured -1,714 to -3,468 Pa/mm, 1.1 mm predicts ~3,300 Pa;
+the observed drop is 35,167-30,970 = **4,197 Pa** — same order. E sits on the SAME level-vs-stress
+curve as contact-stop, freeze, floor and baseline. Confirmed by the `ever - success` gap: **0.075 for
+E vs 0.005 for the baseline** — E lifts about as often as the baseline SUCCEEDS, then drops more,
+the signature of a looser grip.
+
+**THE TWO-SIDED CONCLUSION:**
+- **POSITIVE for GAP as a mechanism.** It rescues an arm that is degenerate without it: D' (encoder,
+  no damping) = 0.000 and C' (uniform damping) = 0.000, both at epoch 150, while E reaches 0.840.
+  Phase-guided modulation demonstrably does something real.
+- **NEGATIVE for GAP as a solution to OUR problem.** The proprio-encoder + GAP direction produces a
+  policy that is WORSE than the plain generalist on success and IDENTICAL on size-blindness. The
+  encoder introduces a pathology; GAP repairs it; the net result is below where we started.
+
+**IMPLICATION FOR THE PLAN: close the proprio-encoder/GAP line.** It answered its question — proprio
+over-reliance is real and modulation fixes the degeneracy it causes — but it does not advance
+"grasp width explainable by object size", and it cannot beat 0.915/0.02. Effort should go to
+mechanisms that change what the policy CONDITIONS ON (metric-size conditioning, perceived-size in
+the category-embedding slot), not to how its proprio gradients are scaled.
+
+**Caveats retained:** E ran GAP at their proven lambda/window but only 14% of its 350 epochs were
+modulated (vs their 50%); and C'/D' are shown degenerate at epoch 150, not 350.
+
+### 2026-08-28 — ABSORBED upstream 0ab70b1 (concurrent collection chains): no damage to us, but the final dataset slips ~18 h
+
+Upstream found three `bigchain.sh` collection chains running concurrently for hours: every teardown
+used `pgrep -f "[b]igchain\|[c]ollect_demos_synth_v3"`, but **`pgrep` takes an ERE**, so `\|` was
+matched LITERALLY, every kill was a no-op, and each relaunch stacked another chain into the same
+dataset dirs — running three DIFFERENT code versions (pre-stress, pre-material-DR, current). Fixed
+with an exclusive `flock` on `bigchain.sh` plus kills by explicit PID; all partial/stale run dirs
+deleted.
+
+**Impact on us:**
+1. **No data damage.** Nothing valid had completed and `data.pkl` writes only at completion, so no
+   frozen set is affected. Our three generalist sources are untouched.
+2. **SCHEDULE: the final collection is ~18 h later than it looked.** Our phase deliverable is THE
+   METHOD, so this does not block method work — but any plan that assumed the final dataset soon
+   should be re-timed.
+3. **We are NOT exposed to the same failure.** Everything here goes through `sbatch`/`scancel`, and
+   today's C'/D' cancellations were verified against `sacct` rather than trusting an exit status.
+   No `pgrep`-based teardown exists in our path.
+
+**Their two lessons are general and belong in `docs/CHECKLISTS.md` section 1 (launching) when we
+fill it in** — noted here so they are not lost:
+- `pgrep`/`pkill` take ERE; `\|` silently matches NOTHING rather than erroring, so a kill can report
+  success while doing nothing. **Verify a kill by observing state (`ps`/`sacct`), never by exit code.**
+- **Long-running background chains need a lockfile, not just kill-before-launch** — kill-then-relaunch
+  is only as reliable as the kill.
+
+### 2026-08-28 — ⭐ THE LOSS BUDGET: the size signal is 2% of the objective, and 99.9% of it is a PROPRIO COPY
+
+User asked whether the DEMO and/or the WIDTH ACTION SPACE is the problem. **Measured on the actual
+generalist training set** (`dataset/dppo/single_lift_generalist_3obj/train.npz`, 1248 trajs,
+254,340 steps; raw npz + `normalization.npz`, no model involved) — three numbers that settle it.
+
+**1. The width action is a near-exact copy of the policy's OWN observed gripper width.**
+
+    regress commanded width (action dim 6, mm) on observed gripper width (state dim 7, mm)
+      all frames      R2 = 0.9960   slope 1.0009   intercept -0.61 mm
+      post-open only  R2 = 0.9886
+
+**2. Where the copy fails is 14.5% of frames, and NOT where the size decision is.**
+
+| phase | share of frames | copy \|err\| mean | p99 |
+|---|---|---|---|
+| open (80 mm hold) | 47.5% | 0.54 mm | 0.54 |
+| ramp (closing) | 14.5% | **3.26 mm** | 12.76 |
+| plateau (the grasp level) | 38.0% | **0.58 mm** | 0.61 |
+
+On the PLATEAU — the frames that carry the size-dependent answer — the copier is accurate to
+**0.39 mm rms against a 10.60 mm between-episode signal**, i.e. it captures **99.90% of the
+plateau-level energy**. The residual the cloud would have to explain is 0.1%.
+
+**3. The loss budget.** Fraction of the total squared-error energy of the whole 7-dim action target:
+
+| component | share |
+|---|---|
+| width dim, overall | 31.6% |
+| **width dim, BETWEEN-EPISODE level (the size signal)** | **2.07%** |
+| ...of which NOT already explained by the proprio copy | **0.1%** |
+| **net gradient pressure to read size from the cloud** | **~0.003% of the BC loss** |
+
+**THE DIAGNOSIS: the near-flat slope is not a failure, it is the objective's optimum.** A
+size-blind copier is within ~0.003% of the loss-minimising width policy on this data. Nothing on
+the INPUT side (aux head, `feed_width_pred`, category embed, GAP) and nothing at INFERENCE (CFG,
+floors, contact stop) changes that fraction — which is exactly the pattern every arm has shown.
+
+**AND IT EXPLAINS THE A/B FAILURE.** The gripper-width channel is simultaneously the shortcut AND
+the closure clock, so deleting it (arms A/B, 0/21) removes the clock. The shortcut cannot be
+removed from the OBSERVATION; it has to be removed from what the TARGET encodes.
+
+**WHY THE ACTION SPACE IS THE ROOT CAUSE (user's hypothesis, supported).** With ABSOLUTE width
+commands + own width in obs, the width channel is a TRAJECTORY-TRACKING problem — 94% of its
+variance is the object-independent ramp/hold shape — with a proprioceptive shortcut, instead of a
+DECISION problem. The single frame per episode where size actually enters (where the ramp stops)
+carries no meaningful loss weight.
+
+**THE PROPERTY A FIX MUST HAVE, and the offline test for it.** Relabel the width target so it is
+**per-episode CONSTANT from t=0** (the eventual grasp width), and let a rate-limited controller
+execute the ramp. Measured on this dataset:
+
+    During the OPEN phase (47.5% of all frames):
+      R2(eventual grasp level | observed gripper width) = 0.0000
+
+So a constant target channel has **NO proprio shortcut over 47% of frames**, and 100% of its
+variance IS the size signal (vs 2%). The slope then becomes, by construction, the accuracy of a
+cloud->width regression — already measured at r = 0.78-0.81 (`docs/width_predictability.md`).
+
+**NOT the same as residual-width v2 (nickq, DECISIVE NEGATIVE).** That relabelled the EXISTING dim
+as `command - episode anchor`, which made the APPROACH-phase residual scene-dependent (open command
+80 mm minus a per-episode anchor) so the gripper was not reliably open during approach. The
+constant-target form keeps dims 0-6 byte-identical and ADDS the target as a separate channel, so
+the approach command is untouched.
+
+**PRE-REGISTERED PREDICTION on the one untried lever.** `width_window_weight` (implemented at
+`pointcloud_dataset.py:102-110`, still NEVER run) up-weights the width dim on chunks overlapping
+the closing/hold window (~52% of steps). The arithmetic above predicts it is **NOT sufficient**: it
+raises the 2% but its window is dominated by the PLATEAU, where the copier is already accurate to
+0.39 mm. Expect a small slope change at best. It is one config flag, so it is still worth running
+as a cheap falsification of this analysis — recorded here BEFORE the run so the reading is not
+fitted afterwards.
+
+**METHOD NOTE:** every number here comes from the raw dataset npz, no policy, no eval, no join
+across files — the class of check that has repeatedly been decisive in this campaign, and the
+cheapest one available.
+
+### 2026-08-28 — DELTA-WIDTH arm launched (user's "last resort"): absolute 6d pose + DELTA gripper
+
+**Job 1769974 `dgrip_gen`.** xaqnb's recipe verbatim (seed 42, 350 epochs, paired-reg 0.5, USUAL
+network size) on a relabelled dataset; the ONLY change is the gripper action space.
+
+**Rationale (user's):** with an ABSOLUTE width the policy can satisfy its loss by COPYING the
+observed width — **86% of demo steps repeat the previous command** — and a copier cannot DRIVE
+closure. As a DELTA, "hold" is one value and "close" is a distinct act.
+
+**What was built.**
+- `dataset/dppo/single_lift_generalist_3obj_dgrip/` — relabelled from the generalist set. Pose dims
+  UNTOUCHED; gripper column becomes a per-step delta, `gripper_delta_scale = 0.0035 m` (max demo
+  delta is 3.07 mm, so 0% of steps clip).
+- `configs/action/abs_pose_euler_delta_gripper.yaml` + experiment
+  `single_lift_mushroom_soft_abs_action_armfocus_7d_realws_dgrip` (diff vs its absolute twin is
+  exactly the `action:` line).
+- Shared sim/real code: `ActionConfig.gripper_delta/_scale`, a delta branch in
+  `ActionPipeline._process_absolute` (**scale factor ONLY — no affine**, the B10 trap),
+  `PolicyEnv` pushes the flag to the backend as it does `rate_limit`, and BOTH `SimBackend` and
+  `RealBackend` accumulate onto their running target BEFORE the rate limiter. All behind a flag
+  defaulting to false, so every existing config is bit-identical.
+
+**Validation gates, all passed.**
+| gate | result |
+|---|---|
+| delta decode | 0 -> 0, +-1 -> +-3.5 mm; absolute mode and pose dims unchanged |
+| existing pipeline tests | **23/23 pass** (no regression on shared sim/real code) |
+| round-trip vs SHIPPED normalization, both splits | **max 0.00000 mm**, 0% clipped |
+| `delta[0]` semantics | = first COMMAND - first MEASURED width (the backend seeds its target from the MEASURED width at reset; using 0 would offset every episode) |
+| paired regularizer | operates on POINT CLOUDS only, never actions -> action-space agnostic, comparability with xaqnb preserved |
+
+**BUG FOUND AND FIXED IN MY OWN RELABELLING** — see `docs/CHECKLISTS.md` 5.1: val was normalized
+with its own range while `normalization.npz` shipped train's. The first round-trip missed it because
+it validated each split against its own constants. Now both splits are decoded with the SHIPPED file.
+
+⚠ **THE RISK THIS ARM CARRIES: 86% of delta targets are exactly ZERO.** The policy can minimize loss
+by emitting ~0 forever and never closing — the mirror of the copy-proprio failure. **Teaser at
+`state_150`** (15 eps / 3 batches / sgs=1, all rendered) rather than discovering it at 350.
+
+⚠ **EVAL MUST use the `_dgrip` experiment.** Pairing this checkpoint with the absolute pipeline would
+decode the gripper through the wrong map entirely (affine into [0,88] mm instead of +-3.5 mm/step).
+
+### 2026-08-28 — F2 VERDICT: the diffusion head fixes their TOTAL failure (0.000 -> 0.200), but their stack is still far behind ours
+
+Canonical protocol, mushroom, 200 episodes, 40 distinct geometries:
+
+| arm | stack | head | success | ever | SUSTAINED | peak |
+|---|---|---|---|---|---|---|
+| xaqnb baseline | OURS | PointNet diffusion MLP | **0.915** | 0.920 | 35,167 | 54,673 |
+| E (GAP) | OURS | same + proprio encoder | 0.840 | 0.915 | 30,970 | 53,784 |
+| **F2** | **THEIRS** | **ConditionalUnet1D (diffusion)** | **0.200** | 0.305 | **42,394** | 57,386 |
+| F | THEIRS | DeterministicMLP (Tanh+MSE) | **0.000** | — | — | — |
+
+**1. THE USER'S HYPOTHESIS IS CONFIRMED IN DIRECTION.** F -> F2 is ONE config line
+(`head: dmm -> diffunet`) inside THEIR codebase, same encoder/trainer/data/GAP settings, and it
+takes success from **0.000 to 0.200**. A unimodal MSE head cannot represent our multimodal
+approach-pose distribution; a diffusion head can. The user reached this from the render frames
+before any number existed.
+
+**2. THE HEAD WAS *A* BLOCKER, NOT *THE* BLOCKER.** 0.200 vs our 0.915 means most of the gap is
+elsewhere in their stack (ResNet-shaped encoder replaced by our PointNet, their temporal
+transformer, their per-batch cyclic LR with `T_max=cfg.epoch`, their contaminated valid split,
+horizon 9 vs our 4).
+
+**3. F2 IS THE HARSHEST-GRIPPING ARM MEASURED: sustained 42,394** (vs baseline 35,167, E 30,970).
+Where it does grasp, it grips hardest — so it is worse on gentleness as well as success.
+
+⚠ **CONFOUND STILL OPEN:** F2 has **6.9x** arm F's TOTAL parameters (65.7M vs 9.5M) — head type and
+capacity moved together. Arm F3 (`down_dims=[16,32,64]`, total 10.65M = 1.12x arm F) is staged and
+config-only; it would separate them.
+
+⚠ **NOT a reproduction of their paper:** their 101-epoch budget on our 1248-demo set is ~2.5x their
+original gradient steps, and their GAP window covers 50% of F/F2's training but only 14% of E's.
+
+**CONCLUSION FOR THE PLAN: their architecture is not a route worth pursuing for us.** Our own
+generalist is 4.6x better on success and gentler. The transferable finding is the NEGATIVE one about
+deterministic heads on multimodal demonstration data — which is a paper-worthy observation in its
+own right, and it was the user's call, not a metric's.
+
+### 2026-08-28 — ⚠ SIZE-BLINDNESS IS OBJECT-SPECIFIC: tofu ADAPTS (slope 0.26, CI excludes 0), mushroom does NOT
+
+Canonical protocol, 200 episodes, **40 distinct geometries**, both objects, both arms:
+
+| object | arm | success | SUSTAINED | **width slope** | 95% CI | %demo |
+|---|---|---|---|---|---|---|
+| mushroom | xaqnb baseline | 0.915 | 35,167 | 0.02 | [-0.21, +0.25] | 2% |
+| mushroom | E (GAP) | 0.840 | 30,970 | 0.03 | [-0.18, +0.23] | 3% |
+| **tofu** | **xaqnb baseline** | **0.785** | 12,645 | **0.26** | **[+0.06, +0.46]** | **24%** |
+| **tofu** | **E (GAP)** | **0.705** | 10,957 | **0.22** | **[+0.04, +0.41]** | **21%** |
+
+**THE HEADLINE CORRECTION: "the policy is size-blind" is TRUE FOR MUSHROOM, FALSE FOR TOFU.** On
+tofu both arms show statistically detectable adaptation — the CI EXCLUDES zero — at ~a quarter of the
+demonstrator. This CONFIRMS, at the rigorous 40-geometry protocol, the earlier 2x2 finding that
+**size sensitivity is driven by the OBJECT, not by multi-object training** (previously tofu +0.30 vs
+mushroom +0.06 at a weaker protocol).
+
+**GAP's verdict is unchanged and now holds on BOTH objects:** 0.02 vs 0.03 (mushroom), 0.26 vs 0.22
+(tofu) — GAP does not change size-awareness either way. E again trades success for a gentler grip on
+tofu too (-0.08 success, -13% sustained), the same level effect as on mushroom.
+
+**TWO CANDIDATE EXPLANATIONS, not yet separated:**
+1. **Real:** a cube's graspable extent scales directly with `obj_scale`, so the mapping the policy
+   must learn is simple and learnable. A mushroom has a cap and a stem, and shape DR (bend/twist/
+   taper/axis_scale) deforms it, so scale and graspable extent decouple.
+2. **MEASUREMENT:** our x-axis is `obj_scale x nominal`, a PROXY, not the measured graspable extent.
+   For a cube it is nearly exact; for a mushroom it is noisy, and noise in x FLATTENS a fitted slope.
+   So part of mushroom's 0.02 may be attenuation, not blindness.
+**These make different predictions and the test is cheap: measure the actual graspable extent per
+episode (from the cloud or the mesh) and refit.** Until then, do not claim the policy is
+size-blind in general — only that it is on mushroom, under a proxy x-axis.
+
+**FIGURE BUG FIXED:** `E_vs_baseline_width_vs_size_tofu.png` inherited the subtitle "Both arms are
+flat: GAP does not make the policy size-aware" hardcoded from the mushroom figure — FALSE for tofu.
+Both figures now read "GAP vs baseline: the slopes match — GAP does not change size-awareness",
+which is what the data supports on both objects.
+Figures: `docs/figures/E_vs_baseline_width_vs_size_{mushroom,tofu}.png`.
+
+### 2026-08-28 — delta-width teaser blocked by the WORKTREE/MAIN split (5th instance), then gated
+
+The dgrip teaser failed instantly: the eval runs with `GM_REPO=<worktree>` and the `_dgrip`
+experiment + action config + the whole `gripper_delta` code path existed only in the MAIN repo.
+Training never surfaced it (pure supervised on the npz; the ActionPipeline is not involved).
+
+**Ported SURGICALLY, not by file copy** — the two copies already diverge (`sim_backend.py` by 49
+lines for the main-only `GM_FIXED_SCALES`/`GM_FIXED_POSE` sweep knobs), so a wholesale copy would
+have dragged unrelated changes into the worktree.
+
+**Gated before relaunching:** job 1771216 loads the `_dgrip` experiment FROM THE WORKTREE and checks
+the decode — `action mode: absolute | gripper_delta: True | scale: 0.0035`, `-1/0/+1 -> -3.5/0/+3.5
+mm`. Only on PASS does the teaser fire (1771217). **The near-miss worth naming: if the config had
+been present but the CODE absent, the gripper would have decoded through the ABSOLUTE affine into
+[0,88] mm and produced a plausible WRONG result rather than an error.**
+
+Rule added to `docs/CHECKLISTS.md` 5.2.
+
+**Also recorded — on the user's fallback idea (recollect ~200 episodes with delta commands):** the
+86% zeros come from the DEMONSTRATOR'S PHASE STRUCTURE (the scripted FSM holds a constant target
+through approach/grasp/firm/lift/hold), NOT from the relabeling, which is exact (round-trip
+0.00000 mm). Re-collecting with delta COMMANDS would reproduce the same physical trajectory and the
+same sparsity. What would actually change the data is a collector that INTERPOLATES / rate-limits
+each target change across several steps, making the deltas dense — a different demonstration STYLE,
+not a re-encoding. Worth deciding deliberately before spending ~7 h, especially with the collector
+mid-rework upstream.
+
+### 2026-08-28 — DELTA-WIDTH teaser @state_150: the 86%-zero hazard did NOT materialise; it OVER-CLOSES instead
+
+`dtjze/eval/teaser_e150` — 15 eps / 3 batches / sgs=1, all rendered, `_dgrip` experiment verified
+to decode the gripper as a delta before the run.
+
+| metric | delta-width @ep150 | demonstrator | reference (200 ep) |
+|---|---|---|---|
+| success | **0.333** (ever 0.333) | 0.94 | xaqnb 0.915 / E 0.840 |
+| SUSTAINED stress | 19,457 | — | xaqnb 35,167 |
+| **width travel / episode** | **31.5 mm** (min 29.0, max 35.2) | ~48 mm | — |
+| **min width reached** | **13.2 mm** | ~31 mm | — |
+
+**1. THE PRE-REGISTERED RISK DID NOT HAPPEN.** 86% of delta targets are exactly zero, so the feared
+failure was "emit ~0 forever, never close". Instead the policy drives the gripper decisively in
+EVERY episode — minimum travel across 15 episodes is 29 mm, none stalled. **The delta
+parameterization does make closure an ACT rather than a level to hold**, which is exactly the
+mechanism the user proposed.
+
+**2. THE NEW FAILURE IS OVER-CLOSING: it closes to 13.2 mm where the demonstrator stops at ~31 mm
+— roughly 18 mm too tight.** Corroborated by `ever == success` exactly (0.333): nothing lifts then
+drops, so objects are either grasped or missed/crushed outright, unlike the baseline's lift-then-drop
+signature. The low sustained stress (19,457) therefore reflects FAILING TO HOLD rather than gentle
+grasping, and must not be read as a gentleness win.
+
+**3. IMPLICATION FOR THE USER'S FALLBACK (recollect ~200 eps with delta commands).** The failure is
+OVER-ACTION, not under-action, so a native-delta collection is unlikely to fix it: the deltas would
+be IDENTICAL (the relabeling is exact, round-trip 0.00000 mm). Over-closing points at the
+INTEGRATION running too far. Two cheaper levers first:
+   - the existing `rate_limit` dgrip is 0.005 m/step and currently NEVER BINDS (our scale is 0.0035);
+     tightening it would directly cap the accumulated closure;
+   - a collector that INTERPOLATES/rate-limits target changes would make the deltas dense — a
+     different demonstration STYLE, which is the version of the user's idea that would actually
+     change the data.
+
+**VERDICT: not degenerate — let it finish to 350 and re-check.** 0.333 is a mid-training,
+15-episode SCREEN, not a number to compare against 200-episode results.
+
+### 2026-08-28 — LITERATURE ANCHOR for the loss budget + DELTA is NOT the fix (measured) + the changepoint is ALSO copy-exact
+
+User asked: has nobody hit this in the literature; how is the gripper action usually represented; is the
+point cloud the problem. Three answers, two of them measured on our own data.
+
+**1. IT IS A NAMED FAILURE MODE — the COPYCAT problem / causal confusion in imitation learning.**
+
+| paper | venue | the nuisance variable |
+|---|---|---|
+| [Causal Confusion in Imitation Learning](https://arxiv.org/abs/1905.11979) (de Haan, Jayaraman, Levine) | NeurIPS 2019 | any observed correlate of the expert action |
+| [Fighting Copycat Agents in BC from Observation Histories](https://arxiv.org/abs/2010.14876) (Wen et al.) | NeurIPS 2020 | the PREVIOUS ACTION, recoverable from an obs history |
+| [Keyframe-Focused Visual Imitation Learning](https://arxiv.org/abs/2106.06452) (Wen et al.) | ICML 2021 | fix = up-weight expert ACTION CHANGEPOINTS |
+| [Resolving Copycat Problems via Residual Action Prediction](https://arxiv.org/abs/2207.09705) (Chuang et al.) | ECCV 2022 | fix = predict the action RESIDUAL |
+
+**OUR INSTANCE IS THE DEGENERATE-EASY CASE.** The literature's copycat needs an observation HISTORY
+from which the previous action can be inferred. We hand it over directly: the action IS the absolute
+gripper width and `gripper_width` (the achieved result of the previous command) is a raw obs channel.
+So the standard remedy — "condition on the most recent observation only" — does not apply to us; the
+leak is IN the most recent observation.
+
+**2. `width_window_weight` NOW HAS A WORSE PROGNOSIS, and the reason is a NEW measurement.**
+The ICML-2021 fix is to up-weight expert action CHANGEPOINTS. Measured on our data, the changepoint
+(the one frame per episode where the closing ramp stops) is where the copier is MOST accurate:
+
+| frames | share of dataset | copy \|err\| |
+|---|---|---|
+| ramp (closing) | 14.5% | **3.26 mm** (servo lag — object-INDEPENDENT) |
+| plateau (the grasp level) | 38.0% | 0.58 mm |
+| **CHANGEPOINT (ramp stops)** | **0.49%** | **0.41 mm** |
+
+**There is NO frame at which the copier fails on the size-dependent quantity.** By the time the
+command settles, the achieved width has caught up, so the copy is exact exactly where the decision
+is. The copy's only error is the ramp's servo lag, which carries no size information. This
+STRENGTHENS the pre-registered null for `width_window_weight` (its window is ramp+plateau) and it
+also rules out the keyframe variant of the same idea. Loss re-weighting cannot work here: there is
+no frame to re-weight toward.
+
+**3. DELTA WIDTH IS NOT THE FIX EITHER — measured counterfactual on the same dataset.**
+
+| representation | between-episode share of action energy |
+|---|---|
+| absolute width (current) | 2.07% |
+| **delta width** | **2.22%** |
+
+Delta buys 0.15 points, and it makes the target WORSE-posed: `delta = 0.000 mm` on the open phase and
+`-0.004 mm` on the plateau — identical for every episode regardless of object — so the grasp LEVEL is
+never supervised at all, only recoverable by INTEGRATING the ramp (corr(ramp-mean delta, final level)
++0.747; corr(ramp length, final level) -0.384). RAP (ECCV 2022) works in driving because the residual
+removes the leak; for a rate-limited aperture ramp it removes the SIGNAL. **Absolute-vs-delta is not
+the axis. TRAJECTORY-vs-TARGET is.**
+
+**4. HOW THE FIELD REPRESENTS THE GRIPPER — and why this has gone unreported.** The dominant
+convention is BINARY open/close, in which case there is no aperture to adapt and this failure mode
+cannot be observed. [UMI](https://arxiv.org/abs/2402.10329) (Chi et al., RSS 2024) is the main work
+arguing for continuous width: *"In contrast to the binary open-close action used in prior works, we
+found commanding gripper width continuously significantly expands the range of tasks doable by
+parallel-jaw grippers."* Two things they do are directly relevant to us:
+- They get force regulation from **HARDWARE** — soft series-elastic fingers, so commanded width
+  deformation implicitly sets grasp force — rather than from the policy predicting the right width.
+  That is a hardware answer to the problem we are fighting in software, and it is a live option
+  (cf. the GelSight premise question in `width_adaptation.md` §0).
+- They represent EE proprioception as a **RELATIVE TRAJECTORY**, not absolute pose. Their stated
+  reason is calibration-free deployment/tracking robustness, but it has the same de-shortcutting
+  side effect — and note they did NOT do this for the gripper channel, which stays absolute width.
+
+**5. IS THE POINT CLOUD THE PROBLEM? NO — by our own numbers** (`docs/width_predictability.md`):
+cloud->width r = 0.771 (well-trained head, frozen standard encoder) / 0.776 (aux-supervised encoder);
+cloud->scale 0.927. Delivered slope-equivalent is 0.02-0.20. **The genuine perception limit is
+CROSS-SHAPE, not size:** leave-one-mesh-variant-out drops cloud->width to 0.23-0.41. So the cloud is
+adequate for within-distribution sizing and is a first-order problem only for the unseen-object goal.
+
+**NOVELTY CHECK (for the paper):** the earlier scan's claim stands after re-searching —
+no published controlled study measures whether a parallel-jaw IL policy adapts APERTURE to object
+size. The framing this session supports is sharper and is a contribution in itself: *continuous-width
+grippers inherit a copycat pathology that binary grippers structurally cannot exhibit, and it is
+invisible to BC validation loss.*
+
+### 2026-08-28 — PLAN: TARGET-PARAMETERISED WIDTH (8th action dim). Pre-flight PASSED, prediction pre-registered.
+
+The fix implied by the loss budget, with the two load-bearing checks already measured on
+`dataset/dppo/single_lift_generalist_3obj/train.npz` (1248 eps) BEFORE any GPU time.
+
+**THE CHANGE.** Add action dim 7 = the episode's FINAL commanded width, **constant from t=0**.
+Dims 0-6 stay byte-identical. Execute `width = max(dim6, dim7)`: dim6 (which the copycat solves,
+and that is fine) supplies the closure CLOCK; dim7 supplies the LEVEL.
+
+**PRE-FLIGHT 1 — the execution rule is label-consistent, so there is NO train/execute mismatch.**
+Because the demo command decreases monotonically to its plateau, `max(dim6_label, dim7_label) ==
+dim6_label` identically:
+
+| check | result |
+|---|---|
+| command RE-OPENS after closing | 5 / 1248 (0.40%) |
+| plateau level != episode MIN | 2 / 1248 (0.16%) |
+| **`max(dim6,dim7)` reproduces the demo command EXACTLY** | **99.84% of episodes** |
+
+This is the property EVERY previous adaptive arm lacked: CFG, floors, contact stop and freeze are
+all TEST-TIME overrides the policy never saw in training (-> distribution shift -> the success
+collapses this campaign kept measuring). Here the rule is an identity on the training data.
+
+**PRE-FLIGHT 2 — the gradient pressure, in the units the MSE actually sees.**
+
+| | today (7-dim) | proposed (8-dim) |
+|---|---|---|
+| dim carrying the size signal | dim6 level, 2.07% of action energy | **dim7, 5.1%** |
+| share of THAT explained by the proprio copy | 99.9% | **0% (R2 = 0.0000 over the 47.5% open phase)** |
+| **net pressure to read size from the cloud** | **~0.003%** | **~5.1% (~1700x)** |
+
+**NOT residual-width v2 (nickq, DECISIVE NEGATIVE).** That RELABELLED dim6 as `command - anchor`,
+making the APPROACH command scene-dependent so the gripper was not reliably open on approach. This
+ADDS a channel and leaves the approach command untouched.
+
+**PRE-REGISTERED PREDICTION (written before the run).**
+- slope **0.5-0.9** — upper-bounded by the head's cloud->width r ~= 0.78 and by the demonstrator's
+  own 3.2 mm residual, which an imitator cannot beat.
+- success **NOT materially below 0.915**, because the execution rule is label-consistent.
+- **FALSIFIER:** slope < 0.2 despite a 5.1% gradient share => the trunk genuinely cannot route
+  cloud-derived size to the action head, and the remaining answer is ARCHITECTURAL separation
+  (a width head that does not see `gripper_width`), not loss or action-space shaping.
+
+**Known risk, stated:** dim7 error is consequential in both directions (over-predict -> loose ->
+drop; under-predict -> extra squeeze). Head MAE ~2.8 mm against the collector's ~8 mm squeeze
+budget, and the demonstrator's own width residual is 3.2 mm — so the error is roughly at
+demonstrator noise, but it is the binding constraint and should be reported per size bin.
+
+**Cost:** dataset RELABEL only (no re-collection) ~10 min; `action_dim 7->8` + eval adapter; ~4 h
+train + ~1.5 h canonical eval (200 eps / 40 geometries).
+
+**FREE SUPPORTING MOVE, measured but never run** (`docs/width_predictability.md`): dropping the
+bottom-20%-`align` mushroom demos raises corr(width, scale) 0.841 -> 0.933 AND lowers demo stress
+10%, with retention uniform across scale (72-83% per bin, all 4 mesh variants kept). It sharpens the
+conditional the diffusion policy must fit, which is the same disease attacked from the data side.
+
+**EXPLICITLY NOT WORTH GPU TIME NOW** (all measured nulls or closed lines): `width_window_weight`
+and keyframe up-weighting (no frame exists where the copier fails on the size-dependent quantity),
+delta-width actions (2.22% vs 2.07%), further aux/conditioning heads, GAP/proprio-encoder.
+
+### 2026-08-28 — CLOSING SPEED IS NOT THE PROBLEM. NON-TERMINATION IS — and it has a heavy tail.
+
+User asked whether closing too fast is a problem. **Measured, and the premise is inverted:** the
+policy closes SLOWER per step than the demonstrator and is nowhere near the rate limit. What it does
+not do is STOP. Policy = xaqnb canonical mushroom (200 eps / 40 geometries,
+`.agent_tmp/canon_mushroom_200geo40_1767027_widthcmd_b*.npz`); demonstrator = the training npz
+(mushroom+tofu-scale episodes, n=1041), absolute env steps.
+
+| | demonstrator | policy |
+|---|---|---|
+| closing rate while closing | **-1.74 mm/step** | **-1.29 mm/step** (26% SLOWER) |
+| rate limit (`abs_pose_euler_abs_gripper.yaml`) | 5.00 mm/step | 5.00 mm/step (3.9x headroom) |
+| closure ONSET | step 95 | step 82 |
+| **onset -> SETTLED (within 0.5 mm of final)** | **26 steps** | **179 steps (7x)** |
+| flat fraction of the last 25% of the episode | **1.00** | 0.87 |
+| further closure after step 120 | 0 (dead flat) | median -0.9, **p90 +21.3, p99 +41.4 mm** |
+| final commanded width | 32.8 mm | **27.3 mm** |
+
+**IT IS A TAIL, NOT A DRIFT.** The 2.7 mm mean extra closure is driven by ~10% of episodes that keep
+squeezing **20-40 mm** past the point where the demonstrator has already stopped. The median episode
+is fine. This is the quantified version of the anecdote already in this DEVLOG ("some episodes keep
+closing AFTER the grasp, 34mm -> 12mm during hold") and it is where the SUSTAINED-stress gap lives.
+
+**THIS IS THE CLOSED-LOOP SIGNATURE OF THE COPYCAT RULE.** `a = w_obs - 0.61 mm` (R2 0.996 on the
+demos) has NO FIXED POINT — it keeps commanding a slightly tighter width forever until a finger is
+physically blocked, and on a soft MPM body it never is. The demonstrator has a HARD STOP (its
+plateau is dead flat, 1.00); the learned rule has none. So the dataset diagnosis and the closed-loop
+behaviour agree, from two independent measurements.
+
+**CONSEQUENCE FOR THE PLAN — the same single change fixes this too.** `width = max(dim6, dim7)`
+imposes a hard floor: once dim6 reaches dim7 the executed width CANNOT creep further. One change
+addresses (i) the flat slope, (ii) the runaway tail, (iii) the part of the sustained-stress gap that
+tail causes. **Guard to add:** dim7 is predicted per step, so LATCH it (median of dim7 over the first
+K steps after closure onset, or a running min-clamp) — reuse the latching machinery from the floor
+arms. Report the p90/p99 extra-closure statistic as an acceptance criterion, not just the mean.
+
+**AND A WARNING THAT FOLLOWS DIRECTLY: do NOT slow the demonstrator's closure to be "gentler".** The
+copier's ONLY error is the servo lag during the ramp (3.26 mm). Closing more slowly shrinks that lag
+toward zero, which makes the shortcut MORE exact and the size signal even less learnable. Gentleness
+from a slower ramp would be bought at the cost of adaptation.
+
+**NOT fixed by dim7, and probably not worth acting on:** onset is 13 steps early (82 vs 95). Small,
+and the cloud-swap ablation shows visual sensitivity is lowest during approach anyway. Flagged, not
+prioritised.
+
+### 2026-08-28 — 3x-WIDTH teaser @state_300: healthy, and it looks like another LEVEL shift
+
+`ddgrl/eval/teaser_e300` — 15 eps / 3 batches / sgs=1. Eval architecture verified from its own
+resolved config (`mlp_dims = [3072,3072,3072]`) before reading anything; without that override the
+eval would have built a 1024-wide net against a 3072-wide checkpoint.
+
+| | 3x width @ep300 (15 eps) | 1x baseline (200 eps) |
+|---|---|---|
+| success | 0.800 (ever 0.867) | 0.915 (ever 0.920) |
+| SUSTAINED | 21,218 | 35,167 |
+| at-grasp width | **32.5 mm** (sd 3.9) | **28.2 mm** (sd ~4.4) |
+
+**Not degenerate — let it finish.** The interesting hint: it grips **~4.3 mm WIDER** with
+correspondingly lower stress, and `ever - success` is 0.067 vs the baseline's 0.005. That is the
+signature of the SAME LEVEL EFFECT every mechanism in this campaign has produced (wider grip -> less
+stress -> more drops), not of size-awareness. **Extra capacity appears to have moved WHERE it grips,
+not made it size-aware** — but 3 geometries cannot give a slope, so the canonical 200-ep/40-geometry
+eval decides.
+
+**Supporting prior:** the 3x net reached train 0.0005 / val 0.0009 vs the baseline's 0.0007 train —
+7.6x the parameters bought almost no fitting gain, suggesting the 1x net already fits these
+demonstrations and capacity is not the binding constraint. Stated as a PREDICTION: eps-loss has
+repeatedly failed to predict closed-loop behaviour here (arm D had the best val loss and never
+closed), so the slope is what settles it.
+
+**Protocol caveat:** teaser is `state_300` (not the `state_150` used for C'/D'/E), 15 episodes, 3
+geometries — a screen, not comparable to 200-episode numbers in either direction.
+
+### 2026-08-29 — upstream 691c565 + 5f95c7a: GENTLENESS NEEDS MATERIAL, NOT JUST SIZE — this is the answer to the "why not scripted top-down?" reviewer question
+
+Upstream found a size-only squeeze rule is gentle on mushroom (**0.58x yield, 99.6% sub-yield**) and
+**damaging on cherry tomato (1.18x yield, 5.8% sub-yield)** — same rule, opposite outcome. Physics:
+for indentation `d` over characteristic length `L`, `sigma ~ E*d/L`, so sub-yield requires
+
+    d <= K * (yield/E) * L
+
+**`yield/E` varies 2.7x across our objects** (tofu 2.5, raspberry 6.7, mushroom 7.5, strawberry 8.3,
+banana 10.0, tomato 12.0, cherry_tomato 13.3) and is **NOT observable from a point cloud**.
+5f95c7a extends the same budget to the FIRM phase, which dominated on small stiff objects (4.5 mm on
+a 24.7 mm cherry tomato = 18%, dwarfing its 0.84 mm base squeeze — which is why fixing the base
+alone moved sub-yield only 5.8% -> 6%).
+
+**THIS ANSWERS THE REVIEWER QUESTION the user raised ("why not just top-down grasp at the floor
+width?").** Geometry gives `L`. It cannot give `yield/E`. So a vision-only geometric floor is
+calibrated for ONE material and is necessarily too loose (drops) or too tight (crushes) on others —
+and upstream MEASURED that failure on a real object. What a learned policy can do instead is
+associate visual appearance with material response, learned from demonstrations generated under a
+material-aware rule.
+
+**PRE-REGISTERED PREDICTION for the scripted baseline (user approved building it):** a vision-only
+top-down grasp with a geometric size-only floor will be ACCEPTABLE ON MUSHROOM (the material its
+calibration implicitly targets) and MATERIALLY WORSE on tofu and raspberry. The learned policy should
+degrade less across the three. If the scripted baseline instead matches the policy everywhere, that
+is a more important finding and we need it before a reviewer supplies it.
+
+⚠ **DATA NOTE:** the mushroom portion of our generalist set is unchanged by the new rule
+(1.94/2.43 mm vs 2.0/2.5), so it stays valid. **Our TOFU and RASPBERRY demos were collected under the
+OLD fixed rule**, and tofu has the LOWEST yield/E (2.5) of any object — the most likely to have been
+over-squeezed. Check their recorded stress before reusing those portions in the bigger collection.
+
+### 2026-08-29 — ⚠ THE SCRIPTED VISION-ONLY BASELINE BEATS THE LEARNED POLICY ON MUSHROOM. This is a real problem for the framing.
+
+User asked the reviewer's question directly ("why not just top-down grasp at the floor width?") and
+approved building the control. Built: `gentle_manip/dppo/scripted/` — object position, narrow-axis
+width and yaw from the **t=0 point cloud only** (STUDENT INFO: cloud + proprio, no privileged pose,
+no registry, no category), then a fixed phase machine emitting absolute top-down pose targets.
+Calibrated ON MUSHROOM deliberately (+18 mm parallax, visible->true 1.23, 2 mm squeeze).
+
+**Canonical protocol, 200 episodes, 40 distinct geometries:**
+
+| object | LEARNED generalist | SCRIPTED vision-only |
+|---|---|---|
+| **mushroom** | 0.915 / sustained 35,167 | **0.940 / sustained 28,934 (-18%)** |
+| tofu | 0.785 / 12,645 | (200-ep run in flight) |
+| raspberry | **0.583** | 0.467 (15 ep, 5/15 perception fallbacks) |
+
+**ON MUSHROOM — the object the real-robot work is built on — A NO-LEARNING PIPELINE WINS ON BOTH
+SUCCESS AND GENTLENESS.** That must be answered before submission; "it degrades on small objects" is
+only a partial answer.
+
+**Where the scripted baseline DOES break, and why — measured, not argued.** Its commanded width on
+raspberry is **median 8.9 mm, range 4.0-34.9 mm on a ~15 mm object**: with only **4-7 object points**
+in a 1024-point `object_focus` cloud (vs ~75 for a mushroom) the geometric estimate is unstable, and
+5/15 episodes could not detect the object at all. **A hand-written geometric pipeline needs enough
+points to measure the object; the learned policy extracts usable structure from the SAME sparse
+cloud where explicit geometry cannot.** That is a defensible contribution claim and it is testable.
+
+⚠ **TWO RETRACTIONS OF MY OWN REASONING, both made before checking:**
+1. I claimed raspberry's initial 0/20 supported the MATERIAL argument (`d <= K*(yield/E)*L`). It did
+   not — the estimator fell back on **15/15** episodes; it never detected the object. That was a
+   perception failure OF MY BASELINE. With thresholds fair to small objects it reaches 0.467.
+2. I reached for the interpretation that suited the narrative before verifying the mechanism. The
+   material argument may still be true, but THIS experiment does not evidence it.
+
+⚠ **`ScriptedTopDownPolicy` shipped with NO dumps — the third Policy adapter to hit that documented
+trap** (the dump lives in the Policy class, not the harness), which cost the ability to diagnose a
+200-episode run that had already been spent. Dumps + LOUD fallback counting added afterwards.
+
+**SCOPE — what this does NOT say.** Singulated objects, flat table, clean simulated depth, top-down
+grasps only. Clutter, occlusion, non-top-down grasps and real-robot transfer are all untested, and
+they are where a learned policy would be expected to earn its place. **That is the experiment the
+paper now needs**, and it is a better use of effort than anything remaining on width adaptation.
+
+### 2026-08-29 — PHASE CLOSE-OUT: the consolidated table. NOTHING beat the plain baseline.
+
+All canonical: 200 episodes, 40 distinct geometries, sgs=1, per-episode video, dumps on.
+
+**SUCCESS by object**
+
+| arm | mushroom | tofu | raspberry |
+|---|---|---|---|
+| **xaqnb baseline (plain generalist)** | **0.915** | **0.785** | **0.583** (60-ep) |
+| E — GAP, their CPD+LSTM rho | 0.840 | 0.705 | — |
+| 3x MLP width (7.6x params) | 0.705 | 0.485 | 0.465 |
+| DELTA width | 0.680 | 0.550 | 0.360 |
+| F2 — their stack, diffusion head | 0.200 | — | — |
+| F — their stack, deterministic head | 0.000 | — | — |
+| C'/D' — proprio encoder +- uniform damping | 0.000 (ep150) | — | — |
+| **SCRIPTED vision-only (no learning)** | **0.940** | 0.760 | 0.467 |
+
+**SUSTAINED STRESS (mushroom / tofu)**: baseline 35,167 / 12,645 · E 30,970 / 10,957 ·
+3x 24,975 / 8,937 · delta 25,742 / 9,682 · F2 42,394 / — · **scripted 28,934 / 9,184**.
+
+**WIDTH SLOPE (mushroom, 40 geometries)**: baseline 0.02 [-0.21,0.25] · E 0.03 [-0.18,0.23] ·
+3x 0.21 [+0.02,+0.40] · delta 0.25 [-0.17,0.66] (at-grasp sd 13.3 mm vs baseline 4.4).
+On TOFU both baseline and E DO adapt: 0.26 [+0.06,+0.46] and 0.22 [+0.04,+0.41].
+
+**CONCLUSIONS**
+1. **No learned variant beat the plain recipe on any object.** Every mechanism that lowered stress
+   did so by gripping wider or looser and dropping more — the same LEVEL effect throughout.
+2. **Size-blindness is object-specific**, not universal: real adaptation on tofu, none on mushroom.
+   Unresolved whether mushroom's 0.02 is genuine or attenuation from the `scale x nominal` proxy
+   x-axis — the cheap test (measure true graspable extent, refit) is still not done.
+3. **GAP:** mechanism real (rescues 0.000 arms) but loses to baseline and never touches slope.
+4. **Their architecture:** the deterministic head is a genuine blocker (0.000 -> 0.200 with their
+   own diffusion head), but their stack still lands 4.6x below ours.
+5. **⚠ A NO-LEARNING VISION-ONLY BASELINE BEATS THE LEARNED POLICY ON MUSHROOM** (0.940/28,934 vs
+   0.915/35,167) and is competitive-and-gentler on tofu (0.760/9,184 vs 0.785/12,645). It loses only
+   on raspberry (0.467 vs 0.583), where 4-7 object points make its geometric estimate unstable
+   (commanded width median 8.9 mm, range 4.0-34.9 on a ~15 mm object).
+
+**WHAT THE PAPER MUST NOW ANSWER**, and it is not width adaptation: on singulated objects on a flat
+table with clean depth, explicit geometry is at least as good and gentler. The learned policy's
+demonstrated edge is the SPARSE-CLOUD regime. Everything else a learned policy should buy —
+clutter, occlusion, non-top-down grasps, real-robot transfer — is UNTESTED. That is where the
+remaining effort belongs.

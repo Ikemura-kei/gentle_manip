@@ -1,0 +1,6 @@
+_target_: policies.head.DeterministicMLP
+network_kwargs:
+  action_dim: ${action_shape}
+  feature_dim: ???
+  horizon: ${horizon}
+  

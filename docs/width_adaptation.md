@@ -5,10 +5,36 @@ launch, results land, or analysis changes a conclusion. Deep analysis lives in
 `docs/width_predictability.md`; literature in `docs/size_adaptation_literature.md`; project-wide
 history in `docs/DEVLOG.md`.
 
-**Last updated:** 2026-08-26 ~22:45 CEST
+**Last updated:** 2026-08-28 (section 000 — root cause: the loss budget)
 **Deadline:** 2 days from 2026-08-26 (venue). **Goal: adaptive width AND success >= 0.7.**
 
 ---
+
+## 000. ⚠ ROOT CAUSE (2026-08-28): THE OBJECTIVE DOES NOT ASK FOR ADAPTATION
+
+Measured on the raw generalist training npz (1248 trajs, no model, no eval):
+
+| quantity | value |
+|---|---|
+| R2(commanded width \| policy's OWN observed width), all frames | **0.9960** (slope 1.001, int -0.61 mm) |
+| copy error on the PLATEAU (where the size answer lives) | **0.39 mm rms** vs a **10.60 mm** signal |
+| between-episode width level, share of total action SE energy | **2.07%** |
+| ...share NOT already explained by the proprio copy | **0.1%** |
+| **net gradient pressure to read size from the cloud** | **~0.003% of the BC loss** |
+
+**A size-blind copier is within ~0.003% of the loss-optimal width policy on this data.** The flat
+slope is the objective's optimum, not a learning failure — which is why every INPUT-side mechanism
+(aux head, feed_width_pred, category embed, GAP) and every INFERENCE-side mechanism (CFG, floors,
+contact stop) left it at 0.02-0.20. None of them changes that fraction.
+
+**The shortcut cannot be removed from the OBSERVATION** (arms A/B, 0/21: the same channel is the
+closure CLOCK). It has to be removed from what the **TARGET** encodes.
+
+**The property a fix must have:** make the width target per-episode CONSTANT from t=0 (the eventual
+grasp width) and let a rate-limited controller run the ramp. Measured: during the open phase (47.5%
+of frames) `R2(eventual grasp level | observed width) = 0.0000` — no shortcut — and 100% of the
+channel's variance is the size signal. Full derivation + the residual-width-v2 contrast + a
+pre-registered prediction for `width_window_weight`: DEVLOG 2026-08-28 "THE LOSS BUDGET".
 
 ## 00. ⚠ THE REAL GAP (2026-08-27): THE POLICY LOSES THE DEMONSTRATOR'S GENTLENESS
 

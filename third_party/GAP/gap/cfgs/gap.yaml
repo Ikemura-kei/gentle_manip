@@ -1,0 +1,34 @@
+defaults:
+  - _self_
+  - policy: bc_policy
+  - task: push
+  - dataset: phase
+  - optimizer: adam
+
+# task and demo
+all_data: 'path/to/demos_folder'
+data_path: ${task.data_path}
+seed: 1
+horizon: 9
+n_obs_steps: 5
+batch_size: 128
+lambda: 0.3
+
+# modal
+method: 'gap'
+image: true
+proprio: true
+
+# others
+lr: 3e-4
+hidden_dim: 512
+action_shape: ${task.action_shape}
+device: cuda
+epoch: 101
+
+hydra:
+  run:
+    dir: ./exp_local/${task.name}/${method}
+  sweep:
+    dir: ./exp_local
+    subdir: ${hydra.job.num}

@@ -80,6 +80,8 @@ class PointNetDiffusionMLP(nn.Module):
                  feed_width_pred=False, width_traj_head=False, width_head_blind=False,
                  aux_width_blind=False,
                  width_head_bins=0, cond_dropout_prob=0.0, aux_hidden=128,
+                 proprio_encoder=False, gap_damp=False, gap_lambda=1.0,
+                 proprio_encoder_identity_init=True,
                  use_first_frame_context=False):
         super().__init__()
         pn = dict(pointnet or {})
@@ -132,6 +134,27 @@ class PointNetDiffusionMLP(nn.Module):
         # 9 probes showed the diffusion path collapses width to a constant (r~0.1) while a
         # regression head on the SAME features reaches r~0.82. It reads `_cond_encoded` =
         self._visual_dim = int(visual_feature_dim) * (2 if use_first_frame_context else 1)
+        self._proprio_dim = int(cond_dim)
+        # GAP (arXiv 2602.12032) damps the PROPRIOCEPTION CHUNK's parameters; our default arch
+        # raw-concatenates the state, so this optional encoder is what gives Eq 5 something to act
+        # on. Ported from the worktree because EVAL runs from THIS repo and must instantiate the
+        # arms trained there. Default off -> every existing checkpoint is unaffected.
+        # RESIDUAL proprio encoder: h = state + MLP(state), final layer ZERO-initialised so it is
+        # EXACTLY a pass-through at step 0. (Identity weights are NOT: Mish(x) != x — measured
+        # max|diff| 2.493 vs random init's 3.276, i.e. barely better, which is why arms C/D failed.)
+        # Proprio is the policy's closure CLOCK; scrambling it at init makes the policy learn to
+        # disregard it, and vision cannot supply phase -> "approach, never close".
+        self.proprio_encoder = (nn.Sequential(nn.Linear(self._proprio_dim, self._proprio_dim),
+                                              nn.Mish(),
+                                              nn.Linear(self._proprio_dim, self._proprio_dim))
+                                if proprio_encoder else None)
+        self.proprio_encoder_residual = bool(proprio_encoder_identity_init)
+        if proprio_encoder and self.proprio_encoder_residual:
+            with torch.no_grad():
+                nn.init.zeros_(self.proprio_encoder[2].weight)
+                nn.init.zeros_(self.proprio_encoder[2].bias)
+        self.gap_damp = bool(gap_damp)
+        self.gap_lambda = float(gap_lambda)
         # [pointnet_feat (+ctx) ⊕ flattened proprio]; proprio carries the CURRENT gripper
         # width, so the head knows where it is on the closing ramp and continues it instead of
         # jumping to the final value.
@@ -194,6 +217,11 @@ class PointNetDiffusionMLP(nn.Module):
         feat = _encode_clouds(self.backbone, cond["point_cloud"], self.pc_cond_steps)
         if self.use_first_frame_context:
             feat = torch.cat([feat, _encode_clouds(self.backbone, cond["first_point_cloud"], 1)], dim=-1)
+        if self.proprio_encoder is not None:
+            h = self.proprio_encoder(state)
+            if self.proprio_encoder_residual:
+                h = state + h                     # exact pass-through at init (final layer zeroed)
+            state = h
         return torch.cat([feat, state], dim=-1)
 
     def aux_predict(self, cond: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:

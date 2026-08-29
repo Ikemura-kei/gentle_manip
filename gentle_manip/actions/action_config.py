@@ -55,6 +55,16 @@ class ActionConfig:
     gripper_min: float = 0.0
     gripper_max: float = DEFAULT_GRIPPER_WIDTH
 
+    # ABSOLUTE mode only: treat the gripper dim as a per-step DELTA while the POSE stays absolute
+    # (2026-08-28). Motivation: with an absolute width the policy can satisfy its loss by COPYING
+    # the observed width (86% of demo steps repeat the previous command), which cannot DRIVE
+    # closure. As a delta, "hold" is one value and "close" is a distinct act.
+    # UNITS (this is the B10 trap): an absolute value uses the full affine into
+    # [gripper_min, gripper_max]; a DELTA uses the SCALE FACTOR ONLY -> dgrip = raw * scale.
+    # The backend accumulates it onto its running target, exactly as delta mode does.
+    gripper_delta: bool = False
+    gripper_delta_scale: float = 0.0035          # metres per unit action (max |demo delta| 3.07 mm)
+
     # Absolute-mode rotation encoding: "rot6d" (default, 10-dim action: 3 pos + 6 rot6d + 1 grip;
     # continuous, singularity-free) or "euler" (7-dim: 3 pos + 3 euler + 1 grip — the RPY convention
     # most papers use; compact but has gimbal-lock/wraparound). Both process to the SAME 8-dim
@@ -115,6 +125,9 @@ class ActionConfig:
             if self.euler_frame_offset_deg is not None and len(self.euler_frame_offset_deg) != 3:
                 raise ValueError(f"euler_frame_offset_deg must be length 3, got "
                                  f"{self.euler_frame_offset_deg}")
+            if self.gripper_delta and self.gripper_delta_scale <= 0:
+                raise ValueError(f"gripper_delta_scale must be positive, got "
+                                 f"{self.gripper_delta_scale}")
             if self.rate_limit is not None:
                 if len(self.rate_limit) != 7:
                     raise ValueError(f"rate_limit must be length 7 "
@@ -134,6 +147,9 @@ class ActionConfig:
             kwargs["pos_max"] = tuple(d.get("pos_max", cls.pos_max))
             kwargs["gripper_min"] = float(d.get("gripper_min", cls.gripper_min))
             kwargs["gripper_max"] = float(d.get("gripper_max", cls.gripper_max))
+            kwargs["gripper_delta"] = bool(d.get("gripper_delta", False))
+            kwargs["gripper_delta_scale"] = float(
+                d.get("gripper_delta_scale", cls.gripper_delta_scale))
             kwargs["rot_repr"] = d.get("rot_repr", "rot6d")
             kwargs["euler_min"] = tuple(d.get("euler_min", cls.euler_min))
             kwargs["euler_max"] = tuple(d.get("euler_max", cls.euler_max))

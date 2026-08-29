@@ -110,6 +110,8 @@ class RealBackend:
         # Accumulated command target (set on reset()).
         self._target_pos = np.zeros(3, dtype=np.float64)
         self._target_quat = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
+        # Set by PolicyEnv from ActionConfig.gripper_delta (see SimBackend for the contract).
+        self.gripper_delta = False
         self._target_gripper = self._gripper_max
         # Optional per-step rate limit for ABSOLUTE commands (delta-`scales` layout). Assigned by
         # PolicyEnv from ActionConfig.rate_limit. THIS is the guard that keeps a policy-emitted
@@ -141,6 +143,10 @@ class RealBackend:
             # to set directly (no accumulation). Still clip to the workspace box for
             # safety even though ActionPipeline already mapped into pos_min/pos_max.
             pos, quat, grip = action[:3], action[3:7], action[7]
+            if getattr(self, "gripper_delta", False):
+                # DELTA gripper (absolute pose): accumulate onto the running target BEFORE the
+                # rate limiter, identical to SimBackend so sim and real cannot diverge.
+                grip = float(np.clip(self._target_gripper + grip, 0.0, self._gripper_max))
             if self.rate_limit is not None:
                 from gentle_manip.actions.pipeline import clamp_absolute_target
                 p_, q_, g_ = clamp_absolute_target(

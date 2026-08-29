@@ -39,7 +39,10 @@ FT_DENOISING=${FT_DENOISING:-0}                              # 0 = eval BC base;
 VIEW=${VIEW:-student}                           # student = point-cloud policy; teacher = privileged
                                                  # full-state policy (no cameras) -- set VIEW=teacher
                                                  # for a state-only (no point-cloud) eval config.
-NUM_ENVS=5                                      # canonical EvalSpec; MUST match cfg n_envs
+# Canonical EvalSpec is 5; overridable ONLY for controlled probes (e.g. the size-sweep, which
+# wants one sub-env per fixed pose context). MUST be passed to the cfg's n_envs too — the
+# override below does that, so the server and the client cannot disagree.
+NUM_ENVS=${NUM_ENVS:-5}
 # Unique per job: several checkpoint evals often run in parallel, and if two land on the SAME
 # node a fixed port makes the second server fail to bind (or worse, the client attaches to the
 # other job's sim). The value is arbitrary, but it MUST be given to BOTH ends: the server takes
@@ -62,6 +65,21 @@ CFG_NAME=${CFG_NAME:-eval_diffusion_pointnet}
 # The eval cfg's default points at single_lift_mushroom_soft_pcd; override NORM for a policy
 # trained on a different dataset (e.g. ..._wide1k) or the obs are mis-scaled and results are junk.
 NORM=${NORM:-$REPO/dataset/dppo/single_lift_mushroom_soft_pcd/normalization.npz}
+
+# ---- RECORD COMMANDS + OBSERVATIONS BY DEFAULT (user mandate 2026-08-28) -------------------
+# Every eval dumps its commanded actions and observations unless explicitly disabled. Rationale:
+# aggregate metrics (success/stress) cannot diagnose BEHAVIOUR. The arm-F approach-offset was
+# only visible because a human watched the renders, and answering it needed a SECOND eval purely
+# to capture obs -- wasted GPU time that a default-on dump makes unnecessary. Dumps are small
+# (state+action only); the point CLOUD stays opt-in via GM_OBS_DUMP_CLOUD=1 because it is large.
+# Set GM_DUMP_OFF=1 to disable.
+if [ "${GM_DUMP_OFF:-0}" != "1" ]; then
+    _DTAG=${EVAL_SUBDIR:-eval}_${SLURM_JOB_ID:-local}
+    export GM_WIDTH_DUMP=${GM_WIDTH_DUMP:-$_DTAG}
+    export GM_OBS_DUMP=${GM_OBS_DUMP:-$_DTAG}
+    export GM_WIDTH_NORM=${GM_WIDTH_NORM:-$NORM}   # dumps convert with THIS eval's normalization
+    echo "[sbatch] dumps ON (default): width=$GM_WIDTH_DUMP obs=$GM_OBS_DUMP cloud=${GM_OBS_DUMP_CLOUD:-0}"
+fi
 
 export WANDB_MODE=offline
 export MUJOCO_GL=egl

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+import os
 import numpy as np
 from scipy.spatial.transform import Rotation
 
@@ -100,6 +101,9 @@ class SimBackend:
         # Optional per-step rate limit for ABSOLUTE commands (delta-`scales` layout). Assigned by
         # PolicyEnv from ActionConfig.rate_limit; None (default) = no limiting, behaviour unchanged.
         self.rate_limit = None
+        # Set by PolicyEnv from ActionConfig.gripper_delta. When True the 8-dim absolute command's
+        # gripper slot carries a per-step DELTA (metres) to accumulate, not an absolute width.
+        self.gripper_delta = False
         self._last_state: Optional[dict] = None
 
     # ── Backend protocol ──────────────────────────────────────────────────────
@@ -135,6 +139,33 @@ class SimBackend:
         self._last_reset_dr = {"object_dxy": object_dxy, "home_offset": home_offset,
                                "object_euler": object_euler}
 
+        # ---- CONTROLLED POSE PINNING (2026-08-27) -----------------------------------------
+        # GM_FIXED_POSE=1 zeroes the object XY offset and the arm home offset; GM_FIXED_YAW_DEG
+        # pins the object's yaw (roll/pitch 0). Together with GM_FIXED_SCALES this leaves SIZE as
+        # the only variable, which is exactly what a size-sensitivity measurement needs.
+        if os.environ.get("GM_FIXED_POSE"):
+            # Each SUB-ENV keeps its OWN pose context for the whole run (drawn once, then reused),
+            # so across batches the ONLY thing that changes is the object SIZE. That gives one
+            # size-sensitivity curve per pose context, and shows whether sensitivity depends on
+            # pose. GM_FIXED_YAW_DEG="0,45,90" assigns a yaw per env; a single value applies to all.
+            if not hasattr(self, "_pinned_pose"):
+                _r = np.random.default_rng(int(os.environ.get("GM_FIXED_POSE_SEED", "0")))
+                _yaw = os.environ.get("GM_FIXED_YAW_DEG")
+                if _yaw:
+                    _ys = [float(x) for x in _yaw.split(",") if x.strip()]
+                    yaws = np.array([_ys[i % len(_ys)] for i in range(self.num_envs)], np.float32)
+                else:                                   # spread evenly if not specified
+                    yaws = np.linspace(0.0, 90.0, self.num_envs, dtype=np.float32)
+                dxy = self._dr.sample_object_dxy(_r, self.num_envs) \
+                    if self._dr.object_pos_xy is not None else np.zeros((self.num_envs, 2), np.float32)
+                home = np.zeros((self.num_envs, 3), np.float32)
+                eul = np.stack([np.zeros_like(yaws), np.zeros_like(yaws), yaws], axis=-1)
+                self._pinned_pose = (np.asarray(dxy, np.float32), home, eul.astype(np.float32))
+                print(f"[sim_backend] PINNED per-env pose: yaws={yaws.tolist()} "
+                      f"dxy={np.asarray(dxy).round(4).tolist()}", flush=True)
+            object_dxy, home_offset, object_euler = self._pinned_pose
+            self._last_reset_dr = {"object_dxy": object_dxy, "home_offset": home_offset,
+                                   "object_euler": object_euler}
         state = self.process.reset(object_dxy, home_offset, object_euler)
         self._last_state = state
         # Seed targets from the actual reset pose so the first deltas are relative
@@ -185,6 +216,24 @@ class SimBackend:
         import numpy as _np
         mat = self._dr.sample_scene(self._rng)                   # E/nu/rho/yield/coup (absolute)
         shp = self._dr.sample_shape_scale(self._rng)             # scale + bend/twist/taper/rbf
+        # ---- CONTROLLED SIZE SWEEP (2026-08-27) -------------------------------------------
+        # GM_FIXED_SCALES="0.8,0.9,1.0,..." pins the object scale to a DETERMINISTIC CYCLE, one
+        # value per scene rebuild, instead of a uniform draw. With pose/home DR also pinned
+        # (GM_FIXED_POSE) this makes SIZE the only variable across batches — the closed-loop
+        # sensitivity test. Offline probes could not do this: they could not hold pose fixed
+        # while varying size, and every attempt confounded the two.
+        import os as _os
+        _fs = _os.environ.get("GM_FIXED_SCALES")
+        if _fs:
+            _vals = [float(x) for x in _fs.split(",") if x.strip()]
+            _i = getattr(self, "_fixed_scale_i", 0)
+            shp = dict(shp)
+            shp["scale"] = _vals[_i % len(_vals)]
+            self._fixed_scale_i = _i + 1
+            for _k in ("bend", "twist", "taper", "rbf", "axis_scale", "axis_scale_ax"):
+                shp.pop(_k, None)                                # shape DR OFF: size only
+            print(f"[sim_backend] FIXED SCALE {shp['scale']:.3f} (sweep {_i % len(_vals)+1}/{len(_vals)})",
+                  flush=True)
         variant = self._dr.sample_mesh_variant(self._rng)        # base-mesh pool pick (or None)
         self._applied_scene = {}
         if (not mat and not shp and variant is None) or not spec.objects:
@@ -284,6 +333,10 @@ class SimBackend:
             # to set directly (no accumulation). Still clip to the workspace box for
             # safety even though ActionPipeline already mapped into pos_min/pos_max.
             pos, quat, grip = action[:, :3], action[:, 3:7], action[:, 7]
+            if self.gripper_delta:
+                # Resolve the DELTA into an absolute target BEFORE the rate limiter, so the
+                # existing clamp (which expects an absolute grip) keeps working unchanged.
+                grip = np.clip(self._target_gripper + grip, 0.0, self._gripper_max)
             if self.rate_limit is not None:
                 # Per-step rate limit against the RUNNING target (seeded from the measured pose at
                 # reset): an absolute policy that emits a pose jump otherwise executes it at full

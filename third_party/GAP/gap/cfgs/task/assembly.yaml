@@ -1,0 +1,15 @@
+defaults:
+  - _self_
+
+name: assembly
+data_path: '${all_data}/metaworld/${task.name}.pkl'
+pro_dim: 9
+action_shape: 4
+demo_num: 100
+
+TaskEnv:
+  _target_: envs.MetaWorldTask
+  task_name: '${task.name}-v2'
+  seed: ${seed}
+  max_env_horizon: 200
+  save_video: ${save_video}
