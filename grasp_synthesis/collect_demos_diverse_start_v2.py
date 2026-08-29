@@ -99,10 +99,10 @@ N_PREROLL_STEPS = 60           # unrecorded home -> start-pose steps (all non-ho
 # path: "above" (over the object, wrong height/rotation), "ground" (descended low to
 # the wrong spot), "air" (wandered off). --start-modes sets the family weights;
 # legacy keys (home/near_object/mid_approach) fold into "sweep".
-START_FAMILIES = ("sweep", "above", "ground", "air")
+START_FAMILIES = ("sweep", "above", "ground", "air", "failed")
 _LEGACY_FAMILY = {"home": "sweep", "near_object": "sweep", "mid_approach": "sweep",
-                  "above_object": "above", "near_ground": "ground", "mid_air": "air"}
-DEFAULT_START_MODES = "sweep:0.62,above:0.15,ground:0.12,air:0.11"
+                  "above_object": "above", "near_ground": "ground", "mid_air": "air", "failed_grasp": "failed"}
+DEFAULT_START_MODES = "sweep:0.44,failed:0.30,above:0.10,ground:0.09,air:0.07"
 
 
 def _wxyz_to_rot(q): return Rot.from_quat([q[1], q[2], q[3], q[0]])
@@ -156,8 +156,12 @@ def _parse_start_modes(spec: str) -> Tuple[np.ndarray, np.ndarray]:
 
 
 def _sample_start(fam: str, home_p, home_q, grasp_p, grasp_q, obj_p, rng):
-    """(start_pos(3), start_quat wxyz(4), n_recorded_approach:int, label:str).
-    Gripper open, orientation ~ grasp orientation. `fam` in START_FAMILIES."""
+    """(start_pos(3), start_quat wxyz(4), n_recorded_approach:int, label:str,
+    recover_from(3) or None). recover_from is set ONLY for the "failed" family:
+    a pose AT the object with the gripper CLOSED (a just-missed first grasp) that
+    the recorded trajectory OPENS + backs away from before the real approach --
+    the explicit reopen-and-retry demonstration a regrasp policy needs.
+    Gripper open (except "failed"), orientation ~ grasp orientation."""
     N = v1.N_HOME_TO_PRE
 
     def _slerp(qa, qb, t):
@@ -174,7 +178,7 @@ def _sample_start(fam: str, home_p, home_q, grasp_p, grasp_q, obj_p, rng):
         q = _rot_to_wxyz(jit * base)
         n_appr = int(np.clip(round(N * (1.0 - 0.72 * t)), 24, N))
         label = "home" if t < 0.15 else ("near_object" if t > 0.72 else "mid_approach")
-        return _clamp_ws(p), q, n_appr, label
+        return _clamp_ws(p), q, n_appr, label, None
 
     if fam == "above":
         h = rng.uniform(0.03, 0.20)
@@ -183,20 +187,31 @@ def _sample_start(fam: str, home_p, home_q, grasp_p, grasp_q, obj_p, rng):
         tilt = Rot.from_rotvec(np.array([rng.uniform(-0.4, 0.4), rng.uniform(-0.4, 0.4),
                                          rng.uniform(-np.pi, np.pi)], np.float32))
         q = _rot_to_wxyz(tilt * _wxyz_to_rot(grasp_q))
-        return _clamp_ws(p), q, max(28, N // 2), "above_object"
+        return _clamp_ws(p), q, max(28, N // 2), "above_object", None
 
     if fam == "ground":
         ang = rng.uniform(0, 2 * np.pi); r = rng.uniform(0.05, 0.16)
         p = grasp_p + np.array([r * np.cos(ang), r * np.sin(ang),
                                 rng.uniform(-0.04, 0.02)], np.float32)
         p[2] = min(p[2], grasp_p[2] + 0.03)
-        return _clamp_ws(p), _rot_to_wxyz(_wxyz_to_rot(grasp_q)), max(40, N // 2), "near_ground"
+        return _clamp_ws(p), _rot_to_wxyz(_wxyz_to_rot(grasp_q)), max(40, N // 2), "near_ground", None
 
     # air: random point in a box around home
     off = np.array([rng.uniform(-0.11, 0.11), rng.uniform(-0.13, 0.13),
                     rng.uniform(-0.09, 0.07)], np.float32)
     dq = Rot.from_rotvec(rng.normal(0, 0.18, 3))
-    return _clamp_ws(home_p + off), _rot_to_wxyz(dq * _wxyz_to_rot(home_q)), N, "mid_air"
+    if fam == "failed":
+        # recover_from = a just-missed grasp: at the object (small random xy/z error),
+        # gripper CLOSED. start_pos = a hover ~4-8cm up & slightly toward the true
+        # grasp, gripper OPEN -- where the recorded "recover" phase ends before the
+        # normal approach takes over.
+        err = rng.normal(0, 1, 3).astype(np.float32) * np.array([0.015, 0.015, 0.008], np.float32)
+        recover_from = _clamp_ws(grasp_p + err)
+        up = np.array([rng.uniform(-0.02, 0.02), rng.uniform(-0.02, 0.02),
+                       rng.uniform(0.04, 0.09)], np.float32)
+        start = _clamp_ws(grasp_p + up)
+        return start, _rot_to_wxyz(_wxyz_to_rot(grasp_q)), max(28, N // 2), "failed_grasp", recover_from
+    return _clamp_ws(home_p + off), _rot_to_wxyz(dq * _wxyz_to_rot(home_q)), N, "mid_air", None
 
 
 
@@ -246,13 +261,20 @@ def execute_and_collect_diverse_v2(
     start_pos  = np.zeros((num_envs, 3), np.float32)
     start_quat = np.zeros((num_envs, 4), np.float32)
     n_appr = np.zeros(num_envs, np.int64)
+    dur_recover = np.zeros(num_envs, np.int64)
+    recover_from = start_pos.copy()          # only meaningful where dur_recover>0
+    start_grip = width_open.copy()           # gripper width at the first RECORDED step
     labels = []
     for i in range(num_envs):
-        sp, sq, na, lab = _sample_start(modes[i], home_pos[i], home_quat[i],
-                                        pos_b[i], quat_b[i], obj_center[i], rng)
+        sp, sq, na, lab, rf = _sample_start(modes[i], home_pos[i], home_quat[i],
+                                            pos_b[i], quat_b[i], obj_center[i], rng)
         start_pos[i], start_quat[i] = sp, sq
         n_appr[i] = na
         labels.append(lab)
+        if rf is not None:                   # "failed" family: closed-gripper start + recover phase
+            recover_from[i] = rf
+            dur_recover[i]  = 34
+            start_grip[i]   = width_cls[i]   # gripper CLOSED (just missed the grasp)
     # per-env label (home/mid_approach/near_object/above_object/near_ground/mid_air) for
     # video filenames + the episode "start_mode" tag; the collector's caller reads it back.
     modes[:] = labels
@@ -266,12 +288,17 @@ def execute_and_collect_diverse_v2(
         return _rot_to_wxyz(Slerp([0., 1.], Rot.concatenate(
             [_wxyz_to_rot(qa), _wxyz_to_rot(qb)]))(float(np.clip(t, 0, 1))))
 
-    # ── Unrecorded pre-roll: home -> start_pose ──
+    # ── Unrecorded pre-roll: home -> (recover_from if failed else start_pose) ──
+    failed = dur_recover > 0
+    pre_target = np.where(failed[:, None], recover_from, start_pos)
     move = np.array([m != "home" for m in modes])   # modes now holds per-env labels
     for j in range(n_preroll_steps):
         a = np.where(move, np.clip((j + 1) / N_PREROLL_STEPS, 0.0, 1.0), 0.0)
         qb = np.stack([_slerp_pair(home_quat[i], start_quat[i], a[i]) for i in range(num_envs)])
-        worker.step(_lerp(home_pos, start_pos, a), qb.astype(np.float32), width_open)
+        # failed-grasp envs close the gripper over the final 40% of the pre-roll
+        gclose = np.clip((a - 0.6) / 0.4, 0.0, 1.0)
+        grip = np.where(failed, width_open + gclose * (width_cls - width_open), width_open)
+        worker.step(_lerp(home_pos, pre_target, a), qb.astype(np.float32), grip.astype(np.float32))
 
     # ── Recorded buffers ──
     obs_bufs:   List[List[dict]]       = [[] for _ in range(num_envs)]
@@ -283,7 +310,7 @@ def execute_and_collect_diverse_v2(
     cur_obs_list = [{k: init_obs_batch[k][i] for k in init_obs_batch} for i in range(num_envs)]
     prev_pos  = start_pos.copy()
     prev_quat = start_quat.copy()
-    prev_grip = width_open.copy()
+    prev_grip = start_grip.copy()
 
     rec_slerps = [Slerp([0., 1.], Rot.concatenate(
         [_wxyz_to_rot(start_quat[i]), _wxyz_to_rot(quat_b[i])])) for i in range(num_envs)]
@@ -293,23 +320,28 @@ def execute_and_collect_diverse_v2(
     dur_grasp  = np.full(num_envs, v1.N_GRASP,  np.int64)
     dur_lift   = np.full(num_envs, v1.N_LIFT,   np.int64)
     dur_hold   = np.full(num_envs, v1.N_HOLD,   np.int64)
-    PHASE_DUR  = [n_appr, dur_settle, dur_grasp, dur_lift, dur_hold]
+    PHASE_DUR  = [dur_recover, n_appr, dur_settle, dur_grasp, dur_lift, dur_hold]
     N_PHASES   = len(PHASE_DUR)
 
     def _env_target(i, ph, st):
         dur = int(PHASE_DUR[ph][i])
-        if ph == 0:      # approach
+        if ph == 0:      # recover (failed-grasp only; dur=0 otherwise): OPEN gripper +
+            a = min((st + 1) / max(dur, 1), 1.0)       # back away from the missed grasp
+            pos = recover_from[i] + a * (start_pos[i] - recover_from[i])
+            quat = quat_b[i]
+            grip = width_cls[i] + a * (width_open[i] - width_cls[i])
+        elif ph == 1:    # approach
             a = min((st + 1) / max(dur, 1), 1.0)
             pos = start_pos[i] + a * (pos_b[i] - start_pos[i])
             quat = _rot_to_wxyz(rec_slerps[i](float(a)))
             grip = width_open[i]
-        elif ph == 1:    # settle
+        elif ph == 2:    # settle
             pos, quat, grip = pos_b[i], quat_b[i], width_open[i]
-        elif ph == 2:    # grasp
+        elif ph == 3:    # grasp
             a = (st + 1) / max(dur, 1)
             pos, quat = pos_b[i], quat_b[i]
             grip = width_open[i] + a * (width_cls[i] - width_open[i])
-        elif ph == 3:    # lift
+        elif ph == 4:    # lift
             a = (st + 1) / max(dur, 1)
             pos = pos_b[i] + a * (lift_b[i] - pos_b[i])
             quat, grip = quat_b[i], width_cls[i]

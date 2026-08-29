@@ -41,7 +41,7 @@ wandb:
   group: dppo-pretrain
 
 train:
-  n_epochs: 1000
+  n_epochs: 300
   batch_size: 128
   learning_rate: 1e-4
   weight_decay: 1e-6
@@ -53,7 +53,7 @@ train:
   update_ema_freq: 5
   save_model_freq: 25
   val_freq: 10
-  early_stop_patience: 20
+  early_stop_patience: 8
   early_stop_min_delta: 1e-4
 
 model:

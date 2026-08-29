@@ -148,3 +148,24 @@ mushroom, banana, grape, kiwi, strawberry, tomato, cherry, raspberry, egg_boiled
   Pipeline 1772323 FAILED instantly on a bare `python3 -c "import numpy"` shape-check
   line (system python has no numpy) -- fixed to run in envs/dppo_arrhenius,
   resubmitted as 1773316 (BC pretrain -> 100-ep eval).
+
+## 2026-08-29 ~06:30 — RIGID EVAL #1 RESULT + regrasp gap
+Eval of best-val ckpt state_175 (val 0.035 @ ep180): **success_rate 0.71 / 100 eps**
+(harness canonical, wide-DR eval). vs the 41% non-regraspable soft baseline -> +30pt.
+BUT episodes.csv first_success_step is ~57 for ALL 71 successes, ZERO late successes:
+the policy grasps cleanly on the first try or fails -- **no within-episode reopen/
+regrasp**. Diverse STARTS made a robust single-grasp policy, not a regrasp policy,
+because (a) the harness eval never puts the policy in a failed state, and (b) every
+diverse start had the gripper OPEN -- the demos never show "gripper closed on
+nothing -> reopen -> retry".
+FIXES (committed):
+ - v2 collector: new "failed" start family (weight 0.30). Pre-roll descends to the
+   object + CLOSES the gripper (a just-missed grasp); a new recorded PHASE 0
+   "recover" then OPENS + backs away before the normal approach -> the explicit
+   reopen-and-retry demonstration, still one continuous episode.
+ - single_lift_banana_rigid_regrasp_eval experiment/DR: arm home forced LOW over the
+   object (robot_init_offset_xyz [0.05,0,-0.14]) so the eval actually starts in a
+   failed-attempt-like state. Diagnose via fss: late successes = real recovery.
+ - pretrain n_epochs 1000->300, early_stop_patience 20->8 (overfit clear by ep200).
+Next: recollect 500 with the "failed" family, retrain, eval on BOTH
+single_lift_banana_rigid_diverse (clean) AND ..._regrasp_eval (hard start).

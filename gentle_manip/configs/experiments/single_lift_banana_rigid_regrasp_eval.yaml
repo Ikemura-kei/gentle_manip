@@ -1,0 +1,14 @@
+# [experiment] Rigid-banana REGRASP eval: single_lift_banana_rigid task, wide object
+# DR, arm starting LOW over the object (rigid_orientation_banana_regrasp_eval) -- the
+# honest test of whether the diverse-start BC policy recovers from a failed-attempt-
+# like state rather than only grasping cleanly from home.
+# Used by: yd_banana_eval.sbatch (EXPERIMENT=single_lift_banana_rigid_regrasp_eval)
+# Status: experimental
+task: single_lift_banana_rigid
+action: delta_pose_delta_gripper
+dr: rigid_orientation_banana_regrasp_eval
+augmentation: l515_noise
+obs: superset_rigid
+views:
+  teacher: [privileged]
+  student: [point_cloud]

@@ -1,0 +1,17 @@
+# [dr] REGRASP eval DR: same wide object DR as rigid_orientation_banana_diverse, but
+# the arm home pose is FORCED LOW + OVER the object (robot_init_offset_xyz) so every
+# eval episode starts in a state resembling the end of a failed first grasp attempt
+# (EE deep in the workspace right above the banana). A policy that only does a clean
+# first grasp from home will do poorly here; one that learned recover/redescend from
+# the "failed" start family will recover. Pair with the fss (first_success_step)
+# column: late successes (fss > ~100) = genuine within-episode recovery.
+# Used by: experiments (dr:) single_lift_banana_rigid_regrasp_eval
+# Status: experimental
+object_pos_xy: 0.08
+object_yaw_deg: 180
+object_pitch_roll_deg: 14
+robot_init_pos_xyz: 0.05
+robot_init_offset_xyz: [0.05, 0.0, -0.14]
+
+object_scale:      [0.85, 1.20]
+object_axis_scale: [0.90, 1.10]
