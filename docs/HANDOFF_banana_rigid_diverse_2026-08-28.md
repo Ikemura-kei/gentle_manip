@@ -169,3 +169,15 @@ FIXES (committed):
  - pretrain n_epochs 1000->300, early_stop_patience 20->8 (overfit clear by ep200).
 Next: recollect 500 with the "failed" family, retrain, eval on BOTH
 single_lift_banana_rigid_diverse (clean) AND ..._regrasp_eval (hard start).
+
+## 2026-08-29 ~12:35 — iter 2 retrained (run xkrpq), 3 evals running
+Collection 26-08-29-ylr: 500 demos, ~110 "failed" recovery episodes (SR 37.9%).
+BC pretrain xkrpq: best val 0.0334 @ ep160 (state_150). early_stop_patience=8 did
+NOT fire (DPPO fork counts differently) -> ran to the 300 cap, overfit to val 0.042.
+Evals (parallel):
+ - 1773865 (pipeline): state_300 (overfit last ckpt -- pipeline BEST= bug), clean + regrasp
+ - 1775655: state_150 (best val), CLEAN experiment
+ - 1775656: state_150 (best val), REGRASP-start experiment (arm low over object)
+Diagnose: SR per experiment + first_success_step distribution -- LATE successes
+(fss > ~100) in the regrasp eval = genuine within-episode recovery (the whole point).
+TODO: fix the pipeline BEST= to pick best-val; investigate DPPO early-stop.
