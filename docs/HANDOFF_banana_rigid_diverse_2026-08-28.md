@@ -209,3 +209,8 @@ Keep the ~70/30 direct-vs-failed demo ratio. Changes for the soft round:
    ground/air 0.06 each, failed 0.30. Object DR wide (pos 0.10, full yaw, +-14).
 5. Softened the regrasp-eval home offset ([0.04,0,-0.11] vs rigid [0.05,0,-0.14])
    to avoid MPM NaN.
+
+## 2026-08-29 ~15:20 — soft grasp gentleness tuning
+close margin sweep (soft): +0.5mm past surface -> ~44% crush-reject (too hard);
+-1mm before surface -> 0% crush but ~25% lift SR (too loose). Landed on **0 margin
+(at the nominal surface)** + crush gate at 1.25x yield. Collect job 1778959.
