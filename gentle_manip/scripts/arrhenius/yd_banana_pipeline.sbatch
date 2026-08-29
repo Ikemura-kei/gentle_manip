@@ -26,7 +26,7 @@ echo; echo "========== convert -> $DPPO_DATA_DIR/$ENV_NAME =========="
 uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.convert_demos \
   "$DEMO_RUN" --out "$DPPO_DATA_DIR/$ENV_NAME" \
   --experiment "$EXPERIMENT" --view student --point-cloud --val-split 0.1
-python3 -c "import numpy as np; d=np.load('$DPPO_DATA_DIR/$ENV_NAME/train.npz'); print('train', {k:d[k].shape for k in d.files})"
+uv run --project envs/dppo_arrhenius --no-sync python -c "import numpy as np; d=np.load('$DPPO_DATA_DIR/$ENV_NAME/train.npz'); print('train', {k:d[k].shape for k in d.files})" || true
 
 echo; echo "========== BC pretrain =========="
 PRE_LOG=$REPO/logs/slurm_logs/${SLURM_JOB_ID:-local}_pretrain.log
