@@ -26,8 +26,9 @@ if [ -z "${CKPT:-}" ]; then
     "$REPO/gentle_manip/scripts/arrhenius/_pick_best_ckpt.py" "$RUN_DIR" "${PRE_LOG:-}")
 fi
 echo "[geneval] ckpt: $CKPT"
-INDOMAIN="mushroom banana_lying kiwi egg_boiled"
-OOD="apple pear avocado pasta_bundle dumpling"
+INDOMAIN="mushroom banana_lying kiwi egg_boiled grape cherry tomato raspberry"
+OOD="blackberry scallop dumpling gelatin"          # matches the GRACE zero-shot set
+SMALL="grape cherry tomato raspberry blackberry scallop"   # -> finer-grid _small eval task
 CATS=${CATS:-$INDOMAIN $OOD}
 OUT="$RUN_DIR/gen_eval_$(date +%Y%m%d_%H%M%S)"; mkdir -p "$OUT"
 echo "[geneval] categories: $CATS -> $OUT"
@@ -36,9 +37,11 @@ i=0
 for cat in $CATS; do
   i=$((i+1)); PORT=$((5600 + (${SLURM_JOB_ID:-0} + i) % 250))
   SRV=$REPO/logs/slurm_logs/${SLURM_JOB_ID:-local}_srv_${cat}.log
-  echo; echo "=== [$cat] ==="
+  EXP=single_lift_xcat_gen_eval
+  case " $SMALL " in *" $cat "*) EXP=single_lift_xcat_gen_eval_small ;; esac
+  echo; echo "=== [$cat]  ($EXP) ==="
   uv run --project envs/sim_arrhenius --no-sync python -m gentle_manip.scripts.serl_sim_server \
-    --experiment single_lift_xcat_gen_eval --dr eval_cat_${cat} --view student \
+    --experiment "$EXP" --dr eval_cat_${cat} --view student \
     --num-envs 5 --render-rgb --subprocess --port "$PORT" > "$SRV" 2>&1 &
   P=$!; trap 'kill $P 2>/dev/null||true' EXIT
   for _ in $(seq 1 180); do grep -q SIM_SERVER_READY "$SRV" && break
@@ -47,7 +50,7 @@ for cat in $CATS; do
   LOGDIR="$OUT/$cat"
   uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.train \
     --config-path "$CFG_DIR" --config-name eval_diffusion_pointnet \
-    base_policy_path="$CKPT" ft_denoising_steps=0 experiment=single_lift_xcat_gen_eval \
+    base_policy_path="$CKPT" ft_denoising_steps=0 experiment="$EXP" \
     env.specific.port="$PORT" logdir="$LOGDIR" || echo "[$cat] eval failed"
   kill $P 2>/dev/null || true; sleep 3
   uv run --project envs/sim_arrhenius --no-sync python \

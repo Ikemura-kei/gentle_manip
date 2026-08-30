@@ -1,0 +1,10 @@
+# [dr] Per-category generalist eval DR (OOD): pool pinned to blackberry. EE init spans
+# home <-> near-object (matches training). Used by: yd_gen_eval.sbatch (CAT=blackberry)
+# Status: experimental
+object_pos_xy: 0.09
+object_yaw_deg: 180
+object_pitch_roll_deg: 14
+robot_init_offset_xyz: [0.03, 0.0, -0.045]
+robot_init_pos_xyz: 0.065
+object_category_pool: ["blackberry"]
+object_scale:      [0.90, 1.12]
