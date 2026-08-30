@@ -367,3 +367,20 @@ Re-smoke 1792749 still 0-success + strawberry mesh crash. Diagnosed:
 - crush_frac default 1.10 -> **1.20** (the tighter grip now does the gentleness work;
   1.10 would starve the dataset).
 Committed. -> re-smoke 1792788 (12 ep / 3 env).
+
+---
+## 2026-08-30 04:40 — Phase 4 smoke fix 3
+
+Smoke 1792788: still 0-success + strawberry crash. Root causes:
+- **strawberry.obj is a 1.4 KB PLACEHOLDER mesh** (egg=37KB, kiwi=26KB) -> 99% quadric
+  decimation in build_object_sdf collapses it -> trimesh rtree "Bounds must be
+  (n,dimension*2)". Dropped strawberry. `_mesh_ok` guard kept (catches deform
+  degeneracy, not this).
+- **0-success across mushroom + banana_lying** even though the banana proof got 54%
+  on the identical collector -> the only diff was physics (grid 190 / substeps 440).
+  Reverted the COLLECTION task to the banana-COLLECTION values **grid 250 / substeps
+  240** (54% SR + regrasp confirmed there). Also reverted the soft width cap to the
+  banana-proven `_short + 2mm` (my 0.8*short "tighten" likely ejected the coarse-grid
+  soft body during close). EVAL task keeps CFL-safe grid 190/substeps 440.
+- Pool now **4 objects**: mushroom, banana_lying, kiwi, egg_boiled.
+-> re-smoke 1792811 (15 ep / 3 env). Expect >0 saves this time.
