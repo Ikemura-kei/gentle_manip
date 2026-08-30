@@ -9,10 +9,11 @@
 #   knobs (env): N_EPISODES N_ENVS MAXFEVALS SEED START_MODES CRUSH_FRAC SCENE_DR_EVERY TAG EXPERIMENT
 #SBATCH -J yd_xcat
 #SBATCH -N 1
-#SBATCH -t 71:00:00
+#SBATCH -t 24:00:00
 #SBATCH -A naiss2026-3-141-gpu
 #SBATCH -p gpu
 #SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=64
 #SBATCH --output=/nobackup/proj/disk/softenable-codesign26/personal/yifeid/gentle_manip/logs/slurm_logs/%j.out
 #SBATCH --error=/nobackup/proj/disk/softenable-codesign26/personal/yifeid/gentle_manip/logs/slurm_logs/%j.err
 set -euo pipefail
@@ -20,7 +21,9 @@ REPO=/nobackup/proj/disk/softenable-codesign26/personal/yifeid/gentle_manip
 source "$REPO/gentle_manip/scripts/arrhenius/yd_env_common.sh"
 
 N_EPISODES=${N_EPISODES:-4500}
-N_ENVS=${N_ENVS:-6}
+N_ENVS=${N_ENVS:-16}   # GH200: 1 GPU + 64 CPU/job; n_envs=6 left the GPU ~0% util / 4GB of 98GB.
+                       # CMA runs n_envs parallel CPU workers; Genesis steps an n_envs batch.
+                       # 16-24 is comfortable; render (1 pcd cam/env/step) is the real cost.
 EXPERIMENT=${EXPERIMENT:-single_lift_xcat_diverse}
 SCENE_DR_EVERY=${SCENE_DR_EVERY:-1}          # draw a new object every batch
 MAXFEVALS=${MAXFEVALS:-700}
