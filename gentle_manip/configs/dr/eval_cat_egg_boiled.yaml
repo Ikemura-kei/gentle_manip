@@ -11,3 +11,9 @@ robot_init_offset_xyz: [0.03, 0.0, -0.045]   # midpoint home(0.40,0,0.21) -> nea
 robot_init_pos_xyz: 0.065                    # +/- box spanning exact-home .. just-above-object
 object_category_pool: ["egg_boiled"]
 object_scale:      [0.88, 1.15]
+
+# scene-level (rebuilt every scene_group -> every 5 eval episodes):
+object_bend_deg:   [-4.0, 4.0]
+object_twist_deg:  [-4.0, 4.0]
+object_taper:      [-0.03, 0.03]
+object_axis_scale: [0.92, 1.08]
