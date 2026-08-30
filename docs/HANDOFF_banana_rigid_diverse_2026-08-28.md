@@ -431,3 +431,12 @@ STOP-CONDITION check: Phase 4 collection running steadily = YES. All *reachable*
 evals diagnosed = YES (rigid banana iter1/2, soft banana clean_v2/regrasp_v2). The
 generalist policy can't be evaluated until it trains -> preliminary generalist BC
 train + dual eval will fire once ~600 demos/side accumulate (~13 h), tracked here.
+
+---
+## 2026-08-30 07:00 — Phase 4 collections @ 2h
+
+- 1792833 xcat_regrasp: 127/4500 (~1/min), batchfail 1/43 (caught).
+- 1792834 xcat_baseline: 207/4500 (~1.7/min), batchfail 0/51.
+- Both stable. Generalist preliminary train will fire when xcat_regrasp reaches
+  ~500-600 (~7-8 h out at current rate). Baseline will be ready first (~3 h).
+- No code/config changes needed.
