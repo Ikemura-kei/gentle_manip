@@ -444,7 +444,7 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
-**2026-08-30 — v4.1-vs-v4.2 A/B COMPLETE (6/7; tofu-v4.2 pending): the metrics BRACKET the object
+**2026-08-30 — v4.1-vs-v4.2 A/B COMPLETE (7/7): the metrics BRACKET the object
 set. Collection recipe decided: p98, by the asymmetric-bars argument. Cluster handoff written
 (`docs/collection_v4_handoff.md`); `integrate-all-2026-08-29` merged.**
 
@@ -454,7 +454,7 @@ set. Collection recipe decided: p98, by the asymmetric-bars argument. Cluster ha
 | raspberry | 100 / 88 ✓ | 100 / **56** ✗ |
 | cherry_tomato | 76.2 / 81 ✓ | 57.1 / 75 ✗ |
 | tomato | 80.0 / 100 ✓ | 66.7 / 100 ✓ |
-| tofu | 66.7 / 100 ✓ | (running) |
+| tofu | 66.7 / 100 ✓ | 76.2 / 100 ✓ |
 | strawberry | **45.7** / 94 ✗ | 88.9 / 94 ✓ |
 | banana_chunk | **42.1** / 100 ✗ | 59.3 / 100 ✗ (hair) |
 

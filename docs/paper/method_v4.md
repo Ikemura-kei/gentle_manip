@@ -236,7 +236,7 @@ Both scan metrics, 16-episode runs per object, both bars = success ≥ 60 % AND 
 | raspberry | 100 % / 88 % ✓ | 100 % / **56 %** ✗ |
 | cherry_tomato | 76.2 % / 81 % ✓ | 57.1 % / 75 % ✗ |
 | tomato | 80.0 % / 100 % ✓ | 66.7 % / 100 % ✓ |
-| tofu | 66.7 % / 100 % ✓ | (running) |
+| tofu | 66.7 % / 100 % ✓ | 76.2 % / 100 % ✓ |
 | strawberry | **45.7 %** / 94 % ✗ | 88.9 % / 94 % ✓ |
 | banana_chunk | **42.1 %** / 100 % ✗ | 59.3 % / 100 % ✗ (hair) |
 
