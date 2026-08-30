@@ -6031,3 +6031,49 @@ table with clean depth, explicit geometry is at least as good and gentler. The l
 demonstrated edge is the SPARSE-CLOUD regime. Everything else a learned policy should buy —
 clutter, occlusion, non-top-down grasps, real-robot transfer — is UNTESTED. That is where the
 remaining effort belongs.
+
+### 2026-08-29 — ⚠ CORRECTION: the scripted baseline does NOT beat the learned policy. My v1 was given the answer.
+
+The user caught three things wrong with the v1 baseline: it must be top-down ALWAYS, it should be a
+simple width estimate then grasp, and **it must not use mesh information**. All three were right, and
+the third was a genuine leak I introduced.
+
+**THE LEAK.** v1 used `VIS_TO_TRUE = 1.23`, derived as (mushroom nominal **33 mm** from the MESH
+REGISTRY) / (visible 26.8 mm). That is privileged information the learned policy never gets. v1 also
+searched yaw for the object's narrowest axis — orientation OPTIMISATION, not a plain top-down grasp.
+
+**v2 removes both.** Fixed top-down yaw; width = the extent it MEASURES along the gripper's closing
+axis, minus a 2 mm squeeze. Nothing from the registry.
+
+| object | LEARNED | v1 (mesh factor + yaw search) | **v2 (honest vision-only)** |
+|---|---|---|---|
+| mushroom | **0.915** / 35,167 | 0.940 / 28,934 | **0.395** / 13,706 |
+| tofu | **0.785** / 12,645 | 0.760 / 9,184 | **0.070** / 5,137 |
+| raspberry | **0.583** | 0.467 | ~0.04 (killed degenerate) |
+
+**MECHANISMS, all read off the dumps rather than inferred:**
+- **tofu 0.070** — commanded width median **42.2 mm**. A 30 mm cube on a diagonal presents
+  sqrt(2)x30 = **42.4 mm** to a FIXED axis. With yaw fixed the gripper measures the diagonal and
+  opens to it, so it never closes on a face. A fixed top-down grasp cannot handle a box at arbitrary
+  yaw — aligning the jaws with a face is exactly what the yaw search had been doing.
+- **mushroom 0.395** — commanded **37.9 mm** on a ~33 mm object: a fixed axis measures a wider extent
+  than the narrowest one, and without the (illegitimate) 1.23 factor the result is still too wide to
+  grip. Stress 13,706 confirms it is barely touching.
+- **raspberry ~0.04** — width now CORRECT (median 15.3 mm on a ~15 mm object) but `X_BIAS_M = 0.018`
+  is a parallax constant calibrated on mushroom/tofu. Parallax scales with the object's own radius,
+  so an 18 mm correction on a 15 mm object overshoots past the object entirely.
+
+**SO THE REVIEWER CHALLENGE IS MUCH WEAKER THAN I REPORTED.** My earlier entry ("A NO-LEARNING
+BASELINE BEATS THE LEARNED POLICY ON MUSHROOM") stands only for a baseline that was handed the mesh's
+nominal size and allowed to optimise orientation. **Corrected: a genuinely vision-only, mesh-free,
+fixed-top-down grasp is 2.3x-11x worse than the learned policy on every object tested.**
+
+⚠ **WHAT IS STILL UNTESTED, and it is the fair middle case:** yaw search (legitimate — it is
+geometric, no mesh) WITH measured-only width (no mesh factor). v1 confounded the two advantages;
+v2 removed both. That arm would separate "orientation selection" from "privileged size", and it is
+the honest strongest form of the reviewer's baseline.
+
+**METHOD LESSON:** I calibrated three constants (`X_BIAS_M`, `VIS_TO_TRUE`, `SQUEEZE_M`) on one
+object and reported the baseline as vision-only. Two of them silently encoded that object's scale.
+**A constant fitted per-object is privileged information wearing a different hat** — the user caught
+what I did not.

@@ -26,8 +26,15 @@ from scipy.spatial.transform import Rotation
 from gentle_manip.actions.pipeline import invert_absolute_action
 
 # --- calibrated ON MUSHROOM, deliberately: that is the point of the experiment ----------------
-X_BIAS_M      = 0.018     # single-camera parallax; measured +19.9 mm mushroom / +17.3 mm tofu
-VIS_TO_TRUE   = 1.23      # visible extent underestimates true extent (partial view): 26.8 -> 33 mm
+# NO MESH / REGISTRY INFORMATION (user, 2026-08-29). The policy commands the width it MEASURES.
+# REMOVED: a `VIS_TO_TRUE = 1.23` correction — it was derived as (mushroom nominal 33 mm) / (visible
+# 26.8 mm), i.e. the numerator was the MESH REGISTRY's nominal size. That is privileged information
+# and had no place in a vision-only baseline. Consequence, stated honestly: a single view sees only
+# the near face, so the measured extent UNDER-estimates the true one and this baseline will grip
+# tighter than before. That under-estimate is a genuine limitation of vision-only geometry and the
+# baseline should carry it rather than be handed the answer.
+X_BIAS_M      = 0.018     # single-camera parallax. Calibrated against WHERE THE ARM ACTUALLY GRASPED
+                          # (robot proprio, +19.9 mm mushroom / +17.3 mm tofu) — no mesh involved.
 SQUEEZE_M     = 0.002     # indentation to actually hold the object (size-only, material-blind)
 Z_GRASP_M     = 0.005     # measured: policies bottom out at ee_z ~3 mm at the grasp
 Z_HOVER_M     = 0.15
@@ -46,7 +53,16 @@ class ScriptedTopDownPolicy:
         self.a_hi = np.asarray(action_max, np.float64)
         self.act_steps = int(act_steps)
         self.n_envs = int(n_envs)
-        self.phase_steps = phase_steps          # approach, descend, close, lift (then hold)
+        self.phase_steps = phase_steps          # retained for signature compatibility (unused)
+        rl = getattr(action_config, "rate_limit", None) or [0.0045, 0.0045, 0.0055, 0, 0, 0, 0.005]
+        # 60% of what the backend would allow over one policy step (act_steps env steps), so the
+        # rate limiter is not saturated and the motion looks smooth rather than abrupt.
+        self._pstep = 0.6 * min(rl[0], rl[1], rl[2]) * int(act_steps)
+        self._gstep = 0.6 * rl[6] * int(act_steps)
+        self._o_lo = np.asarray(obs_min, float) if obs_min is not None else None
+        self._o_hi = np.asarray(obs_max, float) if obs_max is not None else None
+        self._tgt = [None] * int(n_envs); self._wp = [None] * int(n_envs)
+        self._wi = [0] * int(n_envs); self._hold = [0] * int(n_envs)
         # DUMPS: a new Policy adapter starts with NONE (the harness does not provide them) — this
         # is the third adapter to hit that trap, so they are wired in from the start here.
         self._dump_tag = os.environ.get("GM_WIDTH_DUMP")
@@ -62,6 +78,10 @@ class ScriptedTopDownPolicy:
     def reset(self):
         self._flush()
         self._est = [None] * self.n_envs        # (x, y, width, yaw) per env, fixed at t=0
+        self._tgt = [None] * self.n_envs        # running commanded target (pos3 + grip)
+        self._wp = [None] * self.n_envs         # waypoint list per env
+        self._wi = [0] * self.n_envs            # active waypoint index
+        self._hold = [0] * self.n_envs          # steps held at the current waypoint
         self._k = 0                             # policy-step counter
 
     def _flush(self):
@@ -86,7 +106,7 @@ class ScriptedTopDownPolicy:
     # ---- perception: STUDENT INFO ONLY --------------------------------------------------
     @staticmethod
     def _estimate(cloud):
-        """t=0 cloud -> (x, y, width, yaw). `object_focus` keeps the ARM (points near the EE, high
+        """t=0 cloud -> (x, y, width, yaw=0). `object_focus` keeps the ARM (points near the EE, high
         z) so the object is the LOW tail — median z is the arm, not the table."""
         # Thresholds must scale to SMALL objects: a 15 mm raspberry yields only ~13 points below
         # 10 cm (of which 4-7 above the table) in a 1024-point object_focus cloud, vs ~75 for a
@@ -104,13 +124,15 @@ class ScriptedTopDownPolicy:
         if len(obj) < 4:
             return None
         c = np.median(obj[:, :2], axis=0)
-        best_w, best_th = None, 0.0
-        for th in np.linspace(0, np.pi, 37, endpoint=False):       # grasp the NARROW axis
-            u = np.array([np.cos(th), np.sin(th)])
-            w = float(np.ptp(obj[:, :2] @ u))
-            if best_w is None or w < best_w:
-                best_w, best_th = w, th
-        return float(c[0]) - X_BIAS_M, float(c[1]), best_w, best_th
+        # WIDTH ONLY, FIXED TOP-DOWN YAW (user, 2026-08-29): "simple estimate on width then top
+        # down grasp with that width". No yaw search — searching for the narrow axis is orientation
+        # OPTIMISATION, which is extra capability a plain top-down baseline must not have, and on a
+        # near-axisymmetric mushroom that yaw is noise-driven wrist motion.
+        # With yaw fixed at 0 the euler_frame_offset [180,0,0] puts the tool frame at Rx(180 deg),
+        # which maps the gripper's tool-Y jaw axis onto WORLD Y — so the width to measure is the
+        # object's extent along world Y, not its narrowest extent.
+        width = float(np.ptp(obj[:, 1]))
+        return float(c[0]) - X_BIAS_M, float(c[1]), width, 0.0
 
     # ---- encoding: physical -> npz-normalized (the B10 affine, done once, here) ----------
     def _encode(self, pos, yaw, grip):
@@ -122,14 +144,26 @@ class ScriptedTopDownPolicy:
         return 2.0 * (u - self.a_lo) / (self.a_hi - self.a_lo + 1e-6) - 1.0
 
     def act(self, obs):
+        """Emit a target that MOVES every step.
+
+        Previously each phase held a FIXED target for a fixed number of steps, which (a) left the
+        arm idling once it arrived — visible pauses — and (b) made every phase transition a step
+        change in target, so the backend's rate limiter ran at MAX speed for the whole traverse
+        (the abrupt motion). Now the commanded target is interpolated toward the next waypoint at a
+        fraction of the rate limit, so the clamp rarely binds and no step is wasted.
+
+        Deliberate holds are kept ONLY where they mean something: while the gripper closes, and at
+        the end of the lift. No proprio feedback is used — the target advances on its OWN progress,
+        so this stays open-loop (and directly portable to the real backend).
+        """
         cloud = np.asarray(obs["point_cloud"])          # (n_env, T, N, 3) raw xyz, metres
         if cloud.ndim == 4:
             cloud = cloud[:, -1]
+        state = np.asarray(obs["state"])[:, -1]         # normalized proprio, LAST cond step
         out = np.zeros((self.n_envs, self.act_steps, int(self.a_lo.shape[0])), np.float32)
         self._wt_now = [0.0] * self.n_envs
-        # commanded z this step, per env — dumped so at_grasp() can find the grasp moment
         self._z_now = [0.0] * self.n_envs
-        pa, pd, pc_, pl = self.phase_steps
+
         for e in range(self.n_envs):
             if self._est[e] is None:                    # fix the estimate at t=0 and never revise
                 r = self._estimate(cloud[e])
@@ -140,26 +174,44 @@ class ScriptedTopDownPolicy:
                           f"(this episode is a perception failure, not a grasp failure)", flush=True)
                     r = (0.42, 0.0, 0.030, 0.0)
                 self._est[e] = r
-            x, y, w, yaw = self._est[e]
-            wt = float(np.clip(w * VIS_TO_TRUE - SQUEEZE_M, 0.004, GRIP_OPEN_M))
-            k = self._k
-            if k < pa:                                   z, g = Z_HOVER_M, GRIP_OPEN_M
-            elif k < pa + pd:                            z, g = Z_GRASP_M, GRIP_OPEN_M
-            elif k < pa + pd + pc_:                      z, g = Z_GRASP_M, wt
-            elif k < pa + pd + pc_ + pl:                 z, g = Z_LIFT_M, wt
-            else:                                        z, g = Z_LIFT_M, wt
-            out[e, :] = self._encode([x, y, z], yaw, g)[None, :]
-            if self._dump_tag:
-                self._wt_now[e] = wt
-                self._z_now[e] = z
+                x, y, w, _ = r
+                wt = float(np.clip(w - SQUEEZE_M, 0.004, GRIP_OPEN_M))   # MEASURED width only
+                # seed the running target from the ACTUAL start pose (initialisation, not feedback)
+                p0 = ((state[e, :3] + 1.0) / 2.0 * (self._o_hi[:3] - self._o_lo[:3] + 1e-6)
+                      + self._o_lo[:3]) if self._o_lo is not None else np.array([0.45, 0.0, 0.21])
+                self._tgt[e] = np.array([p0[0], p0[1], p0[2], GRIP_OPEN_M], float)
+                #        pos (x, y, z)                 grip     hold steps after arriving
+                self._wp[e] = [(np.array([x, y, Z_HOVER_M]), GRIP_OPEN_M, 0),   # over the object
+                               (np.array([x, y, Z_GRASP_M]), GRIP_OPEN_M, 0),   # descend
+                               (np.array([x, y, Z_GRASP_M]), wt,          4),   # CLOSE + hold
+                               (np.array([x, y, Z_LIFT_M]),  wt,          99)]  # lift + hold
+                self._wi[e], self._hold[e] = 0, 0
+
+            t = self._tgt[e]
+            i = min(self._wi[e], len(self._wp[e]) - 1)
+            goal_p, goal_g, hold = self._wp[e][i]
+            dp = goal_p - t[:3]
+            dg = goal_g - t[3]
+            n = float(np.linalg.norm(dp))
+            arrived = n < 0.003 and abs(dg) < 0.0005
+            if arrived:
+                if self._hold[e] < hold:
+                    self._hold[e] += 1                   # deliberate hold (closing / final hold)
+                elif self._wi[e] < len(self._wp[e]) - 1:
+                    self._wi[e] += 1; self._hold[e] = 0
+            else:                                        # MOVE — never idle at a reached target
+                if n > 1e-9:
+                    t[:3] += dp / n * min(n, self._pstep)
+                t[3] += float(np.clip(dg, -self._gstep, self._gstep))
+            out[e, :] = self._encode(t[:3], 0.0, t[3])[None, :]
+            self._wt_now[e], self._z_now[e] = t[3], t[2]
+
         if self._dump_tag:
             for _ in range(self.act_steps):
-                # ee_z must be REAL: decompose_width's at_grasp() finds the grasp via argmin(z).
-                # Writing NaN here silently produced "no data" after a 2h20m run.
                 self._buf_w.append(np.stack([np.array(self._wt_now) * 1000.0,
                                              np.asarray(self._z_now, np.float64)], axis=-1))
         if self._obs_tag:
-            self._buf_o["state"].append(np.asarray(obs["state"])[:, -1].copy())
+            self._buf_o["state"].append(state.copy())
             self._buf_o["wt"].append(np.array(self._wt_now) * 1000.0)
             if self._obs_cloud:
                 self._buf_o["cloud"].append(cloud.astype(np.float32).copy())

@@ -27,6 +27,7 @@ class ScriptedEvalAgent(EvalAgent):
         self.action_config = exp.action_config
         nz = np.load(cfg.normalization_path)
         self.action_min, self.action_max = nz["action_min"], nz["action_max"]
+        self.obs_min, self.obs_max = nz["obs_min"], nz["obs_max"]
         print(f"[scripted] action mode={self.action_config.mode} "
               f"rot={self.action_config.rot_repr} "
               f"gripper_delta={getattr(self.action_config,'gripper_delta',False)} "
@@ -42,7 +43,8 @@ class ScriptedEvalAgent(EvalAgent):
         )
         policy = ScriptedTopDownPolicy(
             self.action_config, self.action_min, self.action_max,
-            act_steps=self.act_steps, n_envs=self.n_envs)
+            act_steps=self.act_steps, n_envs=self.n_envs,
+            obs_min=self.obs_min, obs_max=self.obs_max)
         run_eval(self.venv, policy, spec, self.logdir,
                  experiment_name=self.cfg.get("experiment"),
                  checkpoint="SCRIPTED-vision-only-topdown",
