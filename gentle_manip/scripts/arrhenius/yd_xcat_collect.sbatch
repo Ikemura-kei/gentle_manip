@@ -21,9 +21,8 @@ REPO=/nobackup/proj/disk/softenable-codesign26/personal/yifeid/gentle_manip
 source "$REPO/gentle_manip/scripts/arrhenius/yd_env_common.sh"
 
 N_EPISODES=${N_EPISODES:-4500}
-N_ENVS=${N_ENVS:-16}   # GH200: 1 GPU + 64 CPU/job; n_envs=6 left the GPU ~0% util / 4GB of 98GB.
-                       # CMA runs n_envs parallel CPU workers; Genesis steps an n_envs batch.
-                       # 16-24 is comfortable; render (1 pcd cam/env/step) is the real cost.
+N_ENVS=${N_ENVS:-10}   # sweet spot: soft-MPM grasp execution does NOT parallelize free on GPU (contact-bound); n_envs 16-20 was net slower than 8-10
+                       # CMA runs n_envs parallel CPU workers; Genesis steps an n_envs MPM batch (contact-bound).
 EXPERIMENT=${EXPERIMENT:-single_lift_xcat_diverse}
 SCENE_DR_EVERY=${SCENE_DR_EVERY:-1}          # draw a new object every batch
 MAXFEVALS=${MAXFEVALS:-700}
