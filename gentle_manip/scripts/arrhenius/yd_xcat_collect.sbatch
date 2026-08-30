@@ -55,7 +55,7 @@ env -u PYTHONPATH -u ROS_DISTRO MUJOCO_GL=egl uv run --project envs/sim_arrheniu
   --experiment "$EXPERIMENT" --task-name "$TASK_DIR" \
   --n-episodes "$N_EPISODES" --n-envs "$N_ENVS" --maxfevals "$MAXFEVALS" \
   --scene-dr-every "$SCENE_DR_EVERY" --seed "$SEED" --start-modes "$START_MODES" \
-  --crush-frac "$CRUSH_FRAC" --record-video 60 --out-dir "$REPO/dataset/demos"
+  --crush-frac "$CRUSH_FRAC" --record-video "${REC_VIDEO:-60}" --out-dir "$REPO/dataset/demos"
 
 RUN=$(ls -dt "$REPO"/dataset/demos/$TASK_DIR/* | head -1)
 echo "[xcat] DONE -> $RUN"
