@@ -217,7 +217,20 @@ real redescend, not hover/jitter.
 
 ## 7. Push
 
-This recipe lives on branch **`cross-category-dp`** (66 commits ahead of
-`origin/cross-category-dp` at time of writing). Pushed to `origin` for the partner to
-branch from / cherry-pick into `main`. **Not merged to `master`** — the cross-category
-generalist work on the same branch is still experimental.
+Everything above is committed on branch **`cross-category-dp`** in
+`/nobackup/proj/disk/softenable-codesign26/personal/yifeid/gentle_manip`
+(67 commits ahead of `origin/cross-category-dp`, clean working tree).
+
+**Not yet pushed** — the Arrhenius login node has no cached GitHub credentials, so
+`git push` cannot run non-interactively from here. To publish for the partner:
+
+```bash
+cd /nobackup/proj/disk/softenable-codesign26/personal/yifeid/gentle_manip
+git push origin cross-category-dp
+```
+
+(or from the local mirror `/home/yifeid/git/gentle_manip` after `git fetch` + fast-forward.)
+
+**Do NOT merge to `master`** — the cross-category generalist work (`single_lift_xcat_*`)
+on the same branch is still experimental. The partner should branch from
+`cross-category-dp` or cherry-pick the soft-banana files listed in §1 into `main`.
