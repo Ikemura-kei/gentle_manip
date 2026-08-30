@@ -352,3 +352,18 @@ no crash, launch the two continuous runs.
 
 NOTE for later: adding the small fruit back needs per-object grid_density (finer)
 + object-size-scaled CMA bounds + a deform-mesh validity guard. Deferred.
+
+---
+## 2026-08-30 04:25 — Phase 4 smoke fix 2
+
+Re-smoke 1792749 still 0-success + strawberry mesh crash. Diagnosed:
+- **CMA-ES returns a STRADDLE width** (w=74-80mm, the 0.08 bound) on a 33mm mushroom
+  -> SDF cost ~0 but no contact. The soft width cap was `_short + 2mm` = 34mm on a
+  33mm object -> zero compression -> slips on lift. **Fix: soft `_wcap = 0.80*short`**
+  (~20% compression), `_floor = 0.42*short`. Rigid unchanged.
+- **strawberry deformed mesh degenerate** -> trimesh `bounds_tree` crash in the SDF
+  build. **Fix: `_mesh_ok()` validity guard in `_make_worker`** (finite AABB, extent
+  > 0.1mm, >=8 faces) -> retry deform up to 3x, then fall back to the nominal mesh.
+- crush_frac default 1.10 -> **1.20** (the tighter grip now does the gentleness work;
+  1.10 would starve the dataset).
+Committed. -> re-smoke 1792788 (12 ep / 3 env).
