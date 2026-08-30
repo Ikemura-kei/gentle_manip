@@ -23,6 +23,7 @@ class SingleLiftTask(BaseTask):
         self.object_type: str = str(task_cfg.get("object_type", "soft"))  # "soft" | "rigid"
         # optional wrist camera (VLA baselines want a base + wrist view); OFF by default
         self.wrist_camera: bool = bool(task_cfg.get("wrist_camera", False))
+        self.backdrop: bool = bool(task_cfg.get("backdrop", False))
 
         # Success: either an ABSOLUTE object-center z-band [min, max] (ruler-checkable on
         # the real robot — the center must sit in this height window), or, if unset, the
@@ -69,11 +70,27 @@ class SingleLiftTask(BaseTask):
         # (examples/gs_sim_backend_dev.py): the grasp reproduces only with this
         # dt/substeps/mpm_bounds/grid_density. One external camera matches the real
         # single-camera rig (cam_ext at the calibrated WORLD_T_CAM_EXT pose).
+        # BACKDROP (opt-in, task cfg `backdrop: true`). Occludes the NEIGHBOURING PARALLEL ENVS
+        # that otherwise appear on cam_ext's horizon (see fixtures.add_fixtures for why MPM scenes
+        # cannot separate envs in the renderer). They MOVE, so they are dynamic distractors in the
+        # RGB observation; the point cloud was never affected because it is cropped.
+        # Walls sit OUTSIDE the point-cloud crop (x<=0.71, |y|<=0.215), so every point-cloud
+        # experiment stays bit-identical. Opt-in: only RGB/VLA tasks should enable it.
+        _fixtures = [FixtureEntry(fixture_type="table")]
+        if self.backdrop:
+            _fixtures += [
+                FixtureEntry(fixture_type="backdrop", pose=(-0.55, 0.0, 0.75),
+                             params={"size": (0.02, 4.0, 1.5)}),      # behind the robot
+                FixtureEntry(fixture_type="backdrop", pose=(0.3, -1.2, 0.75),
+                             params={"size": (4.0, 0.02, 1.5)}),      # side wall -y
+                FixtureEntry(fixture_type="backdrop", pose=(0.3, 1.2, 0.75),
+                             params={"size": (4.0, 0.02, 1.5)}),      # side wall +y
+            ]
         return SceneSpec(
             objects=[ObjectEntry(name=self.object_name, object_type=self.object_type,
                                  spawn_xy=self.object_spawn_xy,
                                  spawn_z=self.object_spawn_z)],
-            fixtures=[FixtureEntry(fixture_type="table")],
+            fixtures=_fixtures,
             cameras=[
                 CameraEntry(
                     name="cam_ext",

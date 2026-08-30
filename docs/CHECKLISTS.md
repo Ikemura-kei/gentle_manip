@@ -150,6 +150,129 @@ the size range, e.g. raspberry ~15 mm / mushroom ~33 mm / tofu ~42 mm demonstrat
 ## 3. Analysis
 *(to be filled in)*
 
+### 3.1 WIDTH-SIZE PROBING — the standing method for "does grasp width track object size?"
+
+**Question it answers:** does the policy open its gripper IN PROPORTION TO THE OBJECT, or does it
+command a near-constant width? This is the gentleness-vs-size question; a constant width crushes
+the small end or drops the large end.
+
+**METRIC — mm of gripper opening per mm of object size.** Regress AT-GRASP commanded width on
+object size, **one point per DISTINCT GEOMETRY**, and report **slope + 95% CI + intercept**
+alongside stress and success. Demonstrator = **1.08**. 0 = constant width. `%demo` = slope/1.08.
+
+⚠ **RETIRED metrics — do not resurrect** (each misled once): correlation (gives direction, not
+magnitude); half-split "% of demonstrator range" (inflated by a uniform mean shift); per-episode
+regression (episodes in a batch SHARE the object, so it triple-counts correlated samples).
+
+**AT-GRASP width** = min commanded width between the lowest EE z and the point the EE has risen
+2 cm (`gentle_manip/pi05/width_probe.py::at_grasp`). Phase-detection-free; measured indistinguishable
+from the per-episode minimum (corr 0.474 vs 0.471).
+
+**PROTOCOL**
+1. **`scene_group_size=1`.** `EvalSpec`'s default is **0 = ONE fixed geometry for the whole eval**.
+   Forgetting this silently turns an eval into a single-object measurement — it happened to the
+   first π0.5 screen (all 20 episodes at `obj_scale` 1.407). Always check `obj_scale` has >1
+   distinct value in `episodes.csv` before believing any size-related number.
+2. **≥40 distinct geometries** for an unbinned claim. Three mechanisms CHANGED VERDICT between 12
+   and 40 geometries (DEVLOG 2026-08-27); the "baseline is 43% adaptive" result was a 12-geometry
+   artifact.
+3. **BINNED SIZE SWEEP — ONE eval pass, `GM_FIXED_SCALES`.** Do NOT fork a DR config per size
+   (I did, and it was redundant). `GM_FIXED_SCALES="1.0,1.125,1.25,1.375,1.5"`, exported for the
+   **sim server** process, pins `object_scale` to a DETERMINISTIC CYCLE — one value per scene
+   rebuild — and disables shape DR, so SIZE is the only variable across batches. Combine with
+   `--scene-group-size 1` and `n_episodes = num_envs × len(scales)` so each size gets exactly one
+   rebuild and `num_envs` episodes:
+   ```
+   NEPS=40 NENVS=8 SGS=1 SCALES="1.0,1.125,1.25,1.375,1.5"   # 5 batches x 8 eps = 8 per size
+   ```
+   Why binned beats random draws: **leverage** (slope SE ∝ 1/sd(x); pinned extremes span the full
+   range, so fewer geometries reach the same precision as ~40 mid-clustered random draws) and
+   **de-confounding** (under random DR size and shape co-vary; this holds shape fixed outright).
+   It buys precision, NOT immunity — with k=5 sizes the CI is wide; treat a borderline result as
+   UNRESOLVED, and add passes (or more scale values) rather than declaring a null.
+4. **Aggregate per geometry, then regress.** Never regress on raw episodes.
+
+**HOW TO RUN (π0.5; the DPPO path is the same idea via `dppo/eval_agent.py`)**
+```bash
+# per bin: GM_WIDTH_DUMP=<tag> writes .agent_tmp/<tag>_widthcmd_b<batch>.npz (width_cmd_mm, ee_z_m)
+GM_WIDTH_DUMP=pi05ew_1p000 ... eval_harness.py --experiment ..._wprobe_1p000 --scene-group-size 1
+# then pool the bins into one regression
+python gentle_manip/pi05/width_probe.py --label pi0.5-ext+wrist \
+    --arm pi05ew_1p000=<eval_dir> --arm pi05ew_1p125=<eval_dir> ...
+```
+
+**ARMS — always run the comparison, never a single policy in isolation.** A slope means little
+alone; it means something against these:
+
+| arm | what it isolates |
+|---|---|
+| **demonstrator** | the target. slope **1.08** — the CMA-ES synthesizer sizes its grasp almost perfectly |
+| **fine-tuned, deployable obs** (e.g. ext-only) | what actually ships |
+| **fine-tuned, richer obs** (e.g. ext+wrist) | whether the extra view buys size sensitivity |
+| **zero-shot / pretrained** | how much of any adaptation is PRETRAINING vs OUR data |
+
+⚠ For a zero-shot arm on a base checkpoint, see the caveat in `pi05/eval_policy.py`: the base
+ships only `params`, so it must borrow OUR norm stats, and its pretrained action space is not our
+convention. Its width slope is still informative (does its VISUAL conditioning respond to size at
+all?) even when its success is ~0 — but never report the success as "the model cannot do the task".
+
+**FULL RECIPE (π0.5; DPPO is the same idea through `dppo/eval_agent.py`)**
+```bash
+# one pass per arm; GM_FIXED_SCALES is exported for the SIM SERVER, GM_WIDTH_DUMP for the policy
+NEPS=40 NENVS=8 SGS=1 SCALES="1.0,1.125,1.25,1.375,1.5" \
+  WDUMP=<tag> CKPT=<ckpt> OUTDIR=<dir> [WRIST_FLAG=--no-wrist] [NORMFROM=<assets/asset_id>] \
+  sbatch .agent_tmp/pi05_eval_smoke.sbatch
+# pool the arms' dumps into the regression
+python gentle_manip/pi05/width_probe.py --label <arm> --arm <tag>=<eval_dir>
+```
+Give every concurrent arm its own `PORT` **and** its own `OUTDIR` — the harness default
+(`<ckpt_parent>/eval/<datetime>/`) carries no arm label and two arms starting in the same second
+overwrite each other.
+
+**REPORT:** slope, 95% CI, intercept, R², #geometries — and stress + success beside them. A slope
+whose CI includes 0 is "no detected adaptation", not "adapts a little".
+
+### 3.2 WIDTH-SIZE PROBING — the FIGURE and the three controls it needs
+
+Reference: `docs/figures/size_sweeps_width_vs_size.png`. Reproduce with
+`gentle_manip/pi05/plot_width_vs_size.py`.
+
+**THE PLOT.** PANEL = one (policy, object). SERIES = one YAW context. X = **object size in mm**
+(`obj_scale × nominal`, not scale units). Y = **commanded width at grasp (mm)**.
+* green dashed line = the **demonstrator's 1.08 mm/mm** — the target every arm is read against;
+* **filled marker = success, OPEN marker = FAILURE** — this carries real information: in the
+  reference figure failures sit ABOVE the mean at small sizes, i.e. the policy DROPPED the object
+  rather than crushing it. Losing the fill/no-fill distinction loses that diagnosis;
+* **error bars = within-size repeat sd** — the MPM noise floor, so a slope is read against the
+  noise it must beat, not in a vacuum;
+* faint dots = individual episodes behind the per-size mean;
+* the per-series legend carries that series' slope in **mm/mm**.
+
+**THE THREE CONTROLS — all set together, or the slope is confounded.**
+| env var | pins | why |
+|---|---|---|
+| `GM_FIXED_SCALES="1.0,1.125,1.25,1.375,1.5"` | object scale, ONE value per scene rebuild | the x-axis; also disables shape DR so size is the only geometric variable |
+| `GM_FIXED_POSE=1` | each SUB-ENV keeps its OWN pose for the whole run | object XY / arm home otherwise move between batches and inject width variance that looks like (or masks) size response |
+| `GM_FIXED_YAW_DEG="0,45,90"` | a yaw per env → one curve per yaw | grasp width depends on approach yaw relative to the object; **pooling yaws mixes a POSE effect into the SIZE slope** |
+
+With all three, a sub-env traces one clean size curve at a fixed pose, so the panel answers both
+"does width track size?" and "does that DEPEND on pose?" — the second question is invisible to a
+pooled regression.
+
+**READING IT**
+* slope ≈ **1.08** → tracks size like the demonstrator; **≈ 0** → constant width (crushes the
+  small end or drops the large end).
+* Compare slopes ACROSS series before concluding: in the reference figure the same policy gives
+  ≈0 on mushroom but +0.26/+0.49 on tofu — **size sensitivity is OBJECT-SPECIFIC**, so a single
+  object can never settle the question.
+* A slope smaller than the within-size error bars is noise, not a small effect.
+* Report slope + 95% CI + intercept + R² + #geometries (§3.1) beside the figure; the figure shows
+  the shape, the regression gives the uncertainty.
+
+⚠ **A probe run WITHOUT `GM_FIXED_POSE`/`GM_FIXED_YAW_DEG` is a weaker measurement** — pose noise
+enters the width and the per-yaw structure is unavailable. Usable as a first look; say so, and
+re-run with the full controls before any claim.
+
 ## 4. Common practices — analysis methods, eval settings
 *(to be filled in)*
 

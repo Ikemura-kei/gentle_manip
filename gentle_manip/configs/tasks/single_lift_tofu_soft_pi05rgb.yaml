@@ -1,0 +1,41 @@
+# [task] Tofu single-lift WITH wrist camera + backdrop — for the pi0.5 RGB/VLA baseline.
+# Used by: single_lift_tofu_soft_pi05
+# Status: experimental (pi0.5 low-data study, 2026-08-30)
+#
+# IDENTICAL to single_lift_tofu_soft.yaml in every physics/reward/success field. Adds ONLY:
+#   wrist_camera: true  -> a second CameraEntry, re-posed each step from
+#                          world_T_ee @ EE_T_CAM_WRIST (now 7 cm OUTSIDE the gripper,
+#                          aimed at the fingertips — was an identity placeholder INSIDE it)
+#   backdrop: true      -> walls that occlude the NEIGHBOURING PARALLEL ENVS which
+#                          otherwise appear on cam_ext's horizon and MOVE (dynamic
+#                          distractors). Outside the point-cloud crop, so point-cloud
+#                          experiments are unaffected.
+# Forked rather than flag-added to the shared task so no existing run gains a camera or a wall.
+success_z_min: 0.175
+success_z_max: 0.275
+hold_steps: 30
+object_name: "tofu"
+object_type: "soft"
+wrist_camera: true       # 7 cm outside the gripper (xarm7_config.EE_T_CAM_WRIST)
+backdrop: true           # occlude neighbouring parallel envs in cam_ext
+
+object_spawn_z: 0.042
+
+sim_substeps: 235
+mpm_grid_density: 250
+
+success_scale: 0.2
+
+rewards:
+  stress:
+    scale: 0.2
+    cap: 1.5
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 0.1
+    decay: 8.0
+  lift:
+    scale: 0.1
+    grasp_gate_dist: 0.079
+    lift_target: 0.16

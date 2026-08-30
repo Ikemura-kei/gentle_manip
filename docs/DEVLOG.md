@@ -6766,3 +6766,182 @@ now, on a throwaway checkpoint, rather than after a multi-hour fine-tune.*
 **Known cost, stated so it is not mistaken for a property of π0.5:** openpi's `Policy.infer` takes
 ONE observation, so `act()` loops over the 5 envs. A 5-episode eval took ~10 min. The canonical
 200-episode protocol will be slow; batching inference is the obvious optimisation if it matters.
+
+### 2026-08-30 — LARGE-SCALE v4 COLLECTION LAUNCHED (6 categories x 500 eps) + a reproducibility fix v4 was missing
+
+Merged the local agent's v4 work (`origin/master` 12c0dd9) into `integrate-all-2026-08-29`. **No
+conflicts** — the anticipated raspberry clash did not occur because they had already merged our
+branch (e8fbb20). `collect_demos_synth_v3.py` was auto-merged with edits from BOTH sides; verified
+by grep that ours survived (RGB passthrough, `_want_rgb`, `image_quality`, `encode_images`,
+`dataset_idx`, `cma_seed`) alongside theirs (`regrasp`, `episode_type`).
+
+**⚠ v4 WAS MISSING THE CSV<->DATASET JOIN, and it is not a cosmetic gap.** v4 writes a
+`dr_params.csv` row for EVERY attempt, inline, before the save loop — with no `dataset_idx`. And a
+`success=1` row still may not be saved: the `n_episodes` cap truncates the last batch, and v4
+silently drops "succeeded-by-crushing" fallback demos (`total_fallback_dropped`). So "the successes,
+in order" is WRONG, and the DR parameters could not be matched to the episodes they produced. This
+is exactly the defect the user had me fix in v3 ("Make sure the recorded stuff are reproducible"),
+about to be baked into 3000 episodes. Ported the v3 mechanism (buffer rows → stamp `dataset_idx` in
+the save loop → write after, −1 for unsaved) and added the `scan_metric` column that guardrail #3
+requires. Both **APPENDED** to the header so no existing column index shifts. Validated on a
+6-episode post-patch run: `dataset_idx` contiguous from 0, `scan_metric`=p98.
+
+*Process note: the six smokes were launched BEFORE the patch, so none of them exercised it — a
+separate tiny run was needed. Also: I edited v4 while three smokes were still running. They were
+unharmed (ProcessPoolExecutor forks rather than re-imports), but it was an avoidable risk I had
+explicitly declined to take earlier in the day with v3. Don't edit a module that running jobs may
+re-import.*
+
+**SMOKE VERIFICATION (16 eps, `--mesh-cycle`, per category — guardrail #1). 5/6 match or beat the
+handoff's expectations; sub-yield meets or beats target EVERYWHERE:**
+
+| category | exp succ | got | exp sub-yield | got | peak top10/yield (med/max) |
+|---|---|---|---|---|---|
+| raspberry | ~100% | 100% | ~88% | 87.5% | 0.81 / 1.16 |
+| cherry_tomato | ~75% | 70.8% | ~80% | **87.5%** | 0.82 / 1.20 |
+| tomato | ~80% | **50%** | ~100% | 100% | 0.35 / 0.91 |
+| tofu | ~65% | **87.5%** | ~100% | 100% | 0.42 / 0.77 |
+| strawberry | ~45% | 45.0% | ~94% | **100%** | 0.32 / 0.74 |
+| banana_chunk | ~40% | 40.0% | ~100% | 100% | 0.40 / 0.71 |
+
+tomato is the one deviation (50% vs ~80% success) but its sub-yield is perfect — a THROUGHPUT
+difference, not a data-quality one (~1000 attempts for 500 eps ≈ 18 h, inside the 48 h allocation).
+Material DR confirmed live (2–4 distinct `mat_E` per smoke — "silently inert" was a real past bug).
+
+**LAUNCHED (500 eps/category, user's number; the handoff specifies 250):** raspberry 1800346,
+cherry_tomato 1800347, tomato 1800348, tofu 1800349, strawberry 1800350, banana_chunk 1800351.
+Recipe = handoff verbatim + `--regrasp-prob 0.2` (user) + `--scan-metric p98`, no manual
+`--closure-gain`. NO pasta_bundle; mushroom NOT recollected (the 26-08-28-jgr 250-set stands).
+`-t 48:00:00`, `--mem=0`. Wall-clock estimated from the mushroom run's measured 1.06 min/attempt:
+raspberry ~9 h → banana_chunk ~22 h.
+
+**Still open after collection (handoff §Filtering):** `filter_pinch_episodes.py` + drop episodes
+with `priv_stress` top10 ≥ 1.0 (expect ~12% on raspberry and cherry_tomato, ~0 elsewhere — the
+smokes' 87.5% sub-yield on both predicts exactly that).
+
+### 2026-08-30 — π0.5 BASELINE: FIRST NUMBERS (20-ep screen). Underpowered; the real finding is lift-then-drop
+
+Both variants fine-tuned 12000 steps on the 250-episode mushroom set (batch 32, 1.9 it/s, ~1.7 h
+each; checkpoints finalized at `11999`, rc=0). Screened through the CANONICAL harness, 20 episodes,
+num_envs 5.
+
+| variant | success | ever | SUSTAINED stress | succ eps |
+|---|---|---|---|---|
+| ext+wrist | **0.400** | 0.65 | 23,782 | 8/20 |
+| ext-only (DEPLOYABLE — no wrist on the real rig) | **0.150** | 0.45 | 22,033 | 3/20 |
+
+**THE WRIST GAP IS NOT SIGNIFICANT AT n=20.** 8/20 vs 3/20 → two-proportion z ≈ 1.84, p ≈ 0.07;
+95% CIs ~[0.19,0.64] vs ~[0.03,0.38], heavily overlapping. Per-batch success swung 0.00–0.80 in
+BOTH arms (5 eps/batch). State it as "directionally favours the wrist, underpowered", never as a
+result. Mid-run I called the early 0.40-vs-0.00 split "striking"; batch 3 reversed it (0.00 vs
+0.40). *A 2-batch lead at 5 eps/batch is noise — do not narrate partial evals.*
+
+**THE ROBUST OBSERVATION IS THE `ever` >> `success` GAP** (0.65→0.40 and 0.45→0.15, both arms):
+π0.5 REACHES the success height band and fails to HOLD it for the required 30 steps. That is
+lift-then-drop — a weak/slipping grasp, not a failure to find the object. Same signature this
+project logged for CFG earlier (§0-CFG: "the 0.33 ever-minus-success gap is the lift-then-drop
+signature"). It is the most actionable thing in these numbers.
+
+**Against the DPPO plain baseline (~0.905 on mushroom), π0.5 is far behind — but the caveats are
+load-bearing and were PRE-REGISTERED**: 12k fine-tune steps (openpi's own `pi05_libero` uses 30k),
+250 episodes of ONE object, ONE scripted behaviour, ONE instruction, and a 20-episode screen.
+A loss in this regime says more about our data than about π0.5. Do not report it as "π0.5 is worse"
+without those qualifiers, and preferably not before the canonical 200-episode protocol.
+
+**NOT RUN: the canonical 200-episode eval** (~6.7 h/variant at the current per-env inference rate)
+— it would contend with four running v4 collections for a constrained GPU-minutes budget. Do it
+after collection, and consider a longer fine-tune first.
+
+*Artifacts:* `third_party/openpi/checkpoints/pi05_libero/pi05_mushroom250_{ext_wrist,ext}/11999`
+and their `eval/26-08-30-172510/` (summary.json, episodes.csv, per-episode video).
+
+### 2026-08-30 — ⚠ CORRECTION: the π0.5 screening numbers were measured on ONE GEOMETRY
+
+Setting up the width probe exposed that `EvalSpec.scene_group_size` defaults to **0 = a single
+fixed object geometry for the whole eval** (only pose/orientation vary per batch), and
+`gentle_manip/pi05/eval_harness.py` never overrode it. So the screen I reported —
+**ext+wrist 0.400 / ext-only 0.150** — ran all 20 episodes at `obj_scale` **1.407**, one shape,
+one size. Verified directly: `episodes.csv` has exactly ONE distinct `obj_scale`.
+
+**What this does and does not invalidate.** The two variants still faced IDENTICAL scenarios, so
+the ext-vs-wrist comparison is internally consistent (and was already not significant, p≈0.07).
+What is void is any comparison to numbers measured under the canonical 40-geometry protocol —
+notably DPPO's ~0.905 on mushroom. Do NOT put 0.400 next to 0.905 in a table: they are different
+protocols, which is precisely the B1 error class this project keeps re-learning.
+
+**Fixed:** `--scene-group-size` added to the π0.5 harness, **default 1**, and it now prints the
+resulting distinct-geometry count at startup. `docs/CHECKLISTS.md` §3.1 makes "check `obj_scale`
+has >1 distinct value in episodes.csv before believing any size-related number" an explicit step.
+
+*LESSON: a default that silently narrows the experiment is worse than a missing argument. I chose
+`EvalSpec()` defaults deliberately "to stay canonical" — but the canonical trio is
+(n_episodes, num_envs, seed); `scene_group_size` is NOT part of it and defaults to the degenerate
+value. Check what a default actually IS, rather than trusting that a config named canonical is
+canonical in every field.*
+
+### 2026-08-30 — WIDTH PROBE: binned design added (user request), method written into CHECKLISTS §3.1
+
+`gentle_manip/pi05/width_probe.py` + `configs/dr/wprobe_{1p000,1p125,1p250,1p375,1p500}.yaml` +
+matching experiments. Pins `object_scale` to 5 levels across the DR range, each asserted in code to
+differ from the reference experiment by `object_scale` ALONE; `scene_group_size=1` keeps shape and
+material varying so every bin yields several DISTINCT GEOMETRIES at a FIXED size.
+
+**Why binned beats random draws here:** (a) LEVERAGE — slope SE ∝ 1/sd(x), so pinning the extremes
+reaches the precision of ~40 random draws clustered mid-range with fewer geometries; (b)
+DE-CONFOUNDING — under random DR, size and shape co-vary, and pinning size isolates the size term.
+It buys precision, NOT immunity from the 40-geometry rule: a borderline CI at low k is UNRESOLVED,
+not negative, and `width_probe.py` prints that warning itself when k < 40.
+
+π0.5 now writes the SAME dump format as the DPPO probe (`GM_WIDTH_DUMP` →
+`.agent_tmp/<tag>_widthcmd_b*.npz` with `width_cmd_mm` + `ee_z_m`), so one analysis serves every
+policy. Launched on ext+wrist: jobs 1805040-1805044, 5 bins x 15 eps.
+
+### 2026-08-30 — NOTE: π0.5 CANNOT be trained on the REAL demos — they carry no RGB
+
+Checked every real-demo pkl (`single_lift_mushroom_real*`, incl. the 9 mm-x-shift-corrected
+`..._real_merged_shift9mm`, 55 episodes, 7-dim actions recorded natively). Observations are
+`[ee_pos, ee_quat, gripper_width, point_cloud]` — **no image keys anywhere**. They were collected
+for a point-cloud student, so RGB was never recorded.
+
+π0.5 is image-conditioned, so the real-data path is blocked until real demos are RE-RECORDED with
+RGB. That is feasible whenever the rig is next available — the L515 (`cam_ext`) already streams
+colour, and `record.py` goes through `PerceptionPipeline`, so it needs only an obs config with an
+`images:` block (the `superset_soft_armfocus_rgb` fork is the template). No wrist camera exists on
+the rig any more, so a real π0.5 would be the EXT-ONLY variant — which is the deployable arm we are
+already measuring in sim.
+
+*Do not "solve" this by rendering pseudo-images from the point cloud: the appearance would match
+neither the real camera nor the sim training distribution, and a policy trained on it could not be
+deployed against a real RGB stream in any meaningful sense.*
+
+### 2026-08-30 — "the mushroom is black in eval but white in the demos" — record camera ≠ policy input
+
+User asked whether the π0.5 comparison is fair given the object looks different. Checked three
+frames from the same collection/eval:
+
+| source | mushroom |
+|---|---|
+| collection VIDEO (free-flying record camera, close) | white/light speckled ball, prominent |
+| eval VIDEO (record camera, farther back) | small dark speckled blob |
+| **training OBSERVATION `image_cam_ext` — what π0.5 actually consumes** | **small DARK low-contrast object**; frame mean 46/255 |
+
+**Verdict: fair on this axis.** The "white" is the COLLECTION RECORD CAMERA, which is not the
+policy's input and is framed differently in collection vs eval. The policy's actual input has
+always shown a small dark object, consistent between training and eval (identical `cam_ext` entry,
+same task config). *Generalises: `videos/` and `render/*.mp4` come from a separate free-flying
+camera. NEVER reason about train/eval appearance from them — decode `image_*` from the dataset and
+dump the eval obs instead.* (Same trap as 2026-08-30's wrist camera: the collector's videos would
+never have shown that bug either.)
+
+**Two honest caveats, recorded rather than smoothed over:**
+1. Compared training-obs against eval-VIDEO, not eval-OBS. Identical camera specs make them match
+   by construction, but it is not directly measured. Dump eval obs RGB if certainty is needed.
+2. **There IS a real observation-level train/eval difference**: `cam_ext` sees neighbouring parallel
+   envs (the leakage TODO), so the BACKGROUND depends on `num_envs` — collection ran **8**, the
+   screening eval ran **5**, the width probe runs **8**. The probe matches training; the screening
+   eval did not. Another reason those screening numbers are soft, on top of the single-geometry bug.
+
+**Worth carrying into the writeup:** in the external view the object is small, dark and low-contrast.
+Consistent across train and eval so it does not bias the comparison, but a plausible contributor to
+π0.5's weak absolute numbers — and exactly what a close, bright wrist view should help with, which
+is the hypothesis the ext-vs-ext+wrist arms test.

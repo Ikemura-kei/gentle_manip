@@ -92,12 +92,26 @@ def main() -> None:
                     help="ext-only variant: feed ZEROS as the wrist image, matching how its "
                          "dataset was converted (train/eval must agree)")
     ap.add_argument("--prompt", default=None)
+    ap.add_argument("--batched-infer", action="store_true",
+                    help="one model call per policy step for ALL envs instead of one per env. "
+                         "openpi's Policy.infer is hardcoded to batch 1; the model it wraps is "
+                         "not. Verify with .agent_tmp/check_batched_infer.py before trusting.")
+    ap.add_argument("--norm-stats-from", default=None,
+                    help="ZERO-SHOT: assets dir (…/assets/<asset_id>) whose norm_stats.json to "
+                         "use, for a base checkpoint that ships only `params`. See the caveat in "
+                         "eval_policy.Pi05EvalPolicy — the resulting number is about ACTION-SPACE "
+                         "TRANSFER, not about whether pi0.5 can do the task.")
     ap.add_argument("--repo-id", default=None,
                     help="LeRobot repo id the checkpoint was trained on; inferred from the "
                          "checkpoint's assets/ tree when omitted")
     ap.add_argument("--n-episodes", type=int, default=None, help="override for a smoke run")
     ap.add_argument("--num-envs", type=int, default=None)
     ap.add_argument("--record-batches", type=int, default=None)
+    ap.add_argument("--scene-group-size", type=int, default=1,
+                    help="rebuild object GEOMETRY every K batches. 1 = a distinct geometry per "
+                         "batch (what every width/adaptation claim requires: >=40 distinct "
+                         "geometries). EvalSpec's own default is 0 = ONE fixed geometry for the "
+                         "whole eval, which silently makes an eval a single-object measurement.")
     ap.add_argument("--out-dir", type=Path, default=None)
     args = ap.parse_args()
 
@@ -107,7 +121,9 @@ def main() -> None:
 
     policy = Pi05EvalPolicy(args.checkpoint, config_name=args.config_name,
                             prompt=args.prompt or DEFAULT_PROMPT,
-                            use_wrist=not args.no_wrist, repo_id=args.repo_id)
+                            use_wrist=not args.no_wrist, repo_id=args.repo_id,
+                            norm_stats_from=args.norm_stats_from,
+                            batched=args.batched_infer)
 
     # PROBE the real action horizon instead of hardcoding it: the venv executes exactly
     # act_steps actions per policy step, so a mismatch would silently drop or repeat commands.
@@ -122,7 +138,12 @@ def main() -> None:
         spec_kwargs["n_episodes"] = args.n_episodes
     if args.num_envs is not None:
         spec_kwargs["num_envs"] = args.num_envs
+    spec_kwargs["scene_group_size"] = args.scene_group_size
     spec = EvalSpec(**spec_kwargs)
+    print(f"[eval] n_episodes={spec.n_episodes} num_envs={spec.num_envs} "
+          f"scene_group_size={spec.scene_group_size} -> "
+          f"{spec.n_batches // max(spec.scene_group_size,1) if spec.scene_group_size else 1} "
+          f"distinct geometries")
 
     image_keys = ["image_cam_ext", "image_cam_wrist"]
     venv = _make_venv(spec.num_envs, act_steps=horizon, max_policy_steps=spec.max_policy_steps,
@@ -130,11 +151,16 @@ def main() -> None:
 
     out_dir = args.out_dir or (args.checkpoint.parent / "eval" /
                                __import__("datetime").datetime.now().strftime("%y-%m-%d-%H%M%S"))
+    # NOTE: the width dump flushes on reset(), i.e. at the START of each batch, so the LAST
+    # batch is never flushed by the loop -- and that is the largest-scale bin, the highest-leverage
+    # point in the size regression. Flush explicitly after the run. (Observed: 4 dumps for 5
+    # batches on the first probe pass.)
     res = run_eval(venv, policy, spec, out_dir, experiment_name=args.experiment,
                    checkpoint=str(args.checkpoint), record_batches=args.record_batches,
                    extra_meta={"policy": "pi0.5", "config_name": args.config_name,
                                "wrist": not args.no_wrist,
                                "prompt": args.prompt or DEFAULT_PROMPT})
+    policy._flush_width_dump()          # final batch (see note above)
     print("summary:", {k: res.get(k) for k in
                        ("success_rate", "ever_success_rate", "stress_top20_ttop20_mean")})
     print("out_dir:", out_dir)

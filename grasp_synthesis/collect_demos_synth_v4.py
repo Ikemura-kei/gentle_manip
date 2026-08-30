@@ -1467,7 +1467,15 @@ def main() -> None:
                         "episode_type", "closure_cmd_mm",
                         "twist_deg", "taper", "rbf", "axis_scale", "axis_scale_ax",
                         "mat_E", "mat_nu", "mat_rho", "coup_friction",
-                        "stress_Pa", "grip_N", "align", "pressure_Pa", "min_pad_mm2", "width_mm", "tilt_deg"])
+                        "stress_Pa", "grip_N", "align", "pressure_Pa", "min_pad_mm2", "width_mm", "tilt_deg",
+                        # dataset_idx: 0-based index into data.pkl["episodes"], or -1 if this
+                        # attempt was NOT saved. Ported from v3 (2026-08-30). Without it the
+                        # CSV<->dataset join is UNDERIVABLE: v4 logs every attempt, and a
+                        # `success=1` row still may not be saved (n_episodes cap, or the
+                        # fallback-grasp drop), so "the successes in order" is wrong.
+                        "dataset_idx",
+                        # scan_metric: guardrail #3 in docs/collection_v4_handoff.md.
+                        "scan_metric"])
 
     total_saved  = 0
     total_failed = 0
@@ -1704,6 +1712,9 @@ def main() -> None:
         print(f"  Success: {success.tolist()}")
 
         # ── Log per-env DR + grasp params for this batch (CSV row per env) ──
+        # Rows are BUFFERED, not written yet: dataset_idx is only known after the save loop.
+        _dr_rows = []
+        _DS_IDX_COL = -2                     # dataset_idx is the 2nd-to-last column
         eul_deg = np.degrees(object_euler) if object_euler is not None else np.zeros((n, 3))
         for i in range(n):
             g = all_grasp[i]
@@ -1711,7 +1722,7 @@ def main() -> None:
             flipped = int(abs(roll) > 140 or abs(pitch) > 140)                # a big-flip sample
             ho = home_offset[i] if home_offset is not None else (0.0, 0.0, 0.0)
             odxy = object_dxy[i] if object_dxy is not None else (0.0, 0.0)
-            dr_writer.writerow([batch_idx, i, int(bool(success[i])),
+            _dr_rows.append([batch_idx, i, int(bool(success[i])),
                                 round(float(odxy[0]), 5), round(float(odxy[1]), 5),
                                 round(float(roll), 1), round(float(pitch), 1), round(float(yaw), 1), flipped,
                                 round(float(ho[0]), 5), round(float(ho[1]), 5), round(float(ho[2]), 5),
@@ -1733,8 +1744,9 @@ def main() -> None:
                                 round(float(g.get("align") or 0), 4), round(float(g.get("pressure") or 0), 1),
                                 round(float((g.get("min_pad_area") or 0) * 1e6), 2),
                                 round(float(g["x"][6] * 1e3), 2),
-                                round(float(g.get("tilt_deg") or 0), 1)])
-        dr_csv.flush()
+                                round(float(g.get("tilt_deg") or 0), 1),
+                                None,                      # dataset_idx, stamped in the save loop
+                                args.scan_metric])
 
         # ── Package and shard successful (or all) episodes ──
         for i in range(n):
@@ -1768,6 +1780,7 @@ def main() -> None:
                 "rewards":      np.asarray(rew_bufs[i], np.float32),
             }
             shard_buf.append(episode)
+            _dr_rows[i][_DS_IDX_COL] = total_saved       # 0-based index into data.pkl["episodes"]
             total_saved += 1
             print(f"    ep {total_saved}: env {i}  {'✓' if success[i] else '✗'}  "
                   f"T={episode['actions'].shape[0]}")
@@ -1788,6 +1801,13 @@ def main() -> None:
 
             if total_saved >= args.n_episodes:
                 break
+
+        # Written HERE, after the save loop, so dataset_idx reflects what was ACTUALLY saved.
+        for _r in _dr_rows:
+            if _r[_DS_IDX_COL] is None:
+                _r[_DS_IDX_COL] = -1
+            dr_writer.writerow(_r)
+        dr_csv.flush()
 
     # ── Flush + merge ──
     if shard_buf:
