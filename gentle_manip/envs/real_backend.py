@@ -141,6 +141,8 @@ class RealBackend:
             # to set directly (no accumulation). Still clip to the workspace box for
             # safety even though ActionPipeline already mapped into pos_min/pos_max.
             pos, quat, grip = action[:3], action[3:7], action[7]
+            if getattr(self, "gripper_delta", False):
+                grip = float(np.clip(self._target_gripper + grip, 0.0, self._gripper_max))
             if self.rate_limit is not None:
                 from gentle_manip.actions.pipeline import clamp_absolute_target
                 p_, q_, g_ = clamp_absolute_target(

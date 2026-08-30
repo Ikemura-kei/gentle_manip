@@ -120,6 +120,9 @@ class PolicyEnv:
         # target instead of one full-speed servo motion. None = attribute untouched.
         if getattr(action_config, "rate_limit", None) is not None:
             self.backend.rate_limit = list(action_config.rate_limit)
+        # Absolute pose + DELTA gripper: the backend must ACCUMULATE the gripper dim, not set it.
+        if getattr(action_config, "gripper_delta", False):
+            self.backend.gripper_delta = True
         # Sim-only stochastic obs augmentation — set by sim experiments to close the
         # sim2real gap; left None for real deployment (the camera is already noisy).
         self._augmentor = build_augmentor(augmentation)

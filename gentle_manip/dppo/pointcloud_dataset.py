@@ -21,7 +21,9 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
                  max_n_episodes=10000, device="cuda:0",
                  cloud_pose_jitter_trans=0.0, cloud_pose_jitter_rot_deg=0.0,
                  first_frame_context=False, aux_grasp_width=False,
-                 normalization_path=None, residual_width=False, width_window_weight=0.0):
+                 normalization_path=None, residual_width=False, width_window_weight=0.0,
+                 blind_gripper_width=False, grasp_window_flag=False, blind_proprio=False,
+                 gap_phase_json=None):
         # normalization_path: the dataset's normalization.npz (unit conversions).
         # residual_width=True -> action dim -1 is
         #   relabeled as (commanded width - episode grasp width) in action-normalized units;
@@ -79,7 +81,41 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
         self._hor = int(horizon_steps)
         self.width_loss_mask = None
         self.width_window_weight = float(width_window_weight)
-        if residual_width or self.width_window_weight > 1.0:
+        # GAP's OWN phase indicator rho, produced by THEIR CPD+LSTM (third_party/GAP) and saved as
+        # one list per trajectory. Their rho marks MOTION TRANSITIONS (change points) and is SPARSE
+        # (mean 0.007, 0.8% of steps > 0.5) — a different quantity from our wide "grasp window".
+        # Concatenated in traj order, matching how the phase was computed from this same train.npz.
+        self.gap_phase = None
+        if gap_phase_json:
+            import json as _json
+            _ph = _json.load(open(gap_phase_json))["phase"]
+            # A phase file is computed from ONE npz split, so it may only be given to the dataset
+            # built from that same split (train 1248 trajs/254340 steps vs val 138/28042 here).
+            # The slice additionally honours max_n_episodes when the dataset subsets the split.
+            _ph = _ph[:max_n_episodes]
+            _flat = np.concatenate([np.asarray(x, np.float32).ravel() for x in _ph])
+            assert len(_flat) == int(np.sum(data["traj_lengths"][:max_n_episodes])), (
+                f"phase length {len(_flat)} != total steps {total} — this gap_phase_json was built "
+                f"from a DIFFERENT split than this dataset (train and val have different "
+                f"traj_lengths); pass a split's phase file only to the dataset built from it")
+            self.gap_phase = torch.from_numpy(_flat[:total]).float().to(device)
+            print(f"[dataset] GAP phase loaded: {len(_ph)} trajs, mean rho {_flat.mean():.4f}, "
+                  f"frac>0.5 {float((_flat > 0.5).mean()):.4f}", flush=True)
+        self.grasp_window_flag = bool(grasp_window_flag)
+        # ARM 1 — BLIND GRIPPER WIDTH: zero the gripper-width channel of the proprio the DENOISER
+        # sees. Kills the "continue the closure ramp from where I am" shortcut while leaving
+        # ee_pos/ee_quat so the policy can still localise itself (our actions are ABSOLUTE, so it
+        # never needs its current width to command a target one). Shapes are unchanged, so no
+        # architecture change and no dataset rebuild. Must be mirrored at EVAL.
+        # ARM A — VISION-ONLY: zero ALL proprio. In the GAP paper's Table 1 vision-only beats
+        # vision+proprio concatenation on nearly every task, which is what motivates this arm.
+        self.blind_proprio = bool(blind_proprio)
+        if self.blind_proprio:
+            print("[dataset] VISION-ONLY: the whole proprio vector is zeroed", flush=True)
+        self.blind_gripper_width = bool(blind_gripper_width)
+        if self.blind_gripper_width:
+            print("[dataset] BLIND GRIPPER WIDTH: proprio dim -1 zeroed for the denoiser", flush=True)
+        if residual_width or self.width_window_weight > 1.0 or grasp_window_flag:
             assert aux_grasp_width and normalization_path, \
                 "residual/window features need aux_grasp_width + normalization_path"
             nz = np.load(normalization_path)
@@ -99,7 +135,7 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
                 self.actions[:, -1] = self.actions[:, -1] - torch.from_numpy(w_step).to(device)
                 print(f"[dataset] RESIDUAL WIDTH actions active (dim -1 -= episode width; "
                       f"mean offset {w_act.mean():+.3f})", flush=True)
-            if self.width_window_weight > 1.0:
+            if self.width_window_weight > 1.0 or grasp_window_flag:
                 a_w = data["actions"][:total, -1]                             # ORIGINAL commands
                 d5 = 2 * 0.005 / (a_hi - a_lo + 1e-6)                         # 5 mm in action units
                 open_lvl = np.repeat(
@@ -119,6 +155,24 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
         if self.jit_trans > 0 or self.jit_rot > 0:   # camera-pose DR (see __init__)
             pc = self._jitter_pose(pc)
         conditions = dict(batch.conditions)
+        if self.blind_proprio:
+            conditions["state"] = torch.zeros_like(conditions["state"])
+        elif self.blind_gripper_width:
+            st = conditions["state"].clone()
+            st[..., -1] = 0.0                        # gripper width -> constant, carries no signal
+            conditions["state"] = st
+        if self.gap_phase is not None:
+            # per-sample rho = max over the action chunk; the training loop then takes the BATCH max,
+            # exactly as their code does (`phase_p = torch.max(batch['phase'])`).
+            conditions["in_grasp_window"] = self.gap_phase[start:start + self._hor].max()
+        elif self.grasp_window_flag and self.width_loss_mask is not None:
+            # ARM 2 — GAP-style phase gate. The demonstrator is SCRIPTED, so the grasp window is
+            # known exactly and needs no phase-probability estimator (the paper's GAP estimates it).
+            # The MODEL uses this flag to drop proprio only INSIDE the window, leaving it intact
+            # during the approach where it is genuinely needed for reaching.
+            conditions["in_grasp_window"] = torch.tensor(
+                float(self.width_loss_mask[start:start + self._hor].any()),
+                device=self.width_loss_mask.device)
         conditions["point_cloud"] = pc               # (pc_cond_steps, N, 3)
         if self.first_frame_context:
             conditions["first_point_cloud"] = self.point_clouds[self.first_idx[start]][None]  # (1,N,3)

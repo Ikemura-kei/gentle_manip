@@ -55,6 +55,12 @@ class ActionConfig:
     gripper_min: float = 0.0
     gripper_max: float = DEFAULT_GRIPPER_WIDTH
 
+    # ABSOLUTE mode only: gripper dim is a per-step DELTA while the POSE stays absolute.
+    # UNITS (B10): absolute -> full affine into [gripper_min, gripper_max]; DELTA -> SCALE FACTOR
+    # ONLY (dgrip = raw * scale). The backend accumulates onto its running target.
+    gripper_delta: bool = False
+    gripper_delta_scale: float = 0.0035
+
     # Absolute-mode rotation encoding: "rot6d" (default, 10-dim action: 3 pos + 6 rot6d + 1 grip;
     # continuous, singularity-free) or "euler" (7-dim: 3 pos + 3 euler + 1 grip — the RPY convention
     # most papers use; compact but has gimbal-lock/wraparound). Both process to the SAME 8-dim
@@ -115,6 +121,9 @@ class ActionConfig:
             if self.euler_frame_offset_deg is not None and len(self.euler_frame_offset_deg) != 3:
                 raise ValueError(f"euler_frame_offset_deg must be length 3, got "
                                  f"{self.euler_frame_offset_deg}")
+            if self.gripper_delta and self.gripper_delta_scale <= 0:
+                raise ValueError(f"gripper_delta_scale must be positive, got "
+                                 f"{self.gripper_delta_scale}")
             if self.rate_limit is not None:
                 if len(self.rate_limit) != 7:
                     raise ValueError(f"rate_limit must be length 7 "
@@ -134,6 +143,9 @@ class ActionConfig:
             kwargs["pos_max"] = tuple(d.get("pos_max", cls.pos_max))
             kwargs["gripper_min"] = float(d.get("gripper_min", cls.gripper_min))
             kwargs["gripper_max"] = float(d.get("gripper_max", cls.gripper_max))
+            kwargs["gripper_delta"] = bool(d.get("gripper_delta", False))
+            kwargs["gripper_delta_scale"] = float(
+                d.get("gripper_delta_scale", cls.gripper_delta_scale))
             kwargs["rot_repr"] = d.get("rot_repr", "rot6d")
             kwargs["euler_min"] = tuple(d.get("euler_min", cls.euler_min))
             kwargs["euler_max"] = tuple(d.get("euler_max", cls.euler_max))

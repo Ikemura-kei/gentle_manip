@@ -100,6 +100,9 @@ class SimBackend:
         # Optional per-step rate limit for ABSOLUTE commands (delta-`scales` layout). Assigned by
         # PolicyEnv from ActionConfig.rate_limit; None (default) = no limiting, behaviour unchanged.
         self.rate_limit = None
+        # Set by PolicyEnv from ActionConfig.gripper_delta: the 8-dim command's gripper slot then
+        # carries a per-step DELTA (metres) to accumulate, not an absolute width.
+        self.gripper_delta = False
         self._last_state: Optional[dict] = None
 
     # ── Backend protocol ──────────────────────────────────────────────────────
@@ -284,6 +287,10 @@ class SimBackend:
             # to set directly (no accumulation). Still clip to the workspace box for
             # safety even though ActionPipeline already mapped into pos_min/pos_max.
             pos, quat, grip = action[:, :3], action[:, 3:7], action[:, 7]
+            if self.gripper_delta:
+                # Resolve the DELTA into an absolute target BEFORE the rate limiter, so the
+                # existing clamp (which expects an absolute grip) keeps working unchanged.
+                grip = np.clip(self._target_gripper + grip, 0.0, self._gripper_max)
             if self.rate_limit is not None:
                 # Per-step rate limit against the RUNNING target (seeded from the measured pose at
                 # reset): an absolute policy that emits a pose jump otherwise executes it at full

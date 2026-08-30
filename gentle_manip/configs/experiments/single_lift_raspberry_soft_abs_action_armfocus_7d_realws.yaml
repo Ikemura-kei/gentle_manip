@@ -1,0 +1,30 @@
+# [experiment] raspberry lift, armfocus setup, 7d absolute action (generalist eval).
+# Used by: 3-object generalist eval (mushroom/tofu/raspberry) — 2026-08-27
+# Status: experimental
+#
+# IDENTICAL to single_lift_raspberry_soft_abs_action_armfocus EXCEPT the action is
+# abs_pose_euler_abs_gripper (7d: 3 pos + 3 euler + 1 grip) instead of abs_pose_abs_gripper
+# (10d rot6d). REQUIRED because the eval sim server derives its ActionPipeline from this
+# experiment, so a 7d policy MUST be evaluated with a 7d action config — see the same note in
+# single_lift_mushroom_soft_abs_action_armfocus_7d_realws.yaml.
+#
+# The 3-object generalist dataset already converted raspberry's 10d SOURCE demos to 7d at build
+# time (`--derive-action abs_pose_euler_abs_gripper --derive-source-action abs_pose_abs_gripper`),
+# so the training data is 7d throughout; only this eval-side config was missing.
+# dr is raspberry's own realws spawn box (soft_orientation_realws_raspberry), unchanged.
+task: single_lift_raspberry_soft_stable
+action: abs_pose_euler_abs_gripper
+dr: soft_orientation_realws_raspberry
+augmentation: l515_noise
+
+obs: superset_soft_armfocus
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400
