@@ -622,3 +622,22 @@ User: kill the regrasp-gen arm-low eval (1798531), all GPU on collection.
 - A 3rd GPU job won't schedule for ~14h (AssocGrpGRESRunMinutes ~= 48 GPU-h cap).
 - Merge at the end: all single_lift_xcat_regrasp/*/data.pkl + single_lift_xcat_small/*/
   + the 500 soft-banana set -> train single_lift_gen8_regrasp_pcd.
+
+---
+## 2026-08-30 17:45 — IMPORTANT: the baseline-vs-regrasp eval was MUSHROOM-ONLY
+
+User caught it: the "4 in-domain" comparison eval actually tested only ONE object.
+Cause: `scene_group_size: 0` -> the sim builds ONE scene at startup, the
+`object_category_pool` draw fires ONCE (-> mushroom), never rebuilds. All 100
+episodes = mushroom at ONE fixed scale/material/shape; only pose + EE-start varied.
+Confirmed: `object=mushroom` in all 4 sim-server logs; `obj_scale` / `mat_E` have a
+single distinct value across episodes.csv.
+
+-> The SR 0.98 vs 0.16 result is valid as a **mushroom, fixed-geometry** regrasp-vs-
+baseline signal, NOT the cross-category generalist claim. Webpage relabeled + caveated.
+
+**The real per-category comparison** = run `yd_gen_eval.sbatch` (scene_group_size 1,
+per-cat pinned pool, 8 in-domain + 4 OOD, 100 rollouts each) on BOTH checkpoints
+`uabeb` (regrasp) and `tqmjv` (baseline). Queued for the first free GPU slot after
+the 4000-demo collection (user wants full collection effort now). This is also the
+template for the final 8x500 model eval.
