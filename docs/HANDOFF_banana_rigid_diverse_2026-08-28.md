@@ -513,3 +513,21 @@ regrasp collector 1792833 still running (~358).
 - MERGE PLAN for the generalist: concat `single_lift_xcat_regrasp` + `single_lift_xcat_small`
   + (optionally) the banana 500 -> one data.pkl -> train `single_lift_gen8_regrasp_pcd`.
   Baseline: same with the strict_home datasets.
+
+---
+## 2026-08-30 12:25 — regrasp generalist pipeline launched
+
+- Baseline generalist eval 1797433 nearly done (batch 15/20, clean SR ~12% -- thin
+  4-obj BC over 474 demos; low absolute, but the comparison is regrasp-vs-baseline).
+- **Stopped regrasp collector 1792833 at ~499 demos** (matched to baseline's 474),
+  run `single_lift_xcat_regrasp/26-08-30-rdz` (99 shards, merged by the pipeline).
+- **Submitted regrasp generalist pipeline 1798531** (`yd_xpipe_r`): merge -> convert
+  -> BC pretrain (`single_lift_xcat_regrasp_pcd`, 150ep) -> clean eval
+  (`single_lift_xcat_diverse_eval`) -> regrasp eval (`single_lift_xcat_regrasp_eval`).
+  EVAL_EXPERIMENT wired correctly (CFL-safe).
+- Small-object collector 1797892 still queued `afterany:1797433` -> starts when the
+  baseline eval slot frees.
+- NOTE: never `uv run --project envs/*` on the login node (aarch64 venv, x86 login) --
+  it prints "Creating virtual environment" and fails; the real venv is untouched but
+  shard merges / any env work must run inside a SLURM job.
+- Next gate: 1798531 done -> baseline vs regrasp 3-metric table -> webpage + handoff.
