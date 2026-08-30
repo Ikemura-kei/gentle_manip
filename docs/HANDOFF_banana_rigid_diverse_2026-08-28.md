@@ -440,3 +440,16 @@ train + dual eval will fire once ~600 demos/side accumulate (~13 h), tracked her
 - Both stable. Generalist preliminary train will fire when xcat_regrasp reaches
   ~500-600 (~7-8 h out at current rate). Baseline will be ready first (~3 h).
 - No code/config changes needed.
+
+---
+## 2026-08-30 07:55 — Phase 4 @ ~3h: 2nd regrasp collector added
+
+- 1792833 xcat_regrasp: 205/4500 (slowed to ~0.7/min -- CMA-bound). 1792834
+  xcat_baseline: 332/4500 (~1.9/min). Both clean.
+- The regrasp side is the bottleneck -> launched **1793396** = 2nd xcat_regrasp
+  collector (seed 7, separate run dir, same TAG folder) to ~2x throughput.
+  First attempt (1793395) cancelled: the salvage-merge loop would have eaten the
+  live collector's shards -> added an mtime<20min guard to yd_xcat_collect.sbatch,
+  committed, then relaunched as 1793396.
+- yd_xcat_pipeline.sbatch ready (PRELIM shard-staging). Prelim generalist train
+  fires when combined regrasp demos ~= 300-400.
