@@ -8,3 +8,9 @@ robot_init_offset_xyz: [0.03, 0.0, -0.045]
 robot_init_pos_xyz: 0.065
 object_category_pool: ["gelatin"]
 object_scale:      [0.90, 1.12]
+
+# scene-level (rebuilt every scene_group -> every 5 eval episodes):
+object_bend_deg:   [-4.0, 4.0]
+object_twist_deg:  [-4.0, 4.0]
+object_taper:      [-0.03, 0.03]
+object_axis_scale: [0.92, 1.08]

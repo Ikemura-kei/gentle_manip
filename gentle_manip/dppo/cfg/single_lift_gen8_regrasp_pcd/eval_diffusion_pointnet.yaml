@@ -4,8 +4,10 @@
 # early_stop_on_success so a would-be-failed first attempt has room to redescend/
 # regrasp -- the behaviour this campaign is testing for.
 #
-# scene_group_size=0 (fixed geometry): every rigid eval this campaign hit the
-# scene-group rebuild-RPC hang; 0 is the standing workaround.
+# scene_group_size=1: rebuild GEOMETRY+MATERIAL every batch (=every 5 episodes);
+# pose/pos/orientation resampled every episode by the harness. NOTE: earlier rigid
+# evals hit a scene-group rebuild-RPC hang at >0 -- TEST with CATS='mushroom' first;
+# if it hangs, fix the rebuild RPC or fall back to 0 + a wider per-reset pose DR.
 #
 # Server (start first, envs/sim_arrhenius):
 #   serl_sim_server --experiment single_lift_xcat_diverse --view student \
@@ -40,7 +42,7 @@ use_ddim: False
 ddim_steps: ${ft_denoising_steps}
 
 n_episodes: 100
-scene_group_size: 0
+scene_group_size: 1
 record_batches: null
 early_stop_on_success: true
 n_steps: 150
