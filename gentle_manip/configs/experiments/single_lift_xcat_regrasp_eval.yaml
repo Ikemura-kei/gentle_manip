@@ -1,0 +1,12 @@
+# [experiment] Cross-category REGRASP eval: low lifted-clear band + arm low over
+# object. The honest recovery + gentleness test for the generalist.
+# Used by: yd_xcat_eval.sbatch EXPERIMENT=single_lift_xcat_regrasp_eval
+# Status: experimental
+task: single_lift_xcat_diverse_eval
+action: delta_pose_delta_gripper
+dr: xcat_diverse_regrasp_eval
+augmentation: l515_noise
+obs: superset_soft
+views:
+  teacher: [privileged]
+  student: [point_cloud]

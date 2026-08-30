@@ -1,0 +1,23 @@
+# [dr] Cross-category diverse-start REGRASP DR: draws one of the 9 held-in soft
+# objects each scene rebuild (object_category_pool), plus wide per-env object
+# pose DR and modest object-agnostic shape/scale DR. EE start-pose coverage is
+# NOT here -- it is the collector's --start-modes (sweep/failed/above/ground/air).
+# Used by: experiments (dr:) single_lift_xcat_diverse / _eval
+# Status: experimental
+#
+# Shape/scale ranges are deliberately global + mild (the collector's v1
+# _apply_scene_dr does not pass per-category ranges); material E/nu/rho are left
+# UNSET so each drawn category keeps its own registry material.
+object_pos_xy: 0.09              # half-range (m) per-env object x/y jitter
+object_yaw_deg: 180             # full yaw
+object_pitch_roll_deg: 14       # per-env tilt
+robot_init_pos_xyz: 0.03        # per-env home jitter
+
+object_category_pool: ["mushroom", "banana_lying", "grape", "kiwi", "strawberry",
+                       "tomato", "cherry", "raspberry", "egg_boiled"]
+
+object_scale:      [0.82, 1.22]
+object_axis_scale: [0.90, 1.10]
+object_bend_deg:   [-4.0, 4.0]
+object_twist_deg:  [-4.0, 4.0]
+object_taper:      [-0.03, 0.03]

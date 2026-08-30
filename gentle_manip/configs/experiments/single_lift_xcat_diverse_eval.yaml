@@ -1,0 +1,12 @@
+# [experiment] Cross-category diverse-start EVAL (clean start): low lifted-clear
+# band + early-stop. Paired with single_lift_xcat_diverse training.
+# Used by: yd_xcat_eval.sbatch
+# Status: experimental
+task: single_lift_xcat_diverse_eval
+action: delta_pose_delta_gripper
+dr: xcat_diverse_regrasp
+augmentation: l515_noise
+obs: superset_soft
+views:
+  teacher: [privileged]
+  student: [point_cloud]

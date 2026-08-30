@@ -1,0 +1,14 @@
+# [experiment] Cross-category (9 held-in soft objects) diverse-start REGRASP
+# collection: the direct generalist arm of the campaign. One BC/DP3 policy trained
+# on merged diverse-start demos across all 9 objects -- no per-object specialist,
+# no distillation. Object drawn per scene from dr: xcat_diverse_regrasp.
+# Used by: grasp_synthesis/collect_demos_diverse_start_v2.py --experiment single_lift_xcat_diverse
+# Status: experimental
+task: single_lift_xcat_diverse
+action: delta_pose_delta_gripper
+dr: xcat_diverse_regrasp
+augmentation: l515_noise
+obs: superset_soft
+views:
+  teacher: [privileged]
+  student: [point_cloud]

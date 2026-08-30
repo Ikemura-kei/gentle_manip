@@ -1,0 +1,25 @@
+# [task] Cross-category diverse-start COLLECTION task: the object actually spawned
+# is drawn per scene from dr: xcat_diverse_regrasp (object_category_pool), not from
+# object_name below (nominal/fallback only). Success band / reward here are used by
+# the eval harness path; the diverse-start collector uses its own internal
+# lifted-clear success (obj_z rises with the gripper) so the band is not critical
+# for collection.
+# Used by: experiments (task:) single_lift_xcat_diverse
+# Status: experimental
+#
+# CFL: pool E spans 1e5 (raspberry) .. 8e5 (tomato). Anchored on the banana soft
+# eval point that ran stable (grid 200 / substeps 340 at E 3e5); scaled to
+# grid 170 / substeps 420 to cover the stiffer members. Rare blowups on the
+# stiffest objects are caught by the collector's per-batch try/except skip.
+success_z_min: 0.16
+success_z_max: 0.40
+hold_steps: 6
+object_name: "mushroom"        # nominal/fallback; dr.object_category_pool overrides per scene
+object_type: "soft"
+sim_substeps: 420
+mpm_grid_density: 170
+success_scale: 0.2
+rewards:
+  stress:      {scale: 0.2, cap: 1.5, mean_weight: 0.2, top10_weight: 0.8}
+  dist_to_obj: {scale: 0.1, decay: 8.0}
+  lift:        {scale: 0.1, grasp_gate_dist: 0.079, lift_target: 0.16}

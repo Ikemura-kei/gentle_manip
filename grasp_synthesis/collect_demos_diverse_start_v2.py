@@ -99,7 +99,12 @@ N_PREROLL_STEPS = 60           # unrecorded home -> start-pose steps (all non-ho
 # path: "above" (over the object, wrong height/rotation), "ground" (descended low to
 # the wrong spot), "air" (wandered off). --start-modes sets the family weights;
 # legacy keys (home/near_object/mid_approach) fold into "sweep".
-START_FAMILIES = ("sweep", "above", "ground", "air", "failed")
+#   "strict_home"  -- EE starts EXACTLY at the fixed home pose, full approach
+#     recorded (no pre-roll). This is the NON-REGRASPABLE BASELINE distribution
+#     (`--start-modes strict_home:1.0`): every demo is one clean home->grasp with
+#     no diverse start coverage, so a policy trained on it has never seen a
+#     post-failure state.
+START_FAMILIES = ("sweep", "above", "ground", "air", "failed", "strict_home")
 _LEGACY_FAMILY = {"home": "sweep", "near_object": "sweep", "mid_approach": "sweep",
                   "above_object": "above", "near_ground": "ground", "mid_air": "air", "failed_grasp": "failed"}
 DEFAULT_START_MODES = "sweep:0.44,failed:0.30,above:0.10,ground:0.09,air:0.07"
@@ -167,6 +172,12 @@ def _sample_start(fam: str, home_p, home_q, grasp_p, grasp_q, obj_p, rng):
     def _slerp(qa, qb, t):
         return _rot_to_wxyz(Slerp([0., 1.], Rot.concatenate(
             [_wxyz_to_rot(qa), _wxyz_to_rot(qb)]))(float(np.clip(t, 0, 1))))
+
+    if fam == "strict_home":
+        # non-regraspable baseline: start exactly at home, record the full approach,
+        # no pre-roll. Label "home" folds into the existing no-pre-roll path.
+        return (np.asarray(home_p, np.float32), np.asarray(home_q, np.float32),
+                N, "home", None)
 
     if fam == "sweep":
         t = float(rng.random())                       # UNIFORM along home->object
@@ -470,6 +481,9 @@ def main() -> None:
     p.add_argument("--top-down", dest="top_down", action="store_true", default=False,
                    help="clamp CMA-ES approach PITCH so grasps stay top-ish (default OFF; the\n                         sky/ground penalties in grasp_cost already bias top-down)")
     p.add_argument("--no-top-down", dest="top_down", action="store_false")
+    p.add_argument("--crush-frac", type=float, default=1.15,
+                   help="soft only: reject an episode whose top-10%% von Mises ever exceeds\n"
+                        "                         this multiple of the object's yield stress (default 1.15)")
     p.add_argument("--record-video", dest="record_video", nargs="?", type=int,
                    const=10**9, default=0,
                    help="record an RGB clip per saved episode; N = first N only")
@@ -494,7 +508,7 @@ def main() -> None:
     perception = PerceptionPipeline(obs_config)
     _yield = float(task.object_yield_stress) if getattr(task, "object_yield_stress", None) else None
     if _yield:
-        print(f"  soft crush gate: yield={_yield:.0f} Pa (reject episodes > 1.15x)")
+        print(f"  soft crush gate: yield={_yield:.0f} Pa (reject episodes > {args.crush_frac:.2f}x)")
 
     collection_config = {
         "task_name": task_name, "description": args.description,
@@ -518,20 +532,51 @@ def main() -> None:
 
     nominal_spec = spec
     do_scene_dr  = args.scene_dr_every > 0 and dr_cfg.has_scene_dr()
+    xcat_pool    = tuple(dr_cfg.object_category_pool or ())   # cross-category: draw object per scene
+    if xcat_pool:
+        print(f"  CROSS-CATEGORY pool ({len(xcat_pool)}): {list(xcat_pool)}")
     import tempfile
-    deform_dir = tempfile.mkdtemp(prefix="gm_synth_deform_dsv2_") if do_scene_dr else None
+    deform_dir = tempfile.mkdtemp(prefix="gm_synth_deform_dsv2_") if (do_scene_dr or xcat_pool) else None
+
+    def _with_registry_object(base_spec, cat_name):
+        """Rebuild base_spec.objects[0] from the registry entry for cat_name so a
+        fresh scene spawns a different object. Material/E/nu/rho reset to None so
+        scene_builder re-resolves from the new category's ObjectDef."""
+        import dataclasses
+        from gentle_manip.assets.registry import get_object_def
+        d = get_object_def(cat_name)
+        o = base_spec.objects[0]
+        no = dataclasses.replace(o, name=cat_name, object_type=d.object_type,
+                                 mesh_path=d.mesh_path, scale=1.0, spawn_z=None,
+                                 youngs_modulus=None, poisson_ratio=None, density=None)
+        return dataclasses.replace(base_spec, objects=[no, *base_spec.objects[1:]])
+
+    def _yield_for(cat_name):
+        from gentle_manip.assets.registry import get_object_def
+        try:
+            return float(get_object_def(cat_name).material.von_mises_yield_stress)
+        except Exception:
+            return _yield
 
     def _make_worker():
+        base_spec = nominal_spec
+        cat_name  = task.object_name
+        if xcat_pool:
+            cat_name  = str(rng.choice(xcat_pool))
+            base_spec = _with_registry_object(nominal_spec, cat_name)
         if do_scene_dr:
-            spec_dr, sdr = v1._apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir)
+            spec_dr, sdr = v1._apply_scene_dr(base_spec, dr_cfg, rng, deform_dir)
         else:
-            spec_dr, sdr = nominal_spec, {"scale": float(nominal_spec.objects[0].scale or 1.0), "bend_deg": 0.0}
+            spec_dr, sdr = base_spec, {"scale": float(base_spec.objects[0].scale or 1.0), "bend_deg": 0.0}
         w = GenesisWorker(spec_dr, num_envs=args.n_envs, show_viewer=False,
                           settle_steps=settle_steps, settle_max_steps=settle_max_steps,
                           settle_vel_thresh=settle_vel_thresh, render_obs_cameras=True)
-        return w, sdr, (w.handle.spec.objects[0].mesh_path or v1.MUSHROOM_MESH)
+        yld = _yield_for(cat_name) if (task.object_type == "soft") else None
+        if xcat_pool:
+            print(f"  scene object -> {cat_name}  (yield={yld})")
+        return w, sdr, (w.handle.spec.objects[0].mesh_path or v1.MUSHROOM_MESH), cat_name, yld
 
-    worker, scene_dr, actual_mesh = _make_worker()
+    worker, scene_dr, actual_mesh, scene_cat, scene_yield = _make_worker()
     if do_scene_dr:
         print(f"  scene DR ON (every {args.scene_dr_every} batch) -> {deform_dir}")
 
@@ -558,9 +603,9 @@ def main() -> None:
         batch_idx += 1
         n = args.n_envs
         try:
-            if do_scene_dr and batch_idx > 1 and (batch_idx - 1) % args.scene_dr_every == 0:
+            if (do_scene_dr or xcat_pool) and batch_idx > 1 and (batch_idx - 1) % args.scene_dr_every == 0:
                 worker.close()
-                worker, scene_dr, actual_mesh = _make_worker()
+                worker, scene_dr, actual_mesh, scene_cat, scene_yield = _make_worker()
 
             print(f"\n-- Batch {batch_idx}  [{total_saved}/{args.n_episodes} saved]"
                   + (f"  scale={scene_dr['scale']:.3f} bend={scene_dr['bend_deg']:+.1f}" if do_scene_dr else ""))
@@ -604,8 +649,10 @@ def main() -> None:
             obs_bufs, act_bufs, rew_bufs, success, frame_bufs, _npr = execute_and_collect_diverse_v2(
                 worker, all_best_x, init_obs_batch, perception, action_config,
                 modes, rng, priv_cfg=priv_cfg, dr_vec=dr_vec, record_video=want_video,
-                object_type=task.object_type, yield_stress=_yield,
-                task_name_hint=task.object_name,
+                object_type=task.object_type,
+                yield_stress=(scene_yield if xcat_pool else _yield),
+                crush_frac=args.crush_frac,
+                task_name_hint=(scene_cat if xcat_pool else task.object_name),
             )
             print(f"  success: {success.tolist()}")
 
@@ -658,7 +705,7 @@ def main() -> None:
             if consec_fail >= 12:
                 print("  [collect] 12 consecutive batch failures -- aborting", flush=True)
                 break
-            worker, scene_dr, actual_mesh = _make_worker()
+            worker, scene_dr, actual_mesh, scene_cat, scene_yield = _make_worker()
             continue
         consec_fail = 0
 
