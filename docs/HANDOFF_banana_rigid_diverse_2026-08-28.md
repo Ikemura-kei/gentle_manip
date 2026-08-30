@@ -453,3 +453,12 @@ train + dual eval will fire once ~600 demos/side accumulate (~13 h), tracked her
   committed, then relaunched as 1793396.
 - yd_xcat_pipeline.sbatch ready (PRELIM shard-staging). Prelim generalist train
   fires when combined regrasp demos ~= 300-400.
+
+---
+## 2026-08-30 08:05 — GPU concurrency cap = 2
+
+1793396 (2nd regrasp collector) could not start: `AssocGrpGRESRunMinutes` -- the
+account caps concurrent GPU jobs at 2. Cancelled. So the two running collectors
+(1792833 regrasp, 1792834 baseline) are the max; regrasp stays CMA-bound at
+~0.7/min. Window will likely end with ~350-450 regrasp + ~600-750 baseline demos
+-> the preliminary generalist comparison uses matched subsets (same N/side).
