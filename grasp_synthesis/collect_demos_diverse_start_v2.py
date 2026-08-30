@@ -262,15 +262,23 @@ def execute_and_collect_diverse_v2(
     lift_b   = grasp_pos.copy(); lift_b[:, 2] += v1.LIFT_HEIGHT
 
     width_open = np.full(num_envs, 0.08, np.float32)
-    _margin = 0.0     if object_type == "soft" else 0.0025
-    _floor  = 0.014   if object_type == "soft" else 0.020
-    # cap at the object's short cross-section (+2mm) so a too-wide CMA straddle still grips
     try:
         from gentle_manip.assets.registry import get_object_def
         _short = float(min(get_object_def(task_name_hint).size[:2])) if task_name_hint else 0.06
     except Exception:
         _short = 0.06
-    _wcap = min(0.075, _short + 0.002)
+    # CMA-ES routinely returns a straddle width WIDER than the object (SDF cost 0, no
+    # contact). Clamp the close width to a firm grip:
+    #   soft  -> ~20% compression into the body (a loose grip = slip on lift)
+    #   rigid -> object short axis + 2mm (just past contact)
+    if object_type == "soft":
+        _margin = 0.0
+        _wcap   = min(0.070, _short * 0.80)
+        _floor  = max(0.012, _short * 0.42)
+    else:
+        _margin = 0.0025
+        _wcap   = min(0.075, _short + 0.002)
+        _floor  = 0.020
     width_cls  = np.clip(np.array([p[2] - _margin for p in poses], np.float32), _floor, _wcap)
 
     home_pos  = np.tile(worker.robot.home_pos[None].astype(np.float32),  (num_envs, 1))
@@ -558,16 +566,37 @@ def main() -> None:
         except Exception:
             return _yield
 
+    def _mesh_ok(path):
+        """Reject a deformed mesh the CMA-ES SDF build would choke on (degenerate
+        AABB -> trimesh 'Bounds must be (n, dimension*2)!')."""
+        if not path:
+            return True
+        try:
+            import trimesh, numpy as _np
+            m = trimesh.load(str(path), process=False, force="mesh")
+            b = _np.asarray(m.bounds, dtype=float)
+            return (b.shape == (2, 3) and _np.all(_np.isfinite(b))
+                    and _np.all(b[1] - b[0] > 1e-4) and len(m.faces) >= 8)
+        except Exception:
+            return False
+
     def _make_worker():
         base_spec = nominal_spec
         cat_name  = task.object_name
         if xcat_pool:
             cat_name  = str(rng.choice(xcat_pool))
             base_spec = _with_registry_object(nominal_spec, cat_name)
+        sdr = {"scale": float(base_spec.objects[0].scale or 1.0), "bend_deg": 0.0}
+        spec_dr = base_spec
         if do_scene_dr:
-            spec_dr, sdr = v1._apply_scene_dr(base_spec, dr_cfg, rng, deform_dir)
-        else:
-            spec_dr, sdr = base_spec, {"scale": float(base_spec.objects[0].scale or 1.0), "bend_deg": 0.0}
+            for _try in range(3):
+                spec_dr, sdr = v1._apply_scene_dr(base_spec, dr_cfg, rng, deform_dir)
+                if _mesh_ok(spec_dr.objects[0].mesh_path):
+                    break
+                print(f"  [dr] degenerate deformed mesh (try {_try+1}) -> retry", flush=True)
+            else:
+                spec_dr, sdr = base_spec, {"scale": float(base_spec.objects[0].scale or 1.0), "bend_deg": 0.0}
+                print("  [dr] falling back to nominal (no shape deform) for this scene", flush=True)
         w = GenesisWorker(spec_dr, num_envs=args.n_envs, show_viewer=False,
                           settle_steps=settle_steps, settle_max_steps=settle_max_steps,
                           settle_vel_thresh=settle_vel_thresh, render_obs_cameras=True)
