@@ -415,3 +415,19 @@ current CMA-ES-SDF + MPM pipeline without per-object grid/bounds work. 4 clean
 cross-category objects still demonstrates the direct-generalist + regrasp claim
 vs the baseline. Re-adding the others = a follow-up (per-object grid_density +
 object-size-scaled CMA bounds + real scanned meshes for grape/cherry/etc.).
+
+---
+## 2026-08-30 05:00 — Phase 4 collections steady
+
+- **1792833 xcat_regrasp**: 16/4500, ~0.8/min, batchfail 0/7. Per-object SR so far:
+  egg_boiled 50%, kiwi 42%, mushroom 42% (the earlier "mushroom 0/6" was one unlucky
+  batch, not systematic). banana_lying not yet re-drawn.
+- **1792834 xcat_baseline** (strict_home): 26/4500, ~1.3/min (faster -- no CMA
+  diversity), batchfail 0/7. egg_boiled 75%, mushroom 50%.
+- Both clean, no crashes, videos recording (first 60 each).
+- Neither finishes in the window (~40 h to 2000 each) -> cumulative reporting.
+
+STOP-CONDITION check: Phase 4 collection running steadily = YES. All *reachable*
+evals diagnosed = YES (rigid banana iter1/2, soft banana clean_v2/regrasp_v2). The
+generalist policy can't be evaluated until it trains -> preliminary generalist BC
+train + dual eval will fire once ~600 demos/side accumulate (~13 h), tracked here.
