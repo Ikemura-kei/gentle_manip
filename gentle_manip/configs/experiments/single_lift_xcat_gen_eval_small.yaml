@@ -1,0 +1,12 @@
+# [experiment] Generalist per-category eval for SMALL objects (<=2.5cm): same as
+# single_lift_xcat_gen_eval but the finer-grid _small_eval task. Category pinned via --dr.
+# Used by: yd_gen_eval.sbatch (small-object categories)
+# Status: experimental
+task: single_lift_xcat_small_diverse_eval
+action: delta_pose_delta_gripper
+dr: eval_cat_grape
+augmentation: l515_noise
+obs: superset_soft
+views:
+  teacher: [privileged]
+  student: [point_cloud]
