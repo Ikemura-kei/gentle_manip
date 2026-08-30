@@ -1,0 +1,23 @@
+# [task] Cross-category SMALL-object diverse-start EVAL task -- low lifted-clear band + brief hold. Object drawn per
+# scene from dr: xcat_small_diverse_regrasp (grape/cherry/tomato/raspberry, 1.5-2 cm).
+# Used by: experiments (task:) single_lift_xcat_small_diverse
+# Status: experimental
+#
+# MPM: a 2 cm soft body needs a much finer grid than the 3 cm+ objects. grid 300 /
+# substeps 450 -> ~200-320 particles for these sizes (coarse; small-object soft
+# physics / stress is approximate). CMA search bounds + close-width cap are rescaled
+# to the ACTUAL object size in the collector (_synth_bounds_topdown obj_size=). E span
+# 1e5 (raspberry) .. 8e5 (tomato); tomato will NaN more often -> caught by the
+# per-batch skip, contributes fewer demos. EVAL task uses the same grid/substeps.
+success_z_min: 0.13
+success_z_max: 0.45
+hold_steps: 4
+object_name: "grape"
+object_type: "soft"
+sim_substeps: 450
+mpm_grid_density: 300
+success_scale: 0.2
+rewards:
+  stress:      {scale: 0.2, cap: 1.5, mean_weight: 0.2, top10_weight: 0.8}
+  dist_to_obj: {scale: 0.1, decay: 8.0}
+  lift:        {scale: 0.1, grasp_gate_dist: 0.079, lift_target: 0.16}
