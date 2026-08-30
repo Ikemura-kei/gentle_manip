@@ -36,10 +36,25 @@ if [ ! -f "$DEMO_RUN/data.pkl" ]; then
   cp "$DEMO_RUN"/shard_*.pkl "$STAGE"/ 2>/dev/null || true
   cp "$DEMO_RUN"/config.yaml "$STAGE"/ 2>/dev/null || true
   uv run --project envs/dppo_arrhenius --no-sync python - "$STAGE" <<'PYM'
-import sys; sys.path.insert(0,"grasp_synthesis")
+# inline shard merge (stdlib only -- collect_demos_synth imports scipy at module top)
+import sys, pickle, datetime
 from pathlib import Path
-import collect_demos_synth as v1
-print("[pipe] merged ->", v1._merge_shards(Path(sys.argv[1])))
+rd = Path(sys.argv[1])
+shards = sorted(rd.glob("shard_*.pkl"))
+eps, meta = [], None
+for p in shards:
+    try:
+        d = pickle.load(open(p, "rb"))
+    except Exception as e:
+        print("  skip", p.name, e); continue
+    meta = meta or dict(d["meta"]); eps.extend(d["episodes"])
+meta = meta or {}
+meta["n_episodes"] = len(eps)
+meta["created"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+out = rd / "data.pkl"
+pickle.dump({"meta": meta, "episodes": eps}, open(out.with_suffix(".tmp"), "wb"))
+out.with_suffix(".tmp").replace(out)
+print(f"[pipe] merged {len(shards)} shards -> {out} ({len(eps)} episodes)")
 PYM
   DEMO_RUN="$STAGE"
 fi
