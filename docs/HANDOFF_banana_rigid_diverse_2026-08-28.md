@@ -628,12 +628,14 @@ User: kill the regrasp-gen arm-low eval (1798531), all GPU on collection.
 
 User caught it: the "4 in-domain" comparison eval actually tested only ONE object.
 Cause: `scene_group_size: 0` -> the sim builds ONE scene at startup, the
-`object_category_pool` draw fires ONCE (-> mushroom), never rebuilds. All 100
+`object_category_pool` draw fires ONCE (-> EGG_BOILED, not mushroom -- the
+`object=mushroom` in the server log is the NOMINAL fallback printed BEFORE the DR draw;
+the spawned mesh is `egg_deformed_815853.obj`, mat_yield 22500 = egg_boiled), never rebuilds. All 100
 episodes = mushroom at ONE fixed scale/material/shape; only pose + EE-start varied.
 Confirmed: `object=mushroom` in all 4 sim-server logs; `obj_scale` / `mat_E` have a
 single distinct value across episodes.csv.
 
--> The SR 0.98 vs 0.16 result is valid as a **mushroom, fixed-geometry** regrasp-vs-
+-> The SR 0.98 vs 0.16 result is valid as an **egg_boiled, fixed-geometry** regrasp-vs-
 baseline signal, NOT the cross-category generalist claim. Webpage relabeled + caveated.
 
 **The real per-category comparison** = run `yd_gen_eval.sbatch` (scene_group_size 1,
