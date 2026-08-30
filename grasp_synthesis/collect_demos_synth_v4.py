@@ -1085,13 +1085,15 @@ def main() -> None:
     # Pass a value explicitly to override.
     p.add_argument("--grasp-E",           type=float, default=None,  help="object Young's modulus (Pa); default = the object's material")
     p.add_argument("--grasp-density",     type=float, default=None, help="object density (kg/m^3); default = the object's material")
-    p.add_argument("--scan-metric", choices=("masked", "p98"), default="masked",
-                   help="v4.2: stress metric for the closure scan's yield crossing. 'masked' "
-                        "(default) = contact-masked top10, the bulk-damage onset -- smooth and "
-                        "non-degenerate on soft objects. 'p98' = the v4.1 unmasked percentile, "
-                        "which saturates >= yield at first contact on soft/low-yield objects "
-                        "(raspberry/strawberry c_y = 0) and collapses the command to the clip "
-                        "minimum; kept for comparison only.")
+    p.add_argument("--scan-metric", choices=("masked", "p98"), default="p98",
+                   help="stress metric for the closure scan's yield crossing. 'p98' (DEFAULT -- "
+                        "the collection recipe): unmasked 98th percentile; errs GENTLE, so its "
+                        "failures are unsaved lift failures (wall-clock cost only) and saved-demo "
+                        "sub-yield was 88-100%% on every object in the 7-object A/B. 'masked' = "
+                        "contact-masked top10; errs FIRM -- better success on strawberry/"
+                        "banana_chunk but saves past-yield episodes on raspberry (56%% sub-yield), "
+                        "i.e. damaged data. Use masked only for comparison/ablation, never for a "
+                        "frozen dataset without per-episode stress filtering.")
     p.add_argument("--closure-gain", type=float, default=None,
                    help="v4: commanded closure = gain * c_y, where c_y is the closure at which the "
                         "SURROGATE predicts yield at the chosen pose. The single global constant of "

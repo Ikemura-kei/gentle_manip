@@ -1,0 +1,26 @@
+# [task] Soft cylinder lift (4.0 x 4.0 x 5.0 cm), TOFU material.
+# Used by: experiments/single_lift_prim_cylinder_soft_abs_action_armfocus.yaml
+# Status: experimental (primitive diversity probe, 2026-08-30; v4.1 FROZEN — do not tune)
+object_name: "prim_cylinder"
+object_type: "soft"
+mpm_grid_density: 200
+sim_substeps: 190
+
+success_z_min: 0.175
+success_z_max: 0.285
+hold_steps: 30
+success_scale: 0.2
+
+rewards:
+  stress:
+    scale: 0.2
+    cap: 1.5
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 0.1
+    decay: 8.0
+  lift:
+    scale: 0.1
+    grasp_gate_dist: 0.060
+    lift_target: 0.13
