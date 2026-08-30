@@ -608,3 +608,17 @@ typical + arm-low). Clips in docs/eval_showcase/generalist/.
   smoke-test with `CATS=mushroom` before the full 12-category run; fix the rebuild RPC
   or fall back to 0 + wider per-reset pose DR.
 - gen8 cfg dirs `single_lift_gen8_{baseline,regrasp}_pcd` set to scene_group_size 1.
+
+---
+## 2026-08-30 17:35 — killed eval, FULL EFFORT on the 4000-demo collection
+
+User: kill the regrasp-gen arm-low eval (1798531), all GPU on collection.
+- Killed 1798531 (arm-low eval; deprecated -- future evals use the unified
+  home<->near-object protocol anyway).
+- **2 collectors now running (the account's max concurrent GPU jobs):**
+  - **1801666 yd_xreg** -- large 4 (mushroom/kiwi/egg_boiled/banana_lying), n_envs 20,
+    maxfevals 650, seed 11, 24h. New run dir under single_lift_xcat_regrasp/.
+  - **1800352 yd_xsmall** -- small 4 (grape/cherry/tomato/raspberry), n_envs 16, 24h.
+- A 3rd GPU job won't schedule for ~14h (AssocGrpGRESRunMinutes ~= 48 GPU-h cap).
+- Merge at the end: all single_lift_xcat_regrasp/*/data.pkl + single_lift_xcat_small/*/
+  + the 500 soft-banana set -> train single_lift_gen8_regrasp_pcd.
