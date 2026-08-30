@@ -444,6 +444,45 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-30 (later) — CALIBRATION IS NOT NECESSARY: the surrogate's own stress-vs-width curve
+predicts the per-object safe closure. Rank-perfect across 4 objects, stable ~0.5-0.6 conservative
+bias. Raspberry probe confirms: baseline-only closure -> 100 % sub-yield (was 19 %).**
+
+User pushback: "if calibration is needed, the significance of the method reduces." Correct — and
+testable. The closure constants exist only to turn the planned width into a commanded width, but
+the surrogate already computes sigma(width) (the refine-round primitive). Scanned it per object and
+compared against the measured safe/unsafe closures from the 08-29/30 runs:
+
+| object | surrogate closure@yield | measured yield-closure | bias |
+|---|---|---|---|
+| mushroom | 5.0 mm | ~10 mm | ~0.5 |
+| raspberry | 2.0 mm | ~3-4 mm | ~0.57 |
+| cherry_tomato | 2.0 mm | ~4 mm | ~0.5 |
+| banana_chunk | 3.5 mm | > 6 mm | <~0.58 |
+
+Rank-perfect ordering (raspberry ~ cherry < banana_chunk < mushroom) — the exact pattern the
+analytic K*(yield/E)*L rule provably mispredicted in both directions — and a conservative bias
+stable enough that ONE global factor transfers across all four, covering both the over-squeezed
+objects and the under-gripped banana_chunk.
+
+**Design consequence (supersedes the 08-29 "measure per object" recommendation):** replace the
+baseline/squeeze/firm constants with a SURROGATE-SELECTED executed width — command the width where
+predicted stress = target x one global bias factor (identified once, on one object). Zero
+per-object constants; the executor's closure becomes part of the model; the cross-object closure
+table turns from a bug list into evidence FOR the surrogate. `fem_surrogate_status.md` section 5
+updated (old item 1 superseded by 1').
+
+**Experimental confirmation of the executor diagnosis:** raspberry probe with
+`--grasp-extra-close 0` (closure = the hardcoded 2.5 mm baseline only): median **0.65x yield,
+100 % sub-yield** (was 1.07x / 19 %). The surrogate and the evaluation metric were never the
+problem.
+
+NOT yet implemented: the surrogate-selected width executor (moderate change: derive w_cmd from the
+already-computed width scan at synthesis time, delete the three constants; keep the weak-grasp firm
+check as a fallback). Next work item before the cluster collection, together with wiring
+`execute_offset` so the yield guard sees the executed width.
+
+
 **2026-08-30 — FEM surrogate scientific-status study (`docs/fem_surrogate_status.md`) + paper
 experiment design (`docs/paper/synthesis_experiments.md`). Raspberry diagnosed: NOT a surrogate or
 metric failure — a THIRD unscaled closure constant, plus `execute_offset` was never wired.**

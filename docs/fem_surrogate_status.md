@@ -82,13 +82,31 @@ system.
 
 ## 5. Paths toward full-FEM fidelity at surrogate cost (ranked)
 
-1. **Fix the executor, not the model** — per-object measured calibration of the TOTAL closure
-   (baseline + squeeze + firm from ONE budget), chosen at collection start by sweeping ~4 closure
-   values on throwaway episodes and keeping the largest whose measured `priv_stress` median stays
-   < 0.8× yield. Already recommended in the DEVLOG (08-29); the analytic `K·(σ_y/E)·L` rule
-   mispredicts in both directions (raspberry too large, banana_chunk too small) because contact
-   geometry enters the real stress. **Cost: minutes per category. This unblocks the 3 REVIEW
-   objects and is the only item required before the cluster collection.**
+1. **SUPERSEDED (08-30) by 1': measured calibration is NOT necessary.** The originally
+   recommended per-object measured calibration is the pragmatic fallback, but it weakens the
+   method's story, and the test below shows it is not needed.
+
+   **1'. Surrogate-selected executed width (MEASURED FEASIBLE 08-30).** The executor's closure
+   constants exist only to convert the planned width into a commanded width — but the surrogate
+   already computes stress as a function of width (the refine-round primitive). Scanning each
+   object's σ(closure) curve on the surrogate and comparing to the measured safe/unsafe closures:
+
+   | object | surrogate closure@yield | measured yield-closure | bias |
+   |---|---|---|---|
+   | mushroom | 5.0 mm | ~10 mm (6.4 safe at 0.4–0.58×) | ~0.5 |
+   | raspberry | 2.0 mm | ~3–4 mm (2.5 → 0.65×; 4.4 → ≥1.05×) | ~0.57 |
+   | cherry_tomato | 2.0 mm | ~4 mm (4.3 → 0.89–1.23×) | ~0.5 |
+   | banana_chunk | 3.5 mm | > 6 mm (3.0 → 0.47× but success 53 %) | ≲0.58 |
+
+   **The ordering is rank-perfect (raspberry ≈ cherry < banana_chunk < mushroom) and the
+   conservative bias is stable at ~0.5–0.6 across all four** — including both gentleness failures
+   AND the needs-more-grip case. So: command the width at which the surrogate predicts a target
+   stress, times ONE global bias factor identified once and shown to transfer. Zero per-object
+   constants; the baseline/squeeze/firm zoo disappears into the model; and the cross-object
+   closure table becomes *evidence for* the surrogate (it predicts the safe-closure ordering the
+   analytic `K·(σ_y/E)·L` rule provably got wrong). The raspberry probe confirms the executor
+   diagnosis experimentally: closure = 2.5 mm baseline only → median 0.65× yield, **100 %
+   sub-yield** (was 19 %).
 2. **Wire `execute_offset`** (exists, unwired) so every candidate is scored at the width that
    will actually be executed under the calibrated budget. Zero added cost; makes the planner's
    yield guard operate on the real operating point.
