@@ -1,0 +1,13 @@
+# [experiment] Generalist per-category eval: ONE EE-init distribution (home <->
+# near-object, matching training) -- no clean/arm-low split. The category is pinned
+# per run via the sim server's --dr eval_cat_<name>. Task = the CFL-safe _eval task.
+# Used by: yd_gen_eval.sbatch
+# Status: experimental
+task: single_lift_xcat_diverse_eval
+action: delta_pose_delta_gripper
+dr: eval_cat_mushroom          # overridden per-category by --dr on the sim server
+augmentation: l515_noise
+obs: superset_soft
+views:
+  teacher: [privileged]
+  student: [point_cloud]

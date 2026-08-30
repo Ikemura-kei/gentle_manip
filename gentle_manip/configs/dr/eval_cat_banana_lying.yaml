@@ -1,0 +1,13 @@
+# [dr] Per-category generalist eval DR: pool pinned to banana_lying. EE init spans the
+# home <-> near-object continuum (robot_init_offset_xyz mid-way + wide
+# robot_init_pos_xyz) to MATCH the training sweep distribution -- no separate
+# clean/arm-low split. Object pose DR mirrors xcat_diverse_regrasp.
+# Used by: yd_gen_eval.sbatch (CAT=banana_lying)
+# Status: experimental
+object_pos_xy: 0.09
+object_yaw_deg: 180
+object_pitch_roll_deg: 14
+robot_init_offset_xyz: [0.03, 0.0, -0.045]   # midpoint home(0.40,0,0.21) -> near-object hover
+robot_init_pos_xyz: 0.065                    # +/- box spanning exact-home .. just-above-object
+object_category_pool: ["banana_lying"]
+object_scale:      [0.88, 1.15]
