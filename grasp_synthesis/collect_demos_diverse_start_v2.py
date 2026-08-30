@@ -504,6 +504,14 @@ def main() -> None:
     p.add_argument("--record-video", dest="record_video", nargs="?", type=int,
                    const=10**9, default=0,
                    help="record an RGB clip per saved episode; N = first N only")
+    p.add_argument("--per-cat-target", type=int, default=0,
+                   help="cross-category: once a category has this many demos (this run + "
+                        "--cat-have preseed), DROP it from the pool so the rest get the "
+                        "budget. 0 = off (draw uniformly to --n-episodes).")
+    p.add_argument("--cat-have", type=str, default="",
+                   help="comma list cat:count of demos ALREADY collected elsewhere, "
+                        "pre-seeded into the per-cat-target accounting (e.g. "
+                        "'mushroom:160,kiwi:166').")
     args = p.parse_args()
 
     modes_arr, modes_p = _parse_start_modes(args.start_modes)
@@ -549,9 +557,25 @@ def main() -> None:
 
     nominal_spec = spec
     do_scene_dr  = args.scene_dr_every > 0 and dr_cfg.has_scene_dr()
-    xcat_pool    = tuple(dr_cfg.object_category_pool or ())   # cross-category: draw object per scene
+    xcat_pool    = list(dr_cfg.object_category_pool or ())    # MUTABLE: categories that hit
+                                                             # --per-cat-target are dropped so
+                                                             # the rest get the freed budget
+    per_cat_target = args.per_cat_target or 0
+    cat_saved: Dict[str, int] = {c: 0 for c in xcat_pool}
+    for tok in filter(None, (t.strip() for t in args.cat_have.split(","))):
+        k, _, v = tok.partition(":")
+        if k in cat_saved:
+            cat_saved[k] = int(v)
+    if per_cat_target:
+        for c in list(xcat_pool):
+            if cat_saved.get(c, 0) >= per_cat_target:
+                xcat_pool.remove(c)
+                print(f"  [pool] {c} already at {cat_saved[c]} >= {per_cat_target} -> excluded")
     if xcat_pool:
-        print(f"  CROSS-CATEGORY pool ({len(xcat_pool)}): {list(xcat_pool)}")
+        print(f"  CROSS-CATEGORY pool ({len(xcat_pool)}): {list(xcat_pool)}"
+              + (f"  per-cat target {per_cat_target}  have {cat_saved}" if per_cat_target else ""))
+    if not xcat_pool and per_cat_target:
+        print("  [pool] all categories already at target -> nothing to collect"); return
     import tempfile
     deform_dir = tempfile.mkdtemp(prefix="gm_synth_deform_dsv2_") if (do_scene_dr or xcat_pool) else None
 
@@ -638,6 +662,9 @@ def main() -> None:
 
     consec_fail = 0
     while total_saved < args.n_episodes:
+        if per_cat_target and not xcat_pool:
+            print("  [pool] every category reached its per-cat target -> stopping", flush=True)
+            break
         batch_idx += 1
         n = args.n_envs
         try:
@@ -719,6 +746,12 @@ def main() -> None:
                 shard_buf.append(episode)
                 total_saved += 1
                 ep_id = total_saved
+                if per_cat_target and xcat_pool:
+                    cat_saved[scene_cat] = cat_saved.get(scene_cat, 0) + 1
+                    if cat_saved[scene_cat] >= per_cat_target and scene_cat in xcat_pool:
+                        xcat_pool.remove(scene_cat)
+                        print(f"  [pool] {scene_cat} reached {cat_saved[scene_cat]} -> "
+                              f"DROPPED. remaining: {xcat_pool}", flush=True)
                 if want_video and frame_bufs[i]:
                     vp = vid_dir / f"ep{ep_id:04d}_env{i}_{modes[i]}_{'ok' if success[i] else 'fail'}.mp4"
                     try:

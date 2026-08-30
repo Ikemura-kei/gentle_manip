@@ -52,11 +52,33 @@ PYM
   fi
 done
 
+# per-category quota: once a category hits PER_CAT_TARGET (this run + demos already
+# collected in OTHER runs of this TAG), it's dropped from the pool so the rest get the
+# budget. CAT_HAVE is auto-computed from every prior collector .out for this TAG.
+PER_CAT_TARGET=${PER_CAT_TARGET:-500}
+CAT_HAVE=$(python3 - "$REPO/logs/slurm_logs" "$TAG" <<'PYH'
+import sys, re, glob, os
+logdir, tag = sys.argv[1], sys.argv[2]
+have={}
+for lg in glob.glob(f"{logdir}/*.out"):
+    h=open(lg,errors="ignore").read(600)
+    if f"tag={tag} " not in h: continue
+    cur=None
+    for ln in open(lg,errors="ignore"):
+        m=re.search(r'scene object -> (\w+)', ln); cur=m.group(1) if m else cur
+        if re.search(r'ep \d+: env \d+\s+OK\b.*mode=', ln) and cur:
+            have[cur]=have.get(cur,0)+1
+print(",".join(f"{k}:{v}" for k,v in have.items()))
+PYH
+)
+echo "[xcat] per-cat target $PER_CAT_TARGET  already have: ${CAT_HAVE:-none}"
+
 env -u PYTHONPATH -u ROS_DISTRO MUJOCO_GL=egl uv run --project envs/sim_arrhenius --no-sync python \
   grasp_synthesis/collect_demos_diverse_start_v2.py \
   --experiment "$EXPERIMENT" --task-name "$TASK_DIR" \
   --n-episodes "$N_EPISODES" --n-envs "$N_ENVS" --maxfevals "$MAXFEVALS" \
   --scene-dr-every "$SCENE_DR_EVERY" --seed "$SEED" --start-modes "$START_MODES" \
+  --per-cat-target "$PER_CAT_TARGET" --cat-have "${CAT_HAVE:-}" \
   --crush-frac "$CRUSH_FRAC" --record-video "${REC_VIDEO:-60}" --out-dir "$REPO/dataset/demos"
 
 RUN=$(ls -dt "$REPO"/dataset/demos/$TASK_DIR/* | head -1)
