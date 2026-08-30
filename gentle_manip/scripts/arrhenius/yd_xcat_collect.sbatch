@@ -33,8 +33,12 @@ TASK_DIR=${TASK_DIR:-single_lift_${TAG}}     # output folder under dataset/demos
 echo "[xcat] tag=$TAG exp=$EXPERIMENT n_episodes=$N_EPISODES n_envs=$N_ENVS crush=$CRUSH_FRAC"
 echo "[xcat] start_modes=$START_MODES"
 
-# Salvage leftover shards from a crashed prior run of this TAG.
+# Salvage leftover shards from a CRASHED prior run of this TAG. Guard: skip any run
+# dir touched in the last 20 min -- that is a still-live parallel collector, and
+# _merge_shards deletes shards (would corrupt its output).
 for RD in "$REPO"/dataset/demos/$TASK_DIR/*/; do
+  [ -n "$(find "$RD" -maxdepth 1 -name 'shard_*.pkl' -mmin -20 2>/dev/null)" ] && \
+    { echo "[xcat] $RD has shards <20 min old -> live collector, skipping salvage"; continue; }
   if [ -n "$(ls "$RD"shard_*.pkl 2>/dev/null)" ] && [ ! -f "$RD/data.pkl" ]; then
     echo "[xcat] merging leftover shards in $RD"
     uv run --project envs/sim_arrhenius --no-sync python - "$RD" <<'PYM'
