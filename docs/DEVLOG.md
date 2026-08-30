@@ -444,6 +444,47 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-30 (v4.2) — v4.1's p98 crossing was an OVER-CORRECTION bundled with the real fix.
+On soft/low-yield objects it degenerates (c_y = 0 at the plan width itself), collapsing commands
+to the clip minimum. v4.2: masked-top10 crossing, pen_tol relaxation KEPT, gain 1.31.**
+
+v4.1 7-object results (16 eps, both bars = sub-yield >= 80 % AND success >= 60 %):
+
+| object | success | sub-yield | median | verdict |
+|---|---|---|---|---|
+| mushroom | 88.9 % | 100 % | 0.32x | PASS |
+| raspberry | 100 % | 88 % | 0.72x | PASS |
+| cherry_tomato | 76.2 % | 81 % | 0.74x | PASS |
+| tomato | 80.0 % | 100 % | 0.39x | PASS |
+| banana_chunk | **42.1 %** | 100 % | 0.47x | REVIEW |
+| strawberry | **45.7 %** | 94 % | 0.32x | REVIEW |
+| tofu | (running) | | | |
+
+Both REVIEWs are the same monotone signature: success rises steadily with commanded closure
+(banana_chunk 11 % at <2 mm -> 67 % at >4 mm; strawberry 0 % at <1.5 mm -> 100 % at >4 mm) with
+huge measured stress headroom — pure under-command.
+
+**Diagnosis (canonical-pose scans, all four key objects):**
+1. **The holdability floor is dead.** Predicted grip satisfies the scalar Coulomb inequality at
+   FIRST CONTACT on every object (c_hold = 0.0 everywhere) — the surrogate's holdability
+   prediction carries no information about simulator slip. Ruled out as a fix.
+2. **The p98 crossing degenerates on soft objects: raspberry and strawberry give c_y = 0.0 mm** —
+   the unmasked contact concentration exceeds yield at the plan width itself, so lambda*c_y = 0
+   and the command collapses to the 0.8 mm clip (strawberry's 0 %-success bin).
+3. The MASKED top10 curve under the relaxed scan is smooth and non-degenerate, and its crossing at
+   the identification pose is a genuine stress crossing (statuses `ok` throughout — not the
+   pen_tol artifact that motivated v4.1's switch).
+
+**Lesson (own it): v4.1 changed two things at once** — the pen_tol relaxation (real fix, kept) and
+the crossing metric (harmful, reverted). A confounded double-change that cost one chain pass.
+
+v4.2: `--scan-metric masked|p98` (default masked; p98 kept for comparison), gain re-identified
+under the masked relaxed interpolated scan: mushroom c_y = 4.88 mm vs measured-good 6.4 mm ->
+**default 1.31**. `scan_metric` + `closure_gain` now recorded in config.yaml. Full 7-object rerun
+queued after tofu completes the v4.1 chain. (Tofu stall alert was a false alarm — soft-MPM batches
+exceed the 20-min episode window; the process is alive at 21 FPS.)
+
+
 **2026-08-30 (v4.1) — the v4 scan's c_y was often GEOMETRIC, not stress-based: the search's 3 mm
 gross-clipping tolerance terminated it. Fixed (user's pen_tol question exposed it); crossing now
 on UNMASKED p98 with interpolation; lambda re-identified = 4.92; chain restarted.**

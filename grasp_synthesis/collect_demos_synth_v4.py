@@ -405,12 +405,17 @@ CLOSURE_CMD_MIN_M   = 0.0008   # never command less than this (contact would be 
 CLOSURE_CMD_MAX_M   = 0.008    # hard safety cap
 
 
-def surrogate_closure(fem_obj, pad_geo, best_x, obj_com, obj_quat, E, yld, density, mu, table_z):
-    """c_y: closure (m, beyond the synthesized width) at which the surrogate first predicts
-    YIELD SOMEWHERE IN THE OBJECT. v4.1: the crossing is on the UNMASKED p98 stress
-    (`stress_p98`), not the contact-masked top10 — the mask is right for pose RANKING (it
-    suppresses the contact singularity) but wrong for a damage-onset question, where
-    contact-region stress counts.
+def surrogate_closure(fem_obj, pad_geo, best_x, obj_com, obj_quat, E, yld, density, mu, table_z,
+                      metric="masked"):
+    """c_y: closure (m, beyond the synthesized width) at which the surrogate's predicted stress
+    first crosses yield. v4.2: the DEFAULT crossing is back on the contact-MASKED top10 (bulk
+    damage onset). v4.1's unmasked-p98 crossing was an over-correction bundled with the real fix
+    (the pen_tol relaxation): measured 2026-08-30, on soft/low-yield objects the unmasked contact
+    concentration exceeds yield AT THE PLAN WIDTH ITSELF (raspberry, strawberry: c_y = 0.0 mm),
+    collapsing commands to the clip minimum — strawberry success 100 % -> 46 %. The masked curve
+    is smooth and non-degenerate under the relaxed scan (verified a genuine stress crossing, not
+    a geometric artifact, at the identification pose). `metric="p98"` retains the v4.1 behaviour
+    for comparison.
 
     v4.1 also fixes two scan terminations that made v4.0's c_y geometric instead of
     stress-based (measured: raspberry c_y clustered at 3.0-3.5 mm = pad depth ~1.5 mm + dw/2
@@ -435,7 +440,7 @@ def surrogate_closure(fem_obj, pad_geo, best_x, obj_com, obj_quat, E, yld, densi
             continue                              # pads not touching yet — deepen
         if st in ("degenerate", "table", "penetrate"):
             return float(max(dw, CLOSURE_SCAN_STEP_M))   # validity edge before yield
-        s98 = sc.get("stress_p98")
+        s98 = sc.get("stress_top10" if metric == "masked" else "stress_p98")
         if s98 is None or not np.isfinite(s98):
             return float(max(dw, CLOSURE_SCAN_STEP_M))
         if s98 >= yld:
@@ -1080,13 +1085,19 @@ def main() -> None:
     # Pass a value explicitly to override.
     p.add_argument("--grasp-E",           type=float, default=None,  help="object Young's modulus (Pa); default = the object's material")
     p.add_argument("--grasp-density",     type=float, default=None, help="object density (kg/m^3); default = the object's material")
-    p.add_argument("--closure-gain", type=float, default=4.92,
+    p.add_argument("--scan-metric", choices=("masked", "p98"), default="masked",
+                   help="v4.2: stress metric for the closure scan's yield crossing. 'masked' "
+                        "(default) = contact-masked top10, the bulk-damage onset -- smooth and "
+                        "non-degenerate on soft objects. 'p98' = the v4.1 unmasked percentile, "
+                        "which saturates >= yield at first contact on soft/low-yield objects "
+                        "(raspberry/strawberry c_y = 0) and collapses the command to the clip "
+                        "minimum; kept for comparison only.")
+    p.add_argument("--closure-gain", type=float, default=1.31,
                    help="v4: commanded closure = gain * c_y, where c_y is the closure at which the "
                         "SURROGATE predicts yield at the chosen pose. The single global constant of "
-                        "the executor, identified once on the mushroom. v4.1: the crossing is the "
-                        "UNMASKED p98 with pen_tol relaxed and interpolated crossing, giving "
-                        "mushroom c_y = 1.30 mm against its measured-good closure 6.4 mm -> "
-                        "gain 4.92. Replaces v3's 2.5 mm baseline + extra_close + firm base.")
+                        "the executor, identified once on the mushroom under the v4.2 masked scan "
+                        "(relaxed pen_tol, interpolated): c_y = 4.88 mm against the measured-good "
+                        "closure 6.4 mm -> gain 1.31. Replaces v3's closure constants entirely.")
     p.add_argument("--regrasp-prob", type=float, default=0.0,
                    help="Fraction of episodes collected as RE-GRASP demos: the gripper STARTS "
                         "6-12 cm above the grasp pose with a RANDOM part-closed width and a small "
@@ -1371,6 +1382,8 @@ def main() -> None:
                         "grasp_escalate": int(args.grasp_escalate),
                         "grasp_width_max_mm": args.grasp_width_max_mm,
                         "regrasp_prob": args.regrasp_prob,
+                        "scan_metric": args.scan_metric,
+                        "closure_gain": args.closure_gain,
                         "grasp_yaw_max_deg": args.grasp_yaw_max_deg,
                         "grasp_yaw_max_deg_resolved": _yaw,
                         "grasp_nu": _fem_nu,
@@ -1626,7 +1639,8 @@ def main() -> None:
                 _cy = surrogate_closure(fem_obj, fem_pad_geo, best_x,
                                         obj_pos_all[i], obj_quat_all[i],
                                         _E_scan, float(args.grasp_yield),
-                                        args.grasp_density, args.grasp_mu, args.table_z)
+                                        args.grasp_density, args.grasp_mu, args.table_z,
+                                        metric=args.scan_metric)
                 _cc = float(np.clip(args.closure_gain * _cy, CLOSURE_CMD_MIN_M, CLOSURE_CMD_MAX_M))
                 print(f"  Env {i}: c_y={_cy*1000:.1f}mm -> commanded closure {_cc*1000:.1f}mm")
             else:
