@@ -703,3 +703,10 @@ Per category now: banana 500+, kiwi ~166, egg ~163, mushroom ~160, + small 4.
 - Self-resubmit + per-cat quota active. ETA ~22h. When user returns / collection
   completes: merge all data.pkl -> train single_lift_gen8_regrasp_pcd (+ baseline
   from strict_home) -> yd_gen_eval (8 in-domain + 4 OOD, 100 each, scene_group 1).
+
+---
+## 2026-08-31 01:15 — collection ~40%
+- 1805147 large: 120 this run. 1805198 small: 160 this run. 0 batchfails.
+- Per category: banana 500+, kiwi ~205, egg ~198, mushroom ~190, grape ~172,
+  cherry ~163, tomato ~135, raspberry ~120. Total ~1610/4000 (40%).
+- ~2 demos/min combined. ~20h to 4000. Self-resubmit + per-cat quota running.
