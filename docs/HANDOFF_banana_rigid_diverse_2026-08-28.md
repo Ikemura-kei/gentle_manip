@@ -666,3 +666,10 @@ Collector default n_envs 16 -> 10.
   grape 57, cherry 55, tomato 32, raspberry 27. Total ~1040/4000.
 - Both continuous; won't finish in the window. Merge + gen8 train + per-category
   eval (yd_gen_eval, 8+4 cats) when the user resumes or collection completes.
+
+---
+## 2026-08-30 20:35 — collection ~30%
+- 1802711 large (n_envs 10): ~104 this run. 1800352 small (n_envs 16): ~260.
+- Per category: banana 500, kiwi ~160, egg ~156, mushroom ~152, grape ~90, cherry ~86,
+  tomato ~57, raspberry ~48. Total ~1210/4000 (30%). 0 batchfails.
+- ~1.5 demos/min combined (soft-MPM contact-bound ceiling on 2 GPUs).
