@@ -444,6 +444,37 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-30 (v4.1) — the v4 scan's c_y was often GEOMETRIC, not stress-based: the search's 3 mm
+gross-clipping tolerance terminated it. Fixed (user's pen_tol question exposed it); crossing now
+on UNMASKED p98 with interpolation; lambda re-identified = 4.92; chain restarted.**
+
+v4.0 first pass: mushroom 94.1 % / 100 % sub-yield (PASS) but raspberry 100 % / 56 % — and the new
+per-episode `closure_cmd_mm` column made the diagnosis immediate: episodes with commanded closure
+<= 3 mm were 88 % sub-yield, > 3 mm only 25 %. The c_y values clustered at 3.0-3.5 mm = pad depth
+(~1.5 mm) + dw/2 crossing `pen_tol` = 3 mm — the scan was being cut off by the SEARCH's
+gross-clipping SDF filter, so c_y reflected geometry, not predicted damage. (The user asked
+whether 3 mm was too strict / whether deeper indents are sometimes wanted — exactly the right
+question: for the search it is a clipping filter that intended contact never trips; for the scan
+it was a bug, and yes, deep indents are legitimate whenever predicted stress stays sub-yield.)
+
+v4.1 scan: crossing on the **UNMASKED p98** (`stress_p98`, newly exposed from the same solve —
+the mask is right for pose ranking, wrong for damage onset), `pen_tol` relaxed to 5 cm for scan
+calls only (search unchanged; validity bounded by the 10 mm small-strain limit), statuses handled
+by meaning (`no_contact` -> deepen; `degenerate`/`table` -> validity edge), and the crossing
+LINEARLY INTERPOLATED (gain ~5 x a 0.5 mm step would otherwise quantize the command by ~2.5 mm).
+Lambda re-identified on the mushroom under the new criterion: c_y = 1.30 mm vs measured-good
+closure 6.4 mm -> **gain 4.92** (default). First batch: mushroom c_y 0.5-1.3 mm -> commands
+2.5-6.2 mm varying per pose.
+
+Also: a botched slice-based edit corrupted v4 mid-change (`FIRM_FORCE_THRESH_N` first occurs in a
+COMMENT before the function, so the slice was reversed-empty and `str.replace('', ...)` exploded
+the file) — restored from git, redone with exact-text replacement. Lesson: never build a
+replacement slice from two independent `index()` calls without asserting start < end.
+
+7-object v4.1 chain restarted from scratch; v4.0 partial runs deleted (n40/regrasp/probe runs
+kept). Results table to follow.
+
+
 **2026-08-30 — `docs/paper/method_v4.md`: the complete v4 method + validation reference in
 paper-adaptable prose.** Every constant verified against `collect_demos_synth_v4.py`/`smgrasp/`
 on this date. Part A: problem statement, preprocessing, E=1 FEM + inertia-relief + Schur

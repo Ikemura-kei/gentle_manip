@@ -127,16 +127,22 @@ kept a 32 mm mushroom at 0.58 σ_y drove a 14 mm raspberry to 2.1–2.7× its yi
 geometry is not in the formula.
 
 v4 instead asks the surrogate: at the chosen pose, the width axis is re-scanned (0.5 mm steps,
-≤ 12 mm) for **c_y, the closure at which predicted stress first crosses σ_y** (using the DR-drawn
-E). The commanded closure is
+≤ 12 mm, linearly interpolated crossing) for **c_y, the closure at which the predicted UNMASKED
+p98 stress first crosses σ_y** (using the DR-drawn E). The unmasked percentile is deliberate: the
+contact mask is correct for pose *ranking* (it suppresses the contact singularity) but wrong for
+a damage-*onset* question, where contact-region stress counts (v4.1; the masked variant also let
+the search's 3 mm gross-clipping tolerance terminate the scan geometrically). During the scan the
+finger-body tolerance is relaxed — deep indents are legitimate when predicted stress stays below
+yield (a soft object may take 8 mm) — and validity is bounded by the 10 mm small-strain limit.
+The commanded closure is
 
 ```
-c_cmd = clip( λ · c_y , 0.8 mm, 8 mm ),      λ = 1.28
+c_cmd = clip( λ · c_y , 0.8 mm, 8 mm ),      λ = 4.92
 ```
 
 with **λ the single global constant of the executor**, identified once on the mushroom
-(measured-good closure 6.4 mm / predicted c_y 5.0 mm) — justified by the measured cross-object
-stability of the surrogate's conservative bias (A.10, table 2). All three closure constants are
+(measured-good closure 6.4 mm / predicted c_y 1.30 mm) — justified by the measured cross-object
+stability of the surrogate's conservative bias (B.2). All three closure constants are
 deleted. A weak-grasp fallback survives: if the measured stress rise at grasp completion is below
 5 % of σ_y, the gripper closes an extra 0.5·c_cmd (≤ 2 mm), once.
 
@@ -222,10 +228,12 @@ the 7-object v4 outcome table is the direct test of λ-transfer.
 
 ### B.3 v4 outcomes per object (16-episode runs, own material; **in progress**)
 
-| object | success | sub-yield | median stress | status |
+(v4.0 pass, superseded by v4.1's scan fix: mushroom 94.1 % / 100 % sub-yield / 0.49 σ_y;
+raspberry 100 % / 56 % — the scan-termination bug, diagnosed via the per-episode closure record.)
+
+| object (v4.1) | success | sub-yield | median stress | status |
 |---|---|---|---|---|
-| mushroom | 94.1 % | **100 %** | 0.49 σ_y | done |
-| raspberry / cherry tomato / banana chunk / tomato / strawberry / tofu | — | — | — | running |
+| all seven | — | — | — | running |
 
 (v3 baseline for contrast: cherry 56 %, raspberry 19 % sub-yield under the analytic constants.)
 Large-scale reference: the frozen mushroom set, 250 episodes, 96.5 % success, 99.6 % sub-yield.

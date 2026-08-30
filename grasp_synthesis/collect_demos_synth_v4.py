@@ -406,23 +406,47 @@ CLOSURE_CMD_MAX_M   = 0.008    # hard safety cap
 
 
 def surrogate_closure(fem_obj, pad_geo, best_x, obj_com, obj_quat, E, yld, density, mu, table_z):
-    """c_y: the closure (m, beyond the synthesized width) at which the surrogate's PREDICTED
-    stress_top10 first crosses the object's yield — scanned at the chosen pose, exactly the
-    refine-round primitive. Returns CLOSURE_SCAN_MAX_M if it never crosses (very soft object).
-    Uses the DR-drawn E when available so the scan matches the simulated material."""
+    """c_y: closure (m, beyond the synthesized width) at which the surrogate first predicts
+    YIELD SOMEWHERE IN THE OBJECT. v4.1: the crossing is on the UNMASKED p98 stress
+    (`stress_p98`), not the contact-masked top10 — the mask is right for pose RANKING (it
+    suppresses the contact singularity) but wrong for a damage-onset question, where
+    contact-region stress counts.
+
+    v4.1 also fixes two scan terminations that made v4.0's c_y geometric instead of
+    stress-based (measured: raspberry c_y clustered at 3.0-3.5 mm = pad depth ~1.5 mm + dw/2
+    crossing the search's 3 mm gross-clipping SDF tolerance):
+    - pen_tol is RELAXED to 5 cm for scan calls only. Deep indents are legitimate here (a soft
+      object may take 8 mm below yield); validity is bounded by the 10 mm max_indent
+      (`degenerate`) instead. The 3 mm filter still protects the CMA search unchanged.
+    - statuses are handled by MEANING: `no_contact` -> keep scanning (not touching yet);
+      `degenerate`/`table` -> stop at the validity edge; `ok` -> test the crossing."""
     from smgrasp import finger_grasp as fg
     x0 = np.asarray(best_x, float)
-    for dw in np.arange(CLOSURE_SCAN_STEP_M, CLOSURE_SCAN_MAX_M + 1e-9, CLOSURE_SCAN_STEP_M):
+    prev_dw, prev_s = 0.0, None
+    for dw in np.arange(0.0, CLOSURE_SCAN_MAX_M + 1e-9, CLOSURE_SCAN_STEP_M):
         x = x0.copy(); x[6] = max(0.004, float(x0[6]) - dw)
         sc = fg.score_finger_grasp(fem_obj, x, obj_com=np.asarray(obj_com, float),
                                    obj_quat_wxyz=np.asarray(obj_quat, float), pad_geo=pad_geo,
                                    E=E, density=density, mu=mu, table_z=table_z,
-                                   w_press=0.05, w_peak=0.3, area_min=0.0)
-        st = sc.get("stress_top10")
-        if st is None or not np.isfinite(st):
-            return float(dw)               # left the scoreable regime -> treat as the crossing
-        if st >= yld:
-            return float(dw)
+                                   pen_tol=0.05, w_press=0.05, w_peak=0.3, area_min=0.0)
+        st = sc.get("status")
+        if st == "no_contact":
+            prev_s = None
+            continue                              # pads not touching yet — deepen
+        if st in ("degenerate", "table", "penetrate"):
+            return float(max(dw, CLOSURE_SCAN_STEP_M))   # validity edge before yield
+        s98 = sc.get("stress_p98")
+        if s98 is None or not np.isfinite(s98):
+            return float(max(dw, CLOSURE_SCAN_STEP_M))
+        if s98 >= yld:
+            # LINEAR INTERPOLATION of the crossing between the bracketing samples: the command is
+            # gain * c_y with gain ~5, so raw 0.5 mm quantization would amplify to ~2.5 mm of
+            # command error. p98 is smooth in closure, so the interpolated crossing is accurate.
+            if prev_s is not None and s98 > prev_s:
+                frac = (yld - prev_s) / (s98 - prev_s)
+                return float(max(prev_dw + frac * (dw - prev_dw), 1e-4))
+            return float(max(dw, CLOSURE_SCAN_STEP_M))
+        prev_dw, prev_s = dw, s98
     return float(CLOSURE_SCAN_MAX_M)
 
 
@@ -1056,13 +1080,13 @@ def main() -> None:
     # Pass a value explicitly to override.
     p.add_argument("--grasp-E",           type=float, default=None,  help="object Young's modulus (Pa); default = the object's material")
     p.add_argument("--grasp-density",     type=float, default=None, help="object density (kg/m^3); default = the object's material")
-    p.add_argument("--closure-gain", type=float, default=1.28,
+    p.add_argument("--closure-gain", type=float, default=4.92,
                    help="v4: commanded closure = gain * c_y, where c_y is the closure at which the "
                         "SURROGATE predicts yield at the chosen pose. The single global constant of "
-                        "the executor, identified once on the mushroom (measured-good closure "
-                        "6.4 mm / predicted c_y 5.0 mm = 1.28) and shown to transfer (rank-perfect "
-                        "ordering, ~0.5-0.6 stable bias across 4 objects). Replaces v3's 2.5 mm "
-                        "baseline + extra_close + firm base entirely.")
+                        "the executor, identified once on the mushroom. v4.1: the crossing is the "
+                        "UNMASKED p98 with pen_tol relaxed and interpolated crossing, giving "
+                        "mushroom c_y = 1.30 mm against its measured-good closure 6.4 mm -> "
+                        "gain 4.92. Replaces v3's 2.5 mm baseline + extra_close + firm base.")
     p.add_argument("--regrasp-prob", type=float, default=0.0,
                    help="Fraction of episodes collected as RE-GRASP demos: the gripper STARTS "
                         "6-12 cm above the grasp pose with a RANDOM part-closed width and a small "
