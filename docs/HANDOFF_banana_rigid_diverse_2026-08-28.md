@@ -331,3 +331,24 @@ Regrasp confirmed on soft banana -> building the direct 9-object generalist.
 - **NEXT**: smoke passes -> launch (a) `yd_xcat_collect` regraspable (4500 ep, won't
   finish in window) and (b) `START_MODES=strict_home:1.0 TAG=xcat_baseline` non-regraspable
   baseline. Both continuous; report cumulative progress.
+
+---
+## 2026-08-30 04:15 — Phase 4 smoke 1792715 found 2 issues -> pool narrowed to 5
+
+Smoke (cross-category draw worked: pool loaded, per-scene object switch + yield
+threading confirmed). But:
+1. **Small fruit break the pipeline.** raspberry (1.5cm) / cherry / grape / tomato
+   (~2cm) deform to degenerate meshes (~64 MPM particles at grid 170); trimesh
+   `bounds_tree` raises "Bounds must be (n, dimension*2)!" in the SDF build ->
+   CMA-ES crashes the batch. Also 0/8 grasp success on raspberry (mushroom-scale
+   `OBJ_SIZE` bounds + grasp_gate_dist search a +-5cm box for a 1.5cm object).
+2. Collector's per-batch skip caught the crashes (no run abort) but no demos saved.
+
+**Fix:** pool narrowed to the 5 mushroom-scale (3-6cm) soft objects:
+`mushroom, banana_lying, kiwi, egg_boiled, strawberry` (E 3e5..5.3e5). Scale DR
+tightened to [0.88,1.15]. Task -> grid 190 / substeps 440. Committed.
+-> re-smoke job 1792749 (10 ep / 3 env). If it saves demos across >=2 objects with
+no crash, launch the two continuous runs.
+
+NOTE for later: adding the small fruit back needs per-object grid_density (finer)
++ object-size-scaled CMA bounds + a deform-mesh validity guard. Deferred.
