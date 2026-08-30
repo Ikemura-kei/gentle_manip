@@ -653,3 +653,16 @@ SLOWER than the old n_envs 6 (1.2/min). Soft-MPM contact does not parallelize fr
 GPU. Killed. Relaunched large as **1802711, n_envs 10, maxfevals 550, seed 13**.
 Collector default n_envs 16 -> 10.
 - Small collector 1800352 stays at n_envs 16 (small objects = few particles, MPM cheap).
+
+---
+## 2026-08-30 19:15 — collection status (~26%)
+
+- 1802711 large (n_envs 10): ~46 demos this run. 1800352 small (n_envs 16): ~165.
+- CONFIRMED: soft-MPM grasp EXECUTION is contact-bound, ~0.7 FPS/env regardless of
+  n_envs -> a 16-env batch ~= 14 min exec + ~4 min CMA. n_envs 6-10 is the sweet
+  spot; the small collector at 16 is a bit slow but PRODUCING (0 batchfails). A
+  natural resubmit will pick up the new n_envs 10 default. Not churning it now.
+- Per category toward 500: banana_lying 500, kiwi 139, egg 137, mushroom 132,
+  grape 57, cherry 55, tomato 32, raspberry 27. Total ~1040/4000.
+- Both continuous; won't finish in the window. Merge + gen8 train + per-category
+  eval (yd_gen_eval, 8+4 cats) when the user resumes or collection completes.
