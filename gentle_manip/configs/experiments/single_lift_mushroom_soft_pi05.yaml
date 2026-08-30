@@ -1,0 +1,44 @@
+# [experiment] pi0.5 VLA baseline data collection: mushroom, RGB (external + wrist) recorded.
+# Used by: collect_demos_synth_v3 (--experiment) ; openpi/LeRobot conversion ; pi0.5 LoRA fine-tune
+# Status: experimental (pi0.5 baseline, 2026-08-30)
+#
+# A FORK OF single_lift_mushroom_soft_abs_action_armfocus_7d_realws — the experiment the
+# generalist run `ddgrl` (logs/dppo/dppo-pretrain/single_lift_generalist_3obj/ddgrl) was trained
+# with, which is the setup we are FIXED ON (user, 2026-08-30). It changes exactly TWO things:
+#   task: ... -> ..._wristcam   (adds cam_wrist)
+#   obs:  superset_soft_armfocus -> superset_soft_armfocus_rgb   (adds the two RGB streams)
+# Action (7d euler abs), DR (soft_orientation_realws) and augmentation are IDENTICAL to the
+# reference, so pi0.5 trains and evaluates under the same conditions as the DPPO baseline it is
+# being compared against. Anything else would confound the comparison.
+#
+# ONE collection feeds BOTH pi0.5 variants (external-only, external+wrist): the variants differ in
+# which image keys the LeRobot conversion emits, NOT in the episodes. `views` cannot split them --
+# ObsConfig.subview treats `images` as all-or-nothing -- so the camera choice belongs to the
+# conversion script, and the two variants must be built from this one dataset to stay paired.
+# ACTION = 7-DIM EULER ABSOLUTE (user standing decision 2026-08-30: 7D always). NOT the 10-dim
+# rot6d that the mm4_s08 collection recipe used. This is NOT a cosmetic re-encoding -- the 7d
+# config carries `euler_frame_offset_deg: [180,0,0]`, without which a top-down grasp's roll sits
+# on the +/-pi seam and decodes 180 deg wrong (run oppsu, ~0% success). Every recent DPPO run
+# (incl. the generalist ddgrl) trains on this action space, so the pi0.5 baseline must too or the
+# comparison is not apples-to-apples and the shared eval harness would decode it differently.
+task: single_lift_mushroom_soft_wristcam
+action: abs_pose_euler_abs_gripper
+dr: soft_orientation_realws   # REAL-workspace object spawn box -- MATCHES the reference run
+augmentation: l515_noise
+
+obs: superset_soft_armfocus_rgb   # quat + arm-focus cloud + privileged aux labels + RGB
+views:
+  teacher: [privileged]
+  student: [point_cloud]       # ee_pos + ee_quat + gripper + point_cloud (obs_dim 8)
+  # pi0.5 EVAL view: proprio (always included) + the two RGB streams, NO point cloud --
+  # pi0.5 consumes images + state only, and dropping the cloud avoids a per-step depth
+  # render the policy would ignore. Used by gentle_manip/pi05/eval_harness.py via
+  # serl_sim_server --view pi05.
+  pi05: [images]
+
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400

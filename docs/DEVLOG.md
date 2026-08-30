@@ -6077,3 +6077,388 @@ the honest strongest form of the reviewer's baseline.
 object and reported the baseline as vision-only. Two of them silently encoded that object's scale.
 **A constant fitted per-object is privileged information wearing a different hat** — the user caught
 what I did not.
+
+### 2026-08-30 — π0.5 PREP: the wrist camera was mounted BACKWARDS, and the smoke test could not have caught it
+
+Building the two-view collection for the π0.5 baseline (external-only vs external+wrist), the
+wrist camera passed its smoke test — `(2,480,640,3)` uint8, and the view changed *more* than the
+external one when the arm moved (14.87 vs 9.85 mean |pixel change|). **It was pointing at the empty
+background above the table.** Only opening `cam_wrist_t25.png` revealed it: dark sky, a sliver of
+gripper, no table and no mushroom, while `cam_ext_t25.png` showed arm + table + mushroom correctly.
+
+**ROOT CAUSE — an axis-convention mismatch at the Genesis API boundary.** Genesis
+`camera.set_pose(transform=)` takes an **OpenGL** pose: `T_to_pos_lookat_up` computes
+`lookat = pos - T[:3, 2]`, so the camera looks along **−z**, +y up. `EE_T_CAM_WRIST`
+(`xarm7_config.py`) is a calibrated **OpenCV** extrinsic: +z forward, +y down — the convention
+`RealBackend` uses and `depth_to_pointcloud` requires. Genesis's own `camera.extrinsics` property
+is the proof, converting back with exactly the flip we were missing:
+`res = transform.copy(); res[..., :3, 1:3] *= -1`. Passing the OpenCV matrix raw therefore aimed
+the camera along `−z_cam` = straight up.
+
+**FIX** (`genesis_worker.py`, at the `set_pose` call — the Genesis boundary, so `wrist_cam_T` keeps
+the OpenCV semantics it shares with `RawObs.camera_extrinsics` and the real backend):
+`_T[..., :3, 1:3] *= -1.0` (self-inverse). This also makes the extrinsic the worker reads back
+correct, so wrist depth would back-project correctly too, not just render correctly.
+
+**THE METHOD LESSON, which is the durable part.** The assertion I wrote (`view changed > 2.0`)
+**cannot fail the way the code actually breaks**: a camera bolted on backwards still moves with the
+arm. It was a test of the re-pose plumbing that I read as a test of the camera. Replaced with three
+checks that are geometric rather than incidental:
+1. **round-trip** — the extrinsic Genesis reports back must equal `world_T_ee @ EE_T_CAM_WRIST`
+   (rotation error < 1°). Catches a convention error in either direction, and catches using the TCP
+   where the calibration wants the gripper base link.
+2. **aim** — the forward axis `world_T_cam[:3, 2]` must have `z < −0.5` at the top-down home pose.
+3. **content** — ≥25% of wrist depth pixels within 1 m: it sees the table, not the sky.
+
+Generalises past cameras: **name the convention explicitly whenever a pose crosses a library
+boundary** (OpenCV vs OpenGL, wxyz vs xyzw, which link a calibration is relative to). This is the
+axis-convention sibling of the B1/B10/B17 wrong-reference-frame class — right arithmetic, wrong
+frame — and it was caught only by looking at the artifact. Recorded in `docs/CHECKLISTS.md` §5.3.
+
+**Near-miss worth stating:** had this shipped, the wrist variant of the π0.5 comparison would have
+trained on 250 episodes of sky. It would still have *converged*, and it would have "shown" that the
+wrist view does not help — a clean, plausible, entirely fabricated negative result.
+
+*Evidence: job 1796508 (PASSED with the camera backwards), `.agent_tmp/rgb_smoke/`; fix + the three
+strengthened checks submitted as job 1796548 (result pending at the time of writing).*
+
+### 2026-08-30 — π0.5 COLLECTION LAUNCHED (250 eps, ext+wrist RGB). Two more traps caught pre-launch
+
+Following the wrist-camera fix above, three further checks before committing ~4 h of GPU time.
+
+**TRAP 1 — the collector had its OWN copy of the hardcoded-empty RGB bug.** `sim_backend.py`'s
+`rgb_images={}` was fixed on 2026-08-29, but `collect_demos_synth_v3._state_to_raw_obs` builds its
+own `RawObs` and had the identical hardcoded `{}`. Fixing one did not fix the other. RGB rendering
+is now DERIVED from the obs config (`_want_rgb = obs_config.images is not None`) rather than a CLI
+flag, so the render and the recorded keys cannot disagree — a flag is a thing you forget.
+*Lesson: when a bug lives in a duplicated builder, grep for the duplicates before calling it fixed.*
+
+**TRAP 2 — the run would have died AT THE MERGE, after hours of collection.** Measured, not
+guessed: two 640×480 RGB streams cost **448 MB per episode — 99.3% of the entire episode** — i.e.
+**100.9 GB for 250 episodes**, while `_merge_shards` loads every shard into RAM at once against a
+**102 GB** job allocation. The collection would have completed, then OOMed writing `data.pkl`.
+
+Fixed with JPEG q95 at shard-write (`gentle_manip/utils/image_codec.py`, `--image-quality`,
+default 95, `0` = raw escape hatch). Measured on a re-run smoke:
+
+| | raw | jpeg q95 |
+|---|---|---|
+| 4-episode `data.pkl` | 1.61 GB | 0.06 GB |
+| per episode | 403 MB | 15 MB |
+| **projected, 250 eps** | **100.9 GB** | **3.8 GB** |
+| mean abs pixel error vs raw | — | **0.46 / 255 (ext), 0.39 / 255 (wrist)** |
+
+26.8× smaller at ~0.18% pixel error, full resolution retained. Lossy is confined to pixels that a
+VLA resizes to 224×224 anyway; actions, proprio, point cloud, privileged labels, DR params and
+seeds are untouched, and `convert_demos.py` already excludes `image_*` keys, so the DPPO student
+path is unaffected.
+
+**CHECK 3 — REPRODUCIBILITY DEMONSTRATED, not assumed (the user's one stated requirement).** The
+raw and JPEG smokes ran at the SAME `--seed`, which turns them into a free experiment: all 24
+initial-condition columns of `dr_params.csv` — `cma_seed`, object dx/dy/roll/pitch/yaw/flip, home
+offset, `scene_scale`, `scene_bend_deg`, `mesh_variant`, twist/taper/rbf/axis_scale, material,
+friction — matched **exactly** across the two independent runs. (Outcome columns may still drift:
+MPM on GPU is not bit-deterministic in the rollout. Initial conditions are what reproducibility
+means here.)
+
+**LAUNCHED: job 1796751** — 250 episodes, 8 envs, `--seed 0`, `maxfevals 1145`, `scene_dr_every 1`,
+the `cdg` v3.4 recipe (`n_grasp 30`, `--grasp-extra-close 0.003`, `--grasp-area-min-mm2 15`,
+`approach_speed 0.0024`, `cam_azimuth_max_deg 60`), video for ALL 250 episodes.
+Experiment `single_lift_mushroom_soft_pi05` — asserted against the parsed config objects to differ
+from the proven collection recipe by EXACTLY `wrist_camera` + the two RGB keys; action, DR, point
+cloud and privileged labels are byte-identical, so this set stays comparable to the existing ones
+AND still trains the DPPO student.
+
+**ARTIFACTS:** run dir `dataset/demos/single_lift_mushroom_soft/26-08-30-<id>/` (`data.pkl`,
+`dr_params.csv`, `config.yaml`, `stats.yaml`, `videos/`); slurm logs
+`logs/slumr_logs/1796751.{out,err}` + `1796751_collect.log`. Smokes kept for comparison at
+`.agent_tmp/pi05_smoke{,_jpeg}/`.
+
+**FRAMING TO PRE-REGISTER (unchanged, and it matters):** the real rig has NO wrist camera any more,
+so external-only is the deployable variant and the wrist variant is a sim-only upper bound. Our
+data is one scripted behaviour, one object, one instruction — a π0.5 loss says more about that data
+regime than about π0.5. Say so wherever the numbers appear.
+
+### 2026-08-30 — openpi/π0.5 IS FEASIBLE ON THE GH200 NODES AT ITS EXACT PINS (checked, not assumed)
+
+The standing worry about a JAX-based VLA on this cluster is aarch64: the GH200 nodes are aarch64
+(glibc 2.34) and several ecosystems ship x86-only CUDA wheels. Checked openpi's actual pins against
+what PyPI and the PyTorch index really hold, before spending any time vendoring.
+
+| requirement | openpi pin | aarch64 CUDA availability | verdict |
+|---|---|---|---|
+| `jax[cuda12]` | `==0.5.3` | `jaxlib`, `jax-cuda12-pjrt`, `jax-cuda12-plugin` 0.5.3 all ship `manylinux2014_aarch64` cp311/cp312 | ✅ exact pin works |
+| `torch` | `==2.7.1` | **not** on the cu126 index (only 2.9.0/2.9.1); **is** on **cu128**: `torch-2.7.1+cu128-cp312-cp312-manylinux_2_28_aarch64.whl` | ✅ exact pin works, via cu128 |
+| driver | CUDA 12.8 needs ≥570 | measured **580.159.04** on the GH200 | ✅ |
+| python | openpi ≥3.11, lerobot (PyPI) ≥3.12 | jax 0.5.3 + torch 2.7.1 both have cp312 aarch64 | ✅ use **3.12** |
+
+**So no version overrides are needed** — unlike `envs/dppo_arrhenius`, which had to override the
+dppo fork's `torch==2.4.0`. The new env follows the repo's established per-arch pattern: a
+`[[tool.uv.index]]` entry pinning torch to the aarch64 CUDA index, here **cu128** rather than the
+cu126 the other arrhenius envs use.
+
+⚠ **TRAP for whoever sets this up:** PyPI's own `torch-2.7.1-...-manylinux_2_28_aarch64.whl` is
+**99 MB vs 821 MB for x86_64** — it is a **CPU-ONLY** build. Installing torch for aarch64 from
+plain PyPI silently yields no CUDA, and everything "works" until it is mysteriously slow. The
+size ratio is the quickest tell. Always take aarch64 torch from the cuXXX index.
+
+Not yet done, and deliberately not started without a check-in: vendoring openpi into `third_party/`
+and creating `envs/openpi_arrhenius`. The 250-episode collection (job 1796751) is the active work.
+
+**PROVENANCE GAP FOUND AT LAUNCH (job 1796751), mitigated in-place.** The collector stamps
+`git_commit` into `config.yaml` — it recorded **74e14df**, which is the commit BEFORE the wrist-pose
+flip, the RGB passthrough and the JPEG codec. Checking out that commit does not reproduce this
+dataset. Since the changes are deliberately still uncommitted (the user pushes themselves), the run
+dir was made SELF-CONTAINED instead: `PROVENANCE.md` + `uncommitted_changes.patch` (tracked files)
++ `uncommitted_status.txt` + `new_files/` holding the four untracked files that `git diff` cannot
+capture (`image_codec.py` and the three configs). 40 kB, and the dataset now carries what builds it.
+
+*Generalises: `git diff` does NOT include untracked files, so a "snapshot the diff" reproducibility
+habit silently omits exactly the NEW files a new feature adds — the most load-bearing ones.*
+
+**TODO (deferred, do NOT edit the collector while job 1796751 runs):** `--image-quality` is not in
+the collector's `config.yaml` control block, so the snapshot does not record how the images were
+encoded (it IS in `data.pkl`'s meta as `image_encoding`/`image_quality`). Add it to the control
+dict after the collection lands. Deferring because the CMA-ES `ProcessPoolExecutor` workers may
+re-import the module, and a cosmetic snapshot field is not worth any risk to a 4.5 h run.
+
+### 2026-08-30 — ⚠ WRONG ACTION SPACE + WRONG DR: π0.5 collection cancelled at 21/250 and relaunched
+
+**The user caught it.** I forked the π0.5 experiment from `..._mm4_s08` — the recipe the most
+recent mushroom *collections* used — reasoning that matching the collection recipe kept the dataset
+comparable. Wrong reference. `mm4_s08` carries **`abs_pose_abs_gripper` (10-dim rot6d)** and a
+**4-mesh pool at scale [0.8,1.5]**, while every recent *training* run — including the generalist
+`ddgrl` we are fixed on — uses **`abs_pose_euler_abs_gripper` (7-dim euler)** with
+**`soft_orientation_realws`** (single mesh, scale [1.0,1.5]).
+
+**Why "just re-derive 7d from the 10d recording" would NOT have rescued it.** My first instinct was
+that rot6d→euler is a lossless re-encoding of the same rotation, so `convert_demos --derive-action`
+could fix it at conversion. Reading `abs_pose_euler_abs_gripper.yaml` killed that: the 7d config
+carries **`euler_frame_offset_deg: [180,0,0]`**, and without it a top-down grasp's roll sits exactly
+on the ±π seam of `as_euler` — the encoded roll sign-flips between consecutive frames (18–27% of
+transitions in every derived abs dataset), trains fine to a low loss, and decodes to a ~180°-wrong
+wrist roll → **~0% eval success** (run `oppsu`, `docs/debug_partC_euler_action_anomaly.md`). The
+two action spaces are not two spellings of the same thing.
+
+**Two independent defects, one root cause.** The action space AND the DR were both inherited from
+the wrong lineage by a single act of forking the wrong file. Had only the action been wrong the
+eval harness would likely have failed loudly; the DR would have failed *silently*, giving π0.5 a
+different object size/shape distribution than the DPPO baseline it is meant to be compared against
+— a confound invisible in every downstream number.
+
+**Corrected:** `single_lift_mushroom_soft_pi05` is now a fork of
+`single_lift_mushroom_soft_abs_action_armfocus_7d_realws` (ddgrl's experiment), asserted in code to
+differ by EXACTLY `wrist_camera` + the two `image_*` keys — action, DR, augmentation, point cloud
+and privileged labels all identical. Job **1796751 cancelled at 21/250**; relaunched as
+**1797457**. The aborted run dir carries an `ABORTED.md` saying why it must not be used.
+
+**RECORDED AS FIXED SETUP — `docs/CHECKLISTS.md` §0** (user standing decision): action (7-dim euler
+absolute, with the frame offset), proprio (quaternion), obs (`superset_soft_armfocus`) and DR
+(`soft_orientation_realws`) are settled, with the concrete parameter values written out. What may
+change: network architecture, data composition, training hyperparameters, and the OBJECT SET
+(expected to grow — the one DR-adjacent field allowed to move, and only deliberately, since it
+shifts the size distribution every width/gentleness number is measured against). New work forks the
+reference and asserts the delta against the PARSED config objects.
+
+*METHOD LESSON, and it is the same shape as the `VIS_TO_TRUE` mesh leak: I picked a reference
+because it was NEAR the work (the collection recipe) rather than because it was the thing the
+result must be COMPARABLE TO (the training reference). "Which config did the last similar job use?"
+is the wrong question; "which config does the baseline I am comparing against use?" is the right
+one.*
+
+**⚠ SAME-DAY CORRECTION to the entry above — I was wrong that derivation could not rescue it.**
+`collect_demos_synth_v3._invert_actions_absolute` **hardcodes rot6d**: the collector records 10-dim
+absolute actions no matter what the experiment's `action:` says, and EVERY demo set on disk
+(mushroom, tofu, raspberry) is `action_dim: 10`. The 7-dim euler the policies train on has always
+been produced at CONVERSION — `.agent_tmp/build_3obj_generalist.sh` builds the generalist dataset
+with `--derive-action abs_pose_euler_abs_gripper.yaml --derive-source-action
+abs_pose_abs_gripper.yaml`, and `actions/derive.py` applies `euler_frame_offset_deg` there. So
+deriving 7d from a 10d recording is not a risky workaround, it is THE pipeline; the `oppsu` failure
+came from deriving with a config that lacked the offset, not from deriving at all.
+
+**What this changes:** the relaunch was justified by the **DR** error alone — that one was real,
+and it is the dangerous kind because it fails silently (a different object size/shape distribution
+than the baseline being compared against). The action-space half of my reasoning was wrong, and the
+running job records 10-dim exactly like every baseline set, which is correct. `docs/CHECKLISTS.md`
+§0 has been corrected accordingly: do not try to make a collection record 7-dim, and do not read
+`action_dim: 10` in a shard as a bug — what must be right is the DERIVE step.
+
+*LESSON: I read one config file's warning comment and generalised it into a claim about the whole
+pipeline without checking how existing datasets were actually built. The evidence that would have
+corrected me — every demo set being action_dim 10 — was one command away and I ran it only after
+the relaunch.*
+
+### 2026-08-30 — π0.5 ADAPTED WITH ZERO CHANGES TO openpi (config + CLI only)
+
+User constraint: *"the best is no internal code needs to be changed, only config modification, and
+maybe mild adaptation for our evaluation env"*. Achieved in full — `third_party/openpi` is a clean
+checkout at `215abfb` with nothing edited. The trick is to make OUR data match a config they
+already ship, rather than adding a config to their tree.
+
+| piece | how | where it lives |
+|---|---|---|
+| env | `uv sync` from **openpi's own uv.lock** on an aarch64 node | `third_party/openpi/.venv` |
+| dataset | emit libero's exact feature names: `image` / `wrist_image` / `state` / `actions` (+ `task`) | `gentle_manip/pi05/convert_to_lerobot.py` (OURS) |
+| training | stock `pi05_libero` + CLI overrides (`--data.repo-id`, `--batch-size`, ...) | no file at all |
+| inference | `LiberoOutputs` slices to the first **7** dims = exactly our action dim | unchanged |
+| eval | `Pi05EvalPolicy` driving the canonical `run_eval` | `gentle_manip/pi05/eval_policy.py` (OURS) |
+
+**Why `pi05_libero` fits us without editing it** — checked in their source, not assumed:
+`LiberoInputs` passes `state` and `actions` through with **no hardcoded dimension** (openpi pads to
+the model dim), so our 8-dim state and 7-dim action are fine. `LiberoOutputs` returns
+`data["actions"][..., :7]` — libero's action dim happens to equal ours, so it is correct for us
+verbatim. `repo_id` is a tyro field on `DataConfigFactory`, so the dataset is a pure CLI override.
+
+**FEASIBILITY, measured:** jax 0.5.3 (openpi's exact pin) has `manylinux2014_aarch64` cp311/cp312
+wheels for `jaxlib` / `jax-cuda12-pjrt` / `jax-cuda12-plugin`; verified on the GH200 —
+`jax.devices()` → 4 `CudaDevice`s, matmul runs. ⚠ **openpi's `torch==2.7.1` resolves to a CPU-ONLY
+aarch64 wheel** (99 MB vs 821 MB on x86_64). Harmless here: openpi's JAX path uses torch only for
+the LeRobot dataloader, all compute is JAX. Worth knowing before someone "fixes" it.
+
+**ACTIONS — derived, not recorded.** The LeRobot `actions` are the 7-dim euler absolute set derived
+with the generalist's exact recipe (`--derive-action abs_pose_euler_abs_gripper`,
+`--derive-source-action abs_pose_abs_gripper`, lookahead 1). Validated on real episodes: decoding
+the derived actions back through `ActionPipeline` reproduces the commanded targets to **0.000 mm
+position / 0.038° max rotation / 0.000 mm gripper**, with **0/237 roll seam crossings**. That
+round-trip is the check `oppsu` failed.
+
+**TWO CAMERA VARIANTS FROM ONE DATASET.** `--cameras ext_wrist` (both views) vs `--cameras ext`
+(wrist_image zero-filled — openpi's own idiom for a missing camera, what they do for
+`right_wrist_0_rgb`). Stated honestly: `LiberoInputs` hardcodes the left-wrist mask to True, so the
+ext-only variant still spends image tokens on a blank frame rather than masking it off. It is a
+fair "no wrist information" ablation, not a free lunch. The real rig has no wrist camera, so `ext`
+is the deployable variant and `ext_wrist` a sim-only upper bound.
+
+**⚠ QUALITATIVE FINDING — NEIGHBOURING ENVS ARE VISIBLE IN cam_ext.** Rendering the recorded RGB to
+video (`gentle_manip/pi05/visualize_rgb.py`) shows two more XArms on the horizon at lift height.
+Cause: soft/MPM scenes must use the per-env bound-camera path with `env_separate_rigid=False` (the
+rasterizer cannot separate MPM geometry per env), so at `ENV_SPACING = 2.5 m` each env's camera
+sees its neighbours. **The point cloud has never been affected** — it is cropped to
+`[0.2,-0.215,0.004]–[0.71,0.215,0.45]` — which is exactly why this never surfaced before. RGB has
+no crop. It is consistent between train and eval so it does not bias the π0.5-vs-DPPO comparison,
+but it is a sim artifact absent on the real rig, and the neighbours MOVE (dynamic distractors).
+Options: accept+document / crop the RGB to the workspace / collect at `num_envs=1` (~8× slower).
+Recommended: accept and document, since both arms of the comparison see it.
+
+*Method note: this was found only by RENDERING THE RECORDED OBSERVATION STREAM and looking at it —
+not by any assertion. The collector's own `videos/` come from a separate free-flying camera and
+would never have shown it.*
+
+### 2026-08-30 — ⚠ TWO TODOs BEFORE THE SERIOUS MULTI-OBJECT RGB COLLECTION (user, 2026-08-30)
+
+Both found by LOOKING at the rendered observation streams. The current 250-episode mushroom
+collection (job 1797457) KEEPS RUNNING and is fine as a smoke/plumbing dataset — the user's
+decision. These must be fixed before the multi-object collection that real comparisons rest on.
+
+**TODO 1 — WRIST CAMERA IS INSIDE THE GRIPPER.** `xarm7_config.EE_T_CAM_WRIST` is an **identity
+placeholder**, not a calibration: the file's own TODO says *"must be replaced with calibrated
+transform"* and *"NOT used by the current rig (no wrist camera)"*. With identity the camera sits at
+the gripper BASE-LINK origin looking along +tool-z at fingertips 171 mm away — i.e. embedded in the
+gripper body, which is exactly what the wrist frames show (fingers filling the top and bottom
+edges). ⚠ **I earlier described this as "the calibrated OpenCV extrinsic" — WRONG, and the user
+caught it.** (The separate OpenCV→OpenGL flip earlier today was still necessary and correct; it
+turned a backwards camera into a forward one, but cannot fix a placeholder pose.)
+
+*Fix:* adopt the calibrated matrix CLAUDE.md already documents but which never reached the code —
+translation `[+0.07132349, -0.00272051, -0.16624549]`, optical axis ≈ +tool-z. That puts the camera
+**337 mm behind the fingertips and 71 mm off-axis: outside the gripper, looking past the jaws**,
+which is what the user asked for ("a bit outside of the gripper in the axis direction"). If that
+matrix is judged stale, fall back to a simple standoff along −tool-z. Either way, re-run the three
+geometric checks from `.agent_tmp/test_rgb_obs.py` (extrinsic round-trip, forward axis, near
+geometry) AND look at a frame — the round-trip check passes for ANY self-consistent pose, including
+a placeholder, so it cannot catch this class on its own.
+
+**TODO 2 — NEIGHBOURING ENVS VISIBLE IN cam_ext.** At `ENV_SPACING = 2.5 m`, soft/MPM scenes must
+use the per-env bound-camera path with `env_separate_rigid=False` (the rasterizer cannot separate
+MPM geometry per env), so each env's external camera sees its neighbours on the horizon — and they
+MOVE, so they are dynamic distractors. The point cloud was never affected (cropped to
+`[0.2,-0.215,0.004]–[0.71,0.215,0.45]`), which is why this never surfaced before RGB.
+
+*Options, best first:*
+1. **Backdrop occluder** — add a wall/plane fixture behind the workspace, outside the robot's
+   reach. Occludes the neighbours AND makes the scene more real-lab-like (a real rig has a
+   background), so it reduces the sim2real gap rather than just hiding an artifact. Cheap.
+2. Raise `ENV_SPACING` — neighbours shrink but stay in frame. Partial.
+3. Collect RGB at `num_envs=1` — clean, ~8× slower. Only if 1 proves insufficient.
+
+*Method note applying to BOTH: neither was caught by any assertion. Both were caught by rendering
+the recorded observation stream to video and looking at it. The collector's own `videos/` come from
+a separate free-flying camera and would never have shown either one.*
+
+### 2026-08-30 — π0.5 TRAINS ON OUR DATA (smoke PASS), OOM was a SLURM allocation bug, full run chained
+
+**SMOKE PASS (job 1797898):** restored `pi05_base` params (12.5 GiB) in 4.2 s → **10/10 steps at
+2.2 s/it** → blocking save 5.65 s → *"Save Finalize is done on all hosts"* → checkpoint finalized as
+`.../pi05_smoke/9`, `rc=0`. End to end on our data with **openpi unmodified**.
+
+**THE OOM WAS OURS, NOT openpi's.** The previous attempt (1797884) trained all 10 steps and was then
+**OOM-killed during the checkpoint save**, leaving a `9.orbax-checkpoint-tmp-0` that never
+finalized. Orbax stages params (12.5 GiB) + train_state (37.5 GiB) into **HOST** memory to write,
+and the job had SLURM's default per-CPU allocation of ~102 GB — while the node has ~485 GB. Adding
+**`#SBATCH --mem=0`** fixed it outright. Checkpoint size is set by MODEL size, not dataset size, so
+this does not regress on the 250-episode run.
+
+⚠ **Note the failure shape: it trains fine and dies at SAVE.** A long run would have burned hours
+and produced nothing. Smoke tests must therefore run far enough to WRITE A CHECKPOINT — a smoke
+that stops at "loss went down" would have passed this and taught us nothing.
+
+*GPU-side fallbacks, from openpi's README, if ever needed (host RAM was the issue here, not GPU):*
+`XLA_PYTHON_CLIENT_MEM_FRACTION=0.9` (now set), `--fsdp-devices 4`, or disable EMA. Full fine-tune
+needs >70 GB and the GH200 has 97.8 GB, so it fits on one GPU; LoRA (>22.5 GB) is not required.
+
+**FULL RUN CHAINED (survives the session — SLURM dependencies, not a watcher):**
+| job | what | depends on |
+|---|---|---|
+| 1797457 | collection, 250 eps → `26-08-30-lyr` | — |
+| **1797916** | convert BOTH variants + norm stats → `dataset/lerobot/gm/mushroom250_{ext_wrist,ext}` | afterok 1797457 |
+| **1797917** | fine-tune `pi05_mushroom250_ext_wrist` | afterok 1797916 |
+| **1797918** | fine-tune `pi05_mushroom250_ext` | afterok 1797916 |
+
+Training: stock `pi05_libero` + CLI overrides only, `--batch-size 32 --num-train-steps 12000
+--save-interval 2000`, 24 h wall. Steps/batch are a JUDGEMENT CALL, not a tuned value — 250 eps ×
+~220 frames ≈ 55k frames, so 12k steps at batch 32 is ~7 epochs. `save-interval 2000` means usable
+checkpoints exist even if the wall clock runs out. Revisit once the first loss curve is visible.
+
+`afterok` means a FAILED collection silently cancels the whole chain rather than training on
+partial data — the intended behaviour, but check `squeue`/the run dir rather than assuming
+training started.
+
+### 2026-08-30 — π0.5 EVAL RUNS THROUGH THE CANONICAL HARNESS (smoke PASS, plumbing only)
+
+`gentle_manip/pi05/eval_harness.py` + `eval_policy.py` route a fine-tuned π0.5 checkpoint through
+`gentle_manip.evaluation.run_eval` over the SAME `GenesisMultiStepVecEnv` + `serl_sim_server`
+bridge every DPPO/DP3 eval uses (CLAUDE.md hard requirement #1), so π0.5 and DPPO face identical
+scenarios, seeds, DR and metrics. Verified on the 10-step smoke checkpoint (job 1798196):
+5 episodes, per-episode video (750 frames each), `summary.json` + `episodes.csv`, **success 0.000 —
+which is the CORRECT result for 10 training steps.** This validated the path, not the policy.
+
+**Modelled on `eval_dp3_harness.py`**: DP3 also normalizes internally, and solves it by building the
+venv with IDENTITY normalization so the venv's normalize/unnormalize become no-ops. Same trick here,
+so π0.5 emits actions directly in the ActionPipeline [-1,1] space — the space
+`derive_action_set` wrote into the LeRobot dataset. Train and eval agree by construction.
+
+**FIVE integration defects, each one layer deeper, all in OUR code (openpi untouched):**
+1. **norm stats looked up under the wrong asset id.** `create_trained_policy` resolves
+   `assets/<asset_id>/norm_stats.json` with `asset_id = assets.asset_id or repo_id`; passing the
+   STOCK `pi05_libero` config looked for `physical-intelligence/libero`. The checkpoint stores them
+   under OUR repo_id. Fixed by inferring repo_id from the checkpoint's own `assets/` tree, so it
+   cannot be passed inconsistently with the checkpoint being loaded.
+2. **`--view student` has no images.** Added an ADDITIVE `pi05: [images]` view (teacher/student
+   untouched) → `[ee_pos, ee_quat, gripper_width, image_cam_ext, image_cam_wrist]`, no point cloud
+   (π0.5 ignores it, and dropping it avoids a per-step depth render).
+3. **the sim server never set `render_rgb_obs`.** Now DERIVED from the view
+   (`obs_cfg.images is not None`), not a new CLI flag, so render and requested keys cannot
+   disagree. `None → False` for every existing experiment ⇒ current runs byte-identical.
+4. **`PolicyEnv` needs `rgb_shape` when `images` is set** and the server passed None. Now derived
+   from the task's `scene_spec` cameras, asserting every image camera agrees (the obs space
+   declares ONE (H, W)).
+5. **the venv does not expose raw `ee_pos`.** It packs proprio into a stacked `state` array in
+   PROPRIO_VIEW order — the same 8-dim vector the LeRobot `state` feature was written with — with
+   an n_obs_steps axis on every modality. The policy now takes the LAST obs step.
+
+*None of these would have been found by reading code; each needed a run. Worth the five iterations
+now, on a throwaway checkpoint, rather than after a multi-hour fine-tune.*
+
+**Known cost, stated so it is not mistaken for a property of π0.5:** openpi's `Policy.infer` takes
+ONE observation, so `act()` loops over the 5 envs. A 5-episode eval took ~10 min. The canonical
+200-episode protocol will be slow; batching inference is the obvious optimisation if it matters.

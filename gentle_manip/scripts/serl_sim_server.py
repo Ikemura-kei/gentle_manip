@@ -84,9 +84,32 @@ def main() -> None:
                                      "settle_max_steps": exp.task_cfg.get("settle_max_steps", 200),
                                      "settle_vel_thresh": exp.task_cfg.get("settle_vel_thresh", 0.005),
                                      "scene_dr_every":   args.scene_dr_every,
+                                     # RGB observation streams, DERIVED from the view rather than
+                                     # a CLI flag so the render and the requested obs keys cannot
+                                     # disagree. None for every non-VLA experiment -> False ->
+                                     # existing runs are byte-identical. (Distinct from
+                                     # --render-rgb, which is the per-env VIDEO camera.)
+                                     "render_rgb_obs":   obs_cfg.images is not None,
                                  }, "dr": dr_cfg})
+    # RGB obs streams need their (H, W) to build the obs space. Take it from the scene spec's
+    # cameras (the authoritative source) rather than a constant, and require every image camera
+    # to agree -- PerceptionPipeline.build_obs_space declares ONE shape for all of them.
+    rgb_shape = None
+    if obs_cfg.images is not None:
+        _res = {c.name: (c.resolution[1], c.resolution[0])        # (w, h) -> (H, W)
+                for c in task.scene_spec.cameras if c.name in obs_cfg.images.cameras}
+        _missing = [c for c in obs_cfg.images.cameras if c not in _res]
+        if _missing:
+            raise ValueError(f"obs config requests images from {_missing}, but the task's "
+                             f"scene_spec has no such camera (have {[c.name for c in task.scene_spec.cameras]})")
+        if len(set(_res.values())) != 1:
+            raise ValueError(f"image cameras have differing resolutions {_res}; the obs space "
+                             "declares a single (H, W) for all of them")
+        rgb_shape = next(iter(_res.values()))
+        print(f"serl sim server: RGB obs {sorted(_res)} at (H,W)={rgb_shape}", flush=True)
+
     env = PolicyEnv(backend, obs_cfg, exp.action_config, task=task,
-                    max_episode_steps=10 ** 9, augmentation=aug)
+                    max_episode_steps=10 ** 9, augmentation=aug, rgb_shape=rgb_shape)
 
     frame_fn = backend.render_rgb if want_frame_cam else None   # works in-process AND subprocess
 

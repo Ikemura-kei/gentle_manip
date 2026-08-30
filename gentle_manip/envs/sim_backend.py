@@ -82,6 +82,10 @@ class SimBackend:
             robot_overrides=robot_overrides,
             # A record-only camera is built but not depth-rendered each step.
             render_obs_cameras=bool(render_cameras),
+            # RGB as an OBSERVATION (not just video): same render call, so near-free, but OFF by
+            # default — every existing dataset/policy is depth+point-cloud only. Enabled via the
+            # setup config `sim.render_rgb_obs: true` for VLA-baseline collections.
+            render_rgb_obs=bool(sim_cfg.get("render_rgb_obs", False)),
         )
         if use_subprocess:
             # Training path: Genesis in a child process (GPU-memory-leak fix). A
@@ -418,7 +422,7 @@ class SimBackend:
             joint_pos=state["joint_pos"],
             joint_vel=state["joint_vel"],
             depth_images=state["depth_images"],
-            rgb_images={},                              # MVP: depth/point-cloud only
+            rgb_images=state.get("rgb_images", {}),     # {} unless the worker renders RGB obs
             camera_intrinsics=state["camera_intrinsics"],
             camera_extrinsics=state["camera_extrinsics"],
             tactile_images={},                          # sim has no tactile

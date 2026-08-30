@@ -57,6 +57,7 @@ class GenesisWorker:
         show_fps: bool = True,
         robot_overrides: Optional[dict] = None,
         render_obs_cameras: bool = True,
+        render_rgb_obs: bool = False,
         env_spacing: float = 2.5,
     ) -> None:
         self.num_envs = int(num_envs)
@@ -67,6 +68,10 @@ class GenesisWorker:
         # on demand, e.g. for occasional policy-behaviour clips) but read_state does
         # NOT render their depth every step — keeps the state teacher render-free/fast.
         self.render_obs_cameras = bool(render_obs_cameras)
+        # RGB AS AN OBSERVATION (2026-08-29): the same render call returns both, so capturing RGB
+        # alongside depth is near-free — but it is OFF by default because every existing dataset and
+        # policy is depth/point-cloud only. Needed for VLA baselines (pi0.5), which take images.
+        self.render_rgb_obs = bool(render_rgb_obs)
 
         _init_genesis()
         self.handle = build_scene(
@@ -241,7 +246,25 @@ class GenesisWorker:
     def read_state(self) -> dict:
         state = self.robot.read_state()
 
-        depth_images, intrinsics, extrinsics = {}, {}, {}
+        # WRIST CAMERA: re-pose per env from world_T_ee @ EE_T_CAM_WRIST BEFORE rendering, the
+        # same transform RealBackend applies each step. Genesis cameras are static at add_camera(),
+        # so without this the "wrist" view would be a fixed pose that merely looks plausible.
+        _wcams = self.handle.cameras.get("cam_wrist") if self.render_obs_cameras else None
+        if _wcams and "wrist_cam_T" in state:
+            # wrist_cam_T is world_T_cam in the OPENCV convention (+z forward, +y down)
+            # -- the convention EE_T_CAM_WRIST was calibrated in, that RealBackend uses,
+            # and that depth_to_pointcloud expects. Genesis's set_pose(transform=) wants
+            # the OPENGL convention (-z forward, +y up); its own `camera.extrinsics`
+            # property converts back with exactly this flip (`res[..., :3, 1:3] *= -1`).
+            # Passing the OpenCV matrix raw points the camera 180 deg the wrong way: it
+            # renders the empty background above the table, and it STILL moves with the
+            # arm -- so a "does the view change?" check does not catch it.
+            _T = np.asarray(state["wrist_cam_T"], dtype=np.float32).copy()
+            _T[..., :3, 1:3] *= -1.0        # OpenCV -> OpenGL (self-inverse)
+            for _e, _c in enumerate(_wcams):
+                _c.set_pose(transform=_T[min(_e, _T.shape[0] - 1)])
+
+        depth_images, intrinsics, extrinsics, rgb_images = {}, {}, {}, {}
         cam_items = self.handle.cameras.items() if self.render_obs_cameras else []
 
         if getattr(self.handle, "batch_render_cameras", False):
@@ -250,7 +273,11 @@ class GenesisWorker:
             # env-local coordinates, identical to the per-env path below.
             for name, cam_list in cam_items:
                 cam = cam_list[0]
-                _, depth = _batched_render(cam, self.handle.scene, rgb=False, depth=True)
+                _rgb, depth = _batched_render(cam, self.handle.scene,
+                                              rgb=self.render_rgb_obs, depth=True)
+                if self.render_rgb_obs and _rgb is not None:
+                    _r = _np(_rgb).astype(np.uint8)
+                    rgb_images[name] = _r[None] if _r.ndim == 3 else _r      # (B, H, W, 3)
                 d = _np(depth).astype(np.float32)
                 if d.ndim == 2:
                     d = d[None]   # rasterizer squeezed B=1 → restore (1, H, W)
@@ -264,9 +291,12 @@ class GenesisWorker:
             # Per-env path (soft/MPM scenes) — one bound camera per env.
             # env-0's K/extrinsic apply to every env's depth (shared env-local frame).
             for name, cam_list in cam_items:
+                _frames = [c.render(rgb=self.render_rgb_obs, depth=True) for c in cam_list]
                 depth_images[name] = np.stack(
-                    [_np(c.render(rgb=False, depth=True)[1]).astype(np.float32) for c in cam_list]
-                )  # (B, H, W)
+                    [_np(f[1]).astype(np.float32) for f in _frames])          # (B, H, W)
+                if self.render_rgb_obs:
+                    rgb_images[name] = np.stack(
+                        [_np(f[0]).astype(np.uint8) for f in _frames])        # (B, H, W, 3)
                 intrinsics[name] = np.asarray(cam_list[0].intrinsics, dtype=np.float32)
                 extrinsics[name] = np.linalg.inv(
                     np.asarray(cam_list[0].extrinsics, dtype=np.float32)
@@ -303,6 +333,7 @@ class GenesisWorker:
                 print(f"[contact] soft coupling force env0={state['contact_force'][0]:.6f}", flush=True)
 
         state["depth_images"] = depth_images
+        state["rgb_images"] = rgb_images      # {} unless render_rgb_obs
         state["camera_intrinsics"] = intrinsics
         state["camera_extrinsics"] = extrinsics
         return state

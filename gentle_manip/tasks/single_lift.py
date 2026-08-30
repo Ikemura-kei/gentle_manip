@@ -21,6 +21,8 @@ class SingleLiftTask(BaseTask):
         self.hold_steps: int = int(task_cfg.get("hold_steps", 30))
         self.object_name: str = str(task_cfg.get("object_name", "tofu"))
         self.object_type: str = str(task_cfg.get("object_type", "soft"))  # "soft" | "rigid"
+        # optional wrist camera (VLA baselines want a base + wrist view); OFF by default
+        self.wrist_camera: bool = bool(task_cfg.get("wrist_camera", False))
 
         # Success: either an ABSOLUTE object-center z-band [min, max] (ruler-checkable on
         # the real robot — the center must sit in this height window), or, if unset, the
@@ -84,7 +86,15 @@ class SingleLiftTask(BaseTask):
                     # TODO: set to the real L515's measured intrinsics for exactness.
                     fov=self.cam_fov,
                 ),
-            ],
+            ] + ([
+                # OPTIONAL WRIST CAMERA (task cfg `wrist_camera: true`, 2026-08-29). Its pose is a
+                # PLACEHOLDER — GenesisWorker re-poses it every step per env from
+                # world_T_ee @ EE_T_CAM_WRIST, mirroring RealBackend. fov 58 ~ the D405's VFOV.
+                # Added for VLA baselines that expect a base + wrist view; OFF by default so every
+                # existing dataset and policy is unaffected.
+                CameraEntry(name="cam_wrist", pos=(0.4, 0.0, 0.4),
+                            lookat=(0.4, 0.0, 0.0), fov=58.0),
+            ] if self.wrist_camera else []),
             sim_dt=1.0 / 30.0,
             sim_substeps=self.sim_substeps,
             # z-floor -0.02 (was -0.012): genesis pads the MPM domain inward by ~0.012, so

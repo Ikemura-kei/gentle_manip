@@ -9,6 +9,97 @@ GPU time or produced a wrong conclusion that had to be retracted.
 
 ---
 
+## 0. FIXED SETUP — NOT open for re-derivation (user standing decision, 2026-08-30)
+
+**THE REFERENCE IS `logs/dppo/dppo-pretrain/single_lift_generalist_3obj` (run `ddgrl`).**
+Its config snapshot — `logs/dppo/dppo-pretrain/single_lift_generalist_3obj/ddgrl/config/` — is the
+setup we are using. Experiment file:
+`gentle_manip/configs/experiments/single_lift_mushroom_soft_abs_action_armfocus_7d_realws.yaml`.
+
+```yaml
+task:         single_lift_mushroom_soft
+action:       abs_pose_euler_abs_gripper     # 7-DIM: 3 pos + 3 euler + 1 gripper
+dr:           soft_orientation_realws
+augmentation: l515_noise
+obs:          superset_soft_armfocus         # quat proprio + arm-focus cloud + privileged aux
+views:        {teacher: [privileged], student: [point_cloud]}
+```
+
+### WHAT IS FIXED (do not vary between experiments)
+
+**ACTION — 7-dim absolute euler, PRODUCED AT CONVERSION.** `pos_min [0.26,-0.225,0.003] /
+pos_max [0.59,0.225,0.50]`, `euler_seq xyz`, `euler_frame_offset_deg [180,0,0]`,
+`gripper 0.0–0.088`, `rate_limit [0.0045,0.0045,0.0055, 0.012,0.012,0.045, 0.005]`.
+
+⚠ **The COLLECTOR always records 10-dim rot6d** — `collect_demos_synth_v3._invert_actions_absolute`
+hardcodes rot6d and ignores the experiment's `action:` field. Every demo set on disk is
+`action_dim: 10`. That is CORRECT and required: the 10-dim recording is the derive SOURCE. The
+7-dim euler the policies train on is produced by `convert_demos`:
+
+```
+--derive-action        gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml   # 7d target
+--derive-source-action gentle_manip/configs/action/abs_pose_abs_gripper.yaml         # 10d source
+```
+
+So do NOT try to make a collection record 7-dim, and do NOT read `action_dim: 10` in a shard as a
+bug. **What must be right is the DERIVE step**: `euler_frame_offset_deg [180,0,0]` lives in the
+TARGET action config and is applied by `actions/derive.py`. Derive with a config lacking it and a
+top-down grasp's roll sits on the ±π seam, sign-flips between frames, trains to a low loss, and
+decodes ~180° wrong → **~0% eval success** (run `oppsu`,
+`docs/debug_partC_euler_action_anomaly.md`).
+
+**PROPRIO — quaternion.** `ee_pos(3) + ee_quat(4) + gripper_width(1)` = 8-dim, `quat_noise_std 0.003`.
+Never euler or rot6d for the OBSERVATION.
+
+**OBS — `superset_soft_armfocus` (arm-focus cloud).** `cameras ["cam_ext"]`,
+`crop_min [0.2,-0.215,0.004] / crop_max [0.71,0.215,0.45]`, `max_points 1024`,
+`outlier_removal {voxel_size 0.01, min_neighbors 23}`,
+`object_focus {z_lo 0.15, r_ee 0.13, arm_weight 0.15}`; privileged aux labels
+`object_pos` + `contact`.
+*(The current file also sets `privileged.stress: true`, added after `ddgrl` ran. That is additive
+PRIVILEGED metadata — a per-episode gentleness record — and the student view is an explicit key
+list, so it does not change training, eval, or any converted view.)*
+
+**DR — `soft_orientation_realws`.** `object_pos_x [0.29,0.48]`, `object_pos_y [-0.11,0.11]`,
+`object_nominal_xy [0.47,0]`, `robot_init_pos_xyz 0.02`, `object_yaw_deg 180`,
+`object_pitch_roll_deg 45`, `object_flip_prob 0.25`, `object_flip_deg [160,180]`,
+`object_scale [1.0,1.5]`, `object_bend_deg [-25,25]`, `object_twist_deg [-20,20]`,
+`object_taper [-0.15,0.15]`, `object_axis_scale [0.95,1.15]`, `object_E [2.0e5,3.0e5]`,
+`object_nu [0.32,0.38]`, `object_rho [900,1100]`, `coup_friction [3.5,4.5]`.
+
+**AUGMENTATION — `l515_noise`.**
+
+### WHAT MAY CHANGE
+
+- **network architecture** (encoder, head, capacity, diffusion vs other)
+- **data composition** (how many episodes, which objects, mixing ratios)
+- **training hyperparameters** (epochs, LR, batch, aux-loss weights)
+- **OBJECT TYPES / the object set** — expected to GROW later. This is the one DR-adjacent field
+  that is allowed to move; when it does, move it deliberately and record it, because it changes
+  the size/shape distribution every width and gentleness number is measured against.
+
+### HOW TO ADD SOMETHING NEW
+
+Fork the reference experiment and **assert the delta against the PARSED config objects**, not the
+YAML text. Worked example — `single_lift_mushroom_soft_pi05` is the reference + `wrist_camera` +
+two `image_*` keys, and that is checked in code before launch:
+
+```python
+ref = Experiment.load("single_lift_mushroom_soft_abs_action_armfocus_7d_realws")
+exp = Experiment.load("single_lift_mushroom_soft_pi05")
+assert exp.action_config == ref.action_config and exp.dr == ref.dr
+assert set(exp.collection_obs().obs_keys()) - set(ref.collection_obs().obs_keys()) \
+       == {"image_cam_ext", "image_cam_wrist"}
+```
+
+*Recorded because it nearly shipped: the π0.5 collection was first launched from `..._mm4_s08` —
+a COLLECTION recipe — which silently carried a different **DR** (4-mesh pool, scale [0.8,1.5]).
+The user caught it 32 min in; it was cancelled and relaunched. (The experiment's `action:` field
+was also wrong, but that one is inert at collection time — see the ACTION note above.)*
+**Rule: proprio / obs / DR come from the TRAINING reference above, never from whichever collection
+config you copied the grasp knobs out of. A wrong DR is the dangerous one: it fails SILENTLY,
+giving a different object size/shape distribution than the baseline being compared against.**
+
 ## 1. Launching training
 *(to be filled in)*
 
@@ -127,6 +218,25 @@ about **[−0.37, +0.51]** — consistent with moderate tracking. I stated it as
 with no interval. **Rule: report n and a CI with every correlation, and do not phrase a null result
 as a positive claim about absence.**
 
+**Reading a ROUNDED printout as an exact value, from a sample of ONE (2026-08-30).** I printed
+derived actions at 3 decimals, saw `roll +0.000 / pitch +0.000` for one episode, and reported that
+"roll and pitch are identically 0 — 2 of the 7 action dims are free". Both halves were wrong: the
+values were ~1e-3–1e-2 (the format rounded them away), and that episode was a near-pure top-down
+grasp. Across the collection roll sd is 0.0106 and pitch 0.0409, nonzero in ~45%/40% of frames; the
+generalist's training data shows normalized roll sd 0.10 / pitch 0.17. The user caught it from
+memory of the data. **Rule: never conclude "exactly zero / constant" from a formatted print — check
+`sd`, `min/max` and a nonzero FRACTION, and check it over the whole dataset, not one episode.
+Formatting is not measurement.**
+
+**Trusting a self-consistent check to validate a pose that is a PLACEHOLDER (2026-08-30).** My
+wrist-camera checks (extrinsic round-trip, forward axis points down, depth sees near geometry) all
+PASSED on an `EE_T_CAM_WRIST` that is the IDENTITY matrix — a placeholder the config file itself
+flags as "must be replaced with calibrated transform". A round-trip check verifies that the pose
+we ASKED for is the pose we GOT; it says nothing about whether the pose is the right one. The user
+spotted from a rendered frame that the camera was inside the gripper. **Rule: consistency checks
+validate plumbing, not values. For any calibrated constant, separately confirm the VALUE'S
+provenance — and be suspicious when a matrix is exactly identity or exactly zero.**
+
 ### 5.2 Protocol
 
 **Comparing across protocols / too few geometries (2026-08-28).** Arm F's eval launched with
@@ -205,6 +315,49 @@ passed in a bare interpreter; the runner installs a fake `torchvision` first, un
 The test validated a configuration we never run. **Rule: reproduce the runtime's stubs/env exactly
 in any verification job.** Same shape as the teacher-forced closure check: verifying under
 conditions that differ from the real ones.
+
+**A smoke test whose assertion cannot fail the way the code actually breaks (2026-08-30).** My
+wrist-camera smoke asserted only that the view CHANGED when the arm moved. It PASSED while the
+camera was aimed 180 deg the wrong way, rendering the empty background above the table — a camera
+bolted on backwards still moves with the arm, so motion was never evidence of aim. The cause:
+Genesis `camera.set_pose(transform=)` takes an OPENGL pose (-z forward, +y up) while
+`EE_T_CAM_WRIST` is a calibrated OPENCV extrinsic (+z forward, +y down); Genesis's own
+`camera.extrinsics` property does the flip (`res[..., :3, 1:3] *= -1`), which is the proof of the
+convention. Only LOOKING at the frame caught it. Replaced with three geometric checks: the
+extrinsic Genesis reports back must equal `world_T_ee @ EE_T_CAM_WRIST`, the forward axis must
+point down at the home pose, and the depth image must contain near geometry. **Rule: before
+trusting a smoke test, ask what the most likely failure looks like and confirm the assertion would
+catch it — then eyeball the actual artifact anyway. Sensor/camera poses additionally need their
+CONVENTION named (OpenCV vs OpenGL, wxyz vs xyzw, which link the calibration is relative to); this
+is the axis-convention sibling of the wrong-reference-frame class in 5.1.**
+*Evidence: job 1796508 (passed, camera backwards) → `.agent_tmp/rgb_smoke/cam_wrist_t25.png`;
+fix + strengthened checks submitted as job 1796548.*
+
+**Fixing a bug in one copy of a duplicated builder (2026-08-30).** `sim_backend.py` hardcoded
+`rgb_images={}`; I fixed it and considered the class closed. `collect_demos_synth_v3` builds its own
+`RawObs` and carried the identical hardcoded `{}`, so the collector still recorded no RGB. **Rule:
+when a bug is in a builder/adapter that exists in more than one place, grep for the other copies
+before calling it fixed — and prefer DERIVING the flag from config over adding a switch each copy
+must remember to set.**
+
+**Sizing a recorded modality only after collecting it (2026-08-30).** Two 640x480 RGB streams are
+448 MB per episode (99.3% of the episode) = ~101 GB at 250 episodes, and `_merge_shards` loads
+every shard into RAM at once against a 102 GB allocation: the run would have finished collecting
+and then OOMed at the merge. Caught by measuring a 4-episode smoke and multiplying, before
+launching. **Rule: before any long collection that adds a modality, measure bytes/episode on a
+short run and multiply out to the full target, then check it against the JOB'S memory limit (not
+just free disk) and against every step that loads the whole dataset at once.**
+*Evidence: raw 403 MB/ep -> 100.9 GB projected; JPEG q95 15 MB/ep -> 3.8 GB, pixel error 0.46/255.*
+
+**Piping a long-running job through `tail` (2026-08-30).** My sbatch ran
+`uv run scripts/train.py ... 2>&1 | tail -40`. `tail` buffers until EOF, so for ~20 minutes the log
+showed NOTHING while the job appeared to be "compiling". The main process had in fact crashed
+almost immediately; its traceback sat unflushed in the pipe, and orphaned DataLoader workers
+(re-parented to PID 1) held the write end open, so `tail` never reached EOF and the job would have
+hung to walltime. Diagnosed with `srun --jobid=<id> --overlap ps`, which showed no main process and
+no GPU memory in use. **Rule: never pipe a long-running job's output through `tail`/`head`/`sort` —
+stream it to the log and let the log BE the log. If a job produces no output for a long time, check
+whether the process still exists before assuming it is working.**
 
 **Editing a config by index splicing without re-parsing (2026-08-28).** I forked an eval YAML by
 cutting between `model:` and `shape_meta:` — but `shape_meta` *precedes* `model`, so the result had

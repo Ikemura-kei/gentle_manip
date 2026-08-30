@@ -61,6 +61,7 @@ from gentle_manip.envs.genesis_worker import GenesisWorker
 from gentle_manip.envs.raw_obs import RawObs
 from gentle_manip.perception.pipeline import PerceptionPipeline
 from gentle_manip.perception.obs_config import CONTACT_FORCE_THRESH_N
+from gentle_manip.utils.image_codec import encode_images
 from gentle_manip.domain_randomization.dr_config import DRConfig
 
 
@@ -220,7 +221,11 @@ def _state_to_raw_obs(state: dict) -> RawObs:
         joint_pos=state.get("joint_pos"),
         joint_vel=state.get("joint_vel"),
         depth_images=state["depth_images"],
-        rgb_images={},
+        # RGB passthrough (2026-08-30). Was hardcoded `{}` -- the same hardcoded-empty bug that
+        # sim_backend.py had. The collector keeps its OWN RawObs builder, so fixing sim_backend did
+        # not fix this path: PerceptionPipeline raises KeyError on image_* if the obs config asks
+        # for images, so an empty dict here fails loudly rather than recording blank frames.
+        rgb_images=state.get("rgb_images", {}),
         camera_intrinsics=state["camera_intrinsics"],
         camera_extrinsics=state["camera_extrinsics"],
         tactile_images={},
@@ -814,7 +819,14 @@ def _make_run_dir(out_dir: Path, task_name: str) -> Path:
 
 
 def _write_shard(run_dir: Path, episodes: List[dict],
-                 task: str, idx: int, rate_hz: float) -> Path:
+                 task: str, idx: int, rate_hz: float, image_quality: int = 0) -> Path:
+    # JPEG-encode the RGB streams before pickling. Raw, two 640x480 cameras cost ~448 MB per
+    # episode (99% of the whole episode) -> ~101 GB at 250 episodes, and _merge_shards loads every
+    # shard into RAM at once against a ~102 GB allocation: the run would die AT THE MERGE, after
+    # hours of collection. q95 is ~10x smaller and still full resolution. See utils/image_codec.
+    if image_quality > 0:
+        episodes = [{**ep, "observations": encode_images(ep["observations"], image_quality)}
+                    for ep in episodes]
     first = episodes[0]
     payload = {
         "meta": {
@@ -822,6 +834,9 @@ def _write_shard(run_dir: Path, episodes: List[dict],
             "obs_keys": sorted(first["observations"].keys()),
             "action_dim": int(first["actions"].shape[1]),
             "rate_hz": rate_hz,
+            # How to read the image_* keys back. Absent/"raw" = plain (T,H,W,3) uint8 arrays.
+            "image_encoding": "jpeg" if image_quality > 0 else "raw",
+            "image_quality": int(image_quality),
         },
         "episodes": episodes,
     }
@@ -928,6 +943,9 @@ def main() -> None:
     p.add_argument("--task-name",  default=None,
                    help="override output dataset name (default: experiment's task field)")
     p.add_argument("--out-dir",    type=Path, default=Path("dataset") / "demos")
+    p.add_argument("--image-quality", type=int, default=95,
+                   help="JPEG quality for recorded image_* obs streams (0 = store raw uint8; "
+                        "raw is ~10x larger and will OOM the merge on a 250-episode 2-camera set)")
     p.add_argument("--shard-size", type=int, default=5,
                    help="episodes per shard file (merged into data.pkl at end)")
     p.add_argument("--description", type=str, default="",
@@ -1200,6 +1218,11 @@ def main() -> None:
     settle_vel_thresh = args.settle_vel_thresh or float(exp.task_cfg.get("settle_vel_thresh", 0.002))
 
     perception = PerceptionPipeline(obs_config)
+    # Render RGB iff the obs config asks for it -- derived, not a CLI flag, so the render and the
+    # recorded keys can never disagree. Costs an extra colour render per camera per env per step.
+    _want_rgb = obs_config.images is not None
+    if _want_rgb:
+        print(f"  RGB obs ON -> {obs_config.images.cameras}")
 
     collection_config = {
         "task_name":   task_name,
@@ -1265,6 +1288,7 @@ def main() -> None:
         w = GenesisWorker(spec_dr, num_envs=args.n_envs, show_viewer=False,
                           settle_steps=settle_steps, settle_max_steps=settle_max_steps,
                           settle_vel_thresh=settle_vel_thresh, render_obs_cameras=True,
+                          render_rgb_obs=_want_rgb,
                           coup_friction=float(sdr.get("coup_friction", 4.0)))
         return w, sdr, (w.handle.spec.objects[0].mesh_path or MUSHROOM_MESH)
 
@@ -1292,7 +1316,12 @@ def main() -> None:
     # Per-env-per-batch DR + grasp log (CSV, alongside the data). One row per env each batch.
     dr_csv = open(run_dir / "dr_params.csv", "w", newline="")
     dr_writer = csv.writer(dr_csv)
-    dr_writer.writerow(["batch", "env", "success", "obj_dx", "obj_dy",
+    # dataset_idx: the episode's 0-based index in data.pkl["episodes"], or -1 if it was NOT saved
+    # (failed, or a crush-fallback drop). Without it the CSV and the dataset can only be matched by
+    # ASSUMING "i-th successful row = i-th episode", which is WRONG: the 26-08-17-hwo mushroom set
+    # has 652 success rows but 650 stored episodes, so every DR param after the first drop is
+    # attributed to the wrong episode. An explicit key makes each episode reproducible.
+    dr_writer.writerow(["batch", "env", "dataset_idx", "cma_seed", "success", "obj_dx", "obj_dy",
                         "roll_deg", "pitch_deg", "yaw_deg", "flipped",
                         "home_dx", "home_dy", "home_dz", "scene_scale", "scene_bend_deg",
                         "mesh_variant",
@@ -1395,8 +1424,10 @@ def main() -> None:
         all_best_x = []
         synth_failed: set[int] = set()      # envs running the fallback grasp (see --keep-synth-failures)
         all_grasp  = []                                          # per-env synthesis dict (for the grasp-pose viz)
+        cma_seeds = {}                      # env -> CMA-ES seed, logged so a grasp is reproducible
         for i in range(n):
             cma_seed = int(cma_seed_rng.integers(1, 2**31 - 1))
+            cma_seeds[i] = cma_seed
             r = fg.synthesize_grasp(fem_obj, fem_pad_geo, obj_pos_all[i], obj_quat_all[i],
                                     E=args.grasp_E, density=args.grasp_density, mu=args.grasp_mu,
                                     table_z=args.table_z, maxfevals=args.maxfevals,
@@ -1517,13 +1548,14 @@ def main() -> None:
 
         # ── Log per-env DR + grasp params for this batch (CSV row per env) ──
         eul_deg = np.degrees(object_euler) if object_euler is not None else np.zeros((n, 3))
+        _dr_rows = []          # buffered: dataset_idx is only known after the save loop below
         for i in range(n):
             g = all_grasp[i]
             roll, pitch, yaw = eul_deg[i]
             flipped = int(abs(roll) > 140 or abs(pitch) > 140)                # a big-flip sample
             ho = home_offset[i] if home_offset is not None else (0.0, 0.0, 0.0)
             odxy = object_dxy[i] if object_dxy is not None else (0.0, 0.0)
-            dr_writer.writerow([batch_idx, i, int(bool(success[i])),
+            _dr_rows.append([batch_idx, i, None, int(cma_seeds.get(i, -1)), int(bool(success[i])),
                                 round(float(odxy[0]), 5), round(float(odxy[1]), 5),
                                 round(float(roll), 1), round(float(pitch), 1), round(float(yaw), 1), flipped,
                                 round(float(ho[0]), 5), round(float(ho[1]), 5), round(float(ho[2]), 5),
@@ -1544,7 +1576,6 @@ def main() -> None:
                                 round(float((g.get("min_pad_area") or 0) * 1e6), 2),
                                 round(float(g["x"][6] * 1e3), 2),
                                 round(float(g.get("tilt_deg") or 0), 1)])
-        dr_csv.flush()
 
         # ── Package and shard successful (or all) episodes ──
         for i in range(n):
@@ -1578,6 +1609,7 @@ def main() -> None:
                 "rewards":      np.asarray(rew_bufs[i], np.float32),
             }
             shard_buf.append(episode)
+            _dr_rows[i][2] = total_saved            # 0-based index into data.pkl["episodes"]
             total_saved += 1
             print(f"    ep {total_saved}: env {i}  {'✓' if success[i] else '✗'}  "
                   f"T={episode['actions'].shape[0]}")
@@ -1591,7 +1623,8 @@ def main() -> None:
                 print(f"    video → {vid_path.name}")
 
             if len(shard_buf) >= args.shard_size:
-                sp = _write_shard(run_dir, shard_buf, task_name, shard_idx, rate_hz)
+                sp = _write_shard(run_dir, shard_buf, task_name, shard_idx, rate_hz,
+                                 image_quality=args.image_quality)
                 print(f"  Shard {shard_idx} → {sp.name}")
                 shard_idx += 1
                 shard_buf = []
@@ -1599,9 +1632,19 @@ def main() -> None:
             if total_saved >= args.n_episodes:
                 break
 
+        # Rows are written HERE, after the save loop, so dataset_idx reflects what was ACTUALLY
+        # stored. Anything not saved (failed, or a crush-fallback drop) keeps -1 rather than being
+        # silently attributed to the next episode.
+        for _r in _dr_rows:
+            if _r[2] is None:
+                _r[2] = -1
+            dr_writer.writerow(_r)
+        dr_csv.flush()
+
     # ── Flush + merge ──
     if shard_buf:
-        _write_shard(run_dir, shard_buf, task_name, shard_idx, rate_hz)
+        _write_shard(run_dir, shard_buf, task_name, shard_idx, rate_hz,
+                     image_quality=args.image_quality)
 
     dr_csv.close()
     data_path = _merge_shards(run_dir)
