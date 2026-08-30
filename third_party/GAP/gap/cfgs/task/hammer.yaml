@@ -1,0 +1,14 @@
+defaults:
+  - _self_
+
+name: hammer_cleanup_d0
+data_path: '${all_data}/mimicgen/${task.name}.hdf5'
+pro_dim: 9
+action_shape: 7
+demo_num: 500
+
+TaskEnv:
+  _target_: envs.MimicgenTask
+  task_name: HammerCleanup_D0
+  max_env_horizon: 400
+  save_video: ${save_video}

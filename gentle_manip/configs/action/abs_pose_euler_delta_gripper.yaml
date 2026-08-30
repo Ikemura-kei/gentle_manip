@@ -1,0 +1,60 @@
+# [action] ABSOLUTE pose (EULER rotation) + DELTA gripper — 7-DIM, gripper dim is a per-step change.
+# Used by: the delta-width generalist arm (dataset single_lift_generalist_3obj_dgrip)
+# Status: experimental (2026-08-28)
+#
+# IDENTICAL to abs_pose_euler_abs_gripper.yaml except `gripper_delta: true`. Motivation: with an
+# ABSOLUTE width the policy can satisfy its loss by COPYING the observed width — 86% of demo steps
+# repeat the previous command — and a copier cannot DRIVE closure. As a DELTA, "hold" is one value
+# and "close" is a distinct act.
+#
+# UNITS: the gripper dim now uses the SCALE FACTOR ONLY (dgrip = raw * gripper_delta_scale); it does
+# NOT use the [gripper_min, gripper_max] affine. The backend accumulates it onto its running target,
+# which is seeded from the MEASURED width at reset — so a dataset for this config must encode
+# delta[0] = (first command - first MEASURED width), not 0.
+#
+# gripper_delta_scale 0.0035 m: the largest per-step width change in the demos is 3.07 mm, so +-1
+# spans the real range with headroom. The rate_limit's dgrip (0.005) is looser, so it never binds.
+# A dataset relabelled at THIS scale is only valid with a pipeline built from THIS config.
+#
+# Same as abs_pose_abs_gripper.yaml EXCEPT the rotation is encoded as 3 EULER angles (RPY,
+# the convention most papers use) instead of the 6D rotation, so the raw action is 7-dim
+# (pos3 + euler3 + gripper1) instead of 10-dim. Both process to the SAME 8-dim physical
+# pose (pos + quat + gripper), so the backend dispatch is unchanged.
+#
+# euler_frame_offset_deg — REQUIRED for a top-down grasp (added 2026-08-20, see
+# docs/debug_partC_euler_action_anomaly.md): the euler angles encode the orientation
+# RELATIVE to this fixed frame (R_rel = R_cmd * R_off^-1). Without it, a top-down grasp's
+# roll sits exactly AT the +/-pi seam of as_euler, so the encoded roll sign-flips between
+# ~+pi and ~-pi on consecutive frames (measured 18-27% of transitions in every derived abs
+# dataset — real, sim-hwo, sim-armfocus alike), which trains fine (bimodal target, low loss)
+# but decodes to a ~180deg-wrong wrist roll whenever sampling lands between the modes →
+# ~0% eval success (run oppsu). With [180, 0, 0] the nominal top-down pose maps to
+# euler ~(0,0,yaw), far from any seam. Encode (actions/derive.py at convert time) and
+# decode (ActionPipeline at rollout) both apply it, so datasets derived with this config
+# are only valid with a pipeline built from this same config.
+mode: absolute
+rot_repr: euler
+clip: [-1.0, 1.0]
+pos_min: [0.26, -0.225, 0.003]
+pos_max: [0.59,  0.225, 0.50]
+# Euler mapping: raw [-1,1] -> [euler_min, euler_max] radians, sequence `euler_seq` (intrinsic
+# xyz ~ roll,pitch,yaw). Full +/-pi is fine resolution-wise: BOTH converters normalize actions
+# to the dataset's actual per-dim range at train time (DPPO convert_demos norm_a; DP3's
+# normalizer), so a narrow used-range costs nothing.
+euler_seq: xyz
+euler_min: [-3.14159265, -3.14159265, -3.14159265]
+euler_max: [ 3.14159265,  3.14159265,  3.14159265]
+euler_frame_offset_deg: [180.0, 0.0, 0.0]
+gripper_min: 0.0
+gripper_max: 0.088
+gripper_delta: true
+gripper_delta_scale: 0.0035
+
+# Per-step rate limit on the decoded absolute target (same layout/units as delta `scales`):
+# translation + gripper = delta_pose_delta_gripper_fast_rot.yaml exactly; rotation = 1.5x its
+# values (user decision 2026-08-21 — the fast_rot rotation bounds were conservatively tight for
+# scripted trajectories; 1.5x lets the standard reach/lift fit without lengthening episodes).
+# Enforced in TWO places: the backends clamp every executed command against the running target
+# (protects the real arm from any policy emitting a pose jump), and the scripted collectors clamp
+# the commanded targets before action inversion (so recorded datasets are bounded by construction).
+rate_limit: [0.0045, 0.0045, 0.0055, 0.012, 0.012, 0.045, 0.005]

@@ -9,6 +9,7 @@ envs/dppo via gentle_manip.dppo.train (hydra _target_).
 """
 from __future__ import annotations
 
+import os
 import numpy as np
 import torch
 from agent.eval.eval_agent import EvalAgent
@@ -223,6 +224,38 @@ class _DiffusionPolicy:
                 raise RuntimeError(f"floor round-trip FAILED: {self._w_offset_mm} -> {back}")
             print(f"[eval_agent] CONSTANT WIDTH FLOOR {self._w_offset_mm:.1f}mm = "
                   f"{self._w_floor_const:+.4f} norm (round-trip {back:.3f}mm OK)", flush=True)
+        # GM_OBS_DUMP=<tag> writes states+actions per batch; GM_OBS_DUMP_CLOUD=1 adds the cloud
+        # (~11MB/batch at 1024 pts x 3 envs x 300 steps — fine for a 30-batch sweep).
+        self._obs_dump_tag = os.environ.get("GM_OBS_DUMP")
+        self._obs_dump_cloud = bool(os.environ.get("GM_OBS_DUMP_CLOUD"))
+        self._obs_buf = {"state": [], "action": [], "point_cloud": []}
+        if self._obs_dump_tag:
+            if not os.environ.get("GM_WIDTH_DUMP"):
+                import atexit as _ae
+                _ae.register(self._flush_obs_dump)   # width dump registers the shared flush; if it
+                                                     # is off, the FINAL batch would be lost
+            print(f"[eval_agent] OBS DUMP active -> .agent_tmp/{self._obs_dump_tag}_obs_b*.npz "
+                  f"(cloud={'yes' if self._obs_dump_cloud else 'no'})", flush=True)
+        # ---- category conditioning (GM_CATEGORY=<registry object name>) --------------------
+        self._cat_embed = None
+        cat = os.environ.get("GM_CATEGORY")
+        want_dim = int(getattr(self.model.network, "category_embed_dim", 0) or 0)
+        if want_dim > 0 and not cat:
+            raise RuntimeError(
+                f"network expects a {want_dim}-d category_embed but GM_CATEGORY is unset — "
+                "a conditioned checkpoint cannot be evaluated without naming the object")
+        if cat:
+            if want_dim == 0:
+                print(f"[eval_agent] GM_CATEGORY={cat} ignored (unconditioned network)", flush=True)
+            else:
+                from gentle_manip.dppo.category_embedding import embed as _cat_embed_fn
+                vec = np.asarray(_cat_embed_fn(cat), dtype=np.float32)
+                if vec.shape[-1] != want_dim:
+                    raise RuntimeError(f"category_embed dim mismatch: network wants {want_dim}, "
+                                       f"embedding for '{cat}' is {vec.shape[-1]}")
+                self._cat_embed = torch.from_numpy(vec).float().to(self.device).unsqueeze(0)
+                print(f"[eval_agent] CATEGORY EMBED '{cat}' active, dim={want_dim}, "
+                      f"nonzero_onehot_idx={int(np.argmax(vec[:15]))}", flush=True)
         self._dump_tag = os.environ.get("GM_WIDTH_DUMP")
         self._dump_buf, self._dump_batch = [], 0
         self._dump_mm = None
@@ -272,7 +305,35 @@ class _DiffusionPolicy:
         if cf is not None:
             self._last_contact = np.asarray(cf, np.float32).reshape(-1)
 
+    def _flush_obs_dump(self):
+        """Write this batch's raw observations so later analysis needs no GPU re-run.
+
+        Saved DENORMALIZED where the scaling is known (state -> metres via obs_min/max) alongside
+        the raw normalized arrays, so a consumer cannot pick the wrong decode — the mistake that
+        produced 'tofu 21.1mm' and a bogus size axis earlier today.
+        """
+        if not self._obs_dump_tag or not self._obs_buf["state"]:
+            return
+        from pathlib import Path
+        out = Path("/nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip"
+                   ) / ".agent_tmp" / f"{self._obs_dump_tag}_obs_b{self._dump_batch}.npz"
+        payload = {"state_norm": np.asarray(self._obs_buf["state"], dtype=np.float32),
+                   "action_norm": np.asarray(self._obs_buf["action"], dtype=np.float32)}
+        nzp = os.environ.get("GM_WIDTH_NORM")
+        if nzp:
+            nz = np.load(nzp)
+            o_lo, o_hi = nz["obs_min"], nz["obs_max"]
+            payload["state_phys"] = ((payload["state_norm"] + 1) / 2 * (o_hi - o_lo + 1e-6) + o_lo
+                                     ).astype(np.float32)       # metres / radians
+            payload["obs_min"], payload["obs_max"] = o_lo, o_hi
+            payload["action_min"], payload["action_max"] = nz["action_min"], nz["action_max"]
+        if self._obs_dump_cloud and self._obs_buf["point_cloud"]:
+            payload["point_cloud"] = np.asarray(self._obs_buf["point_cloud"], dtype=np.float32)
+        np.savez_compressed(out, **payload)
+        self._obs_buf = {"state": [], "action": [], "point_cloud": []}
+
     def _flush_dump(self):
+        self._flush_obs_dump()                                  # same batch boundary
         if not self._dump_tag or not self._dump_buf:
             return
         from pathlib import Path
@@ -292,6 +353,26 @@ class _DiffusionPolicy:
         with torch.no_grad():
             cond = {k: torch.from_numpy(np.asarray(obs[k])).float().to(self.device)
                     for k in self.obs_keys}
+            # Mirror the TRAINING-time input ablations (proprio-shortcut arms A and B). These are
+            # PERMANENT input changes, so eval must apply them or the policy is fed proprio it was
+            # trained never to see — a train/eval mismatch that looks exactly like "the mechanism
+            # failed". (C/D are gradient-only: forward is unchanged, nothing to mirror.)
+            # NOTE this must exist in BOTH the main repo and the worktree copy — the sweep knobs
+            # live here, the arms train there.
+            if os.environ.get("GM_BLIND_PROPRIO"):
+                cond["state"] = torch.zeros_like(cond["state"])
+            elif os.environ.get("GM_BLIND_GRIPPER_WIDTH"):
+                cond["state"] = cond["state"].clone()
+                cond["state"][..., -1] = 0.0
+            if self._cat_embed is not None:
+                # CATEGORY CONDITIONING AT EVAL (2026-08-27). The dataset supplies
+                # cond["category_embed"] during TRAINING, but the eval path never did — so a
+                # category-conditioned checkpoint could not be evaluated closed-loop at all.
+                # category_embedding.py is genesis-free precisely so the harness can build it.
+                # Object identity is static for an episode and each eval run is ONE object, so
+                # this is a constant broadcast over the batch, not a per-step lookup.
+                b = cond["state"].shape[0]
+                cond["category_embed"] = self._cat_embed.expand(b, -1)
             traj = self.model(cond=cond, deterministic=True).trajectories.cpu().numpy()
             if self._width_head:
                 traj[:, :, -1] = self.model.network.predict_width_traj(cond).cpu().numpy()
@@ -401,6 +482,16 @@ class _DiffusionPolicy:
             z = np.asarray(obs["state"])[:, -1, 2]              # last cond step, ee_z (normalized)
             for k in range(self.act_steps):
                 self._dump_buf.append(np.stack([traj[:, k, -1].copy(), z], axis=-1))  # (n_env,2)
+        if self._obs_dump_tag:
+            # FULL OBSERVATION DUMP (2026-08-27). The width dump alone stores width+ee_z, so every
+            # follow-up question ("what was the cloud like at grasp?", "how did proprio evolve?")
+            # needed a fresh GPU job. Store the state, the whole action chunk, and optionally the
+            # cloud, so later analysis is a login-node read instead of a re-run.
+            self._obs_buf["state"].append(np.asarray(obs["state"])[:, -1].copy())   # (n_env, obs_dim)
+            self._obs_buf["action"].append(traj[:, : self.act_steps].copy())        # (n_env, Ta, Da)
+            if self._obs_dump_cloud:
+                self._obs_buf["point_cloud"].append(
+                    np.asarray(obs["point_cloud"])[:, -1].astype(np.float32).copy())  # (n_env,N,3)
         return traj[:, : self.act_steps]              # (n_env, act_steps, act_dim), normalized
 
 

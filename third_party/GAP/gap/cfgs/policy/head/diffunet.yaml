@@ -1,0 +1,6 @@
+_target_: policies.head.ConditionalUnet1D
+network_kwargs:
+  action_dim: ${action_shape}
+  feature_dim: ???
+  horizon: ${horizon}
+  num_diffusion_iters: 5

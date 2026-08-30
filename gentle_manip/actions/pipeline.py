@@ -233,8 +233,14 @@ class ActionPipeline:
             grip_raw = clipped[:, 9]
             quat = _rot6d_to_quat(clipped[:, 3:9])                            # (num_envs, 4) wxyz
 
-        t_grip = (grip_raw - lo) / span
-        grip = self._gripper_min + t_grip * (self._gripper_max - self._gripper_min)
+        if getattr(self.cfg, "gripper_delta", False):
+            # DELTA gripper with an ABSOLUTE pose. Scale factor ONLY — no affine offset (B10):
+            # this is a per-step CHANGE, which the backend accumulates onto its running target
+            # (seeded from the MEASURED width at reset), exactly as delta mode does.
+            grip = grip_raw * float(self.cfg.gripper_delta_scale)
+        else:
+            t_grip = (grip_raw - lo) / span
+            grip = self._gripper_min + t_grip * (self._gripper_max - self._gripper_min)
         return np.concatenate([pos, quat, grip[:, None]], axis=1).astype(np.float32)
 
     def build_action_space(self) -> "gymnasium.spaces.Box":

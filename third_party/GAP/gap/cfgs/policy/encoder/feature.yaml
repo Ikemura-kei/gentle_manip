@@ -1,0 +1,8 @@
+_target_: policies.visual_encoder.FeatureExtractor
+network_kwargs:
+  hidden_dim: ${hidden_dim}
+  image: ${image}
+  proprio: ${proprio}
+  pro_dim: ${task.pro_dim}
+  raw: ${raw}
+  depth: ${depth}

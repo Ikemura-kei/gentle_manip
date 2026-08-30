@@ -1,0 +1,39 @@
+defaults:
+  - _self_
+  - policy: bc_policy
+  - task: push
+  - dataset: general
+  - optimizer: adam
+
+# task and demo
+all_data: 'path/to/demos_folder'
+data_path: ${task.data_path}
+seed: 1
+horizon: 9
+n_obs_steps: 5
+
+# modal
+method: 'base'
+image: false
+proprio: false
+
+# others
+lr: 3e-4
+hidden_dim: 512
+action_shape: ${task.action_shape}
+device: cuda
+epoch: 101
+
+load_bc: true
+ckpt: 100
+snapshot: "path/to/exp_local/${task.name}/${method}/snapshot_${ckpt}.pth"
+
+eval_num: 100
+save_video: false
+
+hydra:
+  run:
+    dir: ./exp_local/${task.name}/${method}/eval
+  sweep:
+    dir: ./exp_local
+    subdir: ${hydra.job.num}
