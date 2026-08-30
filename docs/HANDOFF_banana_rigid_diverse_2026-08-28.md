@@ -298,3 +298,36 @@ Jobs 1789727 (clean) + 1790415 (regrasp), ckpt `hytxr/state_200`, CFL-safe eval 
 DR + the start families, crush gate 1.1x), a `single_lift_cross_category_diverse_pcd` DP3
 cfg dir, launch CONTINUOUS 500/object collection + the matching NON-REGRASPABLE (home-only
 start) baseline collection.
+
+---
+## 2026-08-30 03:55 — Phase 4 START: cross-category generalist infra built
+
+Regrasp confirmed on soft banana -> building the direct 9-object generalist.
+
+- **Collector extended** (`grasp_synthesis/collect_demos_diverse_start_v2.py`):
+  - `object_category_pool` support: `_make_worker` draws a registry object per scene
+    (rebuilds `spec.objects[0]` from `get_object_def`, resets material to None),
+    threads that object's name + `von_mises_yield_stress` into the width-cap and
+    crush-gate. Falls back to `task.object_name` when no pool.
+  - New `strict_home` start family = EE starts exactly at home, full approach
+    recorded, no pre-roll -> the NON-REGRASPABLE BASELINE distribution
+    (`--start-modes strict_home:1.0`).
+  - New `--crush-frac` CLI (default 1.15; Phase 4 uses 1.10 -> gentler than the
+    banana run's 1.25).
+  - Syntax-checked; behaviour untested on aarch64 -> smoke job 1792715
+    (`yd_xcatsm`, 8 ep / 2 env / scene-dr-every 1) validating object-switching +
+    strict_home + no crash BEFORE the big runs.
+- **Configs** (9 objects: mushroom, banana_lying, grape, kiwi, strawberry, tomato,
+  cherry, raspberry, egg_boiled):
+  - `dr/xcat_diverse_regrasp.yaml` (+ `_eval`), `tasks/single_lift_xcat_diverse.yaml`
+    (+ `_eval`), `experiments/single_lift_xcat_diverse{,_eval}.yaml`,
+    `experiments/single_lift_xcat_regrasp_eval.yaml`.
+  - Task CFL point: grid 170 / substeps 420 (pool E 1e5..8e5; anchored on the
+    banana soft eval's stable 200/340 at E 3e5, scaled up for the stiffer members;
+    rare blowups caught by the collector's per-batch skip).
+  - DP3 cfg dir `dppo/cfg/single_lift_xcat_diverse_pcd/{pre,eval}_diffusion_pointnet.yaml`.
+  - `scripts/arrhenius/yd_xcat_collect.sbatch` (71 h walltime, continuous, salvage-merge,
+    `TAG` for regrasp vs baseline; `--record-video 60`).
+- **NEXT**: smoke passes -> launch (a) `yd_xcat_collect` regraspable (4500 ep, won't
+  finish in window) and (b) `START_MODES=strict_home:1.0 TAG=xcat_baseline` non-regraspable
+  baseline. Both continuous; report cumulative progress.
