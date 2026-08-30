@@ -462,3 +462,19 @@ account caps concurrent GPU jobs at 2. Cancelled. So the two running collectors
 (1792833 regrasp, 1792834 baseline) are the max; regrasp stays CMA-bound at
 ~0.7/min. Window will likely end with ~350-450 regrasp + ~600-750 baseline demos
 -> the preliminary generalist comparison uses matched subsets (same N/side).
+
+---
+## 2026-08-30 08:45 — Phase 4 PRELIM generalist comparison started
+
+Given the 2-GPU cap + CMA-bound regrasp rate, collecting the full 500/obj won't
+happen in the window. Pivot to a PRELIM comparison on what's collected:
+- **Stopped baseline collector 1792834** at 474 demos (~118/obj, run 26-08-30-mcy).
+- **regrasp collector 1792833 keeps running** (292 -> ..., run 26-08-30-rdz).
+- New cfg dirs: `single_lift_xcat_{baseline,regrasp}_pcd` (n_epochs 150), both
+  evaluated on the SAME `single_lift_xcat_diverse_eval` (clean) +
+  `single_lift_xcat_regrasp_eval` (arm-low) experiments -> apples-to-apples.
+- **Submitted 1796505 yd_xpipe_b** = baseline pipeline (stage shards -> convert ->
+  BC 150ep -> dual eval). Regrasp pipeline follows once a slot frees / regrasp
+  collection has a comparable count.
+- 3-metric comparison (SR / gentleness / SR*gentleness, clean + regrasp start)
+  will be the Phase 4 preliminary result.
