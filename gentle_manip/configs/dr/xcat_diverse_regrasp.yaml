@@ -13,10 +13,9 @@ object_yaw_deg: 180             # full yaw
 object_pitch_roll_deg: 14       # per-env tilt
 robot_init_pos_xyz: 0.03        # per-env home jitter
 
-object_category_pool: ["mushroom", "banana_lying", "grape", "kiwi", "strawberry",
-                       "tomato", "cherry", "raspberry", "egg_boiled"]
+object_category_pool: ["mushroom", "banana_lying", "kiwi", "egg_boiled", "strawberry"]
 
-object_scale:      [0.82, 1.22]
+object_scale:      [0.88, 1.15]
 object_axis_scale: [0.90, 1.10]
 object_bend_deg:   [-4.0, 4.0]
 object_twist_deg:  [-4.0, 4.0]

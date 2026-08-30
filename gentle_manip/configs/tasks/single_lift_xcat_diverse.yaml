@@ -7,17 +7,20 @@
 # Used by: experiments (task:) single_lift_xcat_diverse
 # Status: experimental
 #
-# CFL: pool E spans 1e5 (raspberry) .. 8e5 (tomato). Anchored on the banana soft
-# eval point that ran stable (grid 200 / substeps 340 at E 3e5); scaled to
-# grid 170 / substeps 420 to cover the stiffer members. Rare blowups on the
-# stiffest objects are caught by the collector's per-batch try/except skip.
+# Pool narrowed to 5 mushroom-scale soft objects (3-6 cm): mushroom, banana_lying,
+# kiwi, egg_boiled, strawberry. The <=2 cm fruit (grape/cherry/tomato/raspberry)
+# broke the deform+SDF+MPM pipeline (degenerate meshes, ~64 MPM particles) and are
+# dropped -- "adjust if any collect badly". E span now 3e5..5.3e5.
+# CFL: anchored on the banana soft eval's stable grid 200 / substeps 340 at E 3e5;
+# scaled to grid 190 / substeps 440 for strawberry (5.3e5). Rare blowups caught by
+# the collector's per-batch try/except skip.
 success_z_min: 0.16
 success_z_max: 0.40
 hold_steps: 6
 object_name: "mushroom"        # nominal/fallback; dr.object_category_pool overrides per scene
 object_type: "soft"
-sim_substeps: 420
-mpm_grid_density: 170
+sim_substeps: 440
+mpm_grid_density: 190
 success_scale: 0.2
 rewards:
   stress:      {scale: 0.2, cap: 1.5, mean_weight: 0.2, top10_weight: 0.8}

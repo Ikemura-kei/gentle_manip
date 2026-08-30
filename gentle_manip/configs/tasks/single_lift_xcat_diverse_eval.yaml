@@ -9,8 +9,8 @@ success_z_max: 0.45
 hold_steps: 4
 object_name: "mushroom"
 object_type: "soft"
-sim_substeps: 420
-mpm_grid_density: 170
+sim_substeps: 440
+mpm_grid_density: 190
 success_scale: 0.2
 rewards:
   stress:      {scale: 0.2, cap: 1.5, mean_weight: 0.2, top10_weight: 0.8}
