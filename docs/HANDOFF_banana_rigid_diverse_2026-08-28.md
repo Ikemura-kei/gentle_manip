@@ -478,3 +478,17 @@ happen in the window. Pivot to a PRELIM comparison on what's collected:
   collection has a comparable count.
 - 3-metric comparison (SR / gentleness / SR*gentleness, clean + regrasp start)
   will be the Phase 4 preliminary result.
+
+---
+## 2026-08-30 10:15 — Phase 4 pipeline bug: eval used the COLLECTION experiment
+
+1796555 got through pretrain (baseline gen `tqmjv`, 150ep, val 0.025) but the clean
+eval sim server launched with `--experiment single_lift_xcat_diverse` (COLLECTION:
+grid 250 / substeps 240, CFL-risky; success band z 0.16-0.40 hold 6) instead of
+`single_lift_xcat_diverse_eval` (grid 190 / substeps 440, CFL-safe; z 0.13-0.45 hold 4).
+Killed it before a mid-eval NaN.
+FIX: pipeline now has `EVAL_EXPERIMENT` (defaults `${EXPERIMENT}_eval`) for both eval
+sim servers, distinct from `EXPERIMENT` (train/convert). Added `SKIP_TRAIN=1`+`RUN_DIR`
+to reuse an existing checkpoint. Committed.
+Resubmitted baseline as **1797433** (SKIP_TRAIN, reuses tqmjv/state_150, eval-only).
+regrasp collector 1792833 still running (~358).
