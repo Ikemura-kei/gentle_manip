@@ -62,6 +62,24 @@ safe; the explicit flag in the recipe above is belt-and-braces. The gain auto-re
 | strawberry | **~45 %** (slow — expected, not a bug) | ~94 % |
 | banana_chunk | **~40 %** (slow — expected, not a bug) | ~100 % |
 
+## Addendum (2026-08-30): six PRIMITIVE categories added — collect these too
+
+All tofu material, procedural meshes, `prim_` namespace; configs templated from tofu; same
+recipe verbatim (defaults are the frozen v4.1 = p98/4.92; 250 eps each):
+
+- `single_lift_prim_cylinder_soft_abs_action_armfocus`   (r 2 cm × h 5 cm)
+- `single_lift_prim_sphere_soft_abs_action_armfocus`     (r 2 cm)
+- `single_lift_prim_lamp_soft_abs_action_armfocus`       (bulb r 1.5 cm + neck + base)
+- `single_lift_prim_cuboid_soft_abs_action_armfocus`     (4 × 3 × 2.5 cm)
+- `single_lift_prim_ellipsoid_soft_abs_action_armfocus`  (5 × 3 × 2.5 cm)
+- `single_lift_prim_torus_soft_abs_action_armfocus`      (R 1.4 / tube 0.7 cm — thin probe)
+
+**Expectations** (16-ep smoke in progress locally; early rows): success in the ~40–60 % band with
+100 % saved-demo sub-yield is EXPECTED for these tofu-soft shapes under the gentle-erring recipe
+(prim_cylinder measured 53.3 % / 100 % sub-yield / median 0.38×). Low success = wall-clock cost
+only; do NOT tune anything — **v4.1 is frozen** (DEVLOG 2026-08-30). The torus may additionally
+hit the small-strain scope limit (1.4 cm tube); if it collects poorly, document and skip it.
+
 ## Guardrails (each of these burned us once — see DEVLOG 2026-08-28..30)
 
 1. **Smoke first**: 16 eps × `--mesh-cycle` per category, **always with `--record-video 100000`**
