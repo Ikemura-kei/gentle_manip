@@ -1,0 +1,12 @@
+# [experiment] Cross-category SMALL-object diverse-start regrasp collection.
+# Merged with single_lift_xcat_diverse (4 large objects) for the 8-object generalist.
+# Used by: grasp_synthesis/collect_demos_diverse_start_v2.py / yd_xcat_* scripts
+# Status: experimental
+task: single_lift_xcat_small_diverse
+action: delta_pose_delta_gripper
+dr: xcat_small_diverse_regrasp
+augmentation: l515_noise
+obs: superset_soft
+views:
+  teacher: [privileged]
+  student: [point_cloud]

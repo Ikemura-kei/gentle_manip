@@ -124,9 +124,22 @@ def _clamp_ws(pos: np.ndarray) -> np.ndarray:
     return np.minimum(np.maximum(pos, lo + 1e-3), hi - 1e-3)
 
 
-def _synth_bounds_topdown(obj_pos: np.ndarray, top_down: bool):
-    """v1._synth_bounds with the roll/pitch bound tightened for a top-down grip."""
+def _synth_bounds_topdown(obj_pos: np.ndarray, top_down: bool, obj_size=None):
+    """v1._synth_bounds with the roll/pitch bound tightened for a top-down grip, and
+    (when obj_size is given: the drawn object's full AABB extents in m) the xy search
+    box + close-width bound rescaled to the ACTUAL object. v1's hardcoded OBJ_SIZE is
+    mushroom-scale (~10 cm box), which makes CMA-ES search a +-7 cm box for a 2 cm
+    fruit and return a straddle width wider than the object (no contact)."""
     lb, ub = v1._synth_bounds(obj_pos)
+    if obj_size is not None:
+        s = np.asarray(obj_size, float)
+        hx, hy = 0.5 * s[0], 0.5 * s[1]
+        lb[0], ub[0] = float(obj_pos[0] - 2.0 * hx), float(obj_pos[0] + 2.0 * hx)
+        lb[1], ub[1] = float(obj_pos[1] - 2.0 * hy), float(obj_pos[1] + 2.0 * hy)
+        # close width in [3 mm, 1.25 x largest-lateral-dim] -- covers a firm grip
+        # without letting CMA park at a no-contact straddle.
+        wmax = float(min(0.08, 1.25 * max(s[0], s[1])))
+        lb[6], ub[6] = 0.003, max(0.012, wmax)
     if top_down:
         # x = [tx, ty, tz, roll, pitch, yaw, width]. ONLY clamp pitch (approach tilt
         # away from straight-down); roll is left at the full default range because the
@@ -273,7 +286,7 @@ def execute_and_collect_diverse_v2(
     # banana-proof values -- do not tighten: an over-tight close ejects a coarse-grid
     # soft body during the grasp.)
     _margin = 0.0     if object_type == "soft" else 0.0025
-    _floor  = 0.014   if object_type == "soft" else 0.020
+    _floor  = (min(0.014, 0.45 * _short) if object_type == "soft" else min(0.020, 0.6 * _short))
     _wcap   = min(0.075, _short + 0.002)
     width_cls  = np.clip(np.array([p[2] - _margin for p in poses], np.float32), _floor, _wcap)
 
@@ -655,9 +668,16 @@ def main() -> None:
             obj_pos_all  = init_state["object_center"].astype(np.float64)
             obj_quat_all = init_state["object_quat"].astype(np.float64)
 
+            # actual AABB extents of the drawn+scaled object -> size-scaled CMA bounds
+            try:
+                from gentle_manip.assets.registry import get_object_def
+                _osz = np.asarray(get_object_def(scene_cat).size, float) * float(scene_dr.get("scale", 1.0))
+            except Exception:
+                _osz = None
+
             payloads = []
             for i in range(n):
-                lb, ub = _synth_bounds_topdown(obj_pos_all[i], args.top_down)
+                lb, ub = _synth_bounds_topdown(obj_pos_all[i], args.top_down, obj_size=_osz)
                 payloads.append((actual_mesh, obj_pos_all[i], obj_quat_all[i],
                                  left_pts, right_pts, args.maxfevals, lb, ub, str(run_dir / "cmaes_logs")))
             futures = [executor.submit(v1._synth_worker, pl) for pl in payloads]
