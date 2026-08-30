@@ -673,3 +673,14 @@ Collector default n_envs 16 -> 10.
 - Per category: banana 500, kiwi ~160, egg ~156, mushroom ~152, grape ~90, cherry ~86,
   tomato ~57, raspberry ~48. Total ~1210/4000 (30%). 0 batchfails.
 - ~1.5 demos/min combined (soft-MPM contact-bound ceiling on 2 GPUs).
+
+---
+## 2026-08-30 21:25 — large collector: dropped banana from the pool
+
+User: banana already has 500+, stop collecting it. `dr/xcat_diverse_regrasp.yaml`
+`object_category_pool` -> `[mushroom, kiwi, egg_boiled]` (was 4 incl banana_lying).
+Cancelled 1802711, resubmitted large as **1805125** (mushroom/kiwi/egg only, n_envs 10,
+seed 21). NOTE: this DR is also `single_lift_xcat_diverse{,_eval}`'s dr -- but the
+per-category eval (yd_gen_eval) uses `dr: eval_cat_<name>` overrides, and the old
+frozen-geometry `_eval` is deprecated, so no eval impact.
+Per category now: banana 500+, kiwi ~166, egg ~163, mushroom ~160, + small 4.
