@@ -444,6 +444,45 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-30 — RE-GRASP (hover-start) demos implemented: `--regrasp-prob`. Smoke on mushroom
+15/15, all three pieces of user feedback applied.**
+
+The idea (user, 2026-08-27): BC only sees states on the expert trajectory, so after a FAILED grasp
+the policy is off-distribution — hovering over the object, gripper part-closed, holding nothing.
+These episodes START in exactly that state.
+
+**Behaviour** (`--regrasp-prob P`, per-episode; 0 = off, ~0.2 for a real collection, 1.0 to test):
+1. Gripper is placed **6-12 cm above the grasp pose** with a **3 cm-radius xy scatter** (the object
+   may have ROLLED after the failed attempt) and a **+-8 deg** orientation jitter.
+2. Gripper starts at a **random part-closed width (10-80 mm)** — the genuinely unseen part of the
+   state, since a normal approach passes through that height but always fully OPEN.
+3. The first **12 recorded steps RE-OPEN to nominal while HOLDING the start pose** — this is the
+   recovery action itself, and it is what the policy must learn to do before re-approaching.
+4. Then it drives **straight to the grasp** at the normal constant velocity (no two-phase
+   approach), and the usual grasp / firm / lift / hold follow unchanged.
+5. The home -> hover move is **executed but NOT recorded**, so the demo's first frame IS the hover.
+6. `dr_params.csv` labels every episode **`re-grasp-demo`** or **`standard`**.
+
+**Smoke (mushroom, 15 eps, `--regrasp-prob 1.0`): 100 % success, all labelled, all within spec:**
+
+| property | measured | spec |
+|---|---|---|
+| height above grasp pose | 63-118 mm (median 90) | 60-120 |
+| xy offset from grasp | 4-39 mm (median 26) | <= 42 (3 cm radius) |
+| start width | 16-78 mm | 10-80, randomized |
+| width after re-open | 80 mm, all episodes | nominal |
+
+**Pinch filtering still applies unchanged** (user check): `filter_pinch_episodes.py` runs on these
+as-is — it keys off `priv_object_pos`, which they carry — and flagged 2 of 15 on the first smoke.
+
+**Not implemented, and worth stating:** this teaches RESTART, not RETRY. There is no failure
+DETECTION — the policy learns "from this state, re-open and grasp", not "that attempt failed, so
+recover". The hover state is the trigger. Also the object is at its normal spawn pose rather than
+displaced by a real failed grasp; the 3 cm xy scatter of the GRIPPER is a proxy for that.
+Verification must be at TRAINING time against a matched no-hover-start baseline — collection
+success says nothing about whether retry behaviour emerges.
+
+
 **2026-08-29 — PER-OBJECT VERIFICATION (7 x 16 eps): 4 PASS, 3 REVIEW. The analytic squeeze rule
 is NOT sufficient; the safe indentation has to be MEASURED per object, not predicted.**
 
