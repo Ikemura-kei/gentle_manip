@@ -41,8 +41,19 @@ def build_object_sdf(mesh_path: str, simplify_reduction: float = 0.99):
     for CMA-ES grasp synthesis).
     """
     mesh = trimesh.load(str(mesh_path), force='mesh')
-    # Simplify for fast BVH traversal (25k faces → ~250 faces)
-    mesh_s = mesh.simplify_quadric_decimation(simplify_reduction)
+    # Simplify for fast BVH traversal (25k faces → ~250 faces). Skip for meshes that
+    # are already small: aggressive quadric decimation of a <~600-face mesh (crude
+    # grape/cherry scans) collapses it to 0-2 faces and the rtree BVH build then
+    # raises "Bounds must be (n, dimension * 2)!".
+    if len(mesh.faces) > 600:
+        try:
+            mesh_s = mesh.simplify_quadric_decimation(simplify_reduction)
+            if mesh_s is None or len(mesh_s.faces) < 8:
+                mesh_s = mesh
+        except Exception:
+            mesh_s = mesh
+    else:
+        mesh_s = mesh
     trimesh.repair.fix_normals(mesh_s)
 
     def _sdf(pts: np.ndarray) -> np.ndarray:
