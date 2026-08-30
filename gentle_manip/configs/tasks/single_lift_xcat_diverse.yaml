@@ -7,20 +7,21 @@
 # Used by: experiments (task:) single_lift_xcat_diverse
 # Status: experimental
 #
-# Pool narrowed to 5 mushroom-scale soft objects (3-6 cm): mushroom, banana_lying,
-# kiwi, egg_boiled, strawberry. The <=2 cm fruit (grape/cherry/tomato/raspberry)
-# broke the deform+SDF+MPM pipeline (degenerate meshes, ~64 MPM particles) and are
-# dropped -- "adjust if any collect badly". E span now 3e5..5.3e5.
-# CFL: anchored on the banana soft eval's stable grid 200 / substeps 340 at E 3e5;
-# scaled to grid 190 / substeps 440 for strawberry (5.3e5). Rare blowups caught by
-# the collector's per-batch try/except skip.
+# Pool = 4 mushroom-scale soft objects (3-6 cm): mushroom, banana_lying, kiwi,
+# egg_boiled. Dropped: the <=2 cm fruit (grape/cherry/tomato/raspberry -- degenerate
+# deformed meshes, ~64 MPM particles) and strawberry (1.4 KB placeholder mesh breaks
+# the SDF BVH). "adjust if any collect badly". E span 1.5e5 (egg) .. 4e5 (kiwi).
+# Physics = the banana COLLECTION values (grid 250 / substeps 240) that yielded
+# 54%% grasp SR + confirmed regrasp. Slightly above banana's 220 substeps for kiwi
+# (E 4e5). Occasional NaN blowups are caught by the collector's per-batch skip.
+# The EVAL task (single_lift_xcat_diverse_eval) uses the CFL-safe grid 190/substeps 440.
 success_z_min: 0.16
 success_z_max: 0.40
 hold_steps: 6
 object_name: "mushroom"        # nominal/fallback; dr.object_category_pool overrides per scene
 object_type: "soft"
-sim_substeps: 440
-mpm_grid_density: 190
+sim_substeps: 240
+mpm_grid_density: 250
 success_scale: 0.2
 rewards:
   stress:      {scale: 0.2, cap: 1.5, mean_weight: 0.2, top10_weight: 0.8}
