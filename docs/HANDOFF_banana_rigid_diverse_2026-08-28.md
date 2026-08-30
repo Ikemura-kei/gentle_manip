@@ -643,3 +643,13 @@ per-cat pinned pool, 8 in-domain + 4 OOD, 100 rollouts each) on BOTH checkpoints
 `uabeb` (regrasp) and `tqmjv` (baseline). Queued for the first free GPU slot after
 the 4000-demo collection (user wants full collection effort now). This is also the
 template for the final 8x500 model eval.
+
+---
+## 2026-08-30 18:10 — n_envs tuning: 20 was too many
+
+1801666 (large, n_envs 20): Genesis idle-FPS 74 but during the GRASP (MPM contact
+solve) it dropped to 0.6 FPS/env -> ~17 min execution per 20-env batch + CMA -> net
+SLOWER than the old n_envs 6 (1.2/min). Soft-MPM contact does not parallelize free on
+GPU. Killed. Relaunched large as **1802711, n_envs 10, maxfevals 550, seed 13**.
+Collector default n_envs 16 -> 10.
+- Small collector 1800352 stays at n_envs 16 (small objects = few particles, MPM cheap).
