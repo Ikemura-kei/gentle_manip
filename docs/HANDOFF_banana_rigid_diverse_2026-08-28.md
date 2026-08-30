@@ -267,3 +267,34 @@ soft-demo section (10 clips).
   state_200). Monitoring first ~3 batches for stability before submitting the regrasp eval.
 - NOT done: the regrasp eval (`single_lift_banana_soft_regrasp_eval`) — submit after clean_v2
   proves stable.
+
+---
+## 2026-08-30 03:40 — Phase 3 SOFT-BANANA EVAL DONE — REGRASP CONFIRMED
+
+Jobs 1789727 (clean) + 1790415 (regrasp), ckpt `hytxr/state_200`, CFL-safe eval physics.
+
+| metric                | clean start | regrasp start (arm low/offset) |
+|-----------------------|-------------|--------------------------------|
+| success rate          | **1.00**    | **0.98**                       |
+| gentleness score      | 0.511       | 0.567                          |
+| combined SR x gentle  | 0.755       | 0.774                          |
+| first_success_step    | 92/100 @ 40-60 | 74 quick(<40) + **23 late(60-120)** |
+
+- **Regrasp = genuine.** Regrasp-start fss is bimodal: either the start pose works
+  immediately (<40) or the policy misses, backs off, repositions and grasps ~30-60 steps
+  later (23%). Frame-by-frame of a late clip (batch00_env1, fss 88) shows a clear
+  approach -> not-secured -> re-widen -> reposition -> grasp + lift-clear cycle. No retry
+  FSM in the training data — pure diverse-start BC.
+- **Gentleness**: peak single-particle stress > 45 kPa yield in ~100% of episodes
+  (transient contact plasticity); SUSTAINED top20 bulk stress ~31 kPa (sub-yield). Grip is
+  firm but not crushing. -> generalist recipe: crush gate 1.25 -> 1.1x.
+- Eval videos (trimmed to success frame, no carry-down tail):
+  `logs/dppo/dppo-pretrain/single_lift_banana_soft_diverse_pcd/hytxr/eval/{clean_v2,regrasp_v2}/render/`
+  summary.json + episodes.csv beside them.
+- EXPERIMENT.md Final summary filled.
+
+**NEXT (Phase 4):** cross-category generalist. Build
+`configs/experiments/single_lift_cross_category_diverse.yaml` (9-object pool + wide pose/size
+DR + the start families, crush gate 1.1x), a `single_lift_cross_category_diverse_pcd` DP3
+cfg dir, launch CONTINUOUS 500/object collection + the matching NON-REGRASPABLE (home-only
+start) baseline collection.
