@@ -693,3 +693,13 @@ Per category now: banana 500+, kiwi ~166, egg ~163, mushroom ~160, + small 4.
   Resubmit ~2x/day. Both running: 1805147 (large: mushroom/kiwi/egg, target 500),
   1805198 (small: grape/cherry/tomato/raspberry, target 500).
 - ETA to 4000: ~24-28h (large finishes 3 objs in ~13h -> that GPU repoints to small).
+
+---
+## 2026-08-30 23:00 — collection ~36%, both collectors healthy
+- 1805147 large (mushroom/kiwi/egg, target 500): ~55 this run. 1805198 small
+  (grape/cherry/tomato/raspberry, target 500): ~68 this run.
+- Per category: banana 500+, kiwi ~187, egg ~177, mushroom ~162, grape ~130,
+  cherry ~123, tomato ~95, raspberry ~82. Total ~1450/4000 (36%). 0 batchfails.
+- Self-resubmit + per-cat quota active. ETA ~22h. When user returns / collection
+  completes: merge all data.pkl -> train single_lift_gen8_regrasp_pcd (+ baseline
+  from strict_home) -> yd_gen_eval (8 in-domain + 4 OOD, 100 each, scene_group 1).
