@@ -15,7 +15,8 @@ set -euo pipefail
 REPO=/nobackup/proj/disk/softenable-codesign26/personal/yifeid/gentle_manip
 source "$REPO/gentle_manip/scripts/arrhenius/yd_env_common.sh"
 
-ENV_NAME=single_lift_banana_rigid_diverse_pcd
+ENV_NAME=${ENV_NAME:-single_lift_banana_rigid_diverse_pcd}
+EXPERIMENT=${EXPERIMENT:-single_lift_banana_rigid_diverse}
 CFG_DIR=$REPO/gentle_manip/dppo/cfg/$ENV_NAME
 DEMO_RUN=${DEMO_RUN:-$(cat "$REPO/logs/slurm_logs/last_banana_collect_run.txt")}
 echo "[pipe] demo run: $DEMO_RUN"
@@ -24,8 +25,8 @@ echo "[pipe] demo run: $DEMO_RUN"
 echo; echo "========== convert -> $DPPO_DATA_DIR/$ENV_NAME =========="
 uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.convert_demos \
   "$DEMO_RUN" --out "$DPPO_DATA_DIR/$ENV_NAME" \
-  --experiment single_lift_banana_rigid_diverse --view student --point-cloud --val-split 0.1
-python3 -c "import numpy as np; d=np.load('$DPPO_DATA_DIR/$ENV_NAME/train.npz'); print('train', {k:d[k].shape for k in d.files})"
+  --experiment "$EXPERIMENT" --view student --point-cloud --val-split 0.1
+uv run --project envs/dppo_arrhenius --no-sync python -c "import numpy as np; d=np.load('$DPPO_DATA_DIR/$ENV_NAME/train.npz'); print('train', {k:d[k].shape for k in d.files})" || true
 
 echo; echo "========== BC pretrain =========="
 PRE_LOG=$REPO/logs/slurm_logs/${SLURM_JOB_ID:-local}_pretrain.log
@@ -75,15 +76,9 @@ RUN_DIR=$(grep -oE '/nobackup/[^ ]+/dppo-pretrain/[^ ]+/config/' "$PRE_LOG" | he
 echo "[pipe] pretrain run dir: $RUN_DIR"
 ls -1v "$RUN_DIR"/checkpoint/state_*.pt
 
-# pick best-val checkpoint if the trainer wrote one, else the last
-BEST=$("$UV_BIN_DIR/uv" run --project envs/dppo_arrhenius --no-sync python - "$RUN_DIR" <<'PY'
-import sys, glob, os, json, re
-rd=sys.argv[1]
-# try find_best_checkpoint-style: look for a val-loss log
-cks=sorted(glob.glob(os.path.join(rd,"checkpoint","state_*.pt")), key=lambda p:int(re.findall(r'(\d+)',os.path.basename(p))[0]))
-print(cks[-1] if cks else "")
-PY
-)
+# pick the BEST-VAL checkpoint (parse the pretrain log); fall back to the last.
+BEST=$("$UV_BIN_DIR/uv" run --project envs/dppo_arrhenius --no-sync python \
+  "$REPO/gentle_manip/scripts/arrhenius/_pick_best_ckpt.py" "$RUN_DIR" "$PRE_LOG")
 echo "[pipe] eval checkpoint: $BEST"
 [ -f "$BEST" ] || { echo "[pipe] no checkpoint to eval"; exit 1; }
 
@@ -91,7 +86,7 @@ echo; echo "========== canonical eval (100 episodes, per-episode video) ========
 PORT=$((5571 + ${SLURM_JOB_ID:-0} % 300))
 SRV_LOG=$REPO/logs/slurm_logs/${SLURM_JOB_ID:-local}_simserver.log
 uv run --project envs/sim_arrhenius --no-sync python -m gentle_manip.scripts.serl_sim_server \
-  --experiment single_lift_banana_rigid_diverse --view student \
+  --experiment "$EXPERIMENT" --view student \
   --num-envs 5 --render-rgb --subprocess --port "$PORT" > "$SRV_LOG" 2>&1 &
 SRV_PID=$!
 trap 'kill $SRV_PID 2>/dev/null || true' EXIT
@@ -108,6 +103,31 @@ uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.train
   env.specific.port="$PORT"
 
 EVAL_DIR=$(ls -dt "$RUN_DIR"/eval/* | head -1)
-echo "[pipe] EVAL DONE -> $EVAL_DIR"
+uv run --project envs/sim_arrhenius --no-sync python "$REPO/gentle_manip/scripts/arrhenius/_trim_eval_clips.py" "$EVAL_DIR" 4 16 || true
+echo "[pipe] EVAL DONE (clean) -> $EVAL_DIR"
 cat "$EVAL_DIR/summary.json" 2>/dev/null || true
 echo "$EVAL_DIR" > "$REPO/logs/slurm_logs/last_banana_eval_dir.txt"
+
+# ---- 2nd eval: REGRASP experiment (arm starts low over the object) ----
+REGRASP_EXPERIMENT=${REGRASP_EXPERIMENT:-single_lift_banana_rigid_regrasp_eval}
+if [ -n "$REGRASP_EXPERIMENT" ] && [ -f "$REPO/gentle_manip/configs/experiments/$REGRASP_EXPERIMENT.yaml" ]; then
+  echo; echo "========== eval #2: $REGRASP_EXPERIMENT (regrasp start) =========="
+  cleanup 2>/dev/null || kill $SRV_PID 2>/dev/null || true; sleep 3
+  PORT2=$((5871 + ${SLURM_JOB_ID:-0} % 300))
+  SRV_LOG2=$REPO/logs/slurm_logs/${SLURM_JOB_ID:-local}_simserver2.log
+  uv run --project envs/sim_arrhenius --no-sync python -m gentle_manip.scripts.serl_sim_server \
+    --experiment "$REGRASP_EXPERIMENT" --view student --num-envs 5 --render-rgb --subprocess --port "$PORT2" > "$SRV_LOG2" 2>&1 &
+  SRV2=$!; trap 'kill $SRV2 2>/dev/null||true' EXIT
+  for _ in $(seq 1 180); do grep -q SIM_SERVER_READY "$SRV_LOG2" 2>/dev/null && break
+    kill -0 $SRV2 2>/dev/null || { tail -30 "$SRV_LOG2"; break; }; sleep 5; done
+  if grep -q SIM_SERVER_READY "$SRV_LOG2"; then
+    uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.train \
+      --config-path "$CFG_DIR" --config-name eval_diffusion_pointnet \
+      base_policy_path="$BEST" ft_denoising_steps=0 experiment="$REGRASP_EXPERIMENT" \
+      env.specific.port="$PORT2" logdir="$RUN_DIR/eval_regrasp/$(date +%Y-%m-%d_%H-%M-%S)" || echo "[pipe] regrasp eval failed"
+    ED2=$(ls -dt "$RUN_DIR"/eval_regrasp/* 2>/dev/null | head -1)
+    uv run --project envs/sim_arrhenius --no-sync python "$REPO/gentle_manip/scripts/arrhenius/_trim_eval_clips.py" "$ED2" 4 16 || true
+    echo "[pipe] REGRASP EVAL DONE -> $ED2"; cat "$ED2/summary.json" 2>/dev/null || true
+    echo "$ED2" > "$REPO/logs/slurm_logs/last_banana_regrasp_eval_dir.txt"
+  fi
+fi

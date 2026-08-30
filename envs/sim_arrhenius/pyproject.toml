@@ -39,6 +39,7 @@ dependencies = [
     "pyyaml",  # YAML config loading
     "matplotlib",
     "pygame",  # keyboard teleop for the in-process sim viewer (examples/sim_teleop_keyboard.py)
+    "cma",     # CMA-ES optimizer for grasp synthesis (grasp_synthesis/synth_utils.py)
     # torch — cu126 aarch64 (GH200); see header note to change for your HW.
     "torch==2.9.1",
     "torchvision==0.24.1",
@@ -61,4 +62,11 @@ torchaudio = { index = "pytorch-cu126" }
 [tool.uv]
 constraint-dependencies = [
     "pymeshlab<2025",  # 2025.x requires manylinux_2_35; older wheels support manylinux_2_31
+]
+# GH200 = aarch64 + RHEL9.8 (glibc 2.34): pymeshlab has NO compatible Linux/aarch64 wheel
+# (<2025 = x86 only; >=2025.7 needs glibc 2.35). Genesis only lazy-imports it inside
+# Mesh.remesh (isotropic remeshing) -- never hit by rigid tasks or the trimesh-only
+# mesh_deform shape DR -- so drop it on aarch64 rather than build Qt+pymeshlab from source.
+override-dependencies = [
+    "pymeshlab; platform_machine != 'aarch64'",
 ]

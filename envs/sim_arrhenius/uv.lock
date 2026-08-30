@@ -8,6 +8,7 @@ resolution-markers = [
 
 [manifest]
 constraints = [{ name = "pymeshlab", specifier = "<2025" }]
+overrides = [{ name = "pymeshlab", marker = "platform_machine != 'aarch64'" }]
 
 [[package]]
 name = "absl-py"
@@ -57,6 +58,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/27/fb/576f067976d320f5f0114a8d9fa1215425441bb35627b1993e5afd8111e5/cloudpickle-3.1.2.tar.gz", hash = "sha256:7fda9eb655c9c230dab534f1983763de5835249750e85fbcef43aaa30a9a2414", size = 22330, upload-time = "2025-11-03T09:25:26.604Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/88/39/799be3f2f0f38cc727ee3b4f1445fe6d5e4133064ec2e4115069418a5bb6/cloudpickle-3.1.2-py3-none-any.whl", hash = "sha256:9acb47f6afd73f60dc1df93bb801b472f05ff42fa6c84167d25cb206be1fbf4a", size = 22228, upload-time = "2025-11-03T09:25:25.534Z" },
+]
+
+[[package]]
+name = "cma"
+version = "4.4.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/67/ac/8c27720838e293898671f01b5c452236a0c74f4799a3f2d5fcccbbf50d71/cma-4.4.4.tar.gz", hash = "sha256:632bd654b5dce04c0eaa3166679d3e4773ce7a79eab7934e7f363c341b9a8170", size = 316645, upload-time = "2026-02-25T22:18:16Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d4/d4/ec46cedab6a6145e21768baa8110db3e2e836a320d8499e4ef18bc894e61/cma-4.4.4-py3-none-any.whl", hash = "sha256:edb6d02eb2aac2d54650f16a8f0c70711ff17445957de7c9de92ff7fd4b7ef38", size = 328311, upload-time = "2026-02-25T22:18:09.602Z" },
 ]
 
 [[package]]
@@ -291,10 +304,10 @@ dependencies = [
     { name = "py-cpuinfo" },
     { name = "pycollada" },
     { name = "pydantic" },
-    { name = "pygel3d", marker = "platform_machine == 'AMD64' or platform_machine == 'x86_64'" },
+    { name = "pygel3d" },
     { name = "pyglet" },
     { name = "pygltflib" },
-    { name = "pymeshlab", marker = "platform_machine == 'AMD64' or platform_machine == 'x86_64'" },
+    { name = "pymeshlab", marker = "platform_machine != 'aarch64'" },
     { name = "pyopengl" },
     { name = "pysplashsurf" },
     { name = "quadrants" },
@@ -340,10 +353,10 @@ requires-dist = [
     { name = "pycollada" },
     { name = "pydantic", specifier = ">=2.11.0" },
     { name = "pydata-sphinx-theme", marker = "extra == 'docs'" },
-    { name = "pygel3d", marker = "platform_machine == 'AMD64' or platform_machine == 'x86_64'" },
+    { name = "pygel3d" },
     { name = "pyglet", specifier = ">=1.5,!=2.1.8" },
     { name = "pygltflib", specifier = "==1.16.0" },
-    { name = "pymeshlab", marker = "platform_machine == 'AMD64' or platform_machine == 'x86_64'" },
+    { name = "pymeshlab" },
     { name = "pyopengl", specifier = ">=3.1.4" },
     { name = "pysplashsurf", specifier = "==0.14.*" },
     { name = "pytest", marker = "extra == 'dev'" },
@@ -411,6 +424,7 @@ name = "gentle-manip-sim-arrhenius"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "cma" },
     { name = "genesis-world" },
     { name = "gentle-manip" },
     { name = "gymnasium" },
@@ -429,6 +443,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cma" },
     { name = "genesis-world", editable = "../../third_party/genesis" },
     { name = "gentle-manip", editable = "../../" },
     { name = "gymnasium" },
@@ -1210,6 +1225,7 @@ dependencies = [
     { name = "numpy" },
 ]
 wheels = [
+    { url = "https://files.pythonhosted.org/packages/28/5d/d2dd826bf8b5e5d1b36a06eefd138c3cd05144488390035f1e73903683bc/pymeshlab-2023.12.post3-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:01cc614be9d2c29300cd39ae3147f9b2c611db03425c4ec52c193f64d7871dc3", size = 70570362, upload-time = "2025-03-05T13:11:23.753Z" },
     { url = "https://files.pythonhosted.org/packages/70/1d/dc7aa2260278a04290ae78c9641906338d77370a8d8898b1efdbc1008b3e/pymeshlab-2023.12.post3-cp312-cp312-macosx_11_0_x86_64.whl", hash = "sha256:b2c8a90164f68f79170aabcddbe467d6392b217b482e68b3c7c35950beed335d", size = 49697158, upload-time = "2025-03-05T13:11:31.667Z" },
     { url = "https://files.pythonhosted.org/packages/51/11/40b9a8a318820eec9ff05a98c1b8678eedae6c97e8e7dccaba4ed538439f/pymeshlab-2023.12.post3-cp312-cp312-manylinux_2_31_x86_64.whl", hash = "sha256:f2bb4c25d4df434908677d77a66f61b1bed036f49656c8425c3a2496468c3167", size = 98741567, upload-time = "2025-03-05T13:11:42.376Z" },
     { url = "https://files.pythonhosted.org/packages/c5/52/dfa6096c620cf7d5ec2037dacbbd0787974d188f783c9d9dbcb9b7d0fd96/pymeshlab-2023.12.post3-cp312-cp312-win_amd64.whl", hash = "sha256:346b53c00241693feca2c9843d72fb750c0cfc78bd5aa44d905ec0570de3997f", size = 52895966, upload-time = "2025-03-05T13:11:52.174Z" },

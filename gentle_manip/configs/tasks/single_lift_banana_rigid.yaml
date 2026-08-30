@@ -12,10 +12,10 @@
 success_z_min: 0.175
 success_z_max: 0.275
 hold_steps: 30
-object_name: "banana"
+object_name: "banana_lying"
 object_type: "rigid"
 
-sim_substeps: 5
+sim_substeps: 10
 mpm_grid_density: 250    # unused (no MPM entity), kept for SceneSpec
 
 settle_steps: 30

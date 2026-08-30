@@ -336,6 +336,22 @@ OBJECT_MAP: dict[str, ObjectDef] = {
         material_dr_mult={"E": (0.6, 1.5), "nu": (0.95, 1.05), "rho": (0.85, 1.15),
                           "yield": (0.6, 1.4)},
     ),
+    # banana_lying: banana_piece.obj rotated so the LONG axis is horizontal (Y) --
+    # a banana chunk resting on its side, how it actually sits on a table. The
+    # upright "banana" baton (long axis vertical) is unstable for rigid physics
+    # (topples during settle) and impossible to grasp cleanly top-down (finger
+    # reach below TCP is ~7cm > the baton height). Used by the rigid-banana
+    # diverse-start regrasp surrogate. mesh origin is at the base (min-z=0).
+    "banana_lying": ObjectDef(
+        "banana_lying", MATERIALS["banana"], object_type="soft",
+        size=(0.0318, 0.057, 0.0318), default_pos=(0.47, 0.0, 0.004),
+        mesh_path=str(_OBJ_DIR / "banana_piece_lying.obj"),
+        shape_dr_ranges={"bend_deg": (-10.0, 10.0), "twist_deg": (-5.0, 5.0),
+                         "taper": (-0.08, 0.08), "axis_scale": (0.9, 1.1),
+                         "scale": (0.85, 1.15)},
+        material_dr_mult={"E": (0.6, 1.5), "nu": (0.95, 1.05), "rho": (0.85, 1.15),
+                          "yield": (0.6, 1.4)},
+    ),
     # tomato (cherry tomato): reuses cherry.obj's geometry (round, cherry-tomato-
     # scale) paired with the tomato material -- shape-DR profile copied verbatim
     # from the cherry entry since it's the identical mesh.

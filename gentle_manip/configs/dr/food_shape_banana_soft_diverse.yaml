@@ -1,0 +1,20 @@
+# [dr] Soft banana WIDE diverse-start DR -- soft-material analogue of
+# rigid_orientation_banana_diverse.yaml. Wide object pose + size + shape, plus MPM
+# material E/nu/rho + coupling-friction bands (banana ~3e5 Pa nominal, +-7%).
+# Used by: experiments (dr:) single_lift_banana_soft_diverse
+# Status: experimental
+object_pos_xy: 0.10
+robot_init_pos_xyz: 0.03
+object_yaw_deg: 180
+object_pitch_roll_deg: 14
+
+object_scale:      [0.80, 1.25]
+object_bend_deg:   [-4.0, 4.0]
+object_twist_deg:  [-4.0, 4.0]
+object_taper:      [-0.03, 0.03]
+object_axis_scale: [0.88, 1.12]
+
+object_E:  [2.79e+05, 3.21e+05]
+object_nu: [0.339, 0.36]
+object_rho: [960.4, 999.6]
+coup_friction: [4.5, 6.0]

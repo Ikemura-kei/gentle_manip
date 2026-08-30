@@ -1,0 +1,12 @@
+# [experiment] Soft banana REGRASP eval: low lifted-clear success band + arm starting
+# low over the object -> the honest test of recovery + gentleness.
+# Used by: yd_banana_eval.sbatch EXPERIMENT=single_lift_banana_soft_regrasp_eval
+# Status: experimental
+task: single_lift_banana_soft_diverse_eval
+action: delta_pose_delta_gripper
+dr: food_shape_banana_soft_regrasp_eval
+augmentation: l515_noise
+obs: superset_soft
+views:
+  teacher: [privileged]
+  student: [point_cloud]

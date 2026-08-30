@@ -20,11 +20,11 @@ name: ${env}_pre_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
 logdir: ${oc.env:DPPO_LOG_DIR}/dppo-pretrain/${env}/${exp_id:}
 train_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/train.npz
 val_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/val.npz
-experiment: single_lift_banana_rigid_diverse
+experiment: single_lift_banana_soft_diverse
 
 seed: 42
 device: cuda:0
-env: single_lift_banana_rigid_diverse_pcd
+env: single_lift_banana_soft_diverse_pcd
 obs_dim: 8
 action_dim: 7
 denoising_steps: 20
@@ -41,7 +41,7 @@ wandb:
   group: dppo-pretrain
 
 train:
-  n_epochs: 300
+  n_epochs: 200
   batch_size: 128
   learning_rate: 1e-4
   weight_decay: 1e-6

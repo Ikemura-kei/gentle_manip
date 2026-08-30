@@ -1,0 +1,12 @@
+# [experiment] Eval-only variant of single_lift_banana_soft_diverse: low lifted-clear
+# success band + brief hold so the eval terminates early on success (no carry-down).
+# Used by: yd_banana_eval.sbatch / yd_banana_pipeline.sbatch REGRASP_EXPERIMENT
+# Status: experimental
+task: single_lift_banana_soft_diverse_eval
+action: delta_pose_delta_gripper
+dr: food_shape_banana_soft_diverse
+augmentation: l515_noise
+obs: superset_soft
+views:
+  teacher: [privileged]
+  student: [point_cloud]
