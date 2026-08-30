@@ -444,6 +444,38 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-31 — PRIMITIVES SMOKE COMPLETE (6 x 16 eps, frozen v4.1, full renderings). Sub-yield is
+100 % ON EVERY OBJECT; success orders EXACTLY by local contact flatness. Recipe untouched.**
+
+| primitive | success (of attempts) | sub-yield | median stress | verdict | run |
+|---|---|---|---|---|---|
+| prim_cuboid | **88.9 %** (16/18) | 100 % | 0.56x | PASS | `26-08-30-lue` |
+| prim_ellipsoid | **72.7 %** (16/22) | 100 % | 0.61x | PASS | `26-08-30-adf` |
+| prim_lamp | 57.1 % (16/28) | 100 % | 0.50x | REVIEW | `26-08-30-pnv` |
+| prim_cylinder | 53.3 % (16/30) | 100 % | 0.38x | REVIEW | `26-08-30-qil` |
+| prim_sphere | 53.3 % (16/30) | 100 % | 0.40x | REVIEW | `26-08-30-kjx` |
+| prim_torus | **19.0 %** (16/84) | 100 % | 0.42x | REVIEW | `26-08-30-ofm` |
+
+**Two findings, both observations (v4.1 is frozen; nothing was or will be tuned):**
+1. **Saved-demo gentleness is INVARIANT: 100 % sub-yield on all six**, max stress 0.50-0.96x. The
+   gentle-erring recipe never saved a damaged episode; every failure is an unsaved slip, i.e. pure
+   wall-clock. Combined with the food A/B this is now 13 categories where the p98 recipe's saved
+   demos are 88-100 % sub-yield.
+2. **Success orders exactly by local contact flatness**: flat faces (cuboid 89 %) > gently curved
+   long sides (ellipsoid 73 %) > strongly curved / bulb-and-neck (lamp/cylinder/sphere 53-57 %) >
+   thin ring (torus 19 %). Rank-perfect with zero exceptions — flat pads on curved soft surfaces
+   slip at gentle closures. A clean, presentable geometry result; also note the non-convex lamp
+   behaves like the convex curved shapes (57 %), so non-convexity per se is not the driver.
+
+The torus (16 saved from 84 attempts, ~5x wall-clock) met the "thin scope probe" expectation but
+DID collect, all sub-yield — the small-strain scope limit did not bite the way the full banana's
+did. Cluster guidance stands: collect it if the wall-clock is acceptable, skip otherwise.
+
+Every episode (success AND failure) has a rendering under each run's `videos/` /
+`videos_failed/` per the new standing rule; the failure clips are the material for reading slip
+vs topple per shape. `docs/smoke_datasets.md` regenerated (122 runs).
+
+
 **2026-08-30 — v4.1 IS FROZEN AS FINAL (user decision). Paper deadline 2026-09-15 (16 days);
 large-scale cluster collection has started; there is NO room for recollection. NO further edits
 to any v4.1 parameter — the scan metric (p98), the gain (4.92), the auto rules, the executor —

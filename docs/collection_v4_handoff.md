@@ -74,11 +74,18 @@ recipe verbatim (defaults are the frozen v4.1 = p98/4.92; 250 eps each):
 - `single_lift_prim_ellipsoid_soft_abs_action_armfocus`  (5 × 3 × 2.5 cm)
 - `single_lift_prim_torus_soft_abs_action_armfocus`      (R 1.4 / tube 0.7 cm — thin probe)
 
-**Expectations** (16-ep smoke in progress locally; early rows): success in the ~40–60 % band with
-100 % saved-demo sub-yield is EXPECTED for these tofu-soft shapes under the gentle-erring recipe
-(prim_cylinder measured 53.3 % / 100 % sub-yield / median 0.38×). Low success = wall-clock cost
-only; do NOT tune anything — **v4.1 is frozen** (DEVLOG 2026-08-30). The torus may additionally
-hit the small-strain scope limit (1.4 cm tube); if it collects poorly, document and skip it.
+**Measured expectations (16-ep smoke complete, 2026-08-31)** — sub-yield was **100 % on all
+six**; success orders by local contact flatness. Low success = wall-clock cost only; do NOT tune
+anything — **v4.1 is frozen**:
+
+| primitive | success of attempts | note |
+|---|---|---|
+| prim_cuboid | 88.9 % | fast |
+| prim_ellipsoid | 72.7 % | fast |
+| prim_lamp | 57.1 % | ~1.8× attempts |
+| prim_cylinder | 53.3 % | ~1.9× attempts |
+| prim_sphere | 53.3 % | ~1.9× attempts |
+| prim_torus | **19.0 %** | **~5× attempts** — collects clean (100 % sub-yield) but slow; collect only if the wall-clock is acceptable, else skip and note |
 
 ## Guardrails (each of these burned us once — see DEVLOG 2026-08-28..30)
 

@@ -10,6 +10,43 @@ so a number can always be traced back to its configuration. Newest first.
 
 | date | object | run | eps | attempts | success | drop | synthesis recipe |
 |---|---|---|---|---|---|---|---|
+| 2026-08-31 00:25 | prim_torus | `26-08-30-ofm` | 16 | 84 | **19%** | 0 | area=auto, wmax=auto, yaw=49, sq=2.5mm, esc=2, az=60 |
+| 2026-08-30 23:43 | prim_ellipsoid | `26-08-30-adf` | 16 | 22 | **73%** | 0 | area=auto, wmax=auto, yaw=58, sq=3.0mm, esc=2, az=60 |
+| 2026-08-30 23:32 | prim_cuboid | `26-08-30-lue` | 16 | 18 | **89%** | 0 | area=auto, wmax=auto, yaw=47, sq=3.0mm, esc=2, az=60 |
+| 2026-08-30 23:17 | prim_lamp | `26-08-30-pnv` | 16 | 28 | **57%** | 0 | area=auto, wmax=auto, yaw=60, sq=3.0mm, esc=2, az=60 |
+| 2026-08-30 23:03 | prim_sphere | `26-08-30-kjx` | 16 | 30 | **53%** | 0 | area=auto, wmax=auto, yaw=47, sq=3.0mm, esc=2, az=60 |
+| 2026-08-30 22:39 | prim_cylinder | `26-08-30-qil` | 16 | 30 | **53%** | 0 | area=auto, wmax=auto, yaw=58, sq=3.0mm, esc=2, az=60 |
+| 2026-08-30 15:52 | tofu | `26-08-30-mgr` | 16 | 21 | **76%** | 0 | area=auto, wmax=auto, yaw=36, sq=3.0mm, esc=2, az=60 |
+| 2026-08-30 15:14 | strawberry | `26-08-30-vhm` | 16 | 18 | **89%** | 0 | area=auto, wmax=auto, yaw=47, sq=1.8mm, esc=2, az=60 |
+| 2026-08-30 14:59 | tomato | `26-08-30-ofd` | 16 | 24 | **67%** | 0 | area=auto, wmax=auto, yaw=69, sq=1.7mm, esc=2, az=60 |
+| 2026-08-30 14:45 | banana_chunk | `26-08-30-yzi` | 16 | 27 | **59%** | 0 | area=auto, wmax=auto, yaw=41, sq=0.9mm, esc=2, az=60 |
+| 2026-08-30 14:29 | cherry_tomato | `26-08-30-fgs` | 16 | 28 | **57%** | 0 | area=auto, wmax=auto, yaw=30, sq=0.8mm, esc=2, az=60 |
+| 2026-08-30 13:56 | raspberry_stable | `26-08-30-tjt` | 16 | 16 | **100%** | 0 | area=auto, wmax=auto, yaw=30, sq=0.9mm, esc=2, az=60 |
+| 2026-08-30 13:32 | mushroom | `26-08-30-nzm` | 16 | 17 | **94%** | 0 | area=auto, wmax=auto, yaw=41, sq=1.9mm, esc=2, az=60 |
+| 2026-08-30 13:16 | tofu | `26-08-30-yws` | 16 | 24 | **67%** | 0 | area=auto, wmax=auto, yaw=36, sq=3.0mm, esc=2, az=60 |
+| 2026-08-30 12:35 | strawberry | `26-08-30-ufg` | 16 | 35 | **46%** | 0 | area=auto, wmax=auto, yaw=47, sq=1.8mm, esc=2, az=60 |
+| 2026-08-30 12:13 | tomato | `26-08-30-zuo` | 16 | 20 | **80%** | 0 | area=auto, wmax=auto, yaw=69, sq=1.7mm, esc=2, az=60 |
+| 2026-08-30 12:02 | banana_chunk | `26-08-30-cdt` | 16 | 38 | **42%** | 0 | area=auto, wmax=auto, yaw=41, sq=0.9mm, esc=2, az=60 |
+| 2026-08-30 11:42 | cherry_tomato | `26-08-30-tbm` | 16 | 21 | **76%** | 0 | area=auto, wmax=auto, yaw=30, sq=0.8mm, esc=2, az=60 |
+| 2026-08-30 11:15 | raspberry_stable | `26-08-30-jnd` | 16 | 16 | **100%** | 0 | area=auto, wmax=auto, yaw=30, sq=0.9mm, esc=2, az=60 |
+| 2026-08-30 10:51 | mushroom | `26-08-30-wvz` | 16 | 18 | **89%** | 0 | area=auto, wmax=auto, yaw=41, sq=1.9mm, esc=2, az=60 |
+| 2026-08-30 09:42 | raspberry_stable | `26-08-30-vcs` | 16 | 17 | **94%** | 0 | area=auto, wmax=auto, yaw=30, sq=0.0mm, esc=2, az=60 |
+| 2026-08-30 09:27 | mushroom | `26-08-30-rdu` | 40 | 41 | **98%** | 0 | area=auto, wmax=auto, yaw=41, sq=1.9mm, esc=2, az=60 |
+| 2026-08-30 07:07 | mushroom | `26-08-30-dsg` | 15 | 15 | **100%** | 0 | area=auto, wmax=auto, yaw=41, sq=1.9mm, esc=2, az=60 |
+| 2026-08-29 22:14 | mushroom | `26-08-29-cvy` | 15 | 15 | **100%** | 0 | area=auto, wmax=auto, yaw=41, sq=1.9mm, esc=2, az=60 |
+| 2026-08-29 03:33 | tofu | `26-08-29-bdu` | 16 | 21 | **76%** | 0 | area=auto, wmax=auto, yaw=36, sq=3.0mm, esc=2, az=60 |
+| 2026-08-29 03:17 | strawberry | `26-08-29-hyk` | 16 | 16 | **100%** | 0 | area=auto, wmax=auto, yaw=47, sq=1.8mm, esc=2, az=60 |
+| 2026-08-29 03:08 | banana_chunk | `26-08-29-hzx` | 16 | 30 | **53%** | 0 | area=auto, wmax=auto, yaw=41, sq=0.9mm, esc=2, az=60 |
+| 2026-08-29 02:52 | tomato | `26-08-29-xag` | 16 | 16 | **100%** | 0 | area=auto, wmax=auto, yaw=69, sq=1.7mm, esc=2, az=60 |
+| 2026-08-29 02:44 | raspberry_stable | `26-08-29-zlb` | 16 | 16 | **100%** | 0 | area=auto, wmax=auto, yaw=30, sq=0.9mm, esc=2, az=60 |
+| 2026-08-29 02:21 | cherry_tomato | `26-08-29-rva` | 16 | 18 | **89%** | 0 | area=auto, wmax=auto, yaw=30, sq=0.8mm, esc=2, az=60 |
+| 2026-08-29 01:56 | mushroom | `26-08-29-orq` | 16 | 16 | **100%** | 0 | area=auto, wmax=auto, yaw=41, sq=1.9mm, esc=2, az=60 |
+| 2026-08-28 21:52 | mushroom | `26-08-28-aye` | 250 | 259 | **97%** | 0 | area=auto, wmax=auto, yaw=41, sq=1.9mm, esc=2, az=60 |
+| 2026-08-28 09:03 | _superseded_nostress | `26-08-28-xzo` | 250 | 313 | **80%** | 0 | area=auto, wmax=auto, yaw=30, sq=1.5mm, esc=2, az=60 |
+| 2026-08-28 03:25 | _superseded_nostress | `26-08-28-jgr` | 250 | 271 | **92%** | 0 | area=auto, wmax=auto, yaw=41, sq=1.9mm, esc=2, az=60 |
+| 2026-08-28 00:07 | mushroom | `26-08-27-icc` | 12 | 12 | **100%** | 0 | area=auto, wmax=auto, yaw=41, sq=4.8mm, esc=2, az=60 |
+| 2026-08-27 22:10 | mushroom | `26-08-27-bys` | 10 | 12 | **83%** | 0 | area=auto, wmax=auto, yaw=41, sq=4.8mm, esc=2, az=60 |
+| 2026-08-27 21:45 | mushroom | `26-08-27-who` | 10 | 12 | **83%** | 0 | area=auto, wmax=auto, yaw=41, sq=4.8mm, esc=2, az=60 |
 | 2026-08-27 17:46 | pasta_bundle | `26-08-27-jmx` | 6 | 14 | **43%** | 0 | area=auto, wmax=auto, yaw=69, sq=3.8mm, esc=2, az=60 |
 | 2026-08-27 17:35 | strawberry | `26-08-27-sjy` | 6 | 6 | **100%** | 0 | area=auto, wmax=auto, yaw=47, sq=4.9mm, esc=2, az=60 |
 | 2026-08-27 17:29 | tofu | `26-08-27-jak` | 6 | 6 | **100%** | 0 | area=auto, wmax=auto, yaw=36, sq=4.5mm, esc=2, az=60 |
@@ -96,4 +133,4 @@ so a number can always be traced back to its configuration. Newest first.
 | 2026-07-27 19:19 | mushroom_rigid | `26-07-27-hfx` | 330 | 497 | **66%** | 0 | area=None |
 | 2026-07-26 19:18 | mushroom_rigid | `26-07-26-sma` | 240 | 315 | **76%** | 0 | area=None |
 
-_85 runs with >= 4 saved episodes._
+_122 runs with >= 4 saved episodes._
