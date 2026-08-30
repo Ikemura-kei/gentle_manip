@@ -85,3 +85,13 @@ RUN=$(ls -dt "$REPO"/dataset/demos/$TASK_DIR/* | head -1)
 echo "[xcat] DONE -> $RUN"
 cat "$RUN/stats.yaml" || true
 echo "$RUN" > "$REPO/logs/slurm_logs/last_${TAG}_run.txt"
+
+# self-continue unless every category hit its target (then we're finished for this TAG)
+if grep -q "every category reached its per-cat target" "$REPO/logs/slurm_logs/${SLURM_JOB_ID}.out" 2>/dev/null; then
+  echo "[xcat] all categories at target -- NOT resubmitting."
+else
+  echo "[xcat] resubmitting to continue collection"
+  N_ENVS=$N_ENVS MAXFEVALS=$MAXFEVALS SEED=$((SEED+1)) TAG=$TAG EXPERIMENT=$EXPERIMENT \
+    REC_VIDEO=0 PER_CAT_TARGET=$PER_CAT_TARGET \
+    sbatch --job-name="$SLURM_JOB_NAME" "$REPO/gentle_manip/scripts/arrhenius/yd_xcat_collect.sbatch" || true
+fi
