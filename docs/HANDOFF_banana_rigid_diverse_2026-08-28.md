@@ -582,3 +582,29 @@ Regrasp-gen: logs/dppo/dppo-pretrain/single_lift_xcat_regrasp_pcd/uabeb/eval{,_r
   back to the full mesh if decimation returns <8 faces. Committed.
 - Resubmitted as **1800352** (n_envs 16, maxfevals 500, 24 h). The old job's
   ProcessPool workers had stale synth_utils -> full resubmit needed.
+
+---
+## 2026-08-30 17:20 — final-eval spec (user) + webpage
+
+**Webpage** (artifact 5682ac2f): added "Generalist vs non-regraspable baseline" to
+Act 3 -- 3-metric table (regrasp SR 0.98 / gentle 0.555 / SRxg 0.768  vs  baseline
+0.16 / 0.155 / 0.157) + 12 eval clips (4 recoveries, 2 clean, 1 fail; baseline
+typical + arm-low). Clips in docs/eval_showcase/generalist/.
+
+**Final-eval spec for the 8x500 model** (`yd_gen_eval.sbatch`):
+- **8 in-domain**: mushroom, banana_lying, kiwi, egg_boiled, grape, cherry, tomato, raspberry
+- **4 OOD** (= GRACE zero-shot set): blackberry, scallop, dumpling, gelatin
+- 100 rollouts each, 3 metrics per-category + aggregate (in-domain mean, OOD mean).
+- **ONE start distribution** (no clean/arm-low split): EE spans home<->near-object via
+  `dr/eval_cat_<name>.yaml` (robot_init_offset [0.03,0,-0.045] + robot_init_pos 0.065).
+- **Randomization cadence** (more than before): geometry+material rebuilt every 5
+  episodes (`scene_group_size: 1`, num_envs 5); pose/pos/orientation every episode
+  (harness per-reset). eval_cat DR carries shape DR (bend/twist/taper/axis_scale) for
+  large objects, scale-only for the crude small meshes; material via each category's
+  registry `material_dr_mult` (object_E/nu/rho left unset).
+- Per-size task switch in the script: small objects (<=2.5cm + blackberry/scallop) use
+  the finer-grid `single_lift_xcat_gen_eval_small` (grid 300/substeps 450).
+- **RISK**: `scene_group_size>0` hit an RPC-rebuild hang in earlier rigid evals. Must
+  smoke-test with `CATS=mushroom` before the full 12-category run; fix the rebuild RPC
+  or fall back to 0 + wider per-reset pose DR.
+- gen8 cfg dirs `single_lift_gen8_{baseline,regrasp}_pcd` set to scene_group_size 1.
