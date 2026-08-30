@@ -35,7 +35,7 @@ collected under the v3-era fixed 1.94 mm squeeze, quality-equivalent to v4-p98 o
 - `single_lift_strawberry_soft_abs_action_armfocus`
 - `single_lift_tofu_soft_abs_action_armfocus_realws`
 
-## Why `--scan-metric p98` for collection (and not the code default `masked`)
+## Why p98 for collection (now also the CODE DEFAULT)
 
 Both metrics were verified on all 7 objects (16-ep runs, 2026-08-30; full table in
 `paper/method_v4.md` B.3). Their failure modes are **asymmetric for a dataset**:
@@ -46,8 +46,10 @@ Both metrics were verified on all 7 objects (16-ep runs, 2026-08-30; full table 
 - **masked** errs firm: better success, but the raspberry saves demos at only 56 % sub-yield —
   **damaged episodes enter the dataset** and must be filtered out.
 
-For a frozen dataset, collection time is cheap and data damage is not ⇒ p98. The gain
-auto-resolves per metric (p98 → 4.92); do **not** pass `--closure-gain` manually.
+For a frozen dataset, collection time is cheap and data damage is not ⇒ p98. **p98 is now the
+code default** (2026-08-30, after the recipe decision), so running without `--scan-metric` is
+safe; the explicit flag in the recipe above is belt-and-braces. The gain auto-resolves per metric
+(p98 → 4.92); do **not** pass `--closure-gain` manually.
 
 ## Expectations per category (from the 16-ep verification; alert if far off)
 
