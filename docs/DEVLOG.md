@@ -444,6 +444,41 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-30 — FEM surrogate scientific-status study (`docs/fem_surrogate_status.md`) + paper
+experiment design (`docs/paper/synthesis_experiments.md`). Raspberry diagnosed: NOT a surrogate or
+metric failure — a THIRD unscaled closure constant, plus `execute_offset` was never wired.**
+
+User asked whether the FEM synthesis is scientifically OK for the paper given the raspberry's 19 %
+sub-yield, whether the evaluation is skewed, and what a near-full-FEM-but-fast path looks like.
+
+**Diagnosis (strain accounting on `26-08-29-zlb`, airtight):** executed closure beyond the planned
+contact width is 4.4–5.5 mm on a 13.7 mm object = 32–40 % strain vs a 15 % yield strain — the
+raspberry is COMMANDED to 2.1–2.7x its yield strain, and the measured top10 pinned at 1.0–1.2x
+yield is honest MPM plastic saturation. The evaluation is NOT skewed (top10/mean stable ~2.3).
+The dominant term is a **hardcoded 2.5 mm baseline in `width_cls`** — the THIRD instance of the
+unscaled-constant class (18 % of a raspberry, 8 % of a mushroom). Also: **the collector never
+passes `execute_offset`**, so every candidate is scored at a width 4–7 mm wider than executed —
+the planner's own yield guard never sees the real operating point. Confirmation probe
+(`--grasp-extra-close 0` → closure = baseline only) running.
+
+**Study doc** (`fem_surrogate_status.md`): claim-by-claim writability verdict ("gentleness-aware
+selector" SAFE; "stress predictor" FALSE; ranking PENDING n=40); full validation ledger; why
+Genesis FEM+IPC in-loop is orders too slow (7k–35k candidates/grasp vs settling-length implicit
+solves); ranked fidelity ladder — (1) measured per-object closure calibration, (2) wire
+`execute_offset`, (3) plastic-excess objective from the SAME solve (fixes the provable flatness
+past yield), (4) deformed-configuration Picard pass on top-K only, (5) nonlinear rescoring of the
+argmax, (6) DefGraspSim offline spot-checks.
+
+**Paper experiments** (`docs/paper/synthesis_experiments.md`): community context — DefGraspSim
+(RA-L'22, open corotational-FEM evaluator for deformables; the closest work and a potential
+external gold standard) and DefGraspNets (ICRA'23, learned FEM surrogate — validates the surrogate
+idea from the learned side); AnyGrasp SDK is license-gated, Contact-GraspNet/GPD are the open
+baselines. Ranked experiment list E1–E8; **the critical missing one is E1: a gentleness-blind
+antipodal+rigid-metric baseline executed through our own pipeline** — everything so far compares
+us only to ourselves. Iteration order before freezing the table: executor calibration → E1 →
+n=40.
+
+
 **2026-08-30 — RE-GRASP (hover-start) demos implemented: `--regrasp-prob`. Smoke on mushroom
 15/15, all three pieces of user feedback applied.**
 
