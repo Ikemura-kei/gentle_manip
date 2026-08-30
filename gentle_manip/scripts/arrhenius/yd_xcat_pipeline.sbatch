@@ -16,7 +16,8 @@ REPO=/nobackup/proj/disk/softenable-codesign26/personal/yifeid/gentle_manip
 source "$REPO/gentle_manip/scripts/arrhenius/yd_env_common.sh"
 
 ENV_NAME=${ENV_NAME:-single_lift_xcat_diverse_pcd}
-EXPERIMENT=${EXPERIMENT:-single_lift_xcat_diverse}
+EXPERIMENT=${EXPERIMENT:-single_lift_xcat_diverse}                 # train/convert
+EVAL_EXPERIMENT=${EVAL_EXPERIMENT:-single_lift_xcat_diverse_eval}  # clean eval (CFL-safe physics + low success band)
 CFG_DIR=$REPO/gentle_manip/dppo/cfg/$ENV_NAME
 # DEMO_RUN: explicit, or last completed run, or (PRELIM) newest dir under the TAG folder.
 TAG=${TAG:-xcat_regrasp}
@@ -59,6 +60,12 @@ PYM
   DEMO_RUN="$STAGE"
 fi
 [ -f "$DEMO_RUN/data.pkl" ] || { echo "[pipe] MISSING $DEMO_RUN/data.pkl (no shards?)"; exit 1; }
+
+# SKIP_TRAIN=1 + RUN_DIR=<pretrain run dir>: jump straight to eval on an existing ckpt.
+if [ "${SKIP_TRAIN:-0}" = "1" ] && [ -n "${RUN_DIR:-}" ]; then
+  echo "[pipe] SKIP_TRAIN -> eval only, RUN_DIR=$RUN_DIR"
+  PRE_LOG=$(ls -t "$REPO"/logs/slurm_logs/*_pretrain.log 2>/dev/null | head -1)
+else
 
 echo; echo "========== convert -> $DPPO_DATA_DIR/$ENV_NAME =========="
 uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.convert_demos \
@@ -111,6 +118,9 @@ uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.train
   --config-path "$CFG_DIR" --config-name pre_diffusion_pointnet env=$ENV_NAME 2>&1 | tee "$PRE_LOG"
 
 RUN_DIR=$(grep -oE '/nobackup/[^ ]+/dppo-pretrain/[^ ]+/config/' "$PRE_LOG" | head -1 | sed 's#/config/##')
+
+fi  # end SKIP_TRAIN guard
+
 echo "[pipe] pretrain run dir: $RUN_DIR"
 ls -1v "$RUN_DIR"/checkpoint/state_*.pt
 
@@ -124,7 +134,7 @@ echo; echo "========== canonical eval (100 episodes, per-episode video) ========
 PORT=$((5571 + ${SLURM_JOB_ID:-0} % 300))
 SRV_LOG=$REPO/logs/slurm_logs/${SLURM_JOB_ID:-local}_simserver.log
 uv run --project envs/sim_arrhenius --no-sync python -m gentle_manip.scripts.serl_sim_server \
-  --experiment "$EXPERIMENT" --view student \
+  --experiment "$EVAL_EXPERIMENT" --view student \
   --num-envs 5 --render-rgb --subprocess --port "$PORT" > "$SRV_LOG" 2>&1 &
 SRV_PID=$!
 trap 'kill $SRV_PID 2>/dev/null || true' EXIT
@@ -137,7 +147,7 @@ grep -q SIM_SERVER_READY "$SRV_LOG" || { echo "[pipe] server timeout"; tail -40 
 
 uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.train \
   --config-path "$CFG_DIR" --config-name eval_diffusion_pointnet \
-  base_policy_path="$BEST" ft_denoising_steps=0 \
+  base_policy_path="$BEST" ft_denoising_steps=0 experiment="$EVAL_EXPERIMENT" \
   env.specific.port="$PORT"
 
 EVAL_DIR=$(ls -dt "$RUN_DIR"/eval/* | head -1)
