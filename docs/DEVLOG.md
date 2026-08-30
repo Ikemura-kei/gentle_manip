@@ -444,6 +444,35 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-30 — v4.1-vs-v4.2 A/B COMPLETE (6/7; tofu-v4.2 pending): the metrics BRACKET the object
+set. Collection recipe decided: p98, by the asymmetric-bars argument. Cluster handoff written
+(`docs/collection_v4_handoff.md`); `integrate-all-2026-08-29` merged.**
+
+| object | v4.1 (p98) succ/sub-yield | v4.2 (masked) succ/sub-yield |
+|---|---|---|
+| mushroom | 88.9 / 100 ✓ | 94.1 / 100 ✓ |
+| raspberry | 100 / 88 ✓ | 100 / **56** ✗ |
+| cherry_tomato | 76.2 / 81 ✓ | 57.1 / 75 ✗ |
+| tomato | 80.0 / 100 ✓ | 66.7 / 100 ✓ |
+| tofu | 66.7 / 100 ✓ | (running) |
+| strawberry | **45.7** / 94 ✗ | 88.9 / 94 ✓ |
+| banana_chunk | **42.1** / 100 ✗ | 59.3 / 100 ✗ (hair) |
+
+Neither metric dominates; each fails two objects, in OPPOSITE directions. **The bars are
+asymmetric for a dataset**: p98's failures are SUCCESS shortfalls (failed lifts are never saved →
+pure wall-clock cost), masked's include SUB-YIELD shortfalls (damaged episodes enter the data).
+**Collection uses `--scan-metric p98`** (saved-demo sub-yield 88-100 % on every object; ~2x
+collection time accepted on strawberry/banana_chunk), with per-episode `priv_stress` filtering as
+the final guard. `--closure-gain` now defaults per metric (masked 1.31 / p98 4.92) so the two can
+never be mispaired.
+
+Merged `integrate-all-2026-08-29` (their side: category conditioning + VLM reference frames,
+delta-gripper action path, GAP replication vendored under `third_party/GAP`, scripted top-down
+vision-only baseline, arrhenius sbatch, dppo submodule advance; only textual overlap was this
+file). Note for E1: their `dppo/scripted/` baseline may be adaptable as the gentleness-blind
+comparison.
+
+
 **2026-08-30 (v4.2) — v4.1's p98 crossing was an OVER-CORRECTION bundled with the real fix.
 On soft/low-yield objects it degenerates (c_y = 0 at the plan width itself), collapsing commands
 to the clip minimum. v4.2: masked-top10 crossing, pen_tol relaxation KEPT, gain 1.31.**

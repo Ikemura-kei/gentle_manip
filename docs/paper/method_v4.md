@@ -228,12 +228,25 @@ the 7-object v4 outcome table is the direct test of λ-transfer.
 
 ### B.3 v4 outcomes per object (16-episode runs, own material; **in progress**)
 
-(v4.0 pass, superseded by v4.1's scan fix: mushroom 94.1 % / 100 % sub-yield / 0.49 σ_y;
-raspberry 100 % / 56 % — the scan-termination bug, diagnosed via the per-episode closure record.)
+Both scan metrics, 16-episode runs per object, both bars = success ≥ 60 % AND sub-yield ≥ 80 %:
 
-| object (v4.1) | success | sub-yield | median stress | status |
-|---|---|---|---|---|
-| all seven | — | — | — | running |
+| object | v4.1 (p98, λ=4.92) succ / sub-yield | v4.2 (masked, λ=1.31) succ / sub-yield |
+|---|---|---|
+| mushroom | 88.9 % / 100 % ✓ | 94.1 % / 100 % ✓ |
+| raspberry | 100 % / 88 % ✓ | 100 % / **56 %** ✗ |
+| cherry_tomato | 76.2 % / 81 % ✓ | 57.1 % / 75 % ✗ |
+| tomato | 80.0 % / 100 % ✓ | 66.7 % / 100 % ✓ |
+| tofu | 66.7 % / 100 % ✓ | (running) |
+| strawberry | **45.7 %** / 94 % ✗ | 88.9 % / 94 % ✓ |
+| banana_chunk | **42.1 %** / 100 % ✗ | 59.3 % / 100 % ✗ (hair) |
+
+⚠ The metrics **bracket** the object set rather than one dominating — p98 errs gentle (its two
+failures are SUCCESS shortfalls), masked errs firm (its failures include SUB-YIELD shortfalls).
+For dataset collection the bars are asymmetric: failed lifts are never saved (a wall-clock cost),
+while past-yield episodes enter the data (a quality cost). **Collection therefore uses p98**
+(saved-demo sub-yield 88–100 % on every object) with the success shortfalls accepted as ~2×
+collection time on two categories; masked remains available (`--scan-metric`). Per-episode
+`priv_stress` filtering is the final guard either way.
 
 (v3 baseline for contrast: cherry 56 %, raspberry 19 % sub-yield under the analytic constants.)
 Large-scale reference: the frozen mushroom set, 250 episodes, 96.5 % success, 99.6 % sub-yield.

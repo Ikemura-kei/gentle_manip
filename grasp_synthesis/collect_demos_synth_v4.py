@@ -1092,12 +1092,13 @@ def main() -> None:
                         "which saturates >= yield at first contact on soft/low-yield objects "
                         "(raspberry/strawberry c_y = 0) and collapses the command to the clip "
                         "minimum; kept for comparison only.")
-    p.add_argument("--closure-gain", type=float, default=1.31,
+    p.add_argument("--closure-gain", type=float, default=None,
                    help="v4: commanded closure = gain * c_y, where c_y is the closure at which the "
                         "SURROGATE predicts yield at the chosen pose. The single global constant of "
-                        "the executor, identified once on the mushroom under the v4.2 masked scan "
-                        "(relaxed pen_tol, interpolated): c_y = 4.88 mm against the measured-good "
-                        "closure 6.4 mm -> gain 1.31. Replaces v3's closure constants entirely.")
+                        "the executor, identified once on the mushroom per metric: masked c_y 4.88 mm "
+                        "-> 1.31; p98 c_y 1.30 mm -> 4.92 (both against the measured-good 6.4 mm). "
+                        "Default None resolves the gain matching --scan-metric — pairing p98 with "
+                        "the masked gain would command ~4x too little. Replaces v3's constants.")
     p.add_argument("--regrasp-prob", type=float, default=0.0,
                    help="Fraction of episodes collected as RE-GRASP demos: the gripper STARTS "
                         "6-12 cm above the grasp pose with a RANDOM part-closed width and a small "
@@ -1415,6 +1416,9 @@ def main() -> None:
     deform_dir     = tempfile.mkdtemp(prefix="gm_synth_deform_") if do_scene_dr else None
 
     _regrasp_rng = np.random.default_rng(args.seed + 977)   # independent of the scene RNG
+    if args.closure_gain is None:
+        args.closure_gain = 1.31 if args.scan_metric == "masked" else 4.92
+    print(f"  closure scan: metric={args.scan_metric} gain={args.closure_gain}")
     _mesh_cycle = [0] if args.mesh_cycle else None    # round-robin cursor (see --mesh-cycle);
                                                      # must precede the first _make_worker() call
     def _make_worker():
