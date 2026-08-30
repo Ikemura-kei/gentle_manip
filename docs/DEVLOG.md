@@ -444,6 +444,23 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-30 — `docs/paper/method_v4.md`: the complete v4 method + validation reference in
+paper-adaptable prose.** Every constant verified against `collect_demos_synth_v4.py`/`smgrasp/`
+on this date. Part A: problem statement, preprocessing, E=1 FEM + inertia-relief + Schur
+per-candidate solve, pad contact model, E-linearity, holdability, full objective with recipe
+weights, feasibility ladder, search + auto bounds, the v4 surrogate-selected width (lambda = 1.28,
+sole executor constant), execution FSM incl. re-grasp mode, provenance recording. Part B: the
+n=40 ranking validation with the full statistics triplet (rho +0.669 CI [+0.38,+0.86], tau
++0.528, concordance 76%) and the decision-relevant decile table (predicted-gentlest 10: 0/10
+past yield; predicted-harshest 10: 8/10); the 4-object closure-transfer table; per-object v4
+outcomes (mushroom 94.1% / 100% sub-yield / 0.49x median — rest running); the saturation finding
+as a standalone contribution; E1 as the gate for comparative claims. DO-NOT-OVERSTATE markers
+inline (e.g. "one global gain identified once", never "calibration-free").
+
+First v4 transfer result: mushroom 16-ep verification 94.1% success, 100% sub-yield, median
+0.49x yield with adaptive closures 3.8-8.0mm (v3: fixed 6.4mm).
+
+
 **2026-08-30 (v4) — `collect_demos_synth_v4.py`: surrogate-selected executed width (v3 untouched
 as fallback). And the n=40 ranking validation is SIGNIFICANT: rho = +0.669, p = 2.4e-6.**
 
