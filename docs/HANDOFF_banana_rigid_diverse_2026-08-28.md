@@ -384,3 +384,34 @@ Smoke 1792788: still 0-success + strawberry crash. Root causes:
   soft body during close). EVAL task keeps CFL-safe grid 190/substeps 440.
 - Pool now **4 objects**: mushroom, banana_lying, kiwi, egg_boiled.
 -> re-smoke 1792811 (15 ep / 3 env). Expect >0 saves this time.
+
+---
+## 2026-08-30 04:50 — Phase 4 smoke PASSED -> continuous collections LAUNCHED
+
+Smoke 1792811 (banana-physics, 4-obj pool) SAVING demos:
+- batch 1 mushroom 0/3, batch 2 kiwi 1/3, batch 3 banana_lying 3/3 (incl. 2
+  failed_grasp recovery demos), batch 4 kiwi ... -> cross-category + recovery
+  demos + video all working. mushroom looks harder (rounder); it just contributes
+  fewer demos per rotation, acceptable.
+
+**LAUNCHED (continuous, 71 h walltime, resubmit to continue):**
+- **1792833  yd_xcat  TAG=xcat_regrasp** -- 9-obj... actually 4-obj pool
+  (mushroom/banana_lying/kiwi/egg_boiled), diverse start-modes
+  (sweep .44/failed .30/above .10/ground .09/air .07), crush 1.20, n_envs 6.
+  Target 4500 (500/obj-equiv); WILL NOT finish in the window -> report cumulative.
+  -> dataset/demos/single_lift_xcat_regrasp/
+- **1792834  yd_xcat  TAG=xcat_baseline** -- same pool + physics, but
+  `--start-modes strict_home:1.0` (EE starts exactly at home, full approach) =
+  the NON-REGRASPABLE baseline for the 3-metric comparison.
+  -> dataset/demos/single_lift_xcat_baseline/
+
+Both PENDING (Priority). Next: confirm both RUNNING + accumulating, then when a
+usable batch exists (~a few hundred/side) convert + BC pretrain the generalist
+via dppo/cfg/single_lift_xcat_diverse_pcd + dual eval.
+
+DEVIATION FROM PLAN (documented): pool is 4 not 9. The 5 small/degenerate-mesh
+objects (grape, cherry, tomato, raspberry, strawberry) are incompatible with the
+current CMA-ES-SDF + MPM pipeline without per-object grid/bounds work. 4 clean
+cross-category objects still demonstrates the direct-generalist + regrasp claim
+vs the baseline. Re-adding the others = a follow-up (per-object grid_density +
+object-size-scaled CMA bounds + real scanned meshes for grape/cherry/etc.).
