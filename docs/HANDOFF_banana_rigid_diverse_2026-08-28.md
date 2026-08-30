@@ -531,3 +531,41 @@ regrasp collector 1792833 still running (~358).
   it prints "Creating virtual environment" and fails; the real venv is untouched but
   shard merges / any env work must run inside a SLURM job.
 - Next gate: 1798531 done -> baseline vs regrasp 3-metric table -> webpage + handoff.
+
+---
+## 2026-08-30 16:15 — Phase 4 GENERALIST vs BASELINE (in-domain, 4 obj, ~475-500 demos each)
+
+Direct 4-object generalists, BC 150ep, same shared harness.
+
+| metric (clean start) | baseline (strict_home) | **regrasp generalist** (diverse-start) |
+|----------------------|------------------------|----------------------------------------|
+| success rate         | 0.16                   | **0.98**                               |
+| gentleness           | 0.155                  | **0.555**                              |
+| SR x gentleness      | 0.157                  | **0.768**                              |
+| stress top10 (Pa)    | 27431                  | 19873 (gentler)                        |
+| late successes (fss>70) | 0 / 16              | 13 / 98                                |
+| arm-low-start SR     | **0.13**               | (eval#2 running, ~1.0 so far)          |
+
+**Regrasp generalist beats the baseline on ALL 3 metrics decisively.** The strict_home
+baseline can't handle the eval's pose DR at all (only ever saw home starts) -> 16% clean.
+The diverse-start generalist is 0.98 clean + shows recovery (13% late).
+
+Baseline eval dirs:
+  logs/dppo/dppo-pretrain/single_lift_xcat_baseline_pcd/tqmjv/eval{,_regrasp}/
+Regrasp-gen: logs/dppo/dppo-pretrain/single_lift_xcat_regrasp_pcd/uabeb/eval{,_regrasp}/
+
+### Eval-protocol change (user, for all future evals)
+- NO clean/arm-low split. ONE eval: EE init spans home <-> near-object (matching the
+  training sweep). Impl: `dr/eval_cat_<name>.yaml` (robot_init_offset_xyz [0.03,0,-0.045]
+  + robot_init_pos_xyz 0.065 box).
+- Per-category: 100 rollouts for EACH in-domain + EACH OOD object, 3 metrics per-cat + overall.
+- Infra: `experiments/single_lift_xcat_gen_eval.yaml` + `scripts/arrhenius/yd_gen_eval.sbatch`
+  (loops cats via --dr override, aggregates). In-domain: mushroom, banana_lying, kiwi,
+  egg_boiled. OOD: apple, pear, avocado, pasta_bundle, dumpling (all real-mesh soft, 3-9cm).
+  RUN once collection + retrain catch up.
+
+### Scale-up (GPU was idle)
+- Per job: 1 GH200 (used ~4GB/98GB, ~0% util), 64-72 CPU (used 6). Collector n_envs 6->16
+  default (launch at 20-24). Walltime 71h->24h so >2 collectors fit under AssocGrpGRESRunMinutes.
+- Small-object collector 1797892 RUNNING (n_envs 6, submitted pre-change) -- SLOW (~4/15min,
+  tiny objects grasp-synth poorly). Watching SR; likely resubmit at n_envs 20.
