@@ -546,6 +546,10 @@ def _score_finger_grasp_impl(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, 
              - w_com * lever - w_tilt * (1.0 - cos_t) - w_occ * (occ or 0.0))
     return {"score": float(score), "status": "ok", "holdable": True,
             "stress_top10": float(r["stress_top10"]), "grip": float(r["grip"]), "align": float(align),
+            # UNMASKED 98th-pct stress (E-scaled). The masked top10 deliberately excludes the
+            # contact region for POSE RANKING; for "when does any region reach yield" (the v4
+            # width scan) the contact region counts — bruising at contact is damage.
+            "stress_p98": float(E * prim["hi_1"]),
             "pressure": float(pressure), "min_pad_area": float(min_pad), "contact_area": float(carea),
             "width_face": wface, "center": center, "axis": axis, "delta_left": dl, "delta_right": dr,
             "com_lever": float(lever), "tilt_deg": float(np.degrees(np.arccos(np.clip(cos_t, -1.0, 1.0)))),

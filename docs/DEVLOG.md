@@ -444,6 +444,310 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-30 — v4.1-vs-v4.2 A/B COMPLETE (6/7; tofu-v4.2 pending): the metrics BRACKET the object
+set. Collection recipe decided: p98, by the asymmetric-bars argument. Cluster handoff written
+(`docs/collection_v4_handoff.md`); `integrate-all-2026-08-29` merged.**
+
+| object | v4.1 (p98) succ/sub-yield | v4.2 (masked) succ/sub-yield |
+|---|---|---|
+| mushroom | 88.9 / 100 ✓ | 94.1 / 100 ✓ |
+| raspberry | 100 / 88 ✓ | 100 / **56** ✗ |
+| cherry_tomato | 76.2 / 81 ✓ | 57.1 / 75 ✗ |
+| tomato | 80.0 / 100 ✓ | 66.7 / 100 ✓ |
+| tofu | 66.7 / 100 ✓ | (running) |
+| strawberry | **45.7** / 94 ✗ | 88.9 / 94 ✓ |
+| banana_chunk | **42.1** / 100 ✗ | 59.3 / 100 ✗ (hair) |
+
+Neither metric dominates; each fails two objects, in OPPOSITE directions. **The bars are
+asymmetric for a dataset**: p98's failures are SUCCESS shortfalls (failed lifts are never saved →
+pure wall-clock cost), masked's include SUB-YIELD shortfalls (damaged episodes enter the data).
+**Collection uses `--scan-metric p98`** (saved-demo sub-yield 88-100 % on every object; ~2x
+collection time accepted on strawberry/banana_chunk), with per-episode `priv_stress` filtering as
+the final guard. `--closure-gain` now defaults per metric (masked 1.31 / p98 4.92) so the two can
+never be mispaired.
+
+Merged `integrate-all-2026-08-29` (their side: category conditioning + VLM reference frames,
+delta-gripper action path, GAP replication vendored under `third_party/GAP`, scripted top-down
+vision-only baseline, arrhenius sbatch, dppo submodule advance; only textual overlap was this
+file). Note for E1: their `dppo/scripted/` baseline may be adaptable as the gentleness-blind
+comparison.
+
+
+**2026-08-30 (v4.2) — v4.1's p98 crossing was an OVER-CORRECTION bundled with the real fix.
+On soft/low-yield objects it degenerates (c_y = 0 at the plan width itself), collapsing commands
+to the clip minimum. v4.2: masked-top10 crossing, pen_tol relaxation KEPT, gain 1.31.**
+
+v4.1 7-object results (16 eps, both bars = sub-yield >= 80 % AND success >= 60 %):
+
+| object | success | sub-yield | median | verdict |
+|---|---|---|---|---|
+| mushroom | 88.9 % | 100 % | 0.32x | PASS |
+| raspberry | 100 % | 88 % | 0.72x | PASS |
+| cherry_tomato | 76.2 % | 81 % | 0.74x | PASS |
+| tomato | 80.0 % | 100 % | 0.39x | PASS |
+| banana_chunk | **42.1 %** | 100 % | 0.47x | REVIEW |
+| strawberry | **45.7 %** | 94 % | 0.32x | REVIEW |
+| tofu | (running) | | | |
+
+Both REVIEWs are the same monotone signature: success rises steadily with commanded closure
+(banana_chunk 11 % at <2 mm -> 67 % at >4 mm; strawberry 0 % at <1.5 mm -> 100 % at >4 mm) with
+huge measured stress headroom — pure under-command.
+
+**Diagnosis (canonical-pose scans, all four key objects):**
+1. **The holdability floor is dead.** Predicted grip satisfies the scalar Coulomb inequality at
+   FIRST CONTACT on every object (c_hold = 0.0 everywhere) — the surrogate's holdability
+   prediction carries no information about simulator slip. Ruled out as a fix.
+2. **The p98 crossing degenerates on soft objects: raspberry and strawberry give c_y = 0.0 mm** —
+   the unmasked contact concentration exceeds yield at the plan width itself, so lambda*c_y = 0
+   and the command collapses to the 0.8 mm clip (strawberry's 0 %-success bin).
+3. The MASKED top10 curve under the relaxed scan is smooth and non-degenerate, and its crossing at
+   the identification pose is a genuine stress crossing (statuses `ok` throughout — not the
+   pen_tol artifact that motivated v4.1's switch).
+
+**Lesson (own it): v4.1 changed two things at once** — the pen_tol relaxation (real fix, kept) and
+the crossing metric (harmful, reverted). A confounded double-change that cost one chain pass.
+
+v4.2: `--scan-metric masked|p98` (default masked; p98 kept for comparison), gain re-identified
+under the masked relaxed interpolated scan: mushroom c_y = 4.88 mm vs measured-good 6.4 mm ->
+**default 1.31**. `scan_metric` + `closure_gain` now recorded in config.yaml. Full 7-object rerun
+queued after tofu completes the v4.1 chain. (Tofu stall alert was a false alarm — soft-MPM batches
+exceed the 20-min episode window; the process is alive at 21 FPS.)
+
+
+**2026-08-30 (v4.1) — the v4 scan's c_y was often GEOMETRIC, not stress-based: the search's 3 mm
+gross-clipping tolerance terminated it. Fixed (user's pen_tol question exposed it); crossing now
+on UNMASKED p98 with interpolation; lambda re-identified = 4.92; chain restarted.**
+
+v4.0 first pass: mushroom 94.1 % / 100 % sub-yield (PASS) but raspberry 100 % / 56 % — and the new
+per-episode `closure_cmd_mm` column made the diagnosis immediate: episodes with commanded closure
+<= 3 mm were 88 % sub-yield, > 3 mm only 25 %. The c_y values clustered at 3.0-3.5 mm = pad depth
+(~1.5 mm) + dw/2 crossing `pen_tol` = 3 mm — the scan was being cut off by the SEARCH's
+gross-clipping SDF filter, so c_y reflected geometry, not predicted damage. (The user asked
+whether 3 mm was too strict / whether deeper indents are sometimes wanted — exactly the right
+question: for the search it is a clipping filter that intended contact never trips; for the scan
+it was a bug, and yes, deep indents are legitimate whenever predicted stress stays sub-yield.)
+
+v4.1 scan: crossing on the **UNMASKED p98** (`stress_p98`, newly exposed from the same solve —
+the mask is right for pose ranking, wrong for damage onset), `pen_tol` relaxed to 5 cm for scan
+calls only (search unchanged; validity bounded by the 10 mm small-strain limit), statuses handled
+by meaning (`no_contact` -> deepen; `degenerate`/`table` -> validity edge), and the crossing
+LINEARLY INTERPOLATED (gain ~5 x a 0.5 mm step would otherwise quantize the command by ~2.5 mm).
+Lambda re-identified on the mushroom under the new criterion: c_y = 1.30 mm vs measured-good
+closure 6.4 mm -> **gain 4.92** (default). First batch: mushroom c_y 0.5-1.3 mm -> commands
+2.5-6.2 mm varying per pose.
+
+Also: a botched slice-based edit corrupted v4 mid-change (`FIRM_FORCE_THRESH_N` first occurs in a
+COMMENT before the function, so the slice was reversed-empty and `str.replace('', ...)` exploded
+the file) — restored from git, redone with exact-text replacement. Lesson: never build a
+replacement slice from two independent `index()` calls without asserting start < end.
+
+7-object v4.1 chain restarted from scratch; v4.0 partial runs deleted (n40/regrasp/probe runs
+kept). Results table to follow.
+
+
+**2026-08-30 — `docs/paper/method_v4.md`: the complete v4 method + validation reference in
+paper-adaptable prose.** Every constant verified against `collect_demos_synth_v4.py`/`smgrasp/`
+on this date. Part A: problem statement, preprocessing, E=1 FEM + inertia-relief + Schur
+per-candidate solve, pad contact model, E-linearity, holdability, full objective with recipe
+weights, feasibility ladder, search + auto bounds, the v4 surrogate-selected width (lambda = 1.28,
+sole executor constant), execution FSM incl. re-grasp mode, provenance recording. Part B: the
+n=40 ranking validation with the full statistics triplet (rho +0.669 CI [+0.38,+0.86], tau
++0.528, concordance 76%) and the decision-relevant decile table (predicted-gentlest 10: 0/10
+past yield; predicted-harshest 10: 8/10); the 4-object closure-transfer table; per-object v4
+outcomes (mushroom 94.1% / 100% sub-yield / 0.49x median — rest running); the saturation finding
+as a standalone contribution; E1 as the gate for comparative claims. DO-NOT-OVERSTATE markers
+inline (e.g. "one global gain identified once", never "calibration-free").
+
+First v4 transfer result: mushroom 16-ep verification 94.1% success, 100% sub-yield, median
+0.49x yield with adaptive closures 3.8-8.0mm (v3: fixed 6.4mm).
+
+
+**2026-08-30 (v4) — `collect_demos_synth_v4.py`: surrogate-selected executed width (v3 untouched
+as fallback). And the n=40 ranking validation is SIGNIFICANT: rho = +0.669, p = 2.4e-6.**
+
+- **v4** (fork of v3 per the fallback convention): the executor's closure constants (2.5 mm
+  `width_cls` baseline, `extra_close`, firm base) are replaced by `gain * c_y`, where `c_y` is the
+  closure at which the SURROGATE predicts yield at the chosen pose (scanned with the refine-round
+  primitive, using the DR-drawn E so the scan matches the simulated material). One global constant
+  (`--closure-gain 1.28`, identified once on the mushroom). Weak-grasp firm check kept as fallback
+  (0.5 x commanded closure, capped 2 mm). New `closure_cmd_mm` column in dr_params.csv.
+  First batch confirms adaptive behaviour: mushroom c_y 4.0-7.0 mm -> commands 5.1-8.0 mm varying
+  with pose and material draw (v3: fixed 6.4 mm for all).
+- **n=40 controlled sub-yield correlation (fixed scene, width swept): Spearman rho = +0.669,
+  p = 2.4e-6** (Pearson +0.563, p = 1.5e-4; MPM span 0.32-1.13x yield). The surrogate's stress
+  ranking is now VALIDATED in the operating regime — quotable. Past yield it remains rho = 0
+  (saturation); any paper statement must name the regime.
+- 7-object v4 verification chain running (16 eps each, all-auto, no pasta).
+
+
+**2026-08-30 (later) — CALIBRATION IS NOT NECESSARY: the surrogate's own stress-vs-width curve
+predicts the per-object safe closure. Rank-perfect across 4 objects, stable ~0.5-0.6 conservative
+bias. Raspberry probe confirms: baseline-only closure -> 100 % sub-yield (was 19 %).**
+
+User pushback: "if calibration is needed, the significance of the method reduces." Correct — and
+testable. The closure constants exist only to turn the planned width into a commanded width, but
+the surrogate already computes sigma(width) (the refine-round primitive). Scanned it per object and
+compared against the measured safe/unsafe closures from the 08-29/30 runs:
+
+| object | surrogate closure@yield | measured yield-closure | bias |
+|---|---|---|---|
+| mushroom | 5.0 mm | ~10 mm | ~0.5 |
+| raspberry | 2.0 mm | ~3-4 mm | ~0.57 |
+| cherry_tomato | 2.0 mm | ~4 mm | ~0.5 |
+| banana_chunk | 3.5 mm | > 6 mm | <~0.58 |
+
+Rank-perfect ordering (raspberry ~ cherry < banana_chunk < mushroom) — the exact pattern the
+analytic K*(yield/E)*L rule provably mispredicted in both directions — and a conservative bias
+stable enough that ONE global factor transfers across all four, covering both the over-squeezed
+objects and the under-gripped banana_chunk.
+
+**Design consequence (supersedes the 08-29 "measure per object" recommendation):** replace the
+baseline/squeeze/firm constants with a SURROGATE-SELECTED executed width — command the width where
+predicted stress = target x one global bias factor (identified once, on one object). Zero
+per-object constants; the executor's closure becomes part of the model; the cross-object closure
+table turns from a bug list into evidence FOR the surrogate. `fem_surrogate_status.md` section 5
+updated (old item 1 superseded by 1').
+
+**Experimental confirmation of the executor diagnosis:** raspberry probe with
+`--grasp-extra-close 0` (closure = the hardcoded 2.5 mm baseline only): median **0.65x yield,
+100 % sub-yield** (was 1.07x / 19 %). The surrogate and the evaluation metric were never the
+problem.
+
+NOT yet implemented: the surrogate-selected width executor (moderate change: derive w_cmd from the
+already-computed width scan at synthesis time, delete the three constants; keep the weak-grasp firm
+check as a fallback). Next work item before the cluster collection, together with wiring
+`execute_offset` so the yield guard sees the executed width.
+
+
+**2026-08-30 — FEM surrogate scientific-status study (`docs/fem_surrogate_status.md`) + paper
+experiment design (`docs/paper/synthesis_experiments.md`). Raspberry diagnosed: NOT a surrogate or
+metric failure — a THIRD unscaled closure constant, plus `execute_offset` was never wired.**
+
+User asked whether the FEM synthesis is scientifically OK for the paper given the raspberry's 19 %
+sub-yield, whether the evaluation is skewed, and what a near-full-FEM-but-fast path looks like.
+
+**Diagnosis (strain accounting on `26-08-29-zlb`, airtight):** executed closure beyond the planned
+contact width is 4.4–5.5 mm on a 13.7 mm object = 32–40 % strain vs a 15 % yield strain — the
+raspberry is COMMANDED to 2.1–2.7x its yield strain, and the measured top10 pinned at 1.0–1.2x
+yield is honest MPM plastic saturation. The evaluation is NOT skewed (top10/mean stable ~2.3).
+The dominant term is a **hardcoded 2.5 mm baseline in `width_cls`** — the THIRD instance of the
+unscaled-constant class (18 % of a raspberry, 8 % of a mushroom). Also: **the collector never
+passes `execute_offset`**, so every candidate is scored at a width 4–7 mm wider than executed —
+the planner's own yield guard never sees the real operating point. Confirmation probe
+(`--grasp-extra-close 0` → closure = baseline only) running.
+
+**Study doc** (`fem_surrogate_status.md`): claim-by-claim writability verdict ("gentleness-aware
+selector" SAFE; "stress predictor" FALSE; ranking PENDING n=40); full validation ledger; why
+Genesis FEM+IPC in-loop is orders too slow (7k–35k candidates/grasp vs settling-length implicit
+solves); ranked fidelity ladder — (1) measured per-object closure calibration, (2) wire
+`execute_offset`, (3) plastic-excess objective from the SAME solve (fixes the provable flatness
+past yield), (4) deformed-configuration Picard pass on top-K only, (5) nonlinear rescoring of the
+argmax, (6) DefGraspSim offline spot-checks.
+
+**Paper experiments** (`docs/paper/synthesis_experiments.md`): community context — DefGraspSim
+(RA-L'22, open corotational-FEM evaluator for deformables; the closest work and a potential
+external gold standard) and DefGraspNets (ICRA'23, learned FEM surrogate — validates the surrogate
+idea from the learned side); AnyGrasp SDK is license-gated, Contact-GraspNet/GPD are the open
+baselines. Ranked experiment list E1–E8; **the critical missing one is E1: a gentleness-blind
+antipodal+rigid-metric baseline executed through our own pipeline** — everything so far compares
+us only to ourselves. Iteration order before freezing the table: executor calibration → E1 →
+n=40.
+
+
+**2026-08-30 — RE-GRASP (hover-start) demos implemented: `--regrasp-prob`. Smoke on mushroom
+15/15, all three pieces of user feedback applied.**
+
+The idea (user, 2026-08-27): BC only sees states on the expert trajectory, so after a FAILED grasp
+the policy is off-distribution — hovering over the object, gripper part-closed, holding nothing.
+These episodes START in exactly that state.
+
+**Behaviour** (`--regrasp-prob P`, per-episode; 0 = off, ~0.2 for a real collection, 1.0 to test):
+1. Gripper is placed **6-12 cm above the grasp pose** with a **3 cm-radius xy scatter** (the object
+   may have ROLLED after the failed attempt) and a **+-8 deg** orientation jitter.
+2. Gripper starts at a **random part-closed width (10-80 mm)** — the genuinely unseen part of the
+   state, since a normal approach passes through that height but always fully OPEN.
+3. The first **12 recorded steps RE-OPEN to nominal while HOLDING the start pose** — this is the
+   recovery action itself, and it is what the policy must learn to do before re-approaching.
+4. Then it drives **straight to the grasp** at the normal constant velocity (no two-phase
+   approach), and the usual grasp / firm / lift / hold follow unchanged.
+5. The home -> hover move is **executed but NOT recorded**, so the demo's first frame IS the hover.
+6. `dr_params.csv` labels every episode **`re-grasp-demo`** or **`standard`**.
+
+**Smoke (mushroom, 15 eps, `--regrasp-prob 1.0`): 100 % success, all labelled, all within spec:**
+
+| property | measured | spec |
+|---|---|---|
+| height above grasp pose | 63-118 mm (median 90) | 60-120 |
+| xy offset from grasp | 4-39 mm (median 26) | <= 42 (3 cm radius) |
+| start width | 16-78 mm | 10-80, randomized |
+| width after re-open | 80 mm, all episodes | nominal |
+
+**Pinch filtering still applies unchanged** (user check): `filter_pinch_episodes.py` runs on these
+as-is — it keys off `priv_object_pos`, which they carry — and flagged 2 of 15 on the first smoke.
+
+**Not implemented, and worth stating:** this teaches RESTART, not RETRY. There is no failure
+DETECTION — the policy learns "from this state, re-open and grasp", not "that attempt failed, so
+recover". The hover state is the trigger. Also the object is at its normal spawn pose rather than
+displaced by a real failed grasp; the 3 cm xy scatter of the GRIPPER is a proxy for that.
+Verification must be at TRAINING time against a matched no-hover-start baseline — collection
+success says nothing about whether retry behaviour emerges.
+
+
+**2026-08-29 — PER-OBJECT VERIFICATION (7 x 16 eps): 4 PASS, 3 REVIEW. The analytic squeeze rule
+is NOT sufficient; the safe indentation has to be MEASURED per object, not predicted.**
+
+User asked to stop the large collection and verify the synthesizer on every object before handing
+the big run to the cluster agent. Done, each object judged on ITS OWN material
+(PASS = sub-yield >= 80 % AND success >= 60 %):
+
+| object | success | sub-yield | verdict |
+|---|---|---|---|
+| mushroom | 100 % | **100 %** | PASS |
+| tomato | 100 % | **100 %** | PASS |
+| tofu | 76.2 % | **100 %** | PASS |
+| strawberry | 100 % | 94 % | PASS |
+| cherry_tomato | 88.9 % | **56 %** | REVIEW (gentleness) |
+| raspberry | 100 % | **19 %** | REVIEW (gentleness) |
+| banana_chunk | **53.3 %** | 100 % | REVIEW (success) |
+
+**A second unscaled constant was found and fixed on the way here.** Cutting the base squeeze alone
+moved the cherry tomato only 5.8 % -> 6 % sub-yield. Measuring the executed grasp showed why: the
+planner synthesized 25.0 mm but the gripper closed to 19.9 mm — 5.1 mm beyond plan, of which only
+0.84 mm was the squeeze. The other ~4.3 mm was the FIRM phase (`FIRM_EXTRA_CLOSE_M` 2.0 mm +
+`FIRM_WEAK_EXTRA_CLOSE_M` 2.5 mm), hard constants applied to EVERY soft grasp — 18 % of a 24.7 mm
+object. Firm now uses the same material-aware budget, and the weakness threshold is 5 % of the
+object's OWN yield instead of a flat 2000 Pa. That took the cherry tomato 6 % -> 56 %.
+
+**But the analytic rule has hit its limit.** `d ~ K*(yield/E)*L` mispredicts in BOTH directions:
+
+| object | budget as % of object | sub-yield | success | diagnosis |
+|---|---|---|---|---|
+| raspberry | 22.2 % | **19 %** | 100 % | budget still too LARGE |
+| banana_chunk | 14.8 % | 100 % | **53.3 %** | budget too SMALL |
+
+A single calibration constant cannot satisfy both: the raspberry needs less indentation than the
+formula says, the banana chunk needs more. Contact geometry (curvature, contact-patch size) enters
+the real stress and is not captured by `(yield/E)*L`.
+
+**Recommended fix — MEASURE instead of predict (not yet implemented).** A short per-object
+auto-calibration at collection start: sweep the squeeze over ~4 values on a handful of throwaway
+episodes, read the resulting peak `priv_stress` (already recorded), and pick the largest squeeze
+whose median stays under ~0.8x yield. That is fully automatic, adds no per-category constants,
+costs a few minutes per category, and directly optimises the real trade-off — gentleness AND grip
+reliability — instead of predicting one from an elastic formula that the elasto-plastic simulator
+does not obey.
+
+**Lesson (this bug class has now appeared TWICE — squeeze, then firm):** any absolute length or
+stress constant applied across objects differing in BOTH size and material is suspect. And an
+object passing tells you nothing about the others: the mushroom read 100 % sub-yield under both the
+broken and the fixed rule.
+
+**Status for the cluster handoff:** mushroom / tomato / tofu / strawberry are ready to collect now.
+cherry_tomato, raspberry and banana_chunk should wait for the auto-calibration. The existing
+250-episode mushroom set (96.5 % success, 99.6 % sub-yield, full material DR) is valid and is the
+intended supplement.
+
+
 **2026-08-29 — CAUGHT MID-COLLECTION: the size-only squeeze rule is GENTLE ON THE MUSHROOM AND
 DAMAGING ON THE CHERRY TOMATO. Replaced with a MATERIAL-AWARE rule; mushroom set preserved.**
 

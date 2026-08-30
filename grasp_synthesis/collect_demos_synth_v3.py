@@ -396,6 +396,19 @@ _GRASP_IDX = [name for name, _ in PHASES].index("grasp")   # boundary the firm-c
 #   SOFT:  von-Mises stress top-10% RISE over the settled-rest baseline (Pa) — a
 #          missed/grazing grasp barely perturbs the body, so its stress stays near
 #          rest. Weak ⟺ rise < FIRM_STRESS_THRESH_PA. (Force is None for MPM.)
+# ── Re-grasp (hover-start) demos ──────────────────────────────────────────────
+REGRASP_H_MIN, REGRASP_H_MAX = 0.06, 0.12   # m above the grasp pose (user spec 6-12 cm)
+REGRASP_XY_JIT   = 0.030                    # m — xy scatter radius (user: the object may ROLL
+                                            # after a failed grasp, so 3 cm not 1 cm)
+REGRASP_ROT_DEG  = 8.0                      # deg — small orientation jitter, per axis
+REGRASP_W_MIN, REGRASP_W_MAX = 0.010, 0.080 # m — random part-closed gripper width
+REGRASP_GOTO_STEPS = 40                     # UNRECORDED steps to reach the hover start
+REGRASP_REOPEN_STEPS = 12                   # recorded steps spent RE-OPENING to the nominal width
+                                            # while HOLDING the start pose, before any motion. This
+                                            # is the recovery action itself: a failed grasp leaves
+                                            # the gripper part-closed, and the policy must learn to
+                                            # release before re-approaching.
+
 FIRM_FORCE_THRESH_N  = 1.0     # rigid: below this measured contact force -> needs firming
 FIRM_STRESS_THRESH_PA = 2000.0 # soft: below this top10 von-Mises rise (Pa) -> grasp came out WEAK
 FIRM_EXTRA_CLOSE_M   = 0.002   # BASE firm close (m, 2.0mm) — applied to EVERY soft grasp. This is the
@@ -472,6 +485,8 @@ def execute_and_collect(
     dr_vec=None,                   # (2,) [scale, bend_deg] for priv_object_dr_params
     yield_stress=None,             # Pa — normalizer for priv_stress (None = stress not emitted)
     firm_close_m=None,             # m — material-aware BASE firm close; None = FIRM_EXTRA_CLOSE_M
+    regrasp_mask=None,             # (N,) bool — envs collected as RE-GRASP demos (hover start)
+    regrasp_rng=None,              # Generator for the hover-start randomization
     extra_close: float = 0.0,      # squeeze this many meters TIGHTER than the synthesized width (all grasps)
     approach_xy_finish=None,       # v3.2: (lo, hi) per-env xy-progress finish fraction; None = straight line
     approach_speed=None,           # v3.3: m/step — per-env approach DURATION = dist/speed (constant
@@ -598,11 +613,60 @@ def execute_and_collect(
         f_min = 1.5 * xy_len / (XY_V_MAX * appr_dur.astype(np.float64))
         xy_finish = np.minimum(np.maximum(xy_finish, f_min), 1.0)
 
+    # ── RE-GRASP demos: start ABOVE the object instead of at home ────────────────────
+    # Rationale: BC only ever sees states on the expert trajectory, so after a FAILED grasp the
+    # policy is off-distribution — hovering over the object, gripper part-closed, holding nothing.
+    # These episodes START in exactly that state so the policy has seen how to recover from it.
+    # The novel part is the part-closed WIDTH (a normal approach passes through this height, but
+    # always fully open), which is why width is randomized over the full range.
+    # The move home -> hover is executed but NOT recorded, so the demo's first frame IS the hover.
+    is_rg = (np.zeros(num_envs, bool) if regrasp_mask is None
+             else np.asarray(regrasp_mask, bool).reshape(num_envs))
+    rg_w0 = width_open.copy()          # per-env START width (== nominal for standard envs)
+    if is_rg.any():
+        rg = regrasp_rng if regrasp_rng is not None else np.random.default_rng(0)
+        for i in np.nonzero(is_rg)[0]:
+            # 6-12 cm above the GRASP pose (where a failed attempt leaves the gripper), with a
+            # small xy scatter so it is not perfectly pre-aligned.
+            hp = pos_b[i].astype(np.float32).copy()
+            hp[2] += float(rg.uniform(REGRASP_H_MIN, REGRASP_H_MAX))
+            hp[:2] += rg.uniform(-REGRASP_XY_JIT, REGRASP_XY_JIT, 2)
+            home_pos[i] = hp
+            # small orientation jitter about the planned grasp orientation
+            dr = Rot.from_euler("xyz", np.radians(rg.uniform(-REGRASP_ROT_DEG, REGRASP_ROT_DEG, 3)))
+            rq = (dr * _wxyz_to_rot(quat_b[i])).as_quat()
+            home_quat[i] = np.array([rq[3], rq[0], rq[1], rq[2]], np.float32)
+            # gripper part-closed to a RANDOM width: the genuinely unseen part of the state
+            rg_w0[i] = float(rg.uniform(REGRASP_W_MIN, REGRASP_W_MAX))   # random part-closed START width
+            slerps[i] = Slerp([0., 1.], Rot.concatenate([_wxyz_to_rot(home_quat[i]),
+                                                         _wxyz_to_rot(quat_b[i])]))
+            if xy_finish is not None:
+                xy_finish[i] = 1.0          # straight line: no two-phase approach for a re-grasp
+        # constant-velocity duration recomputed from the (shorter) hover -> grasp distance
+        if approach_speed is not None:
+            d = np.linalg.norm(pos_b - home_pos, axis=1)
+            appr_dur[is_rg] = (REGRASP_REOPEN_STEPS
+                               + np.clip(np.round(d[is_rg] / float(approach_speed)),
+                                         20, 130)).astype(np.int64)
+
     def _env_target(i: int, phase_idx: int, phase_step: int):
         """(pos, quat_wxyz, grip) for env i at its OWN (phase_idx, phase_step)."""
         name, dur = PHASES[phase_idx]
         if name == "approach":
             dur = int(appr_dur[i])                    # per-env duration (v3.3 speed compensation)
+            if is_rg[i]:
+                # RE-GRASP: hold the hover pose and RE-OPEN to nominal first (the recovery action),
+                # then drive straight to the grasp at the normal constant velocity.
+                if phase_step < REGRASP_REOPEN_STEPS:
+                    a = (phase_step + 1) / REGRASP_REOPEN_STEPS
+                    return (home_pos[i], home_quat[i],
+                            np.float32(rg_w0[i] + a * (width_open[i] - rg_w0[i])))
+                b = (phase_step + 1 - REGRASP_REOPEN_STEPS) / max(dur - REGRASP_REOPEN_STEPS, 1)
+                b = min(b, 1.0)
+                xyzw = slerps[i](b).as_quat()
+                return (home_pos[i] + b * (pos_b[i] - home_pos[i]),
+                        np.array([xyzw[3], xyzw[0], xyzw[1], xyzw[2]], np.float32),
+                        width_open[i])
             alpha = (phase_step + 1) / dur
             if xy_finish is None:
                 pos = home_pos[i] + alpha * (pos_b[i] - home_pos[i])
@@ -718,6 +782,22 @@ def execute_and_collect(
         return next_obs_list, state
 
     # ── Main loop: every env advances through PHASES independently ──
+    # Drive the re-grasp envs from home to their hover start WITHOUT recording, so the saved
+    # episode begins at the hover state rather than at home.
+    if is_rg.any():
+        _h0 = np.tile(worker.robot.home_pos[None].astype(np.float32), (num_envs, 1))
+        _q0 = np.tile(worker.robot.home_quat[None].astype(np.float32), (num_envs, 1))
+        _none = np.zeros(num_envs, bool)
+        for k in range(REGRASP_GOTO_STEPS):
+            a = (k + 1) / REGRASP_GOTO_STEPS
+            gp = _h0.copy(); gq = _q0.copy(); gg = np.full(num_envs, 0.08, np.float32)
+            for i in np.nonzero(is_rg)[0]:
+                gp[i] = _h0[i] + a * (home_pos[i] - _h0[i])
+                gq[i] = home_quat[i]
+                gg[i] = 0.08 + a * (rg_w0[i] - 0.08)
+            cur_obs_list, state = _step(gp, gq, gg, record_mask=_none)
+        prev_pos, prev_quat, prev_grip = home_pos.copy(), home_quat.copy(), rg_w0.copy()
+
     while np.any(phase_idx < N_PHASES):
         active = phase_idx < N_PHASES   # (N,) bool — envs still progressing this step
 
@@ -967,6 +1047,17 @@ def main() -> None:
     # Pass a value explicitly to override.
     p.add_argument("--grasp-E",           type=float, default=None,  help="object Young's modulus (Pa); default = the object's material")
     p.add_argument("--grasp-density",     type=float, default=None, help="object density (kg/m^3); default = the object's material")
+    p.add_argument("--regrasp-prob", type=float, default=0.0,
+                   help="Fraction of episodes collected as RE-GRASP demos: the gripper STARTS "
+                        "6-12 cm above the grasp pose with a RANDOM part-closed width and a small "
+                        "(+-8 deg) orientation jitter, then drives straight to the grasp at the "
+                        "normal constant velocity -- no two-phase approach. Mimics the state a "
+                        "FAILED grasp leaves the gripper in, which BC otherwise never sees (a "
+                        "normal approach passes through that height but always fully OPEN, so the "
+                        "part-closed width is the genuinely unseen part). The home->hover move is "
+                        "NOT recorded, so the demo's first frame is the hover state. Episodes are "
+                        "labelled re-grasp-demo vs standard in dr_params.csv. 0 = off; ~0.2 for a "
+                        "real collection; 1.0 to smoke-test the path.")
     p.add_argument("--mesh-cycle", action="store_true",
                    help="Walk the DR object_mesh_pool in ORDER (round-robin), one mesh per scene "
                         "rebuild, instead of sampling it uniformly at random. Guarantees every mesh "
@@ -1244,6 +1335,7 @@ def main() -> None:
                         "grasp_medial_seeds": bool(args.grasp_medial_seeds),
                         "grasp_escalate": int(args.grasp_escalate),
                         "grasp_width_max_mm": args.grasp_width_max_mm,
+                        "regrasp_prob": args.regrasp_prob,
                         "grasp_yaw_max_deg": args.grasp_yaw_max_deg,
                         "grasp_yaw_max_deg_resolved": _yaw,
                         "grasp_nu": _fem_nu,
@@ -1274,6 +1366,7 @@ def main() -> None:
     do_scene_dr    = args.scene_dr_every > 0 and dr_cfg.has_scene_dr()
     deform_dir     = tempfile.mkdtemp(prefix="gm_synth_deform_") if do_scene_dr else None
 
+    _regrasp_rng = np.random.default_rng(args.seed + 977)   # independent of the scene RNG
     _mesh_cycle = [0] if args.mesh_cycle else None    # round-robin cursor (see --mesh-cycle);
                                                      # must precede the first _make_worker() call
     def _make_worker():
@@ -1325,6 +1418,7 @@ def main() -> None:
                         "roll_deg", "pitch_deg", "yaw_deg", "flipped",
                         "home_dx", "home_dy", "home_dz", "scene_scale", "scene_bend_deg",
                         "mesh_variant",
+                        "episode_type",
                         "twist_deg", "taper", "rbf", "axis_scale", "axis_scale_ax",
                         "mat_E", "mat_nu", "mat_rho", "coup_friction",
                         "stress_Pa", "grip_N", "align", "pressure_Pa", "min_pad_mm2", "width_mm", "tilt_deg"])
@@ -1520,6 +1614,7 @@ def main() -> None:
         rec_this_batch = args.record_video > 0 and total_saved < args.record_video
         print(f"  Executing …")
         try:
+            _rg_mask = (_regrasp_rng.random(args.n_envs) < float(args.regrasp_prob))
             obs_bufs, act_bufs, rew_bufs, success, frame_bufs = execute_and_collect(
                 worker, all_best_x, init_obs_batch, perception, action_config,
                 record_video=rec_this_batch, priv_cfg=priv_cfg, dr_vec=dr_vec,
@@ -1527,7 +1622,8 @@ def main() -> None:
                 approach_xy_finish=args.approach_xy_finish, approach_rng=approach_rng,
             approach_speed=args.approach_speed,
                 trim_max_run=args.held_run_max, trim_keep=args.held_run_keep,
-                yield_stress=args.grasp_yield, firm_close_m=args.grasp_extra_close)
+                yield_stress=args.grasp_yield, firm_close_m=args.grasp_extra_close,
+                regrasp_mask=_rg_mask, regrasp_rng=_regrasp_rng)
             consec_batch_aborts = 0
         except Exception as e:
             # Some scene draws are systematically unstable (solver NaN mid-episode even after a
@@ -1562,6 +1658,7 @@ def main() -> None:
                                 round(float(scene_dr.get("scale", 1.0)), 4),
                                 round(float(scene_dr.get("bend_deg", 0.0)), 2),
                                 scene_dr.get("mesh_variant", ""),
+                                ("re-grasp-demo" if _rg_mask[i] else "standard"),
                                 round(float(scene_dr.get("twist_deg", 0.0)), 2),
                                 round(float(scene_dr.get("taper", 0.0)), 4),
                                 round(float(scene_dr.get("rbf", 0.0)), 4),
