@@ -444,6 +444,24 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-30 (v4) — `collect_demos_synth_v4.py`: surrogate-selected executed width (v3 untouched
+as fallback). And the n=40 ranking validation is SIGNIFICANT: rho = +0.669, p = 2.4e-6.**
+
+- **v4** (fork of v3 per the fallback convention): the executor's closure constants (2.5 mm
+  `width_cls` baseline, `extra_close`, firm base) are replaced by `gain * c_y`, where `c_y` is the
+  closure at which the SURROGATE predicts yield at the chosen pose (scanned with the refine-round
+  primitive, using the DR-drawn E so the scan matches the simulated material). One global constant
+  (`--closure-gain 1.28`, identified once on the mushroom). Weak-grasp firm check kept as fallback
+  (0.5 x commanded closure, capped 2 mm). New `closure_cmd_mm` column in dr_params.csv.
+  First batch confirms adaptive behaviour: mushroom c_y 4.0-7.0 mm -> commands 5.1-8.0 mm varying
+  with pose and material draw (v3: fixed 6.4 mm for all).
+- **n=40 controlled sub-yield correlation (fixed scene, width swept): Spearman rho = +0.669,
+  p = 2.4e-6** (Pearson +0.563, p = 1.5e-4; MPM span 0.32-1.13x yield). The surrogate's stress
+  ranking is now VALIDATED in the operating regime — quotable. Past yield it remains rho = 0
+  (saturation); any paper statement must name the regime.
+- 7-object v4 verification chain running (16 eps each, all-auto, no pasta).
+
+
 **2026-08-30 (later) — CALIBRATION IS NOT NECESSARY: the surrogate's own stress-vs-width curve
 predicts the per-object safe closure. Rank-perfect across 4 objects, stable ~0.5-0.6 conservative
 bias. Raspberry probe confirms: baseline-only closure -> 100 % sub-yield (was 19 %).**

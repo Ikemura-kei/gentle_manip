@@ -20,7 +20,7 @@ sentence of scope.** It is NOT presentable as a stress *predictor*, and the rasp
 | claim | status |
 |---|---|
 | "FEM-based gentleness-aware grasp synthesis" | **SAFE** (objective contains stress terms; hard yield guard; measured sub-yield outcomes on 4/7 objects) |
-| "the surrogate ranks candidate grasps by simulated stress" | **PENDING** — sub-yield controlled test ρ = +0.52 (p = 0.085, n = 12); n = 40 run in progress |
+| "the surrogate ranks candidate grasps by simulated stress" | **VALIDATED sub-yield (08-30)** — controlled test (fixed scene, width swept): Spearman ρ = +0.669, p = 2.4e-6, n = 40. Past yield it remains ρ = 0 (saturation) — state the regime |
 | "the surrogate predicts the stress the object experiences" | **FALSE** — planner ~3× low vs MPM (partly definitional: contact-masked top-10% vs unmasked), and zero correlation past yield (MPM saturates) |
 | "demonstrations are sub-yield" | **PER-OBJECT** — mushroom 99.6 % (n=250) / tomato / tofu 100 %, strawberry 94 %; cherry_tomato 56 %, raspberry 19 % — the latter two are executor bugs, §3 |
 
@@ -36,7 +36,7 @@ in the simulator."* Every clause of that is (or will be, after §3's fix) measur
 |---|---|---|
 | observational corr., scene varied, n=10 | ρ = +0.842 — **artefact** (scene size drives both; planner vs scale ρ = −0.67, MPM vs scale −0.89) | 08-28 |
 | controlled, fixed scene, width swept, PAST yield | **ρ = 0.000** — MPM `ElastoPlastic` saturates at the yield surface; surrogate (no yield model) keeps rising | 08-28 |
-| controlled, fixed scene, SUB-yield | ρ = +0.517 (p = 0.085, n = 12) — trend, not significant; **n = 40 running** | 08-28/30 |
+| controlled, fixed scene, SUB-yield | n=12: ρ = +0.52 (p=.085); **n=40: ρ = +0.669 (p = 2.4e-6)** — significant. MPM span 0.32–1.13× yield | 08-28/30 |
 | absolute calibration | planner 6.8–18.8 kPa vs MPM 20.7–46.4 kPa on the same grasps (~3× low; contact-masked vs unmasked is part of it; unmasked `hi_1` never compared — open) | 08-27 |
 | per-object outcome (16-ep, own material) | mushroom 100 %/100 %, tomato 100 %/100 %, tofu 76 %/100 %, strawberry 100 %/94 %, cherry 89 %/56 %, raspberry 100 %/**19 %**, banana_chunk **53 %**/100 % (success/sub-yield) | 08-29 |
 
