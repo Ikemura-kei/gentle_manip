@@ -88,9 +88,21 @@ J = − σ_top10  − w_align (1 − align) − w_peak E·σ_p98 − w_press (F 
 - `F/A_min`: grip force over the *smaller* pad's contact area — local pressure, the pinch signal
   bulk stress misses; w_press = 0.05 in the recipe.
 
-Infeasible candidates receive *shaped* penalties (−(10⁸ + dist·10⁹)) so CMA-ES retains a gradient
-toward the feasible band, ordered: table scratch ≻ finger–body penetration ≻ jaw miss/overdeep ≻
-FEM-invalid ≻ not-holdable ≻ thin-pad.
+**Feasibility and shaped penalties.** Infeasibility here means *reachability or model-validity*,
+never "the fingers touch the object" — contact-scale penetration of the nominal mesh (~1–2 mm) is
+the contact mechanism itself, and each check carries an explicit tolerance so intended contact
+never trips it: (i) a finger point below the table plane (2 mm allowed); (ii) gross finger-*body*
+clipping through the object volume, beyond 3 mm of SDF depth — a configuration whose contact
+constraints would be meaningless regardless of softness; (iii) a jaw missing the object, or
+indenting beyond 10 mm — the small-strain validity bound, where the linear model would mis-score
+rather than measure; (iv) failing holdability; (v) a worst-pad contact area below the floor.
+Because CMA-ES learns from candidate *rankings*, a flat infeasibility penalty would make the
+(initially dominant) infeasible samples tie and carry no information; each violation is instead
+penalized as −(10⁸ + dist·10⁹) with `dist` its distance to the feasible band, so infeasible
+candidates are ordered by proximity to feasibility and the search distribution drifts toward it.
+The 10⁸ offset guarantees any infeasible candidate ranks below any feasible one (feasible scores
+live at the −10⁴…−10⁵ Pa scale); the not-holdable rung eases as grip force approaches the
+threshold, steering CMA toward narrower widths.
 
 ### A.8 Search
 
