@@ -1,0 +1,24 @@
+# [experiment] single_lift_prim_lamp_soft_abs_action_armfocus_realws: the 3cm TOFU BLOCK twin of single_lift_mushroom_soft_abs_action_armfocus_realws.
+# Used by: v3 synth collection + DPPO training/eval (pure sim, no real data)
+# Status: experimental (second object category)
+#
+# IDENTICAL to single_lift_mushroom_soft_abs_action EXCEPT obs -> superset_soft_armfocus, which adds
+# the arm-focus point cloud (denser object points) and records the AUX LABELS: priv_object_pos
+# (position regression) + priv_contact (PROPER binary gripper-object contact, geometric — not a stress
+# proxy). Quat student (obs_dim 8), abs action (action_dim 10). Collect with FEM (v3) + 2.5mm squeeze.
+task: single_lift_prim_lamp_soft
+action: abs_pose_abs_gripper
+dr: soft_orientation_realws_prim_lamp
+augmentation: l515_noise
+
+obs: superset_soft_armfocus   # quat + arm-focus cloud + privileged aux labels
+views:
+  teacher: [privileged]
+  student: [point_cloud]       # ee_pos + ee_quat + gripper + point_cloud (obs_dim 8)
+
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400

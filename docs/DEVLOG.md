@@ -444,6 +444,38 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-30 — v4.1 IS FROZEN AS FINAL (user decision). Paper deadline 2026-09-15 (16 days);
+large-scale cluster collection has started; there is NO room for recollection. NO further edits
+to any v4.1 parameter — the scan metric (p98), the gain (4.92), the auto rules, the executor —
+regardless of how anything performs, unless the submission itself is abandoned.**
+
+This includes new objects: if a new object underperforms under the frozen recipe, the outcome is
+DOCUMENTED, not fixed. (The `--scan-metric p98` default committed in c5ff4d4 makes an unflagged
+v4 run exactly the frozen v4.1 behaviour.)
+
+**Six primitive diversity objects added (all TOFU material, user request):**
+
+| object | nominal | source |
+|---|---|---|
+| prim_cylinder | r 2 cm, h 5 cm | user spec |
+| prim_sphere | r 2 cm | user spec |
+| prim_lamp | bulb r 1.5 cm + tapered neck + cylindrical base, ~5.2 cm tall | user spec (proportions mine) |
+| prim_cuboid | 4 x 3 x 2.5 cm | proposed: flat-face anisotropy (existing tofu is an equal cube) |
+| prim_ellipsoid | 5 x 3 x 2.5 cm | proposed: smooth anisotropy |
+| prim_torus | R 1.4 / tube 0.7 cm | proposed: topology + ring grasp; deliberately thin (1.4 cm) |
+
+All procedurally generated, watertight, `prim_` namespace (bare `cylinder` was taken). Configs
+templated from tofu (task grid 200/250 by bbox volume, DR = tofu template with scale narrowed to
+[0.85, 1.15] since several prims run near the gripper span, experiment = tofu armfocus template →
+`superset_soft_armfocus` obs, so per-episode `priv_stress` is recorded). Registry entries carry
+the freeze note.
+
+16-ep smoke chain running under the frozen recipe (verified at launch: `metric=p98 gain=4.92`),
+watchdog armed. Expectations, honestly: sphere and cylinder may roll/topple under orientation DR;
+the torus is banana-chunk-thin and MAY hit the small-strain scope limit — if so, that is a
+documented scope observation, NOT a reason to touch the recipe.
+
+
 **2026-08-30 — v4.1-vs-v4.2 A/B COMPLETE (7/7): the metrics BRACKET the object
 set. Collection recipe decided: p98, by the asymmetric-bars argument. Cluster handoff written
 (`docs/collection_v4_handoff.md`); `integrate-all-2026-08-29` merged.**
