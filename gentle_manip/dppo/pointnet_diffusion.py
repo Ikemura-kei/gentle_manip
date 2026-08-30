@@ -79,9 +79,10 @@ class PointNetDiffusionMLP(nn.Module):
                  aux_contact=False, aux_object_pos=False, aux_grasp_width=False,
                  feed_width_pred=False, width_traj_head=False, width_head_blind=False,
                  aux_width_blind=False,
-                 width_head_bins=0, cond_dropout_prob=0.0, aux_hidden=128,
-                 proprio_encoder=False, gap_damp=False, gap_lambda=1.0,
+                 width_head_bins=0, cond_dropout_prob=0.0, category_embed_dim=0,
+                 proprio_dropout_prob=0.0, proprio_encoder=False, gap_damp=False, gap_lambda=1.0,
                  proprio_encoder_identity_init=True,
+                 aux_hidden=128,
                  use_first_frame_context=False):
         super().__init__()
         pn = dict(pointnet or {})
@@ -109,6 +110,7 @@ class PointNetDiffusionMLP(nn.Module):
         input_dim = time_dim + action_dim * horizon_steps + visual_feature_dim + ctx_dim + cond_dim + wdim
         output_dim = action_dim * horizon_steps
         model = ResidualMLP if residual_style else MLP
+        input_dim = input_dim + int(category_embed_dim)   # param, not self.* (assigned below)
         self.mlp_mean = model([input_dim] + list(mlp_dims) + [output_dim],
                               activation_type=activation_type,
                               out_activation_type=out_activation_type,
@@ -133,12 +135,23 @@ class PointNetDiffusionMLP(nn.Module):
         # multimodal (diffusion suits it) but width given the object is unimodal REGRESSION —
         # 9 probes showed the diffusion path collapses width to a constant (r~0.1) while a
         # regression head on the SAME features reaches r~0.82. It reads `_cond_encoded` =
+        # CATEGORY CONDITIONING (ported from the colleague's cross-category-dp branch, 2026-08-27).
+        # 0 (default) reproduces the unconditioned baseline EXACTLY: input_dim unchanged and no
+        # cond["category_embed"] lookup, so every existing config is unaffected. >0 expects
+        # cond["category_embed"]: (B, D) from gentle_manip.dppo.category_embedding (21-d:
+        # one-hot category + log E/yield + nominal size + aspect ratio).
+        # NOTE the size slot is the REGISTRY NOMINAL, constant per category — it fixes the
+        # BETWEEN-category width constant but carries no per-episode size, so it does not address
+        # within-category variation (see the plan §4c).
+        self.category_embed_dim = int(category_embed_dim)
         self._visual_dim = int(visual_feature_dim) * (2 if use_first_frame_context else 1)
+        # cond_encoded layout: [visual (+ctx) | proprio (cond_dim) | category_embed]. Proprio sits
+        # at a FIXED offset from the START, so trailing concatenations (feed_width_pred, category)
+        # do not move it.
         self._proprio_dim = int(cond_dim)
         # GAP (arXiv 2602.12032) damps the PROPRIOCEPTION CHUNK's parameters; our default arch
         # raw-concatenates the state, so this optional encoder is what gives Eq 5 something to act
-        # on. Ported from the worktree because EVAL runs from THIS repo and must instantiate the
-        # arms trained there. Default off -> every existing checkpoint is unaffected.
+        # on. Default off -> every existing checkpoint is unaffected.
         # RESIDUAL proprio encoder: h = state + MLP(state), final layer ZERO-initialised so it is
         # EXACTLY a pass-through at step 0. (Identity weights are NOT: Mish(x) != x — measured
         # max|diff| 2.493 vs random init's 3.276, i.e. barely better, which is why arms C/D failed.)
@@ -209,6 +222,53 @@ class PointNetDiffusionMLP(nn.Module):
         self.cfg_tighten_max = 0.0      # asymmetric clip: max eps-units guidance may TIGHTEN by
         self.null_visual = nn.Parameter(torch.zeros(self._visual_dim)) \
             if cond_dropout_prob > 0 else None
+        # ARM 2 — GAP-style PROPRIO dropout, gated to the GRASP WINDOW.
+        # "When would Vision-Proprioception Policies Fail in Robotic Manipulation?" finds
+        # vision-only can beat vision+proprio, and proposes GAP: damp proprioception's gradient
+        # during motion-TRANSITION phases. Our demonstrator is SCRIPTED, so we do not need their
+        # phase-probability estimator — the dataset hands us `in_grasp_window` exactly. This is the
+        # dropout form of that idea: replace the proprio slice with a learned null token, with
+        # probability p, ONLY on samples inside the grasp window, TRAINING ONLY. Proprio is left
+        # intact during the approach, where it is genuinely needed for reaching.
+        self.proprio_dropout_prob = float(proprio_dropout_prob)
+        self.null_proprio = nn.Parameter(torch.zeros(self._proprio_dim)) \
+            if proprio_dropout_prob > 0 else None
+        # ---- GAP (arXiv 2602.12032, Lu et al.) --------------------------------------------
+        # Eq 5:  w_s^{j+1} = w_s^j - lambda * (1 - rho) * eta * grad_{w_s} L_BC
+        # w_s are the parameters of the PROPRIOCEPTION CHUNK phi_s. Their policy has one
+        # ("an encoder and a temporal transformer"); OURS DOES NOT — `_cond_encoded` raw-
+        # concatenates the state, so there is no w_s to damp. So GAP needs a proprio encoder here
+        # before its mechanism is even expressible. `proprio_encoder` adds the minimal version.
+        # rho is their motion-transition phase indicator, estimated by CPD + an LSTM because they
+        # do not know the phases. OUR DEMONSTRATOR IS SCRIPTED, so rho is the known grasp-window
+        # indicator supplied by the dataset — no estimator needed.
+        # RESIDUAL proprio encoder: h = state + MLP(state), final layer ZERO-initialised so it is
+        # EXACTLY a pass-through at step 0. (Identity weights are NOT: Mish(x) != x — measured
+        # max|diff| 2.493 vs random init's 3.276, i.e. barely better, which is why arms C/D failed.)
+        # Proprio is the policy's closure CLOCK; scrambling it at init makes the policy learn to
+        # disregard it, and vision cannot supply phase -> "approach, never close".
+        self.proprio_encoder = (nn.Sequential(nn.Linear(self._proprio_dim, self._proprio_dim),
+                                              nn.Mish(),
+                                              nn.Linear(self._proprio_dim, self._proprio_dim))
+                                if proprio_encoder else None)
+        self.proprio_encoder_residual = bool(proprio_encoder_identity_init)
+        if proprio_encoder and self.proprio_encoder_residual:
+            with torch.no_grad():
+                nn.init.zeros_(self.proprio_encoder[2].weight)
+                nn.init.zeros_(self.proprio_encoder[2].bias)
+        # NEAR-IDENTITY INIT (2026-08-28). Random init scrambles proprio at step 0; proprio is the
+        # policy's closure CLOCK, so it looks like noise early, the policy learns to disregard it,
+        # and vision cannot supply phase -> "approach, never close" (arms C and D, 0/21, confirmed
+        # not a code bug: eval path bit-identical, weights load complete, EMA faithful).
+        # Identity init makes the encoder a PASS-THROUGH at step 0, so the policy starts from the
+        # baseline's behaviour and the encoder departs only as training justifies. It also makes
+        # GAP coherent: with damping inside the grasp window the encoder simply STAYS a
+        # pass-through there while adapting elsewhere.
+        self.gap_damp = bool(gap_damp)
+        self.gap_lambda = float(gap_lambda)
+        if proprio_encoder:
+            print(f"[PointNetDiffusionMLP] proprio_encoder=True gap_damp={self.gap_damp} "
+                  f"lambda={self.gap_lambda}", flush=True)
 
     def _cond_encoded(self, cond: Dict[str, torch.Tensor]) -> torch.Tensor:
         """[pointnet_feat ⊕ flattened proprio] — the shared conditioning feature."""
@@ -222,7 +282,13 @@ class PointNetDiffusionMLP(nn.Module):
             if self.proprio_encoder_residual:
                 h = state + h                     # exact pass-through at init (final layer zeroed)
             state = h
-        return torch.cat([feat, state], dim=-1)
+        parts = [feat, state]
+        if self.category_embed_dim > 0:
+            ce = cond["category_embed"]
+            if ce.dim() == 3:            # (B, To, D) from a live env's obs-history windowing
+                ce = ce[:, -1]           # constant per episode -- any step is equivalent
+            parts.append(ce.view(ce.shape[0], -1))
+        return torch.cat(parts, dim=-1)
 
     def aux_predict(self, cond: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """Auxiliary predictions from the conditioning feature only (no noise/time). Returns the
@@ -296,6 +362,13 @@ class PointNetDiffusionMLP(nn.Module):
             # aux_predict keeps the base feature, so head input dims are unchanged)
             cond_encoded = torch.cat([cond_encoded, self.width_head(cond_encoded).detach()], dim=-1)
         time_emb = self.time_embedding(time.view(B, 1)).view(B, self.time_dim)
+        if self.training and self.proprio_dropout_prob > 0 and "in_grasp_window" in cond:
+            win = cond["in_grasp_window"].reshape(-1) > 0.5
+            drop_p = (torch.rand(B, device=x.device) < self.proprio_dropout_prob) & win
+            if drop_p.any():
+                cond_encoded = cond_encoded.clone()
+                cond_encoded[drop_p, self._visual_dim:self._visual_dim + self._proprio_dim] = \
+                    self.null_proprio
         if self.training and self.cond_dropout_prob > 0:
             drop = torch.rand(B, device=x.device) < self.cond_dropout_prob
             if drop.any():

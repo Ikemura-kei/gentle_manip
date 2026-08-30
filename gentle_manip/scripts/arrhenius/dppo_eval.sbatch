@@ -19,7 +19,10 @@
 
 set -euo pipefail
 export PATH="$HOME/.local/bin:$PATH"
-REPO=/nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip
+# GM_REPO lets a git WORKTREE eval its own code+checkpoints. Without it this script cd's to
+# the main checkout and silently evaluates the WRONG eval_agent (e.g. one lacking the
+# category-embed wiring), which would look like a normal run and produce a wrong answer.
+REPO=${GM_REPO:-/nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip}
 cd "$REPO"
 
 # ---- knobs (eval = canonical protocol; do NOT change num_envs/seed/n_episodes) ---------

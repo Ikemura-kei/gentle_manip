@@ -236,6 +236,26 @@ class _DiffusionPolicy:
                                                      # is off, the FINAL batch would be lost
             print(f"[eval_agent] OBS DUMP active -> .agent_tmp/{self._obs_dump_tag}_obs_b*.npz "
                   f"(cloud={'yes' if self._obs_dump_cloud else 'no'})", flush=True)
+        # ---- category conditioning (GM_CATEGORY=<registry object name>) --------------------
+        self._cat_embed = None
+        cat = os.environ.get("GM_CATEGORY")
+        want_dim = int(getattr(self.model.network, "category_embed_dim", 0) or 0)
+        if want_dim > 0 and not cat:
+            raise RuntimeError(
+                f"network expects a {want_dim}-d category_embed but GM_CATEGORY is unset — "
+                "a conditioned checkpoint cannot be evaluated without naming the object")
+        if cat:
+            if want_dim == 0:
+                print(f"[eval_agent] GM_CATEGORY={cat} ignored (unconditioned network)", flush=True)
+            else:
+                from gentle_manip.dppo.category_embedding import embed as _cat_embed_fn
+                vec = np.asarray(_cat_embed_fn(cat), dtype=np.float32)
+                if vec.shape[-1] != want_dim:
+                    raise RuntimeError(f"category_embed dim mismatch: network wants {want_dim}, "
+                                       f"embedding for '{cat}' is {vec.shape[-1]}")
+                self._cat_embed = torch.from_numpy(vec).float().to(self.device).unsqueeze(0)
+                print(f"[eval_agent] CATEGORY EMBED '{cat}' active, dim={want_dim}, "
+                      f"nonzero_onehot_idx={int(np.argmax(vec[:15]))}", flush=True)
         self._dump_tag = os.environ.get("GM_WIDTH_DUMP")
         self._dump_buf, self._dump_batch = [], 0
         self._dump_mm = None
@@ -344,6 +364,15 @@ class _DiffusionPolicy:
             elif os.environ.get("GM_BLIND_GRIPPER_WIDTH"):
                 cond["state"] = cond["state"].clone()
                 cond["state"][..., -1] = 0.0
+            if self._cat_embed is not None:
+                # CATEGORY CONDITIONING AT EVAL (2026-08-27). The dataset supplies
+                # cond["category_embed"] during TRAINING, but the eval path never did — so a
+                # category-conditioned checkpoint could not be evaluated closed-loop at all.
+                # category_embedding.py is genesis-free precisely so the harness can build it.
+                # Object identity is static for an episode and each eval run is ONE object, so
+                # this is a constant broadcast over the batch, not a per-step lookup.
+                b = cond["state"].shape[0]
+                cond["category_embed"] = self._cat_embed.expand(b, -1)
             traj = self.model(cond=cond, deterministic=True).trajectories.cpu().numpy()
             if self._width_head:
                 traj[:, :, -1] = self.model.network.predict_width_traj(cond).cpu().numpy()
