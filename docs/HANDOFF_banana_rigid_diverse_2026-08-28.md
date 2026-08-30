@@ -492,3 +492,24 @@ sim servers, distinct from `EXPERIMENT` (train/convert). Added `SKIP_TRAIN=1`+`R
 to reuse an existing checkpoint. Committed.
 Resubmitted baseline as **1797433** (SKIP_TRAIN, reuses tqmjv/state_150, eval-only).
 regrasp collector 1792833 still running (~358).
+
+---
+## 2026-08-30 11:10 — small-object support + webpage reorg
+
+- **Collector**: `_synth_bounds_topdown` now takes `obj_size` -> CMA xy-box + close-width
+  bound rescaled to the actual object (was mushroom-hardcoded -> straddle on 2cm fruit).
+  Width floor scales with object short axis too.
+- **New configs** `single_lift_xcat_small_diverse{,_eval}` + `dr/xcat_small_diverse_regrasp`
+  + `tasks/*`: pool `[grape, cherry, tomato, raspberry]`, grid 300 / substeps 450,
+  SCALE-ONLY DR (no bend/twist -> crashes crude 2-4KB meshes). strawberry dropped
+  (1.4KB placeholder mesh). blueberry available but skipped (1cm, extreme).
+- **gen8 cfg dirs** `single_lift_gen8_{baseline,regrasp}_pcd` (n_epochs 250) for the
+  8-object merged generalist.
+- **Small-object collector 1797892** queued `--dependency=afterany:1797433` (starts when
+  the baseline eval frees a GPU slot). `REC_VIDEO=250`, TAG=xcat_small.
+- **Webpage reorganized** into 3 acts (rigid proof -> soft banana -> cross-category
+  generalist) + 6 diverse-init demo clips each for mushroom/kiwi/egg_boiled. Small-fruit
+  clips to follow. Artifact 5682ac2f.
+- MERGE PLAN for the generalist: concat `single_lift_xcat_regrasp` + `single_lift_xcat_small`
+  + (optionally) the banana 500 -> one data.pkl -> train `single_lift_gen8_regrasp_pcd`.
+  Baseline: same with the strict_home datasets.
