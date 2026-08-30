@@ -684,3 +684,12 @@ seed 21). NOTE: this DR is also `single_lift_xcat_diverse{,_eval}`'s dr -- but t
 per-category eval (yd_gen_eval) uses `dr: eval_cat_<name>` overrides, and the old
 frozen-geometry `_eval` is deprecated, so no eval impact.
 Per category now: banana 500+, kiwi ~166, egg ~163, mushroom ~160, + small 4.
+
+---
+## 2026-08-30 21:45 — per-cat quota + walltime fix
+- Collector now DROPS a category from the pool at --per-cat-target (500); sbatch
+  auto-computes --cat-have from prior TAG logs. Stops when pool empties.
+- 2x 24h GPU jobs exceed AssocGrpGRESRunMinutes -> collector walltime 24h -> 12h.
+  Resubmit ~2x/day. Both running: 1805147 (large: mushroom/kiwi/egg, target 500),
+  1805198 (small: grape/cherry/tomato/raspberry, target 500).
+- ETA to 4000: ~24-28h (large finishes 3 objs in ~13h -> that GPU repoints to small).
