@@ -268,17 +268,13 @@ def execute_and_collect_diverse_v2(
     except Exception:
         _short = 0.06
     # CMA-ES routinely returns a straddle width WIDER than the object (SDF cost 0, no
-    # contact). Clamp the close width to a firm grip:
-    #   soft  -> ~20% compression into the body (a loose grip = slip on lift)
-    #   rigid -> object short axis + 2mm (just past contact)
-    if object_type == "soft":
-        _margin = 0.0
-        _wcap   = min(0.070, _short * 0.80)
-        _floor  = max(0.012, _short * 0.42)
-    else:
-        _margin = 0.0025
-        _wcap   = min(0.075, _short + 0.002)
-        _floor  = 0.020
+    # contact). Clamp the close width to the object short axis (+2mm rigid) so a
+    # straddle still grips; progressive lift-firming does the rest. (These are the
+    # banana-proof values -- do not tighten: an over-tight close ejects a coarse-grid
+    # soft body during the grasp.)
+    _margin = 0.0     if object_type == "soft" else 0.0025
+    _floor  = 0.014   if object_type == "soft" else 0.020
+    _wcap   = min(0.075, _short + 0.002)
     width_cls  = np.clip(np.array([p[2] - _margin for p in poses], np.float32), _floor, _wcap)
 
     home_pos  = np.tile(worker.robot.home_pos[None].astype(np.float32),  (num_envs, 1))
