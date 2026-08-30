@@ -710,3 +710,10 @@ Per category now: banana 500+, kiwi ~166, egg ~163, mushroom ~160, + small 4.
 - Per category: banana 500+, kiwi ~205, egg ~198, mushroom ~190, grape ~172,
   cherry ~163, tomato ~135, raspberry ~120. Total ~1610/4000 (40%).
 - ~2 demos/min combined. ~20h to 4000. Self-resubmit + per-cat quota running.
+
+---
+## 2026-08-31 02:35 — collection ~43%
+- 1805147 large: 168 this run. 1805198 small: 194 this run. 0 batchfails, both healthy.
+- Per category: banana 500+, kiwi ~217, egg ~210, mushroom ~206, grape ~190,
+  cherry ~181, tomato ~150, raspberry ~135. Total ~1690/4000 (43%).
+- ~1.5 demos/min. ~18h to 4000.
