@@ -64,8 +64,10 @@ safe; the explicit flag in the recipe above is belt-and-braces. The gain auto-re
 
 ## Guardrails (each of these burned us once — see DEVLOG 2026-08-28..30)
 
-1. **Smoke first**: 16 eps × `--mesh-cycle` per category; check `priv_stress` sub-yield PER
-   OBJECT before the 250-run. One object passing certifies nothing about the others.
+1. **Smoke first**: 16 eps × `--mesh-cycle` per category, **always with `--record-video 100000`**
+   (full renderings — the user reviews videos and has repeatedly caught defects the metrics
+   missed: occlusion, pinches, long-axis grasps); check `priv_stress` sub-yield PER OBJECT before
+   the 250-run. One object passing certifies nothing about the others.
 2. **Do not tune λ or the scan metric per object.** The executor's whole point is one global
    rule; per-object deviations go through per-episode filtering instead.
 3. **Verify the schema on the first batch**: `dr_params.csv` must have `mat_E`,
