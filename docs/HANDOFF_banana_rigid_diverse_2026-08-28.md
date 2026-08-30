@@ -569,3 +569,16 @@ Regrasp-gen: logs/dppo/dppo-pretrain/single_lift_xcat_regrasp_pcd/uabeb/eval{,_r
   default (launch at 20-24). Walltime 71h->24h so >2 collectors fit under AssocGrpGRESRunMinutes.
 - Small-object collector 1797892 RUNNING (n_envs 6, submitted pre-change) -- SLOW (~4/15min,
   tiny objects grasp-synth poorly). Watching SR; likely resubmit at n_envs 20.
+
+---
+## 2026-08-30 16:30 — small-object SDF crash fixed, resubmitted
+
+- Small collector 1797892: 6/4500, 5/9 batchfails on grape/cherry/tomato. Cause:
+  `build_object_sdf` runs `simplify_quadric_decimation(0.99)` on the crude 2-4 KB
+  grape/cherry scans (~50 faces) -> collapses to 0-2 faces -> trimesh rtree
+  `bounds_tree` "Bounds must be (n, dimension*2)". raspberry (610 KB real mesh) was
+  fine (33% grasp SR).
+- FIX (`synth_utils.build_object_sdf`): skip decimation for <=600-face meshes; fall
+  back to the full mesh if decimation returns <8 faces. Committed.
+- Resubmitted as **1800352** (n_envs 16, maxfevals 500, 24 h). The old job's
+  ProcessPool workers had stale synth_utils -> full resubmit needed.
