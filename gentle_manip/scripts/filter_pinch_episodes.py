@@ -128,9 +128,29 @@ def main():
                               f"(filter_pinch_episodes.py; report in pinch_report.yaml)")
         (out / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
     (out / "pinch_report.yaml").write_text(yaml.safe_dump(report, sort_keys=False))
-    for aux in ("dr_params.csv", "stats.yaml"):
-        if (args.run / aux).exists():
-            shutil.copy(args.run / aux, out / aux)
+    # stats.yaml is a straight copy, but dr_params.csv MUST BE REMAPPED (2026-08-31).
+    # `dataset_idx` indexes data.pkl["episodes"]; after filtering, the surviving episodes are
+    # RENUMBERED 0..n_kept-1. Copying the source CSV verbatim leaves indices pointing at the
+    # UNFILTERED order, so every DR-param <-> episode join silently pairs the wrong rows -- the
+    # same broken-join class fixed in collect_demos_synth_v3/v4. Dropped episodes get -1.
+    if (args.run / "stats.yaml").exists():
+        shutil.copy(args.run / "stats.yaml", out / "stats.yaml")
+    src_csv = args.run / "dr_params.csv"
+    if src_csv.exists():
+        import csv as _csv
+        old2new, _n = {}, 0
+        for _r in report:                          # report is per SOURCE episode, in order
+            if not _r["pinch"]:
+                old2new[_r["episode"]] = _n; _n += 1
+        with open(src_csv) as f:
+            rows = list(_csv.DictReader(f)); hdr = rows[0].keys() if rows else []
+        for r in rows:
+            di = int(r.get("dataset_idx", -1))
+            r["dataset_idx"] = old2new.get(di, -1) if di >= 0 else -1
+        with open(out / "dr_params.csv", "w", newline="") as f:
+            w = _csv.DictWriter(f, fieldnames=list(hdr)); w.writeheader(); w.writerows(rows)
+        print(f"  dr_params.csv remapped: {_n} kept rows renumbered 0..{_n-1}, "
+              f"{sum(1 for r in rows if int(r['dataset_idx']) < 0)} marked -1")
     print(f"saved {out} ({len(keep)} episodes)")
 
 

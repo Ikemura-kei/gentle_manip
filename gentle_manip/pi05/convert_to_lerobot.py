@@ -49,12 +49,22 @@ import numpy as np
 # every instruction is paired with a spread of scenes rather than correlated with one region of
 # the collection. "20 centimeters" is honest: the success band is an absolute object height of
 # 0.175-0.275 m and demos sit at ~0.209 m, i.e. ~19 cm above the ~0.02 m rest height.
-INSTRUCTIONS = [
-    "pick up the mushroom",
-    "pick the mushroom up",
-    "lift the mushroom",
-    "lift the mushroom up for 20 centimeters",
+# PER-OBJECT, and that matters: this dataset mixes objects, so labelling a tofu episode
+# "pick up the mushroom" would teach the model that the instruction is NOISE — the opposite of what
+# a language-conditioned policy should learn, and it would silently destroy the only signal that
+# makes the task language-conditioned at all.
+_PHRASINGS = [
+    "pick up the {obj}",
+    "pick the {obj} up",
+    "lift the {obj}",
+    "lift the {obj} up for 20 centimeters",   # ~19 cm rise: band 0.175-0.275 m from ~0.02 m rest
 ]
+INSTRUCTIONS = [p.format(obj="mushroom") for p in _PHRASINGS]   # back-compat for single-object use
+
+
+def instructions_for(object_name: str) -> list:
+    """The four phrasings, bound to this object's name."""
+    return [p.format(obj=object_name) for p in _PHRASINGS]
 
 
 def _load_episodes(src: Path) -> list:
@@ -79,7 +89,12 @@ def _load_episodes(src: Path) -> list:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("src", type=Path, help="demo data.pkl, or a run dir (data.pkl or shard_*.pkl)")
+    ap.add_argument("src", type=Path, nargs="+",
+                    help="one or more demo data.pkl / run dirs. Several sources are merged into ONE "
+                         "LeRobot dataset (that is how the mixed-object low-data set is built).")
+    ap.add_argument("--object-names", nargs="+", default=None,
+                    help="object name per src, in order — drives the language instruction. "
+                         "Inferred from each run dir's config.yaml when omitted.")
     ap.add_argument("--repo-id", required=True, help="LeRobot dataset id, e.g. gm/mushroom_pi05_ext")
     ap.add_argument("--cameras", choices=["ext", "ext_wrist"], required=True,
                     help="ext = external only (wrist_image zero-filled); ext_wrist = both")
@@ -113,9 +128,31 @@ def main() -> None:
         "euler_frame_offset_deg must be [180,0,0] -- without it a top-down grasp's roll sits on "
         "the +/-pi seam and decodes ~180 deg wrong (run oppsu)")
 
-    episodes = _load_episodes(args.src)
-    if args.max_episodes:
-        episodes = episodes[: args.max_episodes]
+    import yaml as _yaml
+    srcs = list(args.src)
+    names = args.object_names or []
+    if len(names) != len(srcs):                       # infer from each run's config snapshot
+        names = []
+        for sp in srcs:
+            d = sp if sp.is_dir() else sp.parent
+            cfg = d / "config.yaml"
+            obj = "object"
+            if cfg.exists():
+                c = _yaml.safe_load(cfg.read_text()) or {}
+                obj = (c.get("task", {}) or {}).get("object_name") or c.get("object_name") or obj
+                if obj == "object":                   # fall back to the experiment/task name
+                    t = str(c.get("experiment", "")) + str(c.get("task_name", ""))
+                    for cand in ("mushroom", "tofu", "raspberry", "tomato", "strawberry", "banana"):
+                        if cand in t: obj = cand; break
+            names.append(obj)
+    episodes, ep_obj = [], []
+    for sp, nm in zip(srcs, names):
+        e = _load_episodes(sp)
+        if args.max_episodes:
+            e = e[: args.max_episodes]
+        episodes += e; ep_obj += [nm] * len(e)
+        print(f"  {sp}  -> {len(e)} episodes, object={nm!r}")
+    print(f"total: {len(episodes)} episodes across {len(srcs)} source(s)")
 
     out_root = args.root or HF_LEROBOT_HOME
     out_path = Path(out_root) / args.repo_id
@@ -149,7 +186,8 @@ def main() -> None:
         ], axis=1)
         ext = np.asarray(obs["image_cam_ext"])
         wrist = np.asarray(obs["image_cam_wrist"]) if args.cameras == "ext_wrist" else None
-        instruction = INSTRUCTIONS[ei % len(INSTRUCTIONS)]
+        phr = instructions_for(ep_obj[ei])
+        instruction = phr[ei % len(phr)]
         for t in range(T):
             base = image_tools.resize_with_pad(ext[t], S, S)
             ds.add_frame({
@@ -168,7 +206,9 @@ def main() -> None:
     print(f"\nDONE  {len(episodes)} episodes / {n_frames} frames -> {out_path}")
     print(f"cameras={args.cameras}  (wrist_image is "
           f"{'the real wrist view' if args.cameras=='ext_wrist' else 'ZEROS -- no wrist information'})")
-    print("instructions:", INSTRUCTIONS)
+    from collections import Counter
+    print("instructions:", sorted({i for n in set(ep_obj) for i in instructions_for(n)}))
+    print("episodes per object:", dict(Counter(ep_obj)))
 
 
 if __name__ == "__main__":

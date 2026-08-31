@@ -278,6 +278,78 @@ re-run with the full controls before any claim.
 
 ---
 
+## 4b. π0.5 / VLA BASELINE — training and evaluation
+
+**Constraint (user, 2026-08-30): openpi must not be modified.** `third_party/openpi` is a clean
+checkout at `215abfb`; `git status` there must stay empty. Everything below is either an existing
+openpi config + CLI overrides, or OUR code in `gentle_manip/pi05/` calling THEIR library.
+
+### The pipeline
+```
+demos (data.pkl, RGB obs)                    ← collect_demos_synth_v3 with an `images:` obs config
+  └─ pi05/convert_to_lerobot.py              → LeRobot dataset, libero's feature names
+       • ACTIONS ARE DERIVED, not recorded: 7-dim euler absolute from the 10-dim rot6d source
+         (the collector hardcodes rot6d), using the generalist's flags. See §0.
+       • per-object language instructions — a mixed-object set labelled with one object's name
+         teaches the model the instruction is NOISE.
+       • two camera variants from ONE dataset: `ext_wrist` and `ext` (wrist zero-filled, which is
+         openpi's own idiom for a missing camera).
+  └─ pi05/compute_norm_stats.py              → openpi norm stats
+       • wraps THEIR script: `scripts/compute_norm_stats.py` takes only a config NAME and cannot
+         override repo_id (unlike train.py, which is tyro-overridable). num_workers=0.
+  └─ scripts/train.py pi05_libero --data.repo-id … --batch-size … --num-train-steps …
+       • stock config + CLI only. `LiberoInputs` passes state/actions through with NO hardcoded
+         dimension; `LiberoOutputs` slices to 7 — which IS our action dim. Verified in their source.
+       • BUDGET: openpi's own custom-dataset examples (`pi0/pi05_aloha_pen_uncap`) use
+         **20k steps @ batch 64**; `pi05_libero` itself uses 30k @ 256. Use the former for a small
+         custom set, with `--save-interval` so an over-fit last checkpoint is not the only one.
+  └─ pi05/eval_harness.py                    → the CANONICAL harness (hard requirement #1)
+       • identity normalization, as `eval_dp3_harness.py` does for DP3 — openpi normalizes
+         internally, so the venv must not normalize on top.
+       • `--scene-group-size 1` (see §3.1: EvalSpec's default is 0 = ONE geometry).
+  └─ pi05/width_probe.py + plot_width_vs_size.py   → §3.1 / §3.2
+```
+
+### LoRA (`pi05/train_lora.py`) — why it cannot be CLI-only
+LoRA needs `paligemma_variant`/`action_expert_variant` = `*_lora` (strings, CLI-settable) **and**
+`freeze_filter = Pi0Config(...).get_freeze_filter()` — an `nnx` Filter OBJECT that tyro cannot
+build. Setting only the variants adds LoRA adapters and freezes NOTHING: a full fine-tune with
+extra parameters, the opposite of the intent. So the TrainConfig is built in our code from their
+classes and handed to their unmodified `main()`. Use LoRA as the COMPARISON to the full fine-tune
+in low-data regimes (50 demos ≈ 11k frames ≈ 116 epochs at openpi's recipe — where a 3B VLA
+overfits), not as a replacement: the pair is the result.
+
+### Two camera defects that only LOOKING caught (both fixed 2026-08-30)
+1. **Wrist camera inside the gripper.** `EE_T_CAM_WRIST` was an IDENTITY placeholder, so the camera
+   sat at the gripper base-link origin. All three of my geometric checks PASSED on it — a
+   round-trip check proves the pose we got is the pose we asked for, and says nothing about whether
+   the value is right. Fixed as a look-at 12 cm outward along gripper +x aimed at the fingertips
+   (7 cm was tried first and still read as partly inside). **Be suspicious of any calibration matrix
+   that is exactly identity or exactly zero.**
+2. **Neighbouring parallel envs visible in `cam_ext`.** Soft/MPM scenes cannot use
+   `env_separate_rigid`, so at `ENV_SPACING=2.5 m` every env's camera sees its neighbours — and they
+   MOVE, so they are dynamic distractors. The point cloud was never affected (it is cropped), which
+   is why RGB was the first thing to expose it. Fixed with an opt-in `backdrop` fixture, **BLACK**
+   (the arm is white; a light wall gives no contrast and blows out the frame), placed outside the
+   point-cloud crop so point-cloud experiments stay bit-identical.
+
+⚠ **Neither was visible in `videos/` or `render/*.mp4`** — those come from a separate free-flying
+camera. To judge what a policy SEES, decode `image_*` from the dataset (`pi05/visualize_rgb.py`).
+
+### Two infrastructure traps
+- **OOM at CHECKPOINT SAVE, not in training.** π0.5 trained fine and was OOM-killed while orbax
+  staged params (12.5 GiB) + train_state (37.5 GiB) into HOST memory, leaving a
+  `.orbax-checkpoint-tmp-*` that never finalized. Cause: SLURM's default per-CPU allocation gave
+  ~102 GB on a ~485 GB node. **Fix: `#SBATCH --mem=0`.** Checkpoint size depends on MODEL size, not
+  dataset size. *A smoke test must therefore run far enough to WRITE A CHECKPOINT — one that stops
+  at "loss went down" passes this and teaches nothing.* GPU-side levers, if ever needed:
+  `XLA_PYTHON_CLIENT_MEM_FRACTION=0.9`, `--fsdp-devices <n>`, disable EMA.
+- **Batched inference (`--batched-infer`).** openpi's `Policy.infer` is hardcoded to batch 1
+  (`x[np.newaxis,…]` in, `x[0,…]` out) but the `_sample_actions` it wraps is batch-capable, so an
+  N-env eval makes N model calls per step. We transform per env, stack, call the model ONCE, then
+  untransform. Opt-in and unverified until an equivalence check (same obs + fixed RNG through both
+  paths) passes — speed must not be bought with a silent behaviour change.
+
 ## 5. COMMON MISTAKES
 
 Each entry: what happened → how it was caught → the rule. Grouped by kind. Dates are when the
@@ -359,6 +431,14 @@ we ASKED for is the pose we GOT; it says nothing about whether the pose is the r
 spotted from a rendered frame that the camera was inside the gripper. **Rule: consistency checks
 validate plumbing, not values. For any calibrated constant, separately confirm the VALUE'S
 provenance — and be suspicious when a matrix is exactly identity or exactly zero.**
+
+**Subsetting episodes without remapping the join (2026-08-31, THIRD occurrence).**
+`filter_pinch_episodes.py` wrote the source `dr_params.csv` verbatim into its filtered output, so
+`dataset_idx` indexed the UNFILTERED order against a smaller `data.pkl`. Silent, because every
+stale index is individually valid. Previously the same class in `collect_demos_synth_v3` and `_v4`.
+**Rule: any script that DROPS or REORDERS episodes must remap every index that points at them, and
+the check is one line — the saved indices must be contiguous 0..n-1 against the new episode count.
+Run it after every such transformation.**
 
 ### 5.2 Protocol
 

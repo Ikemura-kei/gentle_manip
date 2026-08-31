@@ -6977,3 +6977,122 @@ never have shown that bug either.)
 Consistent across train and eval so it does not bias the comparison, but a plausible contributor to
 π0.5's weak absolute numbers — and exactly what a close, bright wrist view should help with, which
 is the hypothesis the ext-vs-ext+wrist arms test.
+
+### 2026-08-30 (night) — OVERNIGHT PLAN, left durable in case the session dies
+
+**RUNNING (21 jobs).** v4.1 collections, 500 eps each, 13 objects: 7 food (raspberry,
+cherry_tomato, tomato, tofu, strawberry, banana_chunk, mushroom) + 6 primitives (cylinder, sphere,
+lamp, cuboid, ellipsoid, torus). Every 500-run is gated `afterok` on its own 16-ep `--mesh-cycle`
+smoke, and smokes now record FULL renderings (upstream rule c03f9f3; my earlier smokes used
+`--record-video 4` — a violation). Recipe verbatim: p98, `--regrasp-prob 0.2`,
+`--grasp-extra-close auto`, no manual `--closure-gain`. 500 (not the handoff's 250) so all 13
+objects weigh equally in the generalist.
+
+Plus the π0.5 low-data pair: 25 mushroom + 25 tofu RGB episodes, **wrist camera 12 cm outside the
+gripper + BLACK backdrop** (user-approved from `.agent_tmp/obs_fixed_mushroom`).
+
+**THEN, unattended, in order:**
+1. Verify each collection (schema incl. `dataset_idx`/`scan_metric`, per-object sub-yield, success
+   vs the handoff table). Recover `data.pkl` with `scripts/merge_shards.py` for anything cut at its
+   walltime — shards survive, only the final merge is lost.
+2. **Document the final dataset composition** (per object: run dir, episodes, success, sub-yield).
+3. `.agent_tmp/build_generalist13.sh` — convert each slice with the generalist's derive flags
+   (7d euler target ← 10d rot6d source), merge, then launch the ×3 paired-reg generalist.
+   * **normalization is JOINT and AFTER the merge** (user requirement). `merge_npz_datasets`
+     already does this; the build now ASSERTS it — merged actions must SPAN [-1,1] (fitting inside
+     is not enough; per-slice normalization would also fit) and the joint stats must differ from at
+     least one slice's.
+   * **EPOCHS ARE SOLVED, NOT COPIED.** ddgrl = 350 epochs × (254,340/128) = **695,461 gradient
+     steps**. The 13-object set is ~5× larger, so 350 epochs would be ~5× the budget — a different
+     experiment. Solve `n_epochs` from the realised `train.npz`; scale `save_model_freq` by the same
+     ratio (projected 69 epochs / save every 10). Recompute at build time: per-object success rates
+     differ, so the realised count is not 13×500×199.
+   * paired term uses `paired_cube3_clouds_shift9.npz` (9 mm corrected; ddgrl used the UNcorrected
+     one). ⚠ residual **−8.4 mm x / +7.1 mm y** remains — the regulariser is being asked to equate
+     clouds that still differ. Flagged, not silently shipped.
+   * NO real co-training (real exists only for mushroom).
+4. π0.5 low-data: convert 50 demos → two FULL fine-tunes (ext-only, ext+wrist) at openpi's
+   documented small-dataset budget (20k @ batch 64) → controlled width-size probe
+   (`GM_FIXED_SCALES` + `GM_FIXED_POSE` + `GM_FIXED_YAW_DEG`, CHECKLISTS §3.2).
+5. **THEN LoRA** (user-approved): `gentle_manip/pi05/train_lora.py`, same two variants, as the
+   COMPARISON to the full fine-tune — 50 demos is exactly where a full fine-tune of a 3B VLA
+   overfits. LoRA is impossible via openpi's CLI (`freeze_filter` is an nnx Filter object, and
+   setting only the variant strings would add adapters while freezing NOTHING), so the config is
+   built in our code from their classes and handed to their unmodified `main()`.
+
+**OPEN QUESTIONS FOR THE MORNING (do not silently resolve):** the paired-cloud residual above;
+and whether the dark, low-contrast object in `cam_ext` is depressing π0.5's absolute numbers — the
+backdrop fixed the background, not the object's own lighting.
+
+### 2026-08-31 — ⚠ RASPBERRY v4.1 500-ep: 55% OF SAVED DEMOS EXCEED YIELD, and it is SIZE-DEPENDENT
+
+`26-08-30-iqe`, 500/500 saved, 99.0% demonstrator success — but **sub-yield 223/500 (44.6%)**,
+median peak top10 **1.02×** yield, max 1.28. The 16-ep smoke said 87.5% sub-yield and the handoff
+expected ~88%; its filtering step budgets "≤12% on raspberry". We have 55.4% over-yield.
+
+**IT IS A SIZE EFFECT, NOT NOISE.**
+
+| stratum | over-yield |
+|---|---|
+| small third (`scene_scale` < 0.93) | **85.6%** |
+| large third (`scene_scale` > 1.12) | **19.5%** |
+
+`corr(peak, scene_scale) = -0.524`, `corr(peak, grasp width_mm) = -0.621`,
+`corr(peak, closure_cmd_mm) = +0.468`, `corr(peak, mat_E) = +0.267`. Re-grasp and standard episodes
+are equally affected (54.3% vs 55.7%), so the `--regrasp-prob` start state is not the cause. The
+v4.1 p98 closure rule simply commands too firm a grasp on SMALL raspberries — and raspberry is
+already the smallest category (~1.5 cm), so scale 0.93 is a ~1.4 cm berry.
+
+**⚠ DO NOT "FIX" THIS BY FILTERING.** Dropping the 277 over-yield episodes leaves 223 that are
+SIZE-BIASED toward large berries — which would corrupt precisely the width-vs-size analysis this
+dataset exists to support (§3.1/§3.2), and would do so invisibly. A size-biased slice is worse than
+a smaller unbiased one.
+
+**WHY THE SMOKE MISSED IT.** 16 episodes, and `--mesh-cycle` cycles MESHES, not SCALES — the draw
+happened to land on kinder (larger) samples: smoke median peak 0.81 vs 1.02 over 500. *A 16-episode
+smoke cannot see a stratified failure that only appears in one third of the size range.* The
+guardrail is still worth keeping (it caught torus's walltime), but it certifies "runs and is
+schema-clean", not "the data is gentle across the DR range".
+
+**THIS ALSO QUESTIONS THE p98-vs-masked DECISION.** Upstream chose p98 over `masked` specifically
+because "the raspberry saves demos at only 56% sub-yield" under masked. At 500 episodes, p98 on
+raspberry gives 44.6% sub-yield — i.e. p98 is behaving on the full run the way masked did on the
+smoke that disqualified it. Both metrics were compared on 16-episode runs; that sample cannot
+resolve a size-stratified effect either.
+
+**OPEN — needs a decision, not a silent workaround:** (a) re-collect raspberry with a size-aware
+closure floor, (b) drop raspberry from the generalist, or (c) keep it and report the dataset's
+sub-yield honestly per object. Every other finished object is clean: tomato 99.8%, tofu 100.0%,
+mushroom 99.8%.
+
+### 2026-08-31 — RASPBERRY: pinch-filtered and KEPT (user decision), with the residuals documented
+
+User's call: filter and keep, rather than re-collect or drop. `26-08-30-iqe` → `-iqe-filt`.
+
+| | before | after pinch filter |
+|---|---|---|
+| episodes | 500 | **307** (193 dropped) |
+| sub-yield | 44.6% | **60.9%** |
+| peak top10/yield (median) | 1.02 | 0.94 |
+
+**The filter finds real artifacts.** 81.3% of DROPPED episodes were also over-yield vs 39.1% of
+KEPT — pinches (object dangling from the fingertips, near-minimum width) and crushes are largely
+the same episodes, which is what the user saw in the rendered videos.
+
+**TWO RESIDUALS THAT MUST TRAVEL WITH THIS DATASET:**
+1. **120 of the 307 survivors (39.1%) still exceed yield.** Filtering mitigates, it does not fix.
+2. **The kept set is SIZE-SKEWED.** Small raspberries are both likelier to be pinched AND likelier
+   to be crushed, so filtering removes them preferentially: small-third share **32.0% → 14.0%**,
+   median `scene_scale` 1.027 → 1.105. Acceptable as a mild distribution shift for GENERALIST
+   TRAINING; **NOT acceptable for a raspberry width-vs-size claim** — 14% small examples cannot
+   support a size slope, so raspberry is EXCLUDED from per-object width-size conclusions (§3.1/3.2).
+3. Raspberry therefore contributes **307** episodes where every other object contributes 500 —
+   unequal weighting, to be stated wherever the dataset is described.
+
+**⚠ BUG FOUND AND FIXED IN `filter_pinch_episodes.py`:** it copied the source `dr_params.csv`
+verbatim into the filtered run dir, so `dataset_idx` still indexed the UNFILTERED episode order
+(0..499) against a 307-episode `data.pkl`. Every DR-param↔episode join on a filtered dataset would
+have paired the WRONG rows — silently, because the stale indices are all individually valid. Now
+remapped (kept rows renumbered 0..n-1, dropped marked -1) and verified contiguous. Same broken-join
+class as the v3/v4 `dataset_idx` fixes; that makes three occurrences, so **treat "does the join
+survive this transformation?" as a standing check for any script that subsets episodes.**
