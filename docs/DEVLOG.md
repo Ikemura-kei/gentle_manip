@@ -444,6 +444,53 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-31 — WHY lamp/cylinder/sphere/torus succeed at only 19-57 % while mushroom hits ~100 %:
+a three-layer analysis (observation only; v4.1 frozen, nothing modified).**
+
+Per-attempt planner metrics (`dr_params.csv`) for ALL attempts including failures, prims vs the
+food anchors, success-vs-failure medians:
+
+| object | succ | align S/F | min_pad S/F (mm2) | tilt S/F (deg) | closure S/F (mm) |
+|---|---|---|---|---|---|
+| prim_cuboid | 92 % | 0.93/0.79 | 378/69 | 0/9 | 8.0/3.0 |
+| prim_ellipsoid | 71 % | 0.95/0.81 | 129/45 | 0/8 | 8.0/2.5 |
+| prim_lamp | 59 % | 0.94/0.85 | 90/40 | 0/16 | 8.0/8.0 |
+| prim_cylinder | 56 % | 0.96/0.81 | 437/75 | 0/15 | 8.0/6.9 |
+| prim_sphere | 50 % | 0.94/0.80 | 88/46 | 13/13 | 8.0/7.8 |
+| prim_torus | 18 % | 0.72/0.72 | 44/31 | 7/12 | 3.4/3.1 |
+| mushroom (p98) | 100 % | 0.94/– | 42/– | 0/– | – |
+| tofu (p98) | 67 % | 0.96/0.78 | 177/76 | 0/14 | 8.0/3.4 |
+
+**Layer 1 — the user's observation is confirmed: pinch/edge POSES exist and NEVER lift.**
+Defining a poor pose as align < 0.75 OR min_pad < 10 mm2: they are 12-22 % of attempts on
+lamp/cylinder/sphere and their success is **0 %** (0/16 pooled). On the TORUS they are **62 %** of
+attempts (success 16 %) — the ring's geometry makes a flush two-pad pose rare, and this alone
+explains most of its 19 %. (Selection can only pick the best of what CMA finds; on a torus the
+feasible pool itself is mostly edge grasps. Documented, not fixed — freeze.)
+
+**Layer 2 — but good poses still only lift 64-70 % on the curved soft prims** (vs 92 % cuboid), so
+pose quality is only half the gap. Among GOOD poses, failures differ from successes by:
+- **tilt**: successes are almost exactly top-down (0 deg median); failures 8-16 deg. A tilted
+  approach on a curved soft surface slides.
+- **commanded closure**: successes cluster AT the 8 mm cap; failures at 2.5-7 mm — the familiar
+  under-command signature: tofu material has yield strain sigma_y/E = 40 %, so the p98 crossing is
+  DEEP and pose-noisy; shallow-scan poses get gentle commands that slip.
+- **min_pad**: successes carry ~2-6x the pad contact of failures — curvature shrinks the patch.
+
+**Layer 3 — the material force budget explains mushroom vs everything.** Staying sub-yield caps
+the contact pressure at sigma_y; friction capacity ~ 2*mu*sigma*A. The mushroom has 6x the E and
+2x the yield of tofu material: at the same gentleness fraction it generates several times the grip
+force, so even its modest 42 mm2 patches hold with margin (~100 %). Tofu-material prims at 0.4-0.6x
+of a LOW yield (20 kPa) have thin margins that only survive with a LARGE patch: flat faces
+(cuboid 378 mm2, tofu-cube 177 mm2) -> 67-92 %; curved patches (88-129 mm2) -> 50-71 %; the
+66 g cylinder needs the most force of all (3.4x the mushroom's mass) yet has line contact.
+
+**One sentence:** low success = (a) a minority of pinch/edge poses that never lift — dominant on
+the torus; (b) on good poses, soft-material sub-yield force ceilings x curvature-shrunk contact
+patches x tilt sensitivity — the price of erring gentle on soft curved objects, paid in unsaved
+attempts, never in saved-demo quality (100 % sub-yield throughout).
+
+
 **2026-08-31 — PRIMITIVES SMOKE COMPLETE (6 x 16 eps, frozen v4.1, full renderings). Sub-yield is
 100 % ON EVERY OBJECT; success orders EXACTLY by local contact flatness. Recipe untouched.**
 
