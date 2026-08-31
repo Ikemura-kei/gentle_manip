@@ -851,3 +851,16 @@ Per category now: banana 500+, kiwi ~166, egg ~163, mushroom ~160, + small 4.
   {home,near_object}.
 - ETA: stage+convert ~20-30min, pretrain ~4-8h, gen_eval ~5-6h. Watch
   logs/slurm_logs/1826461.out + _pretrain.log.
+
+---
+## 2026-08-31 13:10 — gen8 reconfigured per user, resubmitted
+- User: drop strict-home baseline; baseline = ALL data EXCEPT failed_grasp (recovery)
+  family; scale model for the larger set.
+- Cancelled 1826461/1826462. _gen8_stage.py gained --exclude-modes. baseline VARIANT
+  now uses `--exclude-modes failed_grasp` (was `--modes home,near_object`).
+- MODEL SCALE-UP (both gen8 pre+eval cfgs, kept byte-identical apart from env:):
+  mlp_dims [512,512,512]->[768,768,768], visual_feature_dim 256->384, batch 128->256,
+  n_epochs 250->300, warmup 100->150, early_stop_patience 8->15.
+- Resubmitted: 1826960 (regrasp, all modes) + 1826961 (baseline, minus failed_grasp).
+  Both PENDING. Each: stage->convert->BC pretrain 300ep->auto yd_gen_eval (8+4 x100,
+  scene_group_size 1). Commit 8c... pushed to cross-category-dp? NO -- user must push.

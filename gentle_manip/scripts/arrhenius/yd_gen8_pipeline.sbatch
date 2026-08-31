@@ -14,7 +14,7 @@
 #   VARIANT=baseline sbatch gentle_manip/scripts/arrhenius/yd_gen8_pipeline.sbatch
 #SBATCH -J yd_gen8
 #SBATCH -N 1
-#SBATCH -t 20:00:00
+#SBATCH -t 12:00:00
 #SBATCH -A naiss2026-3-141-gpu
 #SBATCH -p gpu
 #SBATCH --gres=gpu:1
