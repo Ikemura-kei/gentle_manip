@@ -33,9 +33,10 @@ for flag, var in (("--baseline", "baseline"), ("--baseline-width", "bwidth")):
             baseline = val
         else:
             bwidth = val
-assert baseline in ("naive", "antipodal") and bwidth in ("own", "v41")
+assert baseline in ("naive", "antipodal", "rigid") and bwidth in ("own", "v41")
 
-_impl = {"naive": baseline_synth.naive_topdown, "antipodal": baseline_synth.antipodal}[baseline]
+_impl = {"naive": baseline_synth.naive_topdown, "antipodal": baseline_synth.antipodal,
+         "rigid": baseline_synth.rigid_planner}[baseline]
 _orig_scan = C.surrogate_closure
 _seed = [0]
 

@@ -10,6 +10,12 @@ Two baselines for the paper's comparison (docs/paper/synthesis_experiments.md, E
               geometrically feasible ones, rank by CONE MARGIN (the honest two-hard-contact
               stand-in for Ferrari-Canny epsilon, which is identically zero for two frictional
               point contacts in 6D). Width = pair distance − 2 mm.
+  rigid     — the STRONG rigid-body planner (so a v4.1 win is attributable to
+              gentleness-awareness, not search budget): stage 1 sweeps a LARGE antipodal
+              candidate set (n_samples 4000) by cone margin; stage 2 re-ranks the top-K
+              candidates with the full geometric scorer — flush alignment, worst-pad contact
+              area, COM lever, holdability — i.e. every quantity our FEM scorer computes EXCEPT
+              stress. GPD-style two-stage architecture on the privileged mesh.
 
 Both are gentleness-blind BY DESIGN: no stress term anywhere. Geometric validity (table, gross
 penetration, jaw capture) is checked with the same ladder the FEM synthesis uses, so failures of
@@ -111,3 +117,65 @@ def antipodal(obj, pad_geo, obj_com, obj_quat_wxyz, *, E=3e5, density=1000.0, mu
         return {"x": None, "stress_top10": None, "baseline": "antipodal"}
     return {"x": best[1], "stress_top10": 1.0, "grip": 0.0, "align": 0.0, "pressure": None,
             "min_pad_area": 0.0, "width_face": None, "baseline": "antipodal"}
+
+
+def rigid_planner(obj, pad_geo, obj_com, obj_quat_wxyz, *, E=3e5, density=1000.0, mu=0.7,
+                  table_z=0.0, seed=0, n_samples=4000, top_k=40, yaw_max_deg=None, **_ignored):
+    """Two-stage rigid-body planner: large antipodal sweep -> geometric re-rank (no stress).
+
+    rigid_score = align − 5·lever/obj_size + 0.3·min(min_pad/50mm2, 1), holdable candidates only.
+    All quantities from the same scorer v4.1 uses, with the stress terms EXCLUDED — the exact
+    gentleness-awareness ablation at matched candidate quality."""
+    rng = np.random.default_rng(seed)
+    q = np.asarray(obj_quat_wxyz, float)
+    R = Rot.from_quat([q[1], q[2], q[3], q[0]])
+    com = np.asarray(obj_com, float)
+    bidx = np.unique(boundary_faces(obj.tets)[0])
+    P = R.apply(obj.verts[bidx]) + com
+    N = R.apply(boundary_normals(obj)[bidx])
+    cone = np.arctan(mu)
+    hi = np.pi / 2 if yaw_max_deg is None else np.radians(float(yaw_max_deg))
+    obj_size = float((obj.verts.max(0) - obj.verts.min(0)).max())
+
+    cands = []
+    ii = rng.integers(0, len(P), n_samples)
+    jj = rng.integers(0, len(P), n_samples)
+    for i, j in zip(ii, jj):
+        if i == j:
+            continue
+        d = P[j] - P[i]
+        L = np.linalg.norm(d)
+        if L < 0.008 or L > 0.079:
+            continue
+        d /= L
+        if abs(d[2]) > AXIS_Z_MAX:
+            continue
+        a1 = np.arccos(np.clip(np.dot(N[i], -d), -1, 1))
+        a2 = np.arccos(np.clip(np.dot(N[j], d), -1, 1))
+        margin = cone - max(a1, a2)
+        if margin <= 0:
+            continue
+        yaw = (float(np.arctan2(d[0], -d[1])) + np.pi / 2) % np.pi - np.pi / 2
+        if abs(yaw) > hi + 1e-6:
+            continue
+        mid = 0.5 * (P[i] + P[j])
+        cands.append((margin, mid, yaw, L))
+    cands.sort(key=lambda c: -c[0])
+
+    best = None
+    for margin, mid, yaw, L in cands[:top_k]:
+        x = _topdown_x(mid[0], mid[1], yaw, L - SQUEEZE_M, obj, pad_geo, table_z)
+        sc = fg.score_finger_grasp(obj, x, obj_com=com, obj_quat_wxyz=q, pad_geo=pad_geo,
+                                   E=E, density=density, mu=mu, table_z=table_z)
+        if sc.get("status") != "ok" or not sc.get("holdable"):
+            continue
+        align = float(sc.get("align") or 0.0)
+        lever = float(sc.get("com_lever") or 0.0)
+        pad = float(sc.get("min_pad_area") or 0.0)
+        rigid_score = align - 5.0 * lever / max(obj_size, 1e-6) + 0.3 * min(pad / 50e-6, 1.0)
+        if best is None or rigid_score > best[0]:
+            best = (rigid_score, x)
+    if best is None:
+        return {"x": None, "stress_top10": None, "baseline": "rigid"}
+    return {"x": best[1], "stress_top10": 1.0, "grip": 0.0, "align": 0.0, "pressure": None,
+            "min_pad_area": 0.0, "width_face": None, "baseline": "rigid"}
