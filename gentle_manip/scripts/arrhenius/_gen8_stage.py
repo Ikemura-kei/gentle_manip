@@ -60,10 +60,12 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("out_dir", type=Path)
     ap.add_argument("--modes", default="", help="comma list of start_mode to KEEP (empty = all)")
+    ap.add_argument("--exclude-modes", default="", help="comma list of start_mode to DROP")
     ap.add_argument("--per-cat-cap", type=int, default=0, help="unused placeholder (cat unknown here)")
     args = ap.parse_args()
 
     keep = set(m.strip() for m in args.modes.split(",") if m.strip())
+    drop = set(m.strip() for m in args.exclude_modes.split(",") if m.strip())
     run_dirs: list[Path] = []
     for g in SRC_GLOBS:
         run_dirs += sorted(DEMOS.glob(g))
@@ -90,6 +92,8 @@ def main() -> None:
         n0 = len(eps)
         if keep:
             eps = [e for e in eps if e.get("start_mode") in keep]
+        if drop:
+            eps = [e for e in eps if e.get("start_mode") not in drop]
         for e in eps:
             mode_counts[e.get("start_mode", "?")] += 1
         all_eps.extend(eps)
@@ -106,6 +110,7 @@ def main() -> None:
         "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "staged_from": [str(p) for p in run_dirs],
         "modes_filter": sorted(keep) or "all",
+        "modes_excluded": sorted(drop) or "none",
         "src_counts": dict(src_counts),
         "mode_counts": dict(mode_counts),
     }

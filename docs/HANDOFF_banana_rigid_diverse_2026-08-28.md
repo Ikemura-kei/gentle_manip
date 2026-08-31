@@ -803,3 +803,51 @@ Per category now: banana 500+, kiwi ~166, egg ~163, mushroom ~160, + small 4.
   reserved GPU at 1 job's pool cost. Submitted 1815726 (PENDING on pool; starts when
   a slot frees). Cancelled the single-collector standby 1815706.
 - Currently RUNNING: 1805147 (large, 632), 1812536 (small, 258), 1815690 (small, ~0).
+
+---
+## 2026-08-31 12:15 — collection ~99% total, QUOTA BUG found, mushroom top-up
+- Per-cat (reliable mode-parse): banana 500 · egg 596 · kiwi 496 · grape 548 · tomato 574
+  · cherry 478 · raspberry 432 · MUSHROOM 372. total ~3996.
+- BUG: collect_demos_diverse_start_v2 per-cat quota is PER-COLLECTOR not global. 4
+  concurrent small-pool collectors each seeded CAT_HAVE from other logs AT STARTUP +
+  counted only their own saves -> none individually crossed 500 -> grape/tomato
+  overshot to 550-590 while raspberry/mushroom undershot. (Fix later: global tally
+  file, or single small collector.)
+- ACTION: killed 1815690 + pack 1815807 (over-collecting grape/tomato). Added
+  configs/dr/xcat_mushroom_only.yaml + experiments/single_lift_xcat_mushroom.yaml
+  (pool=[mushroom]). Submitted 1824898/1824899 (yd_mush60/61, mushroom-only,
+  write into single_lift_xcat_regrasp/) -- PENDING on GRES pool. 1805147 still
+  runs [mushroom,kiwi]; 1812536 small until walltime ~13:50.
+- PLAN: if mushroom >= ~450 by ~12:40 OR top-up jobs still pending -> FIRE gen8
+  pipelines regardless (mushroom ~9% of set is acceptable; top-up+retrain if it
+  evals weak). yd_gen8_pipeline.sbatch (regrasp) + VARIANT=baseline both ready.
+
+---
+## 2026-08-31 12:44 — GEN8 PIPELINES FIRED
+- Per-cat FINAL-ish (reliable mode-parse): banana 500 · kiwi 506 · egg 596 · grape 565
+  · tomato 588 · cherry 478 · raspberry 435 · mushroom 409. total ~4077.
+- Submitted 1826461 (yd_gen8 VARIANT=regrasp) + 1826462 (VARIANT=baseline). Both
+  PENDING on GRES pool (ikemura + my collectors full). They stage -> convert ->
+  BC pretrain 250ep -> auto-submit yd_gen_eval (8 in-domain + 4 OOD x100, scene_group_size 1).
+- Killed 1812536 (redundant small). KEPT 1805147 + 1824898/1824899 (all mushroom-only
+  now) running -- gen8 stage reads disk at RUN time, so more mushroom before it starts
+  is a bonus. Next tick: if gen8 still PENDING, leave collectors; when gen8 STARTS,
+  cancel the mushroom collectors (shard-only dirs are merged by _gen8_stage.py, but its
+  20-min fresh-shard guard means cancel >20min before stage, or accept losing the last
+  ~20min of mushroom).
+- CAVEAT to record in the pretrain EXPERIMENT.md: mushroom ~410/500 (10% vs ~12.5%
+  even) due to the per-collector quota bug; top-up + retrain if mushroom evals weak.
+
+---
+## 2026-08-31 12:54 — GEN8 RUNNING (collectors cancelled)
+- Cancelled 1805147 + 1824898/1824899 (mushroom ~430/500 final -- acceptable, per-cat
+  quota bug capped it). Freed GRES -> 1826461 (regrasp) + 1826462 (baseline) both
+  STARTED (n92 / n119, 20h wall).
+- Shard-only dirs to be merged by _gen8_stage.py: 26-08-30-kwb (157), 26-08-31-pbt (23),
+  -bdt (4), -nqu (5). _gen8_stage.py merges unconditionally (no age guard).
+- Pipeline each: stage(all xcat + soft-banana + shard merges) -> convert(pointcloud,
+  student view) -> BC pretrain 250ep -> auto-submit yd_gen_eval (8 in-domain + 4 OOD
+  x100, scene_group_size 1). baseline VARIANT filters episodes to start_mode in
+  {home,near_object}.
+- ETA: stage+convert ~20-30min, pretrain ~4-8h, gen_eval ~5-6h. Watch
+  logs/slurm_logs/1826461.out + _pretrain.log.

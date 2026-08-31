@@ -1,11 +1,15 @@
-# [dppo-pretrain] BC-pretrain a PointNet diffusion policy on RIGID banana diverse-start
-# lift demos (OmniReset-inspired regrasp campaign, rigid surrogate).
+# [dppo-pretrain] NON-REGRASPABLE baseline for the 8-object cross-category generalist:
+# BYTE-IDENTICAL to single_lift_gen8_regrasp_pcd/pre_diffusion_pointnet.yaml except `env:`.
+# Its dataset (staged by yd_gen8_pipeline VARIANT=baseline) is the SAME ~4k demos MINUS
+# the failed_grasp (post-failure recovery) start family -- same objects, same direct-start
+# diversity, no recovery examples. This is the control for the 3-metric comparison
+# (SR / gentleness / SRxgentleness); keep the two cfgs in lock-step.
 # Used by: third_party/dppo/script/run.py (TrainDiffusionAgent) via gentle_manip.dppo.train
 # Status: experimental
 #
-# cond_steps=8 / pc_cond_steps=4 carried over from single_lift_banana_soft_easy_pcd:
-# regrasp needs the policy to read the *trend* (gripper settled on object vs closing on
-# nothing; object falling away after a slip), not a single instant.
+# cond_steps=8 / pc_cond_steps=4: read the *trend*, not one instant.
+# Model + schedule scaled for the ~8x larger dataset: mlp_dims 768x3, visual_feature_dim
+# 384, batch 256, epochs 300, early-stop patience 15.
 defaults:
   - _self_
 hydra:
@@ -32,7 +36,7 @@ horizon_steps: 4
 cond_steps: 8
 pc_cond_steps: 4
 n_points: 1024
-visual_feature_dim: 256
+visual_feature_dim: 384
 
 wandb:
   entity: ${oc.env:DPPO_WANDB_ENTITY,null}
@@ -41,19 +45,19 @@ wandb:
   group: dppo-pretrain
 
 train:
-  n_epochs: 250
-  batch_size: 128
+  n_epochs: 300
+  batch_size: 256
   learning_rate: 1e-4
   weight_decay: 1e-6
   lr_scheduler:
     first_cycle_steps: ${train.n_epochs}
-    warmup_steps: 100
+    warmup_steps: 150
     min_lr: 1e-5
   epoch_start_ema: 10
   update_ema_freq: 5
   save_model_freq: 25
   val_freq: 10
-  early_stop_patience: 8
+  early_stop_patience: 15
   early_stop_min_delta: 1e-4
 
 model:
@@ -68,7 +72,7 @@ model:
     pc_cond_steps: ${pc_cond_steps}
     visual_feature_dim: ${visual_feature_dim}
     time_dim: 16
-    mlp_dims: [512, 512, 512]
+    mlp_dims: [768, 768, 768]
     activation_type: ReLU
     residual_style: True
     pointnet:

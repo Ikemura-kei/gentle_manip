@@ -4,7 +4,10 @@
 #
 # Two variants (env VARIANT):
 #   regrasp  (default): ALL start modes -> single_lift_gen8_regrasp_pcd
-#   baseline           : home + near_object only (non-regraspable) -> single_lift_gen8_baseline_pcd
+#   baseline           : ALL modes EXCEPT failed_grasp (the post-failure recovery
+#                        family) -> single_lift_gen8_baseline_pcd. Same object
+#                        coverage + same direct-start diversity as regrasp, only the
+#                        recovery demos removed -> a fair non-regraspable control.
 #
 # Submit both:
 #   sbatch gentle_manip/scripts/arrhenius/yd_gen8_pipeline.sbatch
@@ -23,21 +26,21 @@ REPO=/nobackup/proj/disk/softenable-codesign26/personal/yifeid/gentle_manip
 source "$REPO/gentle_manip/scripts/arrhenius/yd_env_common.sh"
 
 VARIANT=${VARIANT:-regrasp}
+STAGE_ARGS=()
 if [ "$VARIANT" = "baseline" ]; then
   ENV_NAME=single_lift_gen8_baseline_pcd
-  MODES="home,near_object"
+  STAGE_ARGS=(--exclude-modes failed_grasp)   # drop only the post-failure recovery family
 else
   ENV_NAME=single_lift_gen8_regrasp_pcd
-  MODES=""
 fi
 CFG_DIR=$REPO/gentle_manip/dppo/cfg/$ENV_NAME
 STAGE=$REPO/dataset/demos/_gen8_${VARIANT}
 EXPERIMENT=${EXPERIMENT:-single_lift_xcat_diverse}          # obs-key order for convert (student view)
-echo "[gen8] variant=$VARIANT env=$ENV_NAME modes='${MODES:-all}' stage=$STAGE"
+echo "[gen8] variant=$VARIANT env=$ENV_NAME stage_args='${STAGE_ARGS[*]:-none}' stage=$STAGE"
 
 echo; echo "========== stage demos =========="
 uv run --project envs/dppo_arrhenius --no-sync python \
-  "$REPO/gentle_manip/scripts/arrhenius/_gen8_stage.py" "$STAGE" ${MODES:+--modes "$MODES"}
+  "$REPO/gentle_manip/scripts/arrhenius/_gen8_stage.py" "$STAGE" "${STAGE_ARGS[@]}"
 [ -f "$STAGE/data.pkl" ] || { echo "[gen8] staging produced no data.pkl"; exit 1; }
 
 if [ "${SKIP_TRAIN:-0}" = "1" ] && [ -n "${RUN_DIR:-}" ]; then
