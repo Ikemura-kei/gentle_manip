@@ -110,3 +110,10 @@ obj_meshes/*/_*.png
 # report.json + _selection.json are the artifacts; the renders are large and regenerable.
 obj_meshes/*/selected/*.mp4
 obj_meshes/*/selected/*.gif
+# E1 external-baseline clones (setup recipes: grasp_synthesis/learned_baselines/SETUP.md)
+third_party/gpd/
+third_party/contact_graspnet/
+third_party/graspnet-baseline/
+third_party/graspnetAPI/
+third_party/gn1b_venv/
+third_party/cgn_venv/

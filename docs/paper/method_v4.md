@@ -1,9 +1,15 @@
 # Gentleness-aware grasp synthesis, v4 — complete method & validation reference
 
-Written 2026-08-30 for paper drafting: every number verified against `collect_demos_synth_v4.py`
-and `smgrasp/` on this date. Prose is deliberately close to paper register so paragraphs can be
-lifted and trimmed. ⚠ marks facts that must not be overstated (cross-checked against
-`../grasp_synthesis_model.md`, the DO-NOT-CLAIM ledger).
+Written 2026-08-30 for paper drafting; **re-audited 2026-08-31 against the FROZEN v4.1 code**
+(`collect_demos_synth_v4.py` + `smgrasp/`): A.9/A.10 verified line-by-line — scan metric
+default `p98`, gain auto-resolves 4.92 (masked variant 1.31 remains a CLI option), closure
+clip [0.8, 8] mm, scan step 0.5 mm / depth 12 mm, firm base 0.0 (no unconditional firm in v4;
+the 2.0/2.5 mm `FIRM_*` module constants are v3-era leftovers overridden at runtime), weak
+fallback 0.5·c_cmd ≤ 2 mm at a 5 %-of-σ_y stress-rise threshold, success = raised > 0.10 m.
+Prose is deliberately close to paper register so paragraphs can be lifted and trimmed. ⚠ marks
+facts that must not be overstated (cross-checked against `../grasp_synthesis_model.md`, the
+DO-NOT-CLAIM ledger). Baseline comparisons: B.5 / `synthesis_experiments.md` §4; related work:
+`related_work_synthesis.md`.
 
 ---
 
@@ -226,7 +232,8 @@ Rank-perfect ordering — precisely the pattern the analytic rule mispredicted i
 with a conservative bias stable enough for one global λ. ⚠ n = 4 objects, bracketed measurements;
 the 7-object v4 outcome table is the direct test of λ-transfer.
 
-### B.3 v4 outcomes per object (16-episode runs, own material; **in progress**)
+### B.3 v4 outcomes per object (16-episode runs, own material; COMPLETE — this A/B chose the
+frozen v4.1 recipe)
 
 Both scan metrics, 16-episode runs per object, both bars = success ≥ 60 % AND sub-yield ≥ 80 %:
 
@@ -260,8 +267,15 @@ must either hold the operating point sub-yield (our choice, enforced by A.9) or 
 work. This is presentable as a finding, and motivates the plastic-excess objective
 (`Σ max(σ−σ_y,0)·V` from the same solve) as future work.
 
-### B.5 Still required before comparative claims
+### B.5 Comparative claims — E1/B2 baseline grid (COMPLETE, 2026-08-31)
 
-A gentleness-blind baseline (antipodal sampling + rigid wrench metric, executed through the same
-v4 executor) — experiment E1 of `synthesis_experiments.md`. Until it runs, every gentleness number
-above compares the pipeline only to itself.
+The gentleness-blind baseline requirement is met: a 31-run grid (naive top-down, antipodal +
+cone-margin, GPD [ten Pas et al. 2017], and a stress-blind geometric re-ranker, × 6 objects,
+same frozen executor, + width-swap factorization runs) is complete. Full tables, five findings,
+and the run/video map: `synthesis_experiments.md` §4; related-work positioning:
+`related_work_synthesis.md`. Headline: v4.1 is the only method holding success AND sub-yield
+stress simultaneously across the object set; the width-swap runs show the surrogate closure
+transfers to decent pose generators but does not rescue weak poses (raspberry: closure on GPD
+poses secures them past yield) — joint pose+closure optimization is the operative mechanism.
+Honest exceptions (lamp: area-floor limitation; sphere: trivial geometry; cherry: firm closure)
+are recorded there and belong in the limitations text.
