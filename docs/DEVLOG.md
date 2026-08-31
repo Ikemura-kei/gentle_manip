@@ -444,6 +444,30 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-31 — PROBE ANSWER: yes, a hard min-contact-area floor helps the lamp. 57.1 % -> 72.7 %
+at 100 % sub-yield, zero synthesis failures. OFF-RECIPE — the frozen v4.1 recipe is unchanged;
+this is a post-deadline v4.x candidate and paper-analysis material.**
+
+User question: "would raising the min contact area help the lamp?" Probe: lamp_mush, 16 eps,
+frozen recipe EXCEPT `--grasp-area-min-mm2 50` (hard) instead of `auto`
+(run `single_lift_prim_lamp_mush_soft/26-08-31-qpo`, clearly labelled ANALYSIS PROBE):
+
+| lamp_mush | success | sub-yield | median stress | synth failures |
+|---|---|---|---|---|
+| frozen recipe (auto floor) | 57.1 % | 100 % | 0.61x | 0 |
+| hard floor 50 mm2 | **72.7 %** | 100 % | 0.44x | **0** |
+
+The floor pruned the thin-pad neck/edge poses (failure min_pad 64 vs success 91 mm2) at zero
+feasibility cost — the on-record prediction ("modest at best, may even drop; pools may collapse
+to fallbacks") was too pessimistic; the user's instinct was right. The residual failures remain
+TILT-separated (0 vs 10 deg), which an area floor cannot bound — that is the 72.7 -> 100 gap and
+would need the (weight-0) w_tilt term or a hard tilt bound in a future version.
+
+Filed as v4.x candidate: object-conditional? No — the probe suggests a HIGHER GLOBAL hard floor
+might help geometry-limited shapes at no cost to others (cuboid/ellipsoid pads are huge), but that
+is untested cross-object and NOT for now. Freeze holds.
+
+
 **2026-08-31 — MATERIAL A/B COMPLETE on all six primitives (same meshes, same frozen recipe,
 tofu vs mushroom material). The force-budget theory holds with one honest miss.**
 
