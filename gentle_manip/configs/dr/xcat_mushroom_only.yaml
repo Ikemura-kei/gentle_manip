@@ -1,0 +1,18 @@
+# [dr] Mushroom-only top-up collection DR: same as xcat_diverse_regrasp but the
+# category pool is pinned to mushroom (the slow-yield laggard whose cap/stem shape
+# drives crush-gate rejects). Used to bring mushroom to parity after the 4-way
+# concurrent small-pool collectors left it undershooting the per-cat target.
+# Used by: yd_xcat_collect.sbatch with EXPERIMENT=single_lift_xcat_diverse DR override
+# Status: experimental
+object_pos_xy: 0.09
+object_yaw_deg: 180
+object_pitch_roll_deg: 14
+robot_init_pos_xyz: 0.03
+
+object_category_pool: ["mushroom"]
+
+object_scale:      [0.88, 1.15]
+object_axis_scale: [0.90, 1.10]
+object_bend_deg:   [-4.0, 4.0]
+object_twist_deg:  [-4.0, 4.0]
+object_taper:      [-0.03, 0.03]
