@@ -444,6 +444,24 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-31 — PRIMITIVES SWAPPED TO MUSHROOM MATERIAL (user-approved object-definition change;
+v4.1 recipe untouched). Cluster had NOT started prim collection, so no data forks. Smoke rerunning.**
+
+Follow-up to the three-layer analysis: the force-budget layer predicts that the mushroom material
+(E 3e5, yield 4e4 — 6x stiffer, 2x the yield of tofu) lifts the curved prims into the ~75-90 %
+band via two compounding channels (higher sub-yield force ceiling; deeper p98 commanded closures).
+The user approved the swap explicitly. Changes: the six `prim_*` registry entries now reference
+`MATERIALS["mushroom"]` (`MATERIALS["tofu"]` itself untouched — it is shared with the food tofu);
+prim DR ranges E [2.0e5, 3.0e5], nu [0.32, 0.38], rho [900, 1000]. Task substeps already exceed
+the mushroom-stable minimums (235@250 / 190@200 vs 210@250 needed) — unchanged. **No v4.1
+synthesis/executor parameter was modified.**
+
+The tofu-material smoke runs stay on disk as the material half of a clean same-shape A/B
+(tofu-material: cuboid 92 / ellipsoid 71 / lamp 59 / cylinder 56 / sphere 50 / torus 18 %, all
+100 % sub-yield). Predictions to check against the rerun: curved prims ~75-90 %; torus improves
+little (its failure is pose-driven: 62 % edge/pinch poses).
+
+
 **2026-08-31 — WHY lamp/cylinder/sphere/torus succeed at only 19-57 % while mushroom hits ~100 %:
 a three-layer analysis (observation only; v4.1 frozen, nothing modified).**
 
