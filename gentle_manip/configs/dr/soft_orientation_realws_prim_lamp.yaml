@@ -1,4 +1,4 @@
-# [dr] mushroom-material primitive (swapped from tofu 2026-08-31) 'prim_lamp' — tofu template, narrowed scale.
+# [dr] tofu-material primitive 'prim_lamp' — tofu template, narrowed scale.
 # Used by: experiments single_lift_tofu_soft_abs_action_armfocus_{realws,7d_realws}
 # Status: experimental (second object category)
 #
@@ -35,7 +35,7 @@ object_axis_scale: [0.95, 1.05]  # near-cubic aspect only
 # Bounded for MPM stability at the tuned substeps (210): stable substeps ∝ √E, so we keep E on
 # the SOFT side of the tuned 3e5 (softer = fewer substeps needed = always stable). yield stays
 # from the registry material.
-object_E: [2.0e5, 3.0e5]     # mushroom firmness range (material swapped 2026-08-31)
-object_nu: [0.32, 0.38]
-object_rho: [900, 1000]
+object_E: [3.0e4, 8.0e4]     # tofu firmness range around the 5e4 nominal (see materials.py)
+object_nu: [0.28, 0.38]      # tofu Poisson range
+object_rho: [900, 1100]      # density (kg/m^3)
 coup_friction: [3.5, 4.5]    # rigid<->MPM coupling friction

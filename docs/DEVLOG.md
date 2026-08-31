@@ -444,6 +444,32 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-31 — ADDITIVE `prim_*_mush` variants (mushroom material) replace the in-place material
+override; material A/B first rows: cylinder & sphere 53 % -> 100 %, lamp UNCHANGED at 57 %.**
+
+Per user instruction: never override existing registry entries for variants — the earlier in-place
+swap (fdbc320) is REVERTED (plain `prim_*` back to tofu material, exactly as smoked) and six
+ADDITIVE `prim_*_mush` entries created instead (same meshes, `MATERIALS["mushroom"]`, mushroom DR
+ranges; 18 new config files). Reduces merge-conflict risk with the cluster and preserves both
+halves of the material A/B. Saved as a standing memory.
+
+_mush smoke (frozen recipe, full renderings), first three:
+| variant | success | tofu-material baseline |
+|---|---|---|
+| prim_cylinder_mush | **100 %** | 53.3 % |
+| prim_sphere_mush | **100 %** | 53.3 % |
+| prim_lamp_mush | 57.1 % | 57.1 % (IDENTICAL) |
+
+The dissociation is clean: cylinder/sphere were FORCE-BUDGET-limited (material fixes them); the
+lamp is GEOMETRY-limited (bulb-neck poses; material does nothing). Cuboid/ellipsoid/torus pending;
+torus predicted to behave like the lamp. An off-recipe ANALYSIS PROBE (lamp_mush, hard area floor
+50 mm2) is queued behind the chain to answer "would a min-contact-area floor help the lamp?" —
+prediction on record: modest at best, tilt-driven failures remain. The frozen v4.1 recipe is
+untouched by all of this.
+
+Cluster: collect the `_mush` prim experiments (handoff updated), not the plain tofu ones.
+
+
 **2026-08-31 — PRIMITIVES SWAPPED TO MUSHROOM MATERIAL (user-approved object-definition change;
 v4.1 recipe untouched). Cluster had NOT started prim collection, so no data forks. Smoke rerunning.**
 

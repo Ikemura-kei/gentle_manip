@@ -62,17 +62,21 @@ safe; the explicit flag in the recipe above is belt-and-braces. The gain auto-re
 | strawberry | **~45 %** (slow — expected, not a bug) | ~94 % |
 | banana_chunk | **~40 %** (slow — expected, not a bug) | ~100 % |
 
-## Addendum (2026-08-30): six PRIMITIVE categories added — collect these too
+## Addendum (2026-08-31): six PRIMITIVE categories — **collect the `_mush` variants**
 
-All tofu material, procedural meshes, `prim_` namespace; configs templated from tofu; same
-recipe verbatim (defaults are the frozen v4.1 = p98/4.92; 250 eps each):
+**Cluster note, short version: collect `single_lift_prim_*_mush_soft_abs_action_armfocus`
+(mushroom material), NOT the plain `prim_*` (tofu material).** The tofu variants measured thin
+sub-yield friction margins on curved shapes (50–57 % success); the mushroom-material variants of
+the same meshes recover dramatically (cylinder & sphere 53 % → **100 %** measured). Plain `prim_*`
+entries remain in the registry untouched, for reference/A-B only — additive variants, no
+overrides. Same recipe verbatim (defaults are the frozen v4.1 = p98/4.92; 250 eps each):
 
-- `single_lift_prim_cylinder_soft_abs_action_armfocus`   (r 2 cm × h 5 cm)
-- `single_lift_prim_sphere_soft_abs_action_armfocus`     (r 2 cm)
-- `single_lift_prim_lamp_soft_abs_action_armfocus`       (bulb r 1.5 cm + neck + base)
-- `single_lift_prim_cuboid_soft_abs_action_armfocus`     (4 × 3 × 2.5 cm)
-- `single_lift_prim_ellipsoid_soft_abs_action_armfocus`  (5 × 3 × 2.5 cm)
-- `single_lift_prim_torus_soft_abs_action_armfocus`      (R 1.4 / tube 0.7 cm — thin probe)
+- `single_lift_prim_cylinder_mush_soft_abs_action_armfocus`   (r 2 cm × h 5 cm) — smoke: 100 %
+- `single_lift_prim_sphere_mush_soft_abs_action_armfocus`     (r 2 cm) — smoke: 100 %
+- `single_lift_prim_lamp_mush_soft_abs_action_armfocus`       (bulb + neck + base) — smoke: 57 % (geometry-limited; expected, collect anyway)
+- `single_lift_prim_cuboid_mush_soft_abs_action_armfocus`     (4 × 3 × 2.5 cm) — smoke running
+- `single_lift_prim_ellipsoid_mush_soft_abs_action_armfocus`  (5 × 3 × 2.5 cm) — smoke running
+- `single_lift_prim_torus_mush_soft_abs_action_armfocus`      (thin ring probe) — smoke running; collect only if wall-clock acceptable
 
 **Measured expectations (16-ep smoke complete, 2026-08-31)** — sub-yield was **100 % on all
 six**; success orders by local contact flatness. Low success = wall-clock cost only; do NOT tune

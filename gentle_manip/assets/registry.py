@@ -151,29 +151,48 @@ OBJECT_MAP: dict[str, ObjectDef] = {
     "tomato5": ObjectDef("tomato5", MATERIALS["tomato"], object_type="soft",
                         size=(0.06, 0.0537, 0.059), default_pos=(0.47, 0.0, 0.0303),
                         mesh_path=str(_OBJ_DIR / "tomato5.obj")),
-    # Primitive diversity objects (2026-08-30, user request) — MUSHROOM material since 2026-08-31
-    # (originally tofu; the tofu-material smoke measured thin sub-yield friction margins on the
-    # curved shapes — 50-57 % success — and the user approved the swap BEFORE cluster collection
-    # started, so no collected data forks). Shape-class
+    # Primitive diversity objects (2026-08-30, user request) — ALL tofu material. Shape-class
     # probes for the FROZEN v4.1 synthesis: cylinder/sphere/lamp user-specified; cuboid/
     # ellipsoid/torus proposed (flat-face + smooth anisotropy + topology). v4.1 parameters are
     # NOT to be modified regardless of how these perform (paper freeze, deadline 2026-09-15).
-    "prim_cylinder": ObjectDef("prim_cylinder", MATERIALS["mushroom"], object_type="soft",
+    "prim_cylinder": ObjectDef("prim_cylinder", MATERIALS["tofu"], object_type="soft",
                         size=(0.04, 0.04, 0.05), default_pos=(0.47, 0.0, 0.026),
                         mesh_path=str(_OBJ_DIR / "prim_cylinder.obj")),
-    "prim_sphere": ObjectDef("prim_sphere", MATERIALS["mushroom"], object_type="soft",
+    "prim_sphere": ObjectDef("prim_sphere", MATERIALS["tofu"], object_type="soft",
                         size=(0.04, 0.04, 0.04), default_pos=(0.47, 0.0, 0.021),
                         mesh_path=str(_OBJ_DIR / "prim_sphere.obj")),
-    "prim_lamp": ObjectDef("prim_lamp", MATERIALS["mushroom"], object_type="soft",
+    "prim_lamp": ObjectDef("prim_lamp", MATERIALS["tofu"], object_type="soft",
                         size=(0.03, 0.03, 0.052), default_pos=(0.47, 0.0, 0.037),
                         mesh_path=str(_OBJ_DIR / "prim_lamp.obj")),
-    "prim_cuboid": ObjectDef("prim_cuboid", MATERIALS["mushroom"], object_type="soft",
+    "prim_cuboid": ObjectDef("prim_cuboid", MATERIALS["tofu"], object_type="soft",
                         size=(0.04, 0.03, 0.025), default_pos=(0.47, 0.0, 0.0135),
                         mesh_path=str(_OBJ_DIR / "prim_cuboid.obj")),
-    "prim_ellipsoid": ObjectDef("prim_ellipsoid", MATERIALS["mushroom"], object_type="soft",
+    "prim_ellipsoid": ObjectDef("prim_ellipsoid", MATERIALS["tofu"], object_type="soft",
                         size=(0.05, 0.03, 0.025), default_pos=(0.47, 0.0, 0.0135),
                         mesh_path=str(_OBJ_DIR / "prim_ellipsoid.obj")),
-    "prim_torus": ObjectDef("prim_torus", MATERIALS["mushroom"], object_type="soft",
+    "prim_torus": ObjectDef("prim_torus", MATERIALS["tofu"], object_type="soft",
+                        size=(0.042, 0.042, 0.014), default_pos=(0.47, 0.0, 0.008),
+                        mesh_path=str(_OBJ_DIR / "prim_torus.obj")),
+    # *_mush VARIANTS (2026-08-31): the same six primitive meshes with MUSHROOM material,
+    # ADDED as separate entries per user instruction (never override existing entries — the
+    # tofu-material prim_* set above stays intact for the material A/B and to avoid merge
+    # conflicts with the cluster). Force-budget prediction: curved shapes recover to ~75-90%.
+    "prim_cylinder_mush": ObjectDef("prim_cylinder_mush", MATERIALS["mushroom"], object_type="soft",
+                        size=(0.04, 0.04, 0.05), default_pos=(0.47, 0.0, 0.026),
+                        mesh_path=str(_OBJ_DIR / "prim_cylinder.obj")),
+    "prim_sphere_mush": ObjectDef("prim_sphere_mush", MATERIALS["mushroom"], object_type="soft",
+                        size=(0.04, 0.04, 0.04), default_pos=(0.47, 0.0, 0.021),
+                        mesh_path=str(_OBJ_DIR / "prim_sphere.obj")),
+    "prim_lamp_mush": ObjectDef("prim_lamp_mush", MATERIALS["mushroom"], object_type="soft",
+                        size=(0.03, 0.03, 0.052), default_pos=(0.47, 0.0, 0.037),
+                        mesh_path=str(_OBJ_DIR / "prim_lamp.obj")),
+    "prim_cuboid_mush": ObjectDef("prim_cuboid_mush", MATERIALS["mushroom"], object_type="soft",
+                        size=(0.04, 0.03, 0.025), default_pos=(0.47, 0.0, 0.0135),
+                        mesh_path=str(_OBJ_DIR / "prim_cuboid.obj")),
+    "prim_ellipsoid_mush": ObjectDef("prim_ellipsoid_mush", MATERIALS["mushroom"], object_type="soft",
+                        size=(0.05, 0.03, 0.025), default_pos=(0.47, 0.0, 0.0135),
+                        mesh_path=str(_OBJ_DIR / "prim_ellipsoid.obj")),
+    "prim_torus_mush": ObjectDef("prim_torus_mush", MATERIALS["mushroom"], object_type="soft",
                         size=(0.042, 0.042, 0.014), default_pos=(0.47, 0.0, 0.008),
                         mesh_path=str(_OBJ_DIR / "prim_torus.obj")),
     "raspberry": ObjectDef("raspberry", MATERIALS["raspberry"], object_type="soft",
