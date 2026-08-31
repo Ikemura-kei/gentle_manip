@@ -444,6 +444,129 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-31 — ADDITIVE `prim_*_mush` variants (mushroom material) replace the in-place material
+override; material A/B first rows: cylinder & sphere 53 % -> 100 %, lamp UNCHANGED at 57 %.**
+
+Per user instruction: never override existing registry entries for variants — the earlier in-place
+swap (fdbc320) is REVERTED (plain `prim_*` back to tofu material, exactly as smoked) and six
+ADDITIVE `prim_*_mush` entries created instead (same meshes, `MATERIALS["mushroom"]`, mushroom DR
+ranges; 18 new config files). Reduces merge-conflict risk with the cluster and preserves both
+halves of the material A/B. Saved as a standing memory.
+
+_mush smoke (frozen recipe, full renderings), first three:
+| variant | success | tofu-material baseline |
+|---|---|---|
+| prim_cylinder_mush | **100 %** | 53.3 % |
+| prim_sphere_mush | **100 %** | 53.3 % |
+| prim_lamp_mush | 57.1 % | 57.1 % (IDENTICAL) |
+
+The dissociation is clean: cylinder/sphere were FORCE-BUDGET-limited (material fixes them); the
+lamp is GEOMETRY-limited (bulb-neck poses; material does nothing). Cuboid/ellipsoid/torus pending;
+torus predicted to behave like the lamp. An off-recipe ANALYSIS PROBE (lamp_mush, hard area floor
+50 mm2) is queued behind the chain to answer "would a min-contact-area floor help the lamp?" —
+prediction on record: modest at best, tilt-driven failures remain. The frozen v4.1 recipe is
+untouched by all of this.
+
+Cluster: collect the `_mush` prim experiments (handoff updated), not the plain tofu ones.
+
+
+**2026-08-31 — PRIMITIVES SWAPPED TO MUSHROOM MATERIAL (user-approved object-definition change;
+v4.1 recipe untouched). Cluster had NOT started prim collection, so no data forks. Smoke rerunning.**
+
+Follow-up to the three-layer analysis: the force-budget layer predicts that the mushroom material
+(E 3e5, yield 4e4 — 6x stiffer, 2x the yield of tofu) lifts the curved prims into the ~75-90 %
+band via two compounding channels (higher sub-yield force ceiling; deeper p98 commanded closures).
+The user approved the swap explicitly. Changes: the six `prim_*` registry entries now reference
+`MATERIALS["mushroom"]` (`MATERIALS["tofu"]` itself untouched — it is shared with the food tofu);
+prim DR ranges E [2.0e5, 3.0e5], nu [0.32, 0.38], rho [900, 1000]. Task substeps already exceed
+the mushroom-stable minimums (235@250 / 190@200 vs 210@250 needed) — unchanged. **No v4.1
+synthesis/executor parameter was modified.**
+
+The tofu-material smoke runs stay on disk as the material half of a clean same-shape A/B
+(tofu-material: cuboid 92 / ellipsoid 71 / lamp 59 / cylinder 56 / sphere 50 / torus 18 %, all
+100 % sub-yield). Predictions to check against the rerun: curved prims ~75-90 %; torus improves
+little (its failure is pose-driven: 62 % edge/pinch poses).
+
+
+**2026-08-31 — WHY lamp/cylinder/sphere/torus succeed at only 19-57 % while mushroom hits ~100 %:
+a three-layer analysis (observation only; v4.1 frozen, nothing modified).**
+
+Per-attempt planner metrics (`dr_params.csv`) for ALL attempts including failures, prims vs the
+food anchors, success-vs-failure medians:
+
+| object | succ | align S/F | min_pad S/F (mm2) | tilt S/F (deg) | closure S/F (mm) |
+|---|---|---|---|---|---|
+| prim_cuboid | 92 % | 0.93/0.79 | 378/69 | 0/9 | 8.0/3.0 |
+| prim_ellipsoid | 71 % | 0.95/0.81 | 129/45 | 0/8 | 8.0/2.5 |
+| prim_lamp | 59 % | 0.94/0.85 | 90/40 | 0/16 | 8.0/8.0 |
+| prim_cylinder | 56 % | 0.96/0.81 | 437/75 | 0/15 | 8.0/6.9 |
+| prim_sphere | 50 % | 0.94/0.80 | 88/46 | 13/13 | 8.0/7.8 |
+| prim_torus | 18 % | 0.72/0.72 | 44/31 | 7/12 | 3.4/3.1 |
+| mushroom (p98) | 100 % | 0.94/– | 42/– | 0/– | – |
+| tofu (p98) | 67 % | 0.96/0.78 | 177/76 | 0/14 | 8.0/3.4 |
+
+**Layer 1 — the user's observation is confirmed: pinch/edge POSES exist and NEVER lift.**
+Defining a poor pose as align < 0.75 OR min_pad < 10 mm2: they are 12-22 % of attempts on
+lamp/cylinder/sphere and their success is **0 %** (0/16 pooled). On the TORUS they are **62 %** of
+attempts (success 16 %) — the ring's geometry makes a flush two-pad pose rare, and this alone
+explains most of its 19 %. (Selection can only pick the best of what CMA finds; on a torus the
+feasible pool itself is mostly edge grasps. Documented, not fixed — freeze.)
+
+**Layer 2 — but good poses still only lift 64-70 % on the curved soft prims** (vs 92 % cuboid), so
+pose quality is only half the gap. Among GOOD poses, failures differ from successes by:
+- **tilt**: successes are almost exactly top-down (0 deg median); failures 8-16 deg. A tilted
+  approach on a curved soft surface slides.
+- **commanded closure**: successes cluster AT the 8 mm cap; failures at 2.5-7 mm — the familiar
+  under-command signature: tofu material has yield strain sigma_y/E = 40 %, so the p98 crossing is
+  DEEP and pose-noisy; shallow-scan poses get gentle commands that slip.
+- **min_pad**: successes carry ~2-6x the pad contact of failures — curvature shrinks the patch.
+
+**Layer 3 — the material force budget explains mushroom vs everything.** Staying sub-yield caps
+the contact pressure at sigma_y; friction capacity ~ 2*mu*sigma*A. The mushroom has 6x the E and
+2x the yield of tofu material: at the same gentleness fraction it generates several times the grip
+force, so even its modest 42 mm2 patches hold with margin (~100 %). Tofu-material prims at 0.4-0.6x
+of a LOW yield (20 kPa) have thin margins that only survive with a LARGE patch: flat faces
+(cuboid 378 mm2, tofu-cube 177 mm2) -> 67-92 %; curved patches (88-129 mm2) -> 50-71 %; the
+66 g cylinder needs the most force of all (3.4x the mushroom's mass) yet has line contact.
+
+**One sentence:** low success = (a) a minority of pinch/edge poses that never lift — dominant on
+the torus; (b) on good poses, soft-material sub-yield force ceilings x curvature-shrunk contact
+patches x tilt sensitivity — the price of erring gentle on soft curved objects, paid in unsaved
+attempts, never in saved-demo quality (100 % sub-yield throughout).
+
+
+**2026-08-31 — PRIMITIVES SMOKE COMPLETE (6 x 16 eps, frozen v4.1, full renderings). Sub-yield is
+100 % ON EVERY OBJECT; success orders EXACTLY by local contact flatness. Recipe untouched.**
+
+| primitive | success (of attempts) | sub-yield | median stress | verdict | run |
+|---|---|---|---|---|---|
+| prim_cuboid | **88.9 %** (16/18) | 100 % | 0.56x | PASS | `26-08-30-lue` |
+| prim_ellipsoid | **72.7 %** (16/22) | 100 % | 0.61x | PASS | `26-08-30-adf` |
+| prim_lamp | 57.1 % (16/28) | 100 % | 0.50x | REVIEW | `26-08-30-pnv` |
+| prim_cylinder | 53.3 % (16/30) | 100 % | 0.38x | REVIEW | `26-08-30-qil` |
+| prim_sphere | 53.3 % (16/30) | 100 % | 0.40x | REVIEW | `26-08-30-kjx` |
+| prim_torus | **19.0 %** (16/84) | 100 % | 0.42x | REVIEW | `26-08-30-ofm` |
+
+**Two findings, both observations (v4.1 is frozen; nothing was or will be tuned):**
+1. **Saved-demo gentleness is INVARIANT: 100 % sub-yield on all six**, max stress 0.50-0.96x. The
+   gentle-erring recipe never saved a damaged episode; every failure is an unsaved slip, i.e. pure
+   wall-clock. Combined with the food A/B this is now 13 categories where the p98 recipe's saved
+   demos are 88-100 % sub-yield.
+2. **Success orders exactly by local contact flatness**: flat faces (cuboid 89 %) > gently curved
+   long sides (ellipsoid 73 %) > strongly curved / bulb-and-neck (lamp/cylinder/sphere 53-57 %) >
+   thin ring (torus 19 %). Rank-perfect with zero exceptions — flat pads on curved soft surfaces
+   slip at gentle closures. A clean, presentable geometry result; also note the non-convex lamp
+   behaves like the convex curved shapes (57 %), so non-convexity per se is not the driver.
+
+The torus (16 saved from 84 attempts, ~5x wall-clock) met the "thin scope probe" expectation but
+DID collect, all sub-yield — the small-strain scope limit did not bite the way the full banana's
+did. Cluster guidance stands: collect it if the wall-clock is acceptable, skip otherwise.
+
+Every episode (success AND failure) has a rendering under each run's `videos/` /
+`videos_failed/` per the new standing rule; the failure clips are the material for reading slip
+vs topple per shape. `docs/smoke_datasets.md` regenerated (122 runs).
+
+
 **2026-08-30 — v4.1 IS FROZEN AS FINAL (user decision). Paper deadline 2026-09-15 (16 days);
 large-scale cluster collection has started; there is NO room for recollection. NO further edits
 to any v4.1 parameter — the scan metric (p98), the gain (4.92), the auto rules, the executor —
