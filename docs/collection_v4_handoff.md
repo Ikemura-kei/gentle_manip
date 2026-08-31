@@ -74,9 +74,9 @@ overrides. Same recipe verbatim (defaults are the frozen v4.1 = p98/4.92; 250 ep
 - `single_lift_prim_cylinder_mush_soft_abs_action_armfocus`   (r 2 cm × h 5 cm) — smoke: 100 %
 - `single_lift_prim_sphere_mush_soft_abs_action_armfocus`     (r 2 cm) — smoke: 100 %
 - `single_lift_prim_lamp_mush_soft_abs_action_armfocus`       (bulb + neck + base) — smoke: 57 % (geometry-limited; expected, collect anyway)
-- `single_lift_prim_cuboid_mush_soft_abs_action_armfocus`     (4 × 3 × 2.5 cm) — smoke running
-- `single_lift_prim_ellipsoid_mush_soft_abs_action_armfocus`  (5 × 3 × 2.5 cm) — smoke running
-- `single_lift_prim_torus_mush_soft_abs_action_armfocus`      (thin ring probe) — smoke running; collect only if wall-clock acceptable
+- `single_lift_prim_cuboid_mush_soft_abs_action_armfocus`     (4 × 3 × 2.5 cm) — smoke: 94 % (sub-yield 81 %; filter residue at conversion)
+- `single_lift_prim_ellipsoid_mush_soft_abs_action_armfocus`  (5 × 3 × 2.5 cm) — smoke: 100 %
+- `single_lift_prim_torus_mush_soft_abs_action_armfocus`      (thin ring probe) — smoke: 38 % (~2.6× wall-clock); collect only if acceptable
 
 **Measured expectations (16-ep smoke complete, 2026-08-31)** — sub-yield was **100 % on all
 six**; success orders by local contact flatness. Low success = wall-clock cost only; do NOT tune

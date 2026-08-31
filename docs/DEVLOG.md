@@ -444,6 +444,32 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-31 — MATERIAL A/B COMPLETE on all six primitives (same meshes, same frozen recipe,
+tofu vs mushroom material). The force-budget theory holds with one honest miss.**
+
+| shape | tofu succ | mush succ | mush sub-yield | verdict (mush) |
+|---|---|---|---|---|
+| cylinder | 53.3 % | **100 %** | 100 % | PASS |
+| sphere | 53.3 % | **100 %** | 100 % | PASS |
+| ellipsoid | 72.7 % | **100 %** | 100 % | PASS |
+| cuboid | 88.9 % | 94.1 % | **81 %** (was 100) | PASS |
+| lamp | 57.1 % | 57.1 % (IDENTICAL) | 100 % | REVIEW |
+| torus | 19.0 % | **38.1 %** | 88 % (was 100) | REVIEW |
+
+Readings:
+1. **Where force was the binding constraint (curved convex bodies), the stiffer material fully
+   fixes success** — cylinder/sphere/ellipsoid all reach 100 %, at equal-or-LOWER median stress.
+2. **Where geometry binds, material does nothing or little**: lamp bit-identical at 57.1 %
+   (bulb-neck poses; tilt signature); torus doubled (19 -> 38 %) — MORE force effect than
+   predicted ("little change" was the prediction; wrong by half) but still pose-dominated.
+3. **The flip side, first seen here**: on shapes that never needed the force (cuboid), stiffness
+   costs gentleness margin — cuboid sub-yield 100 -> 81 %, torus 100 -> 88 %. Nothing is free;
+   the per-episode `priv_stress` filter covers the residue at conversion.
+
+Handoff annotations updated to the final numbers. The off-recipe lamp area-floor probe
+(hard 50 mm2) now runs behind the chain; the frozen recipe remains untouched throughout.
+
+
 **2026-08-31 — ADDITIVE `prim_*_mush` variants (mushroom material) replace the in-place material
 override; material A/B first rows: cylinder & sphere 53 % -> 100 %, lamp UNCHANGED at 57 %.**
 
