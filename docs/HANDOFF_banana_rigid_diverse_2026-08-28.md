@@ -740,3 +740,10 @@ Per category now: banana 500+, kiwi ~166, egg ~163, mushroom ~160, + small 4.
   cherry ~231, tomato ~196, raspberry ~180. Total ~1970/4000 (49%).
 - ~1.4/min. ~12h to 4000. Small collector (1805198) hits 12h walltime ~10:20 ->
   resubmit if SIGTERM path skips auto-resubmit.
+
+---
+## 2026-08-31 07:00 — collection ~52%
+- 1805147 large: 343 (bf 1). 1805198 small: 374.
+- Per category: banana 500+, kiwi ~265, egg ~259, mushroom ~258, grape ~257,
+  cherry ~245, tomato ~210, raspberry ~195. Total ~2070/4000 (52%).
+- ~2/min. ~10h to 4000.
