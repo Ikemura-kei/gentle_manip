@@ -41,6 +41,22 @@ START_MODES=${START_MODES:-sweep:0.44,failed:0.30,above:0.10,ground:0.09,air:0.0
 echo "[xpack] N_PACK=$N_PACK per_cat=$PER_CAT_TARGET seed0=$SEED0"
 nvidia-smi --query-gpu=memory.total,memory.used --format=csv || true
 
+# Salvage leftover shards from any CRASHED/TIMED-OUT prior run (guard: skip dirs
+# touched in the last 20 min -> still-live collector).
+for RD in "$REPO"/dataset/demos/single_lift_xcat_regrasp/*/ "$REPO"/dataset/demos/single_lift_xcat_small/*/; do
+  [ -d "$RD" ] || continue
+  [ -n "$(find "$RD" -maxdepth 1 -name 'shard_*.pkl' -mmin -20 2>/dev/null)" ] && continue
+  if [ -n "$(ls "$RD"shard_*.pkl 2>/dev/null)" ] && [ ! -f "$RD/data.pkl" ]; then
+    echo "[xpack] merging leftover shards in $RD"
+    uv run --project envs/sim_arrhenius --no-sync python - "$RD" <<'PYM' || true
+import sys; sys.path.insert(0,"grasp_synthesis")
+from pathlib import Path
+import collect_demos_synth as v1
+print("  merged", v1._merge_shards(Path(sys.argv[1])))
+PYM
+  fi
+done
+
 pids=()
 for i in $(seq 0 $((N_PACK-1))); do
   spec="${SLOTS[$i]}"

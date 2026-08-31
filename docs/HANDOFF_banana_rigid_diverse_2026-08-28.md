@@ -754,3 +754,52 @@ Per category now: banana 500+, kiwi ~166, egg ~163, mushroom ~160, + small 4.
 - Per category: banana 500+, kiwi ~271, egg ~265, mushroom ~264, grape ~264,
   cherry ~255, tomato ~220, raspberry ~207. Total ~2130/4000 (53%).
 - ~1.5/min. ~9h to 4000. 1805198 small hits 12h walltime ~13:20.
+
+---
+## 2026-08-31 ~08:05 — collection ~44% (on-disk log tally), eval bug reconfirmed
+- Authoritative log tally (all collector .out, `ep N: env i OK` by scene cat):
+  xcat_regrasp: egg 343, kiwi 290, mushroom 233, banana_lying 165 (=1031)
+  xcat_small:   grape 244, cherry 192, tomato 177, raspberry 130 (=743)
+  + soft-banana 500 set (separate). Combined toward 8x500 ~ 1774/3500 non-banana.
+- Jobs: 1805147 yd_xreg (24h wall, 8h in, 16h left), 1805198 yd_xsmall (12h, 4h left),
+  1812536 yd_xsml2 PENDING on AssocGrpGRESRunMinutes (warm standby, auto-starts when
+  1805198 frees ~12:00).
+- RECONFIRMED the frozen-geometry eval bug: the 2026-08-30 xcat evals (uabeb regrasp,
+  tqmjv baseline) still have mat_yield/mat_E/obj_scale = 1 distinct across all 100 eps
+  (yield 22500 = egg_boiled only). scene_group_size fix not applied there. Numbers on
+  that single object: regrasp uabeb SR 0.98 (all 98 successes first_success_step >40,
+  med 50, tail to 131 = recovery); baseline tqmjv SR 0.13 (all successes step 25-34,
+  no recovery). Story holds but NOT the cross-category claim yet.
+- NEXT GATE: collection to 8x500 -> merge -> train single_lift_gen8_regrasp_pcd +
+  strict_home baseline -> yd_gen_eval (per-cat pool + scene_group_size 1). Proper
+  per-cat eval on uabeb/tqmjv deferred to keep GRES headroom for collectors.
+
+---
+## 2026-08-31 ~06:14 — 3rd collector promoted, collection ~50%
+- 1812536 yd_xsml2 (3rd, small-object) now RUNNING on n48 (GRES cap cleared). 3
+  collectors live: 1805147 large (457 this run), 1805198 small (492), 1812536 small (0, starting).
+- 1805198 hits 12h walltime ~09:30 -> will self-resubmit or 1812536 covers small.
+- No new batch failures. Next gate unchanged.
+
+---
+## 2026-08-31 09:44 — 1805198 hit 12h walltime (SIGTERM mid-CMA, no auto-resubmit)
+- 1805198 run dir 26-08-30-wfz: 141 shards, no data.pkl (merge pending). Will be
+  salvage-merged by a later yd_xcat_collect cycle (20-min live guard currently blocks).
+- Submitted replacement small collector (SEED=11). Running: 1805147 (large, 627),
+  1812536 (small, 249), + new yd_xsmall. 1805147 still 24h wall (11.7h left).
+
+---
+## 2026-08-31 09:50 — GPU/pool analysis + packed-collector optimization
+- CONSTRAINT identified: account naiss2026-3-141-gpu has GrpTRESRunMins gres/gpu=36000
+  (600 GPU-h of SUMMED REMAINING runtime across all running jobs), SHARED with users
+  ikemura + sean. ikemura currently runs ~7 GPU jobs incl several 30h (1-06:00:00)
+  walltime -> pool near-full -> my 4th job pends (AssocGrpGRESRunMinutes). Not a
+  job-count cap; not cluster capacity (253 idle GPU nodes).
+- Each of my grasp collectors: ~7 GB / 98 GB GPU mem, ~0-15% GPU util (grasp exec is
+  CPU/CMA + contact-physics bound per CLAUDE.md, NOT GPU-compute bound).
+- NEW: gentle_manip/scripts/arrhenius/yd_xcat_pack.sbatch -- runs N_PACK=3 collector
+  processes inside ONE GPU allocation (1 large-pool + 2 small-fruit), 90s staggered
+  genesis inits, each own run dir, CAT_HAVE auto-coordinated. 3x throughput per
+  reserved GPU at 1 job's pool cost. Submitted 1815726 (PENDING on pool; starts when
+  a slot frees). Cancelled the single-collector standby 1815706.
+- Currently RUNNING: 1805147 (large, 632), 1812536 (small, 258), 1815690 (small, ~0).
