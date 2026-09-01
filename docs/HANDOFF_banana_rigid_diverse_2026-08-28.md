@@ -1216,3 +1216,10 @@ re-collect with a gentleness cost. Old ueini banana was 0.687 too -> banana alwa
   will pick the _fast dirs (newest). Est ~1.5-2h each now.
 - REGRASP eval batches at state_225 were 1.0/1.0/1.0/1.0 on first cat -> looking strong.
 - lorap pretrain ep240 val 0.0178, ~22:00 done -> FINAL auto-eval will ALSO be scene_group_size=0 now.
+
+## 2026-09-01 21:28 — first eval cat on webpage
+- REGRASP kiwi (state_225): SR 0.67 / gentleness 0.727 / SRxg 0.697 (n60).
+  vs OLD ueini kiwi (h150 obs8): 0.44 / 0.824 / 0.632. SR way up, gentleness a bit down, combined up.
+- Published to 5682ac2f (label gen8-eval-live-1cat). gen8_refresh.sh works; builds 5-clip
+  montages per cat from render/. Publish tracking: logs/slurm_logs/webpage_publish_log.txt.
+- baseline 0/12 still (slower). regrasp 1/12. lorap pretrain ep290, ~21:35 cap -> final auto-eval.
