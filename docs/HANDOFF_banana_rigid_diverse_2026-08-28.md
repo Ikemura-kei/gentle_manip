@@ -1261,3 +1261,13 @@ carry-down, no over-squeeze). webpage b=4 r=3.
   hasn't reached -> webpage shows RFINAL where real, prelim elsewhere; RFINAL overwrites as
   it completes. Re-run the cp before each refresh (in gen8_refresh manually for now).
 - webpage b=4 r=3, kiwi now 0.88.
+
+## 2026-09-01 23:50 — 3 RFINAL real cats: regrasp wins all 3 metrics
+             BASELINE (state_250)      REGRASP FINAL (state_300)
+  banana     0.62 / 0.686 / 0.651      0.98 / 0.626 / 0.805
+  egg_boiled 0.70 / 0.621 / 0.660      1.00 / 0.623 / 0.811
+  kiwi       0.62 / 0.746 / 0.681      0.88 / 0.786 / 0.834
+Regrasp: SR +0.26..+0.36, gentleness TIED-to-+0.04, SRxg +0.15. The "baseline gentler"
+read was a state_225 artifact -- state_300 gentleness matches/beats baseline while
+keeping the huge SR lead. Both models free of carry-down + over-squeeze.
+webpage b=4 r=3(real). Baseline still stuck on slow small fruit (batch ~3-4/8).
