@@ -1253,3 +1253,11 @@ VERDICT SHAPE: regrasp SR consistently +0.05..+0.36, baseline gentleness consist
 +0.02..+0.07. Regrasp SRxg wins every shared cat. The "regrasp lifts more, baseline
 grips gentler" tradeoff -- combined metric favors regrasp. Both models FIXED (no
 carry-down, no over-squeeze). webpage b=4 r=3.
+
+## 2026-09-01 23:29 — FINAL ckpt (state_300) MUCH better than state_225
+- RFINAL kiwi: SR 0.88 / g 0.786 / SRxg 0.834  (state_225 was 0.67/0.727/0.697; baseline 0.62/0.746/0.681).
+  Final checkpoint beats baseline on BOTH SR and gentleness now. Last ~75 epochs mattered.
+- gen8_refresh: I now cp -rn prelim (state_225) cats into the RFINAL dir for cats RFINAL
+  hasn't reached -> webpage shows RFINAL where real, prelim elsewhere; RFINAL overwrites as
+  it completes. Re-run the cp before each refresh (in gen8_refresh manually for now).
+- webpage b=4 r=3, kiwi now 0.88.
