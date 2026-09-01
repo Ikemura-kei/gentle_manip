@@ -34,6 +34,14 @@ class DRConfig:
     object_yaw_deg: float = 0.0         # half-range (deg); per-env uniform object YAW (about world z). 180 = full
     object_pitch_roll_deg: float = 0.0  # half-range (deg); per-env uniform object PITCH & ROLL tilt (small, e.g. 15)
 
+    # ── per-reset REACTIVE perturbation: a random lateral velocity impulse to the object
+    #    mid-approach ("dragged away by a random force"), so the policy must re-target and
+    #    still grasp. Applied by GenesisWorker at sim-frame `fire_frame` (one-frame kick;
+    #    physics carries momentum + friction decel). Deterministic under eval reseed.
+    object_perturb_prob: float = 0.0               # per-episode probability of a perturbation
+    object_perturb_speed: Optional[_Range] = None  # impulse speed range (m/s), e.g. (0.15, 0.5)
+    object_perturb_frame: Optional[_Range] = None  # sim-frame window for the kick, e.g. (24, 96)
+
     # ── per-scene (rebuild via GenesisProcess.restart) ────────────────────────
     object_E: Optional[_Range] = None       # Young's modulus (Pa)
     object_nu: Optional[_Range] = None      # Poisson ratio (in (0, 0.5))
@@ -71,7 +79,12 @@ class DRConfig:
     def has_reset_dr(self) -> bool:
         return (self.object_pos_xy > 0 or self.robot_init_pos_xyz > 0
                 or self.robot_init_offset_xyz is not None
-                or self.object_yaw_deg > 0 or self.object_pitch_roll_deg > 0)
+                or self.object_yaw_deg > 0 or self.object_pitch_roll_deg > 0
+                or self.has_perturb())
+
+    def has_perturb(self) -> bool:
+        return (self.object_perturb_prob > 0.0 and self.object_perturb_speed is not None
+                and self.object_perturb_frame is not None)
 
     def has_scene_dr(self) -> bool:
         return (any(getattr(self, f) is not None for f in self._SCENE_FIELDS)
@@ -131,6 +144,23 @@ class DRConfig:
         e[:, 1] = rng.uniform(-pr, pr, num_envs)    # pitch (about y)
         e[:, 2] = rng.uniform(-yaw, yaw, num_envs)  # yaw   (about z)
         return e
+
+    def sample_perturb(self, rng: np.random.Generator, num_envs: int) -> Optional[dict]:
+        """Per-env reactive perturbation, or None if disabled. Returns
+        {"fire_frame": (N,) int32, "vel": (N,3) float32}. fire_frame < 0 => no kick for
+        that env (prob gate). vel is a lateral (xy) impulse; z is 0."""
+        if not self.has_perturb():
+            return None
+        lo_f, hi_f = self.object_perturb_frame
+        lo_s, hi_s = self.object_perturb_speed
+        fire = rng.integers(int(lo_f), int(hi_f) + 1, num_envs).astype(np.int32)
+        fire[rng.random(num_envs) >= self.object_perturb_prob] = -1        # prob gate
+        theta = rng.uniform(0.0, 2.0 * np.pi, num_envs)
+        speed = rng.uniform(lo_s, hi_s, num_envs)
+        vel = np.zeros((num_envs, 3), np.float32)
+        vel[:, 0] = np.cos(theta) * speed
+        vel[:, 1] = np.sin(theta) * speed
+        return {"fire_frame": fire, "vel": vel}
 
     def sample_home_offset(self, rng: np.random.Generator, num_envs: int) -> Optional[np.ndarray]:
         """Per-env (dx, dy, dz) offset for the reset home EE pose, or None if disabled.

@@ -116,9 +116,10 @@ class GenesisProcess:
     # ── commands ────────────────────────────────────────────────────────────────
     def reset(self, object_dxy: Optional[np.ndarray] = None,
               home_offset: Optional[np.ndarray] = None,
-              object_euler: Optional[np.ndarray] = None) -> dict:
+              object_euler: Optional[np.ndarray] = None,
+              perturb: Optional[dict] = None) -> dict:
         return self._call("reset", {"object_dxy": object_dxy, "home_offset": home_offset,
-                                    "object_euler": object_euler})
+                                    "object_euler": object_euler, "perturb": perturb})
 
     def step(self, target_pos: np.ndarray, target_quat: np.ndarray, target_gripper: np.ndarray) -> dict:
         return self._call("step", (target_pos, target_quat, target_gripper))

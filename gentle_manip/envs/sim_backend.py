@@ -128,11 +128,18 @@ class SimBackend:
         else:
             object_euler = self._dr.sample_object_euler(self._rng, self.num_envs)
 
+        # Per-env reactive perturbation (lateral velocity impulse mid-approach), unless
+        # explicitly disabled by the caller. Deterministic under an eval reseed of _rng.
+        perturb = None if kwargs.get("no_perturb") else self._dr.sample_perturb(self._rng, self.num_envs)
+
         # Record the per-env randomization actually applied this reset (for eval audit/CSV).
         self._last_reset_dr = {"object_dxy": object_dxy, "home_offset": home_offset,
                                "object_euler": object_euler}
+        if perturb is not None:
+            self._last_reset_dr["perturb_frame"] = perturb["fire_frame"]
+            self._last_reset_dr["perturb_vel"] = perturb["vel"]
 
-        state = self.process.reset(object_dxy, home_offset, object_euler)
+        state = self.process.reset(object_dxy, home_offset, object_euler, perturb=perturb)
         self._last_state = state
         # Seed targets from the actual reset pose so the first deltas are relative
         # to where the arm really is.

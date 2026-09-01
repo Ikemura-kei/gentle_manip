@@ -79,10 +79,16 @@ class GenesisWorker:
         self.robot = XArm7Sim(self.handle.robot, num_envs, overrides=robot_overrides,
                               rigid_grasp=rigid_grasp)
 
+        # reactive perturbation state (set per-reset via `perturb`): one-frame lateral
+        # velocity impulse to the object at sim-frame `fire_frame` (per env).
+        self._frame = 0
+        self._perturb = None
+
     # ── lifecycle ───────────────────────────────────────────────────────────────
     def reset(self, object_dxy: Optional[np.ndarray] = None,
               home_offset: Optional[np.ndarray] = None,
-              object_euler: Optional[np.ndarray] = None) -> dict:
+              object_euler: Optional[np.ndarray] = None,
+              perturb: Optional[dict] = None) -> dict:
         """Reset to the built state, re-home the arm, (optionally) pose-DR each
         env's object, settle, and return the initial state.
 
@@ -129,7 +135,42 @@ class GenesisWorker:
                 obj.set_particles_pos(parts + shift)
 
         self._settle()
+        # arm the reactive perturbation for this episode (frame counter starts AFTER settle)
+        self._frame = 0
+        self._perturb = None
+        if perturb is not None:
+            ff = np.asarray(perturb["fire_frame"], np.int64).reshape(self.num_envs)
+            vv = np.asarray(perturb["vel"], np.float32).reshape(self.num_envs, 3)
+            if np.any(ff >= 0):
+                self._perturb = {"fire_frame": ff, "vel": vv}
         return self.read_state()
+
+    def _apply_perturbation(self) -> None:
+        """One-frame lateral velocity impulse to the object for any env whose
+        fire_frame == current frame. MPM soft: set every particle's velocity; the
+        solver then carries the momentum and friction decelerates it."""
+        p = self._perturb
+        if p is None:
+            return
+        hits = np.nonzero(p["fire_frame"] == self._frame)[0]
+        if hits.size == 0:
+            return
+        for obj, otype in zip(self.handle.objects, self.handle.object_types):
+            for e in hits:
+                v = p["vel"][e]
+                try:
+                    if otype == "rigid":
+                        cur = obj.get_vel()
+                        cur = cur.cpu().numpy() if hasattr(cur, "cpu") else np.asarray(cur)
+                        cur = np.asarray(cur, np.float32).reshape(self.num_envs, -1)
+                        cur[e, :3] = v
+                        obj.set_vel(cur)
+                    else:
+                        n = np.asarray(obj.get_particles_pos(envs_idx=[int(e)])).reshape(-1, 3).shape[0]
+                        obj.set_particles_vel(np.tile(v, (n, 1)).astype(np.float32),
+                                              envs_idx=[int(e)])
+                except Exception as ex:              # never let a perturb error kill the rollout
+                    print(f"[perturb] env {int(e)} kick failed: {ex}", flush=True)
 
     def _settle(self) -> None:
         """Run sim steps until all rigid objects come to rest (vel < thresh) or
@@ -163,6 +204,8 @@ class GenesisWorker:
     def step(self, target_pos, target_quat, target_gripper) -> dict:
         """Drive the arm/gripper to the target, advance one sim step, read state."""
         self.robot.apply_target(target_pos, target_quat, target_gripper)
+        self._frame += 1
+        self._apply_perturbation()          # reactive kick (no-op unless armed + frame hits)
         self.handle.scene.step()
         return self.read_state()
 

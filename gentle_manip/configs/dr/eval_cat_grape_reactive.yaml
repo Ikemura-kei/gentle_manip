@@ -1,0 +1,20 @@
+# [dr] Per-category generalist eval DR: pool pinned to grape. EE init spans home <->
+# near-object (matches training). Material varies per scene-group rebuild via the
+# category's registry material_dr_mult (object_E/nu/rho left unset on purpose).
+# Used by: yd_reactive_eval.sbatch (adds a random mid-approach object kick) (CAT=grape); small object -> _small eval task.
+# Status: experimental
+object_pos_xy: 0.09
+object_yaw_deg: 180
+object_pitch_roll_deg: 14
+robot_init_offset_xyz: [0.03, 0.0, -0.045]
+robot_init_pos_xyz: 0.065
+object_category_pool: ["grape"]
+
+# scene-level (rebuilt every scene_group = every 5 eval episodes): geometry only for
+# the crude small meshes (bend/twist collapse them); material via registry mult.
+object_scale: [0.90, 1.12]
+
+# ── reactive perturbation: lateral velocity impulse to the object mid-approach ──
+object_perturb_prob:  0.75          # 75%% of episodes get a kick; 25%% stay clean
+object_perturb_speed: [0.15, 0.55]  # impulse speed (m/s) -> ~3-9 cm slide after friction
+object_perturb_frame: [24, 104]     # sim-frame window (act_steps=4 -> policy step ~6..26, during approach)
