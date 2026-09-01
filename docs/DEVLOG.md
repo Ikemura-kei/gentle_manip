@@ -444,6 +444,16 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-09-01 (morning) — Overnight COMPLETE: gn1b full 6-object row lands; CGN closed as
+unusable-on-stack; visual index built.** gn1b: 26–64 % success, and the WORST gentleness in
+the grid on compact fruits (raspberry 6 % sub-yield median 1.24×, cherry 36 %) — a modern
+learned 7-DOF planner + close-until-contact execution crushes exactly the objects
+gentleness targets; strongest external row for the paper table. CGN probe killed at batch 2
+(2/21 synth successes) — reported as integration-blocked, no number claimed. One adapter
+crash fixed mid-run (gn1b emitted a left-handed rotation on raspberry → guard + retry, clean
+100-ep... 16-ep retry OK). Visual review map: `docs/e1_visual_index.md` + per-object method
+contact sheets in `docs/figures/e1_sheets/`. Committed locally (NO push, per user).
+
 **2026-09-01 (overnight) — Learned-planner baselines: GraspNet-1Billion WORKING, Contact-
 GraspNet integrated-but-unstable; rigid_v41w_occ round near-complete (occ bound changes
 NOTHING on 5/5 so far — the challenger's wins are not occlusion-freedom).**

@@ -314,7 +314,14 @@ def _rank_to_tcp(hands, obj, pad_geo, com, q, E, density, mu, table_z, name, dep
             if xs is None:
                 continue
             w_ap = xs
-        R_ours = Rot.from_matrix(np.column_stack([-ax, bin_, app]))
+        M = np.column_stack([-ax, bin_, app])
+        # learned planners occasionally emit malformed rotations (non-unit columns /
+        # left-handed frames — measured: gn1b on raspberry crashed Rot.from_matrix);
+        # skip degenerate candidates instead of crashing the collector.
+        if (np.linalg.det(M) < 0.5 or
+                not np.allclose(np.linalg.norm(M, axis=0), 1.0, atol=0.1)):
+            continue
+        R_ours = Rot.from_matrix(M)
         rpy = R_ours.as_euler("xyz")
         width = float(np.clip(w_ap - SQUEEZE_M, 0.008, 0.079))
         pad_centre = pos + app * depth_off               # planner origin -> enclosed-slice centre

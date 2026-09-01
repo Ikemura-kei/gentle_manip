@@ -170,15 +170,29 @@ yields ZERO executable proposals for a table-level 45 mm-finger workspace — a 
 pre-shape openings converted to width commands via local cross-section − 2 mm
 (close-until-contact execution semantics); same validity ladder.
 
-- **GraspNet-1Billion (`--baseline gn1b`): WORKING** — deterministic across seeds, ~6–9 s
-  per synthesis; 16-ep smoke × 6 objects queued (results in the table when done).
-- **Contact-GraspNet (`--baseline cgn`): integrated but UNSTABLE on RTX 4090 + CUDA 12** —
+- **GraspNet-1Billion (`--baseline gn1b`): WORKING — full 16-ep × 6 results (2026-09-01):**
+
+  | object | success (att) | sub-yield % | median ×y | max ×y | run |
+  |---|---|---|---|---|---|
+  | mushroom | 51.6 % (31) | 100 | 0.41 | 0.96 | `26-09-01-ipz` |
+  | strawberry | 26.2 % (61) | 81 | 0.64 | 1.09 | `26-09-01-hsd` |
+  | cherry | 64.0 % (25) | **36** | **1.18** | 1.22 | `26-09-01-han` |
+  | raspberry | 26.2 % (61) | **6** | **1.24** | 1.29 | `26-09-01-hcb` |
+  | sphere_mush | 40.0 % (40) | 100 | 0.21 | 0.55 | `26-09-01-hmn` |
+  | lamp_mush | 34.0 % (47) | 100 | 0.25 | 0.73 | `26-09-01-wol` |
+
+  Reading: the modern learned planner sits between GPD and antipodal on success (26–64 % vs
+  v4.1's 46–100 %) and reproduces the rigid-planner damage pattern on the compact fruits —
+  raspberry at 6 % sub-yield (median 1.24×) and cherry at 36 % is the WORST gentleness in
+  the whole grid: its confident deep grasps + close-until-contact execution crush exactly
+  the objects gentleness is for. Strong table row for the paper.
+- **Contact-GraspNet (`--baseline cgn`): integrated but UNUSABLE on RTX 4090 + CUDA 12** —
   identical seeded input gives 0 grasps / N grasps / CUDA-illegal-address abort across runs
-  (2019-era pointnet2 TF ops; `-G` build and TF-2.20/2.15 both affected). Adapter retries
-  ×3 with shifted seeds; an 8-ep probe quantifies usable yield. Proper fix = their pinned
-  TF 2.5 / CUDA 11 container (post-deadline). Report as "integration attempted, blocked by
-  legacy-kernel instability" if the probe is unusable — do NOT present a number that is
-  mostly our-stack artifacts.
+  (2019-era pointnet2 TF ops; `-G` build and TF-2.20/2.15 both affected). 8-ep probe
+  (killed at batch 2, ~80 min): synthesis succeeded in 2/21 envs, 1 lift success. Reported
+  as "integration attempted; blocked by legacy-kernel instability on our stack" — a number
+  from this would be mostly our-stack artifacts, not the planner. Proper fix = their pinned
+  TF 2.5 / CUDA 11 container (post-deadline).
 
 **Occlusion-bound confound: RESOLVED — it changes nothing.** The full occ re-run
 (rigid_v41w_occ ×6, v4.1's hard 60° camera-azimuth bound forwarded into the pose search) is
