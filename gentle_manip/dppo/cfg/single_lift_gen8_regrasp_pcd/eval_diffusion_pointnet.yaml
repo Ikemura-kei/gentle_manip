@@ -45,6 +45,7 @@ n_episodes: 100
 scene_group_size: 1
 record_batches: null
 early_stop_on_success: true
+lifted_clear_hold_steps: 1   # freeze the instant the object first clears into the z-band (dont wait -- an early ckpt reverses fast)
 success_grace_steps: 8   # after success/lifted-clear, run this many more policy steps then END the episode (don't idle to n_steps)
 n_steps: 225
 render_num: 5

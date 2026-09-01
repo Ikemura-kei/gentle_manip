@@ -88,6 +88,27 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
         except Exception as e:
             print(f"[eval] could not load experiment for success z-band: {e}", flush=True)
 
+    # Frozen-env HOLD action for early_stop_on_success. A normalized 0.0 is NOT "zero
+    # delta": the demo action distribution is min-max normalized and asymmetric -- e.g.
+    # dz range ~[-1, +0.48] -> midpoint -0.26 (a DOWN command), and the gripper midpoint
+    # is an OPEN command. Feeding 0.0 to a frozen env actively drives the arm down and
+    # opens the fingers (== the "carries the object back down, releases, hits the floor"
+    # the user saw). Instead compute the normalized vector that un-normalizes to a real
+    # hold: raw [.. +small_up .. -small_close ..]. State-policy venvs (no action_min/max
+    # attr) take raw actions already, so 0.0 there really is zero delta.
+    hold_action = 0.0
+    _amin = getattr(venv, "action_min", None)
+    _amax = getattr(venv, "action_max", None)
+    if _amin is not None and _amax is not None:
+        _amin = np.asarray(_amin, np.float64)
+        _amax = np.asarray(_amax, np.float64)
+        _hold_raw = np.zeros_like(_amin)
+        if _hold_raw.size >= 7:              # 7-dim delta action (dx,dy,dz,dr,dp,dyaw,dgrip)
+            _hold_raw[2] = 0.03             # gentle up-hold vs gravity/compliance sag
+            _hold_raw[6] = -0.06            # keep the gripper closing on the held object
+        hold_action = (2.0 * (_hold_raw - _amin) / (_amax - _amin + 1e-6) - 1.0).astype(np.float32)
+        print(f"[eval] early_stop hold action (normalized): {np.round(hold_action, 3)}", flush=True)
+
     for i in range(spec.n_batches):
         # Per-group scene DR: rebuild the object geometry (size/shape/material) every K batches from
         # a deterministic group seed (identical across evals -> apples-to-apples across sizes/shapes).
@@ -152,8 +173,9 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
             action = policy.act(obs)
             if spec.early_stop_on_success and np.any(done_mask):
                 action = np.asarray(action).copy()
-                action[done_mask] = 0.0    # no-op for already-succeeded envs -- normalized
-                                            # delta action space, 0 == hold in place
+                action[done_mask] = hold_action   # real hold (see hold_action above) --
+                                                  # NOT 0.0, which un-normalizes to a
+                                                  # down+open command for these demos
             obs, reward, _term, _trunc, info = venv.step(action)
             ep_reward += np.asarray(reward, float).reshape(n)
             succ = np.asarray(info.get("success", np.zeros(n, bool))).reshape(n).astype(bool)
