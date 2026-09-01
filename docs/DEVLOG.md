@@ -444,6 +444,33 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-09-01 — REAL paired-RGB demo campaign COMPLETE: 7 objects x 20(-21) eps, 141 episodes,
+all runs VERIFIED PASS.** Teleop (SpaceMouse pose + Z/X gripper), obs =
+`point_cloud_1cam_armfocus_rgb.yaml` (generalist student cloud view + PAIRED in-obs
+`image_cam_ext` 480x640 uint8 — idle-trimmed with all channels, so RGB step i == obs step i by
+construction), saved actions = 7d euler ABSOLUTE via --record-action-config (matches the cvzth
+generalist training config); point_cloud_shift [0.009,0,0] active BY USER INTENT (standing
+extrinsic compensation). Dual-purpose: DPPO generalist cotrain (cloud+abs actions) AND pi0.5
+VLA baseline (RGB; convert via gentle_manip/pi05/convert_to_lerobot.py). Per-object runs
+(dataset/demos/single_lift_<o>_real/<id>, paired videos in <run>/videos_paired/):
+
+| object | run | eps | gripper floor (mm) |
+|---|---|---|---|
+| mushroom | 26-09-01-xlb | 20 | 31 |
+| grape | 26-09-01-ioa | 20 | 16 |
+| tomato | 26-09-01-cfw | 20 | 63 |
+| padron_pepper | 26-09-01-euq | 20 | 13 |
+| cherry_tomato | 26-09-01-ezm | 20 | 24 |
+| strawberry | 26-09-01-biu | 20 | 22 |
+| tofu | 26-09-01-wbz | 21 | 26 |
+
+Verification = `gentle_manip/scripts/verify_real_demos.py` (pairing, schema, absolute-action
+sanity, crop bounds, quat canonicalization, config snapshot, paired-video render). Gripper
+floors track object size cleanly (13-63 mm) — good size signal for the generalist. Fixes that
+came out of this campaign (committed): record.py rgb_shape plumbing; checklist commands for
+pcd preview (delta action config) + collection recipe in deploy_real.sh.
+
+
 **2026-09-01 (morning) — Overnight COMPLETE: gn1b full 6-object row lands; CGN closed as
 unusable-on-stack; visual index built.** gn1b: 26–64 % success, and the WORST gentleness in
 the grid on compact fruits (raspberry 6 % sub-yield median 1.24×, cherry 36 %) — a modern
