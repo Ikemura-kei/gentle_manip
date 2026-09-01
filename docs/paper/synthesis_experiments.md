@@ -186,6 +186,26 @@ pre-shape openings converted to width commands via local cross-section − 2 mm
   raspberry at 6 % sub-yield (median 1.24×) and cherry at 36 % is the WORST gentleness in
   the whole grid: its confident deep grasps + close-until-contact execution crush exactly
   the objects gentleness is for. Strong table row for the paper.
+
+  Two protocol clarifications (reviewer-proofing):
+  - **Viewpoints.** GraspNet-1B's training data was captured by an arm-mounted RealSense
+    swept over a quarter-sphere ABOVE each tabletop scene — an oblique-to-overhead view
+    distribution. Our steep virtual views (77°/90°) are therefore near their regime, and
+    favorable to the baseline: the shallower ~54° view (closest to our real rig's front
+    camera) produced predictions whose side-ish approaches were 100 % table-colliding for
+    our 45 mm fingers on 3–4 cm objects. Our real rig's camera is NOT involved in synthesis
+    for any method; the only camera coupling is v4.1's occlusion bound (occ round: no
+    effect). Clean single-object clouds also make our setting EASIER than their clutter
+    benchmark.
+  - **Their score.** GraspNet-1B labels each grasp s = 1.1 − μ_min, where μ_min is the
+    smallest friction coefficient at which the grasp is force-closure (s=1 ⇒ works nearly
+    frictionless = robust; s=0.1 ⇒ needs μ=1.0 = marginal); their tables slice by these
+    bands, and the network regresses s as its confidence. We use the predicted score
+    exactly as their demo does — collision-check → NMS → sort by score → take best (no
+    absolute threshold; nothing discarded for low score). Note the scores it assigned on
+    our objects were modest (~0.10–0.25): by its OWN friction-based metric the network
+    judged these small curved deformables friction-demanding — self-consistent with its
+    poor gentleness outcome.
 - **Contact-GraspNet (`--baseline cgn`): integrated but UNUSABLE on RTX 4090 + CUDA 12** —
   identical seeded input gives 0 grasps / N grasps / CUDA-illegal-address abort across runs
   (2019-era pointnet2 TF ops; `-G` build and TF-2.20/2.15 both affected). 8-ep probe
