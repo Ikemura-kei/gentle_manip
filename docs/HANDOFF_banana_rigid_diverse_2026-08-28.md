@@ -1223,3 +1223,14 @@ re-collect with a gentleness cost. Old ueini banana was 0.687 too -> banana alwa
 - Published to 5682ac2f (label gen8-eval-live-1cat). gen8_refresh.sh works; builds 5-clip
   montages per cat from render/. Publish tracking: logs/slurm_logs/webpage_publish_log.txt.
 - baseline 0/12 still (slower). regrasp 1/12. lorap pretrain ep290, ~21:35 cap -> final auto-eval.
+
+## 2026-09-01 22:00 — lorap pretrain done; regrasp FINAL eval; refresh smarter
+- lorap pretrain done (ep300, val ~0.0176). state_300 saved. Auto-submitted eval 1904335
+  was DEFAULT n=100 -> CANCELLED (mismatched baseline n=60). Also cancelled prelim 1899726.
+- REGRASP FINAL eval 1904528 -> lorap/gen_eval_20260901_215958_final, n=60/40 NCAT_PAR=4
+  scene_group_size=0 (matches baseline dthox eval). last_regrasp_geneval.txt updated.
+- gen8_refresh.sh now _pick()s the gen_eval_* dir with MOST summary.json (newest on tie)
+  -> a fresh re-eval (0 cats) won't blank the page while the prelim still has 3 cats.
+- REGRASP PRELIM results (state_225, kept visible until final overtakes): banana 0.98/0.626/0.805,
+  egg_boiled 0.98/0.555/0.769, kiwi 0.67/0.727/0.697. All beat/match old ueini.
+- BASELINE eval 1899725 batch 8-10/12 wave 1, FPS ~0.6-0.8/env (heavy contention). Full ~00:00-00:30.
