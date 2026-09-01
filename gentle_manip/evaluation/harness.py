@@ -104,8 +104,13 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
         _amax = np.asarray(_amax, np.float64)
         _hold_raw = np.zeros_like(_amin)
         if _hold_raw.size >= 7:              # 7-dim delta action (dx,dy,dz,dr,dp,dyaw,dgrip)
-            _hold_raw[2] = 0.03             # gentle up-hold vs gravity/compliance sag
-            _hold_raw[6] = -0.06            # keep the gripper closing on the held object
+            # dz: tiny anti-sag up-bias (~0.1 mm/step after scaling). dgrip: EXACTLY 0 --
+            # a delta-mode "maintain the current gripper target", NOT a close. Any residual
+            # negative dgrip, held over the grace window, keeps crushing the soft object
+            # (the over-squeeze the user flagged: stress pinned at ~yield for the whole
+            # frozen hold). The grasp is already made; freeze == hold, don't keep squeezing.
+            _hold_raw[2] = 0.02
+            _hold_raw[6] = 0.0
         hold_action = (2.0 * (_hold_raw - _amin) / (_amax - _amin + 1e-6) - 1.0).astype(np.float32)
         print(f"[eval] early_stop hold action (normalized): {np.round(hold_action, 3)}", flush=True)
 
