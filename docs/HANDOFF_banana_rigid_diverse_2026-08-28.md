@@ -1122,3 +1122,11 @@ data-prep (~30m) -> BC pretrain (~5-6h) -> auto eval (~6-10h). New 5-letter run 
 (old ueini/lonau superseded). Local tests passed: rebalance/pad/state-synth/object_at_
 gripper all OK, all files ast-parse clean. Full pytest NOT run (aarch64, login can't).
 NEXT GATE: watch 1879047/8 data-prep for errors; then pretrain val loss; then eval.
+
+## 2026-09-01 11:35 — gen8 v2 data-prep PASSED, both in BC pretrain
+1879047 regrasp: rebalance 4400->3717 eps (failed_grasp/mid_air/near_ground capped),
+  hold-tail +20 on 3716, convert -> train states (564290, 12) / 3345 trajs. obs_dim 12 OK.
+1879048 baseline: hold-tail +20 on 3277, convert -> train states (490615, 12) / 2949 trajs.
+object_at_gripper synth + --extra-state-keys wired correctly in both. net params 1748940
+(was 1724364 @ obs_dim 8). Both now in BC pretrain (~5-6h) -> auto yd_gen_eval.
+NEXT: watch <jobid>_pretrain.log val loss (target best-val <~0.017).
