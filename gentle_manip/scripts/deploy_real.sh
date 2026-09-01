@@ -407,20 +407,20 @@
 #   * big net auto-loads from downloaded_runs/qjzsf/.hydra; load-smoked.
 #   * Object placement: the real demos' own workspace (the realws box is a safe subset).
 #
-ckpt=downloaded_runs/qjzsf/checkpoint/state_1000.pt
-normalization=downloaded_runs/qjzsf/normalization.npz
+# ckpt=downloaded_runs/qjzsf/checkpoint/state_1000.pt
+# normalization=downloaded_runs/qjzsf/normalization.npz
 
-uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-  --ckpt ${ckpt} \
-  --ft-denoising-steps 0 \
-  --normalization ${normalization} \
-  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
-  --smooth-alpha 0.6 \
-  --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/qjzsf1000 \
-  --shard-size 10 \
-  --max-steps 5000
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} \
+#   --ft-denoising-steps 0 \
+#   --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --smooth-alpha 0.6 \
+#   --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/qjzsf1000 \
+#   --shard-size 10 \
+#   --max-steps 5000
 
 # ── CLUSTER: lulkx/state_600 — v33b_shift9 + PAIRED-REG (item 16, w=0.5, cube3 pairs), seed 43.
 # The first entry on the FIXED dataset: v33b re-converted the real slice properly and shift9 uses
@@ -597,10 +597,14 @@ uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.p
 # start; W/S etc. move it if pressed; just watch the cloud and ESC to quit,
 # save nothing.)
 #
-# uv run --project envs/deploy python -m gentle_manip.demos.record \
-#   --setup gentle_manip/configs/setup/real_lab.yaml \
-#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-#   --task-name pcd_preview --input keyboard --show-pointcloud
+# NOTE --action-config is REQUIRED: record.py's DEFAULT is now the 10-dim ABSOLUTE
+# config (absolute-demo collection era), but teleop emits 7-dim deltas ->
+# "IndexError: index 9 out of bounds" in _process_absolute without it (hit 2026-09-01).
+uv run --project envs/deploy python -m gentle_manip.demos.record \
+  --setup gentle_manip/configs/setup/real_lab.yaml \
+  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+  --action-config gentle_manip/configs/action/delta_pose_delta_gripper.yaml \
+  --task-name pcd_preview --input keyboard --show-pointcloud
 #
 # Camera-only quick look (NO robot, so the armfocus filter is SKIPPED — crop +
 # outlier + subsample only; raw gray vs processed orange overlay + crop box):
