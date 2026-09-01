@@ -1,0 +1,31 @@
+# [experiment] pi0.5 LOW-DATA study (50 demos: 25 mushroom + 25 tofu), RGB ext + wrist.
+# Used by: collect_demos_synth_v3 ; gentle_manip/pi05/* ; openpi pi05_libero (CLI overrides only)
+# Status: experimental (2026-08-30)
+#
+# Fork of the FIXED reference setup (CHECKLISTS §0): 7-dim euler-absolute actions derived at
+# conversion, quaternion proprio, armfocus cloud, realws DR. Changes vs that reference:
+#   task -> *_pi05rgb   (wrist camera OUTSIDE the gripper + backdrop occluder)
+#   obs  -> superset_soft_armfocus_rgb   (adds image_cam_ext + image_cam_wrist)
+# Both changes are REQUIRED for an RGB/VLA dataset and are asserted at launch to be the ONLY ones.
+task: single_lift_tofu_soft_pi05rgb
+# 7-DIM EULER ABSOLUTE — the space the policy is TRAINED on (derived at conversion from the
+# collector's 10-dim rot6d recording) and therefore the space EVAL must decode. Getting this
+# wrong is silent at collection (the collector ignores this field and always writes rot6d)
+# and fatal at eval: ActionPipeline indexes [:, 9] for the gripper and an IndexError kills
+# the sim server mid-episode, surfacing only as 'socket closed mid-message' on the client.
+action: abs_pose_euler_abs_gripper
+dr: soft_orientation_realws_tofu
+augmentation: l515_noise
+
+obs: superset_soft_armfocus_rgb
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+  pi05: [images]          # proprio + the two RGB streams (eval view; see CHECKLISTS §3.2)
+
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400

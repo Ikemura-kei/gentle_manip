@@ -1,0 +1,25 @@
+# [experiment] pasta_bundle EVAL variant: 7-dim euler-absolute actions.
+# Used by: dppo_eval.sbatch for the 12-object generalist -- OUT-OF-DISTRIBUTION probe.
+# Status: active (2026-09-01)
+#
+# ⚠ pasta_bundle is NOT in the 12-object training set (never collected: 43-50% demonstrator
+# success). This experiment exists ONLY to measure zero-shot transfer to an unseen object.
+# It is the LARGEST object in the inventory (~6.0 cm vs mushroom 3.3 cm), so it probes the
+# large end of the size range as well as an unseen shape class.
+# IDENTICAL to single_lift_pasta_bundle_soft_abs_action_armfocus except `action:` (7-dim is the trained space).
+task: single_lift_pasta_bundle_soft
+action: abs_pose_euler_abs_gripper
+dr: soft_orientation_realws_pasta_bundle
+augmentation: l515_noise
+
+obs: superset_soft_armfocus
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400

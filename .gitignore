@@ -117,3 +117,17 @@ third_party/graspnet-baseline/
 third_party/graspnetAPI/
 third_party/gn1b_venv/
 third_party/cgn_venv/
+
+# openpi (π0.5 VLA baseline) — vendored as a PLAIN CHECKOUT, pinned upstream commit 215abfb
+# (recorded in docs/DEVLOG.md 2026-08-30). Ignored rather than tracked because the working tree
+# carries its own .venv, its 12 GB pi05_base asset cache and its fine-tune checkpoints (~49 GB).
+# TODO: register it as a proper submodule (repo convention for third_party) so the pin is in git.
+third_party/openpi/
+# LeRobot datasets derived from dataset/demos by gentle_manip/pi05/convert_to_lerobot.py
+dataset/lerobot/
+
+# Eval / observation VIDEO outputs under docs/figures (2026-09-01). PNG figures ARE tracked
+# (18 of them); mp4s are not — they are large (~22 MB per batch) and regenerable from the eval
+# dirs on the cluster (<run>/eval/<subdir>/render/) or via gentle_manip/pi05/visualize_rgb.py.
+docs/figures/**/*.mp4
+

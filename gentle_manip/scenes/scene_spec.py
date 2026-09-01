@@ -50,7 +50,7 @@ class FixtureEntry:
     pose: Tuple[float, float, float] = (0.0, 0.0, 0.0)
     params: Dict[str, Any] = field(default_factory=dict)
 
-    _VALID_TYPES = frozenset(("table", "platform", "chopping_board", "bin"))
+    _VALID_TYPES = frozenset(("table", "platform", "chopping_board", "bin", "backdrop"))
 
     def validate(self) -> None:
         if self.fixture_type not in self._VALID_TYPES:

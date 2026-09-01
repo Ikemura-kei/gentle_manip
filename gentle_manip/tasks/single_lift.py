@@ -21,6 +21,9 @@ class SingleLiftTask(BaseTask):
         self.hold_steps: int = int(task_cfg.get("hold_steps", 30))
         self.object_name: str = str(task_cfg.get("object_name", "tofu"))
         self.object_type: str = str(task_cfg.get("object_type", "soft"))  # "soft" | "rigid"
+        # optional wrist camera (VLA baselines want a base + wrist view); OFF by default
+        self.wrist_camera: bool = bool(task_cfg.get("wrist_camera", False))
+        self.backdrop: bool = bool(task_cfg.get("backdrop", False))
 
         # Success: either an ABSOLUTE object-center z-band [min, max] (ruler-checkable on
         # the real robot — the center must sit in this height window), or, if unset, the
@@ -67,11 +70,38 @@ class SingleLiftTask(BaseTask):
         # (examples/gs_sim_backend_dev.py): the grasp reproduces only with this
         # dt/substeps/mpm_bounds/grid_density. One external camera matches the real
         # single-camera rig (cam_ext at the calibrated WORLD_T_CAM_EXT pose).
+        # BACKDROP (opt-in, task cfg `backdrop: true`). Occludes the NEIGHBOURING PARALLEL ENVS
+        # that otherwise appear on cam_ext's horizon (see fixtures.add_fixtures for why MPM scenes
+        # cannot separate envs in the renderer). They MOVE, so they are dynamic distractors in the
+        # RGB observation; the point cloud was never affected because it is cropped.
+        # Walls sit OUTSIDE the point-cloud crop (x<=0.71, |y|<=0.215), so every point-cloud
+        # experiment stays bit-identical. Opt-in: only RGB/VLA tasks should enable it.
+        _fixtures = [FixtureEntry(fixture_type="table")]
+        if self.backdrop:
+            # HEIGHT 0.9 m, NOT 1.5 (2026-08-31). Genesis' single default light is
+            # DirectionalLight(dir=(-1,-1,-1)) — i.e. it comes from +x+y+z — and shadows are on,
+            # so the +y wall casts a shadow band over y in [1.3-h, 1.3] at table height. At
+            # h=1.5 that is [-0.20, 1.30], which covers the whole workspace (|y|<=0.30): the
+            # scene rendered DARK. At h=0.9 the band is [0.40, 1.30] and clears it.
+            # 0.9 m is still ample for OCCLUSION: cam_ext (pos x=0.989, VFOV 46 -> HFOV 59)
+            # sees the back wall at 1.54 m, where the frame top is z=0.77. So 0.9 covers the
+            # full frame with margin, and the side walls only enter frame at x=-1.13, i.e.
+            # already behind the back wall. Verified geometrically AND by looking at the
+            # recorded observation frames (see docs/figures/pi05_obs_*.mp4).
+            _H = 0.9
+            _fixtures += [
+                FixtureEntry(fixture_type="backdrop", pose=(-0.55, 0.0, _H / 2),
+                             params={"size": (0.02, 4.0, _H)}),      # behind the robot
+                FixtureEntry(fixture_type="backdrop", pose=(0.3, -1.2, _H / 2),
+                             params={"size": (4.0, 0.02, _H)}),      # side wall -y
+                FixtureEntry(fixture_type="backdrop", pose=(0.3, 1.2, _H / 2),
+                             params={"size": (4.0, 0.02, _H)}),      # side wall +y
+            ]
         return SceneSpec(
             objects=[ObjectEntry(name=self.object_name, object_type=self.object_type,
                                  spawn_xy=self.object_spawn_xy,
                                  spawn_z=self.object_spawn_z)],
-            fixtures=[FixtureEntry(fixture_type="table")],
+            fixtures=_fixtures,
             cameras=[
                 CameraEntry(
                     name="cam_ext",
@@ -84,7 +114,15 @@ class SingleLiftTask(BaseTask):
                     # TODO: set to the real L515's measured intrinsics for exactness.
                     fov=self.cam_fov,
                 ),
-            ],
+            ] + ([
+                # OPTIONAL WRIST CAMERA (task cfg `wrist_camera: true`, 2026-08-29). Its pose is a
+                # PLACEHOLDER — GenesisWorker re-poses it every step per env from
+                # world_T_ee @ EE_T_CAM_WRIST, mirroring RealBackend. fov 58 ~ the D405's VFOV.
+                # Added for VLA baselines that expect a base + wrist view; OFF by default so every
+                # existing dataset and policy is unaffected.
+                CameraEntry(name="cam_wrist", pos=(0.4, 0.0, 0.4),
+                            lookat=(0.4, 0.0, 0.0), fov=58.0),
+            ] if self.wrist_camera else []),
             sim_dt=1.0 / 30.0,
             sim_substeps=self.sim_substeps,
             # z-floor -0.02 (was -0.012): genesis pads the MPM domain inward by ~0.012, so

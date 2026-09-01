@@ -1,4 +1,11 @@
-"""Post-filter a collected demo run: drop PINCH episodes (object dangling from fingertips).
+"""Post-filter a collected demo run: drop PINCH episodes and NaN-STRESS episodes.
+
+Two independent defects, reported separately because their rates differ per object:
+  PINCH       - object dangling from the fingertips (see the geometry below).
+  NaN-STRESS  - `priv_stress` contains NaN while clouds/proprio/actions stay finite
+                (MPM stress-readout hiccup, ~1-4%). The trajectory is trainable but
+                its gentleness cannot be VERIFIED, so it is dropped by default from
+                what is fundamentally a gentleness dataset. `--keep-nan-stress` opts out.
 
 A proper enveloping grasp holds the mushroom cap between the finger pads: at hold, the TCP
 sits ~17 mm BELOW the object centre with settle width ~33-40 mm. A pinch grabs the cap rim:
@@ -95,6 +102,11 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("run", type=Path)
     ap.add_argument("--out", type=Path, default=None, help="default: <run>-filt")
+    ap.add_argument("--keep-nan-stress", action="store_true",
+                    help="KEEP episodes whose priv_stress is NaN. Default is to DROP them: their "
+                         "trajectories are fine but their gentleness cannot be verified, and this "
+                         "is a gentleness dataset. Use only if you want maximum episode count and "
+                         "will exclude them from stress statistics downstream yourself.")
     ap.add_argument("--size-scale", type=float, default=None,
                     help="override the object-size threshold scaling (default: from the run config)")
     args = ap.parse_args()
@@ -106,18 +118,35 @@ def main():
     for i, ep in enumerate(eps):
         vert, horiz, width = episode_metrics(ep)
         pinch = is_pinch(vert, horiz, width, scale)
+        # NaN-STRESS (2026-08-31, user request). ~1-4% of episodes carry NaN in `priv_stress`
+        # while clouds/proprio/actions stay finite (an MPM stress-readout hiccup). Such an episode
+        # is TRAINABLE but its gentleness CANNOT BE VERIFIED — and this is a gentleness dataset, so
+        # an unverifiable episode is dropped rather than silently assumed safe. Tracked separately
+        # from `pinch` because they are different defects with different rates per object.
+        ps = ep["observations"].get("priv_stress")
+        nan_stress = bool(ps is None or not np.isfinite(np.asarray(ps)[:, 1]).all())
+        drop = bool(pinch or (nan_stress and not args.keep_nan_stress))
         report.append({"episode": i, "vert_mm": round(vert * 1000, 1),
                        "horiz_mm": round(horiz * 1000, 1), "width_mm": round(width * 1000, 1),
-                       "pinch": bool(pinch)})
-        if not pinch:
+                       "pinch": bool(pinch), "nan_stress": nan_stress, "dropped": drop})
+        if not drop:
             keep.append(ep)
-    n_drop = len(eps) - len(keep)
-    print(f"{args.run}: {len(eps)} episodes, dropping {n_drop} pinches "
-          f"({[r['episode'] for r in report if r['pinch']]})")
+    n_pinch = sum(r["pinch"] for r in report)
+    n_nan   = sum(r["nan_stress"] for r in report)
+    n_both  = sum(r["pinch"] and r["nan_stress"] for r in report)
+    n_drop  = len(eps) - len(keep)
+    print(f"{args.run}: {len(eps)} episodes -> dropping {n_drop} "
+          f"({n_pinch} pinch, {n_nan} nan-stress, {n_both} both)"
+          + ("  [nan kept: --keep-nan-stress]" if args.keep_nan_stress else ""))
+    print(f"  pinch idx: {[r['episode'] for r in report if r['pinch']]}")
+    if n_nan:
+        print(f"  nan idx  : {[r['episode'] for r in report if r['nan_stress']]}")
 
     out = args.out or args.run.parent / (args.run.name + "-filt")
     out.mkdir(exist_ok=True)
-    meta = dict(meta, n_episodes=len(keep), pinch_filtered=n_drop, filter_source=str(args.run))
+    meta = dict(meta, n_episodes=len(keep), pinch_filtered=n_pinch,
+                nan_stress_filtered=(0 if args.keep_nan_stress else n_nan),
+                total_filtered=n_drop, filter_source=str(args.run))
     with open(out / "data.pkl", "wb") as f:
         pickle.dump({"meta": meta, "episodes": keep}, f)
     src_cfg = args.run / "config.yaml"
@@ -128,9 +157,29 @@ def main():
                               f"(filter_pinch_episodes.py; report in pinch_report.yaml)")
         (out / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
     (out / "pinch_report.yaml").write_text(yaml.safe_dump(report, sort_keys=False))
-    for aux in ("dr_params.csv", "stats.yaml"):
-        if (args.run / aux).exists():
-            shutil.copy(args.run / aux, out / aux)
+    # stats.yaml is a straight copy, but dr_params.csv MUST BE REMAPPED (2026-08-31).
+    # `dataset_idx` indexes data.pkl["episodes"]; after filtering, the surviving episodes are
+    # RENUMBERED 0..n_kept-1. Copying the source CSV verbatim leaves indices pointing at the
+    # UNFILTERED order, so every DR-param <-> episode join silently pairs the wrong rows -- the
+    # same broken-join class fixed in collect_demos_synth_v3/v4. Dropped episodes get -1.
+    if (args.run / "stats.yaml").exists():
+        shutil.copy(args.run / "stats.yaml", out / "stats.yaml")
+    src_csv = args.run / "dr_params.csv"
+    if src_csv.exists():
+        import csv as _csv
+        old2new, _n = {}, 0
+        for _r in report:                          # report is per SOURCE episode, in order
+            if not _r["dropped"]:
+                old2new[_r["episode"]] = _n; _n += 1
+        with open(src_csv) as f:
+            rows = list(_csv.DictReader(f)); hdr = rows[0].keys() if rows else []
+        for r in rows:
+            di = int(r.get("dataset_idx", -1))
+            r["dataset_idx"] = old2new.get(di, -1) if di >= 0 else -1
+        with open(out / "dr_params.csv", "w", newline="") as f:
+            w = _csv.DictWriter(f, fieldnames=list(hdr)); w.writeheader(); w.writerows(rows)
+        print(f"  dr_params.csv remapped: {_n} kept rows renumbered 0..{_n-1}, "
+              f"{sum(1 for r in rows if int(r['dataset_idx']) < 0)} marked -1")
     print(f"saved {out} ({len(keep)} episodes)")
 
 

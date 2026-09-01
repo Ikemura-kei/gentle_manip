@@ -1,0 +1,49 @@
+# [task] Mushroom single-lift WITH wrist camera + backdrop — for the pi0.5 RGB/VLA baseline.
+# Used by: single_lift_mushroom_soft_pi05_v2
+# Status: experimental (pi0.5 low-data study, 2026-08-30)
+#
+# IDENTICAL to single_lift_mushroom_soft.yaml in every physics/reward/success field. Adds ONLY:
+#   wrist_camera: true  -> a second CameraEntry, re-posed each step from
+#                          world_T_ee @ EE_T_CAM_WRIST (now 12 cm OUTSIDE the gripper,
+#                          aimed at the fingertips — was an identity placeholder INSIDE it)
+#   backdrop: true      -> walls that occlude the NEIGHBOURING PARALLEL ENVS which
+#                          otherwise appear on cam_ext's horizon and MOVE (dynamic
+#                          distractors). Outside the point-cloud crop, so point-cloud
+#                          experiments are unaffected.
+# Forked rather than flag-added to the shared task so no existing run gains a camera or a wall.
+success_z_min: 0.175
+success_z_max: 0.275
+hold_steps: 30           # consecutive steps in the band for success (~1 s at 30 Hz)
+object_name: "mushroom"
+object_type: "soft"
+wrist_camera: true       # 12 cm outside the gripper (xarm7_config.EE_T_CAM_WRIST)
+backdrop: true           # occlude neighbouring parallel envs in cam_ext      # MPM -> has von_mises_stress for the stress reward
+
+sim_substeps: 235
+mpm_grid_density: 250
+
+success_scale: 0.2
+
+rewards:
+  # Gentleness: penalty = -(von_mises / yield)^2 * scale. yield (~40 kPa) auto-injected
+  # from the material, so cap is a FRACTION of yield (1.0 = bruising onset). scale=2.0
+  # (bumped from 1.0) so gentle beats bruising by ~1.5/step vs the +2/step success — a
+  # firmer gentleness incentive. TODO: confirm a gentle grasp can still succeed.
+  stress:
+    scale: 0.2
+    cap: 1.5
+    mean_weight: 0.2
+    top10_weight: 0.8
+  dist_to_obj:
+    scale: 0.1
+    # decay 20 -> 8 (2026-07-02): exp(-20d) is ~flat (~0.02) beyond 10cm, so from the
+    # ~20cm home pose the policy got no gradient to approach. exp(-8d) gives a smooth,
+    # informative pull across the whole 0.02-0.3m approach range.
+    decay: 8.0
+  # Lift: rise normalized to [0,1] by lift_target (~rest->success-band rise) then *scale,
+  # so a fully-lifted object gives ~1.0 (a real gradient toward the success band), ~10x
+  # the old raw-metres term, with no runaway for over-lifting.
+  lift:
+    scale: 0.1
+    grasp_gate_dist: 0.079
+    lift_target: 0.16

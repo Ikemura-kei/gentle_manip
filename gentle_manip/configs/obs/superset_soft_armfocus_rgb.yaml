@@ -1,0 +1,44 @@
+# [obs] SUPERSET soft armfocus + RGB (cam_ext + cam_wrist) — fork of superset_soft_armfocus.yaml.
+# Used by: single_lift_mushroom_soft_pi05 (pi0.5 VLA baseline data collection)
+# Status: experimental (pi0.5 baseline)
+#
+# IDENTICAL to superset_soft_armfocus.yaml (same proprio, same point cloud, same privileged aux
+# labels) with ONE addition: `images:` passes the two RGB streams through to the recorded obs as
+# `image_cam_ext` / `image_cam_wrist` (N, 480, 640, 3) uint8.
+#
+# WHY BOTH CAMERAS IN ONE COLLECTION: the pi0.5 comparison is external-only vs external+wrist, and
+# the honest version of that comparison holds the DATA fixed and varies only the input. Recording
+# both in one pass gives both variants the identical episodes, seeds and DR. The real rig has NO
+# wrist camera any more (user, 2026-08-30), so external-only is the deployable variant and the
+# wrist variant is a sim-only upper bound — say so wherever the numbers are reported.
+#
+# Stored at the native 640x480; openpi resizes to 224x224 at conversion. ~34 GB for 250 episodes
+# (1.8% of the free 1.9 TB), which buys the option to re-crop later rather than baking in a resize.
+# The point cloud still comes from cam_ext DEPTH exactly as before, so the DPPO student view of this
+# dataset is bit-comparable to the existing collections.
+include_joint_pos: false
+include_joint_vel: false
+quat_noise_std: 0.003
+privileged:
+  stress: true              # priv_stress (N,2) = [mean, top10] / yield. Recorded so the FROZEN
+                            # dataset carries a PER-EPISODE gentleness record: needed to (a) filter
+                            # demos that exceed yield and (b) state the sub-yield fraction of the
+                            # actual dataset rather than of a proxy sample. Privileged-only, and the
+                            # DPPO views are explicit key lists, so this does NOT change the student
+                            # (point-cloud) obs or any converted view — it is additive metadata.
+  object_pos: true          # AUX LABEL: object position (COM) — 3D regression target
+  contact: true             # AUX LABEL: proper binary gripper-object contact (geometric, not stress)
+point_cloud:
+  cameras: ["cam_ext"]
+  crop_min: [0.2, -0.215, 0.004]
+  crop_max: [0.71,   0.215,  0.45]
+  max_points: 1024
+  outlier_removal:
+    voxel_size: 0.01
+    min_neighbors: 23
+  object_focus:
+    z_lo: 0.15          # keep points below this at full weight (table + resting object)
+    r_ee: 0.13          # finger-safe SPHERE radius around the EE (gripper + grasped/lifted object)
+    arm_weight: 0.15    # arm-body points sampled at 0.15x (budget -> object, helps aux predictors)
+images:
+  cameras: ["cam_ext", "cam_wrist"]   # -> obs["image_cam_ext"], obs["image_cam_wrist"]

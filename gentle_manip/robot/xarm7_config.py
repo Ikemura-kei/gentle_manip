@@ -158,13 +158,26 @@ WORLD_T_CAM_EXT = [
     [     0.00000000,      0.00000000,      0.00000000,      1.00000000],
 ]
 
-# Fixed transform from EE link to wrist camera optical frame (calibrated once via AprilTag).
-# NOT used by the current rig (no wrist camera) — kept for future use:
-#   world_T_cam_wrist = world_T_ee @ EE_T_CAM_WRIST   (RealBackend would update each step)
-# TODO: replace with calibrated values if a wrist camera is added.
+# Fixed transform from the GRIPPER BASE LINK to the wrist camera optical frame, OPENCV convention
+# (+z forward = viewing direction, +y image-down). Consumers:
+#   world_T_cam_wrist = world_T_ee @ EE_T_CAM_WRIST      (xarm7_sim each step; RealBackend likewise)
+# ⚠ genesis_worker converts OpenCV -> OPENGL before `camera.set_pose(transform=)`. Do not
+#   "simplify" that flip away; without it the camera renders backwards (DEVLOG 2026-08-30).
+#
+# THIS IS A SIM MOUNT POSE, NOT A CALIBRATION. It replaces an IDENTITY placeholder that put the
+# camera AT the base-link origin — i.e. INSIDE the gripper body, looking out between the jaws
+# (the user spotted it in the rendered frames). Built as a look-at:
+#   position  [+0.12, 0, +0.02] m in the gripper frame — 12 cm OUTWARD along +x. Started at
+#             7 cm; the user judged the view still partly INSIDE the gripper and asked for 5 cm
+#             more. 2 cm forward of the base link so it clears the wrist body;
+#   optical axis aimed at the fingertip/grasp point [0, 0, 0.171] (SIM_TCP_OFFSET), i.e. 24.9 deg
+#             inward from the tool axis, standoff 19.3 cm.
+# Rotation is orthonormal with det +1 (asserted at build time).
+# TODO: if a wrist camera is ever mounted on the REAL rig, replace this with its AprilTag
+#       calibration — the real rig currently has none, so no real data uses it.
 EE_T_CAM_WRIST = [
-    [1.0, 0.0, 0.0, 0.0],
-    [0.0, 1.0, 0.0, 0.0],
-    [0.0, 0.0, 1.0, 0.0],
-    [0.0, 0.0, 0.0, 1.0],
+    [ 0.00000000,  0.78288801, -0.62216265,  0.12000000],
+    [-1.00000000,  0.00000000,  0.00000000,  0.00000000],
+    [ 0.00000000,  0.62216265,  0.78288801,  0.02000000],
+    [ 0.00000000,  0.00000000,  0.00000000,  1.00000000],
 ]

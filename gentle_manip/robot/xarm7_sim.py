@@ -220,8 +220,20 @@ class XArm7Sim:
         q = _np(self.robot.get_dofs_position(self.dof_idx))    # (B, 13)
         dq = _np(self.robot.get_dofs_velocity(self.dof_idx))   # (B, 13)
         ee_quat = _np(self.ee.get_quat()).astype(np.float32)   # (B, 4) wxyz
-        tcp_pos = self._baselink_to_tcp(_np(self.ee.get_pos()), ee_quat)  # base frame, fingertip
+        link_pos = _np(self.ee.get_pos()).astype(np.float32)   # (B, 3) gripper BASE LINK
+        tcp_pos = self._baselink_to_tcp(link_pos, ee_quat)     # base frame, fingertip
+        # WRIST-CAMERA EXTRINSIC (2026-08-29). world_T_cam = world_T_ee @ EE_T_CAM_WRIST, exactly as
+        # RealBackend computes it — and `ee` here is the gripper BASE LINK, which is what the real
+        # calibration is relative to. Using the TCP (fingertip) instead would offset every wrist
+        # image by the 130 mm tool-Z, silently and plausibly. Computed here because this is the one
+        # place holding the raw link pose alongside the TCP conversion.
+        _xyzw = np.concatenate([ee_quat[:, 1:], ee_quat[:, :1]], axis=1)
+        _world_T_ee = np.tile(np.eye(4, dtype=np.float32), (ee_quat.shape[0], 1, 1))
+        _world_T_ee[:, :3, :3] = Rotation.from_quat(_xyzw).as_matrix().astype(np.float32)
+        _world_T_ee[:, :3, 3] = link_pos
+        wrist_cam_T = _world_T_ee @ np.asarray(cfg.EE_T_CAM_WRIST, dtype=np.float32)
         return {
+            "wrist_cam_T": wrist_cam_T.astype(np.float32),           # (B, 4, 4) world_T_cam_wrist
             "ee_pos": tcp_pos.astype(np.float32),                    # (B, 3) TCP (fingertip)
             "ee_quat": ee_quat,                                      # (B, 4) wxyz
             "joint_pos": q[:, :7].astype(np.float32),                # (B, 7)

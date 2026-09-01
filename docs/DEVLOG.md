@@ -6681,3 +6681,1213 @@ the honest strongest form of the reviewer's baseline.
 object and reported the baseline as vision-only. Two of them silently encoded that object's scale.
 **A constant fitted per-object is privileged information wearing a different hat** — the user caught
 what I did not.
+
+### 2026-08-30 — π0.5 PREP: the wrist camera was mounted BACKWARDS, and the smoke test could not have caught it
+
+Building the two-view collection for the π0.5 baseline (external-only vs external+wrist), the
+wrist camera passed its smoke test — `(2,480,640,3)` uint8, and the view changed *more* than the
+external one when the arm moved (14.87 vs 9.85 mean |pixel change|). **It was pointing at the empty
+background above the table.** Only opening `cam_wrist_t25.png` revealed it: dark sky, a sliver of
+gripper, no table and no mushroom, while `cam_ext_t25.png` showed arm + table + mushroom correctly.
+
+**ROOT CAUSE — an axis-convention mismatch at the Genesis API boundary.** Genesis
+`camera.set_pose(transform=)` takes an **OpenGL** pose: `T_to_pos_lookat_up` computes
+`lookat = pos - T[:3, 2]`, so the camera looks along **−z**, +y up. `EE_T_CAM_WRIST`
+(`xarm7_config.py`) is a calibrated **OpenCV** extrinsic: +z forward, +y down — the convention
+`RealBackend` uses and `depth_to_pointcloud` requires. Genesis's own `camera.extrinsics` property
+is the proof, converting back with exactly the flip we were missing:
+`res = transform.copy(); res[..., :3, 1:3] *= -1`. Passing the OpenCV matrix raw therefore aimed
+the camera along `−z_cam` = straight up.
+
+**FIX** (`genesis_worker.py`, at the `set_pose` call — the Genesis boundary, so `wrist_cam_T` keeps
+the OpenCV semantics it shares with `RawObs.camera_extrinsics` and the real backend):
+`_T[..., :3, 1:3] *= -1.0` (self-inverse). This also makes the extrinsic the worker reads back
+correct, so wrist depth would back-project correctly too, not just render correctly.
+
+**THE METHOD LESSON, which is the durable part.** The assertion I wrote (`view changed > 2.0`)
+**cannot fail the way the code actually breaks**: a camera bolted on backwards still moves with the
+arm. It was a test of the re-pose plumbing that I read as a test of the camera. Replaced with three
+checks that are geometric rather than incidental:
+1. **round-trip** — the extrinsic Genesis reports back must equal `world_T_ee @ EE_T_CAM_WRIST`
+   (rotation error < 1°). Catches a convention error in either direction, and catches using the TCP
+   where the calibration wants the gripper base link.
+2. **aim** — the forward axis `world_T_cam[:3, 2]` must have `z < −0.5` at the top-down home pose.
+3. **content** — ≥25% of wrist depth pixels within 1 m: it sees the table, not the sky.
+
+Generalises past cameras: **name the convention explicitly whenever a pose crosses a library
+boundary** (OpenCV vs OpenGL, wxyz vs xyzw, which link a calibration is relative to). This is the
+axis-convention sibling of the B1/B10/B17 wrong-reference-frame class — right arithmetic, wrong
+frame — and it was caught only by looking at the artifact. Recorded in `docs/CHECKLISTS.md` §5.3.
+
+**Near-miss worth stating:** had this shipped, the wrist variant of the π0.5 comparison would have
+trained on 250 episodes of sky. It would still have *converged*, and it would have "shown" that the
+wrist view does not help — a clean, plausible, entirely fabricated negative result.
+
+*Evidence: job 1796508 (PASSED with the camera backwards), `.agent_tmp/rgb_smoke/`; fix + the three
+strengthened checks submitted as job 1796548 (result pending at the time of writing).*
+
+### 2026-08-30 — π0.5 COLLECTION LAUNCHED (250 eps, ext+wrist RGB). Two more traps caught pre-launch
+
+Following the wrist-camera fix above, three further checks before committing ~4 h of GPU time.
+
+**TRAP 1 — the collector had its OWN copy of the hardcoded-empty RGB bug.** `sim_backend.py`'s
+`rgb_images={}` was fixed on 2026-08-29, but `collect_demos_synth_v3._state_to_raw_obs` builds its
+own `RawObs` and had the identical hardcoded `{}`. Fixing one did not fix the other. RGB rendering
+is now DERIVED from the obs config (`_want_rgb = obs_config.images is not None`) rather than a CLI
+flag, so the render and the recorded keys cannot disagree — a flag is a thing you forget.
+*Lesson: when a bug lives in a duplicated builder, grep for the duplicates before calling it fixed.*
+
+**TRAP 2 — the run would have died AT THE MERGE, after hours of collection.** Measured, not
+guessed: two 640×480 RGB streams cost **448 MB per episode — 99.3% of the entire episode** — i.e.
+**100.9 GB for 250 episodes**, while `_merge_shards` loads every shard into RAM at once against a
+**102 GB** job allocation. The collection would have completed, then OOMed writing `data.pkl`.
+
+Fixed with JPEG q95 at shard-write (`gentle_manip/utils/image_codec.py`, `--image-quality`,
+default 95, `0` = raw escape hatch). Measured on a re-run smoke:
+
+| | raw | jpeg q95 |
+|---|---|---|
+| 4-episode `data.pkl` | 1.61 GB | 0.06 GB |
+| per episode | 403 MB | 15 MB |
+| **projected, 250 eps** | **100.9 GB** | **3.8 GB** |
+| mean abs pixel error vs raw | — | **0.46 / 255 (ext), 0.39 / 255 (wrist)** |
+
+26.8× smaller at ~0.18% pixel error, full resolution retained. Lossy is confined to pixels that a
+VLA resizes to 224×224 anyway; actions, proprio, point cloud, privileged labels, DR params and
+seeds are untouched, and `convert_demos.py` already excludes `image_*` keys, so the DPPO student
+path is unaffected.
+
+**CHECK 3 — REPRODUCIBILITY DEMONSTRATED, not assumed (the user's one stated requirement).** The
+raw and JPEG smokes ran at the SAME `--seed`, which turns them into a free experiment: all 24
+initial-condition columns of `dr_params.csv` — `cma_seed`, object dx/dy/roll/pitch/yaw/flip, home
+offset, `scene_scale`, `scene_bend_deg`, `mesh_variant`, twist/taper/rbf/axis_scale, material,
+friction — matched **exactly** across the two independent runs. (Outcome columns may still drift:
+MPM on GPU is not bit-deterministic in the rollout. Initial conditions are what reproducibility
+means here.)
+
+**LAUNCHED: job 1796751** — 250 episodes, 8 envs, `--seed 0`, `maxfevals 1145`, `scene_dr_every 1`,
+the `cdg` v3.4 recipe (`n_grasp 30`, `--grasp-extra-close 0.003`, `--grasp-area-min-mm2 15`,
+`approach_speed 0.0024`, `cam_azimuth_max_deg 60`), video for ALL 250 episodes.
+Experiment `single_lift_mushroom_soft_pi05` — asserted against the parsed config objects to differ
+from the proven collection recipe by EXACTLY `wrist_camera` + the two RGB keys; action, DR, point
+cloud and privileged labels are byte-identical, so this set stays comparable to the existing ones
+AND still trains the DPPO student.
+
+**ARTIFACTS:** run dir `dataset/demos/single_lift_mushroom_soft/26-08-30-<id>/` (`data.pkl`,
+`dr_params.csv`, `config.yaml`, `stats.yaml`, `videos/`); slurm logs
+`logs/slumr_logs/1796751.{out,err}` + `1796751_collect.log`. Smokes kept for comparison at
+`.agent_tmp/pi05_smoke{,_jpeg}/`.
+
+**FRAMING TO PRE-REGISTER (unchanged, and it matters):** the real rig has NO wrist camera any more,
+so external-only is the deployable variant and the wrist variant is a sim-only upper bound. Our
+data is one scripted behaviour, one object, one instruction — a π0.5 loss says more about that data
+regime than about π0.5. Say so wherever the numbers appear.
+
+### 2026-08-30 — openpi/π0.5 IS FEASIBLE ON THE GH200 NODES AT ITS EXACT PINS (checked, not assumed)
+
+The standing worry about a JAX-based VLA on this cluster is aarch64: the GH200 nodes are aarch64
+(glibc 2.34) and several ecosystems ship x86-only CUDA wheels. Checked openpi's actual pins against
+what PyPI and the PyTorch index really hold, before spending any time vendoring.
+
+| requirement | openpi pin | aarch64 CUDA availability | verdict |
+|---|---|---|---|
+| `jax[cuda12]` | `==0.5.3` | `jaxlib`, `jax-cuda12-pjrt`, `jax-cuda12-plugin` 0.5.3 all ship `manylinux2014_aarch64` cp311/cp312 | ✅ exact pin works |
+| `torch` | `==2.7.1` | **not** on the cu126 index (only 2.9.0/2.9.1); **is** on **cu128**: `torch-2.7.1+cu128-cp312-cp312-manylinux_2_28_aarch64.whl` | ✅ exact pin works, via cu128 |
+| driver | CUDA 12.8 needs ≥570 | measured **580.159.04** on the GH200 | ✅ |
+| python | openpi ≥3.11, lerobot (PyPI) ≥3.12 | jax 0.5.3 + torch 2.7.1 both have cp312 aarch64 | ✅ use **3.12** |
+
+**So no version overrides are needed** — unlike `envs/dppo_arrhenius`, which had to override the
+dppo fork's `torch==2.4.0`. The new env follows the repo's established per-arch pattern: a
+`[[tool.uv.index]]` entry pinning torch to the aarch64 CUDA index, here **cu128** rather than the
+cu126 the other arrhenius envs use.
+
+⚠ **TRAP for whoever sets this up:** PyPI's own `torch-2.7.1-...-manylinux_2_28_aarch64.whl` is
+**99 MB vs 821 MB for x86_64** — it is a **CPU-ONLY** build. Installing torch for aarch64 from
+plain PyPI silently yields no CUDA, and everything "works" until it is mysteriously slow. The
+size ratio is the quickest tell. Always take aarch64 torch from the cuXXX index.
+
+Not yet done, and deliberately not started without a check-in: vendoring openpi into `third_party/`
+and creating `envs/openpi_arrhenius`. The 250-episode collection (job 1796751) is the active work.
+
+**PROVENANCE GAP FOUND AT LAUNCH (job 1796751), mitigated in-place.** The collector stamps
+`git_commit` into `config.yaml` — it recorded **74e14df**, which is the commit BEFORE the wrist-pose
+flip, the RGB passthrough and the JPEG codec. Checking out that commit does not reproduce this
+dataset. Since the changes are deliberately still uncommitted (the user pushes themselves), the run
+dir was made SELF-CONTAINED instead: `PROVENANCE.md` + `uncommitted_changes.patch` (tracked files)
++ `uncommitted_status.txt` + `new_files/` holding the four untracked files that `git diff` cannot
+capture (`image_codec.py` and the three configs). 40 kB, and the dataset now carries what builds it.
+
+*Generalises: `git diff` does NOT include untracked files, so a "snapshot the diff" reproducibility
+habit silently omits exactly the NEW files a new feature adds — the most load-bearing ones.*
+
+**TODO (deferred, do NOT edit the collector while job 1796751 runs):** `--image-quality` is not in
+the collector's `config.yaml` control block, so the snapshot does not record how the images were
+encoded (it IS in `data.pkl`'s meta as `image_encoding`/`image_quality`). Add it to the control
+dict after the collection lands. Deferring because the CMA-ES `ProcessPoolExecutor` workers may
+re-import the module, and a cosmetic snapshot field is not worth any risk to a 4.5 h run.
+
+### 2026-08-30 — ⚠ WRONG ACTION SPACE + WRONG DR: π0.5 collection cancelled at 21/250 and relaunched
+
+**The user caught it.** I forked the π0.5 experiment from `..._mm4_s08` — the recipe the most
+recent mushroom *collections* used — reasoning that matching the collection recipe kept the dataset
+comparable. Wrong reference. `mm4_s08` carries **`abs_pose_abs_gripper` (10-dim rot6d)** and a
+**4-mesh pool at scale [0.8,1.5]**, while every recent *training* run — including the generalist
+`ddgrl` we are fixed on — uses **`abs_pose_euler_abs_gripper` (7-dim euler)** with
+**`soft_orientation_realws`** (single mesh, scale [1.0,1.5]).
+
+**Why "just re-derive 7d from the 10d recording" would NOT have rescued it.** My first instinct was
+that rot6d→euler is a lossless re-encoding of the same rotation, so `convert_demos --derive-action`
+could fix it at conversion. Reading `abs_pose_euler_abs_gripper.yaml` killed that: the 7d config
+carries **`euler_frame_offset_deg: [180,0,0]`**, and without it a top-down grasp's roll sits exactly
+on the ±π seam of `as_euler` — the encoded roll sign-flips between consecutive frames (18–27% of
+transitions in every derived abs dataset), trains fine to a low loss, and decodes to a ~180°-wrong
+wrist roll → **~0% eval success** (run `oppsu`, `docs/debug_partC_euler_action_anomaly.md`). The
+two action spaces are not two spellings of the same thing.
+
+**Two independent defects, one root cause.** The action space AND the DR were both inherited from
+the wrong lineage by a single act of forking the wrong file. Had only the action been wrong the
+eval harness would likely have failed loudly; the DR would have failed *silently*, giving π0.5 a
+different object size/shape distribution than the DPPO baseline it is meant to be compared against
+— a confound invisible in every downstream number.
+
+**Corrected:** `single_lift_mushroom_soft_pi05` is now a fork of
+`single_lift_mushroom_soft_abs_action_armfocus_7d_realws` (ddgrl's experiment), asserted in code to
+differ by EXACTLY `wrist_camera` + the two `image_*` keys — action, DR, augmentation, point cloud
+and privileged labels all identical. Job **1796751 cancelled at 21/250**; relaunched as
+**1797457**. The aborted run dir carries an `ABORTED.md` saying why it must not be used.
+
+**RECORDED AS FIXED SETUP — `docs/CHECKLISTS.md` §0** (user standing decision): action (7-dim euler
+absolute, with the frame offset), proprio (quaternion), obs (`superset_soft_armfocus`) and DR
+(`soft_orientation_realws`) are settled, with the concrete parameter values written out. What may
+change: network architecture, data composition, training hyperparameters, and the OBJECT SET
+(expected to grow — the one DR-adjacent field allowed to move, and only deliberately, since it
+shifts the size distribution every width/gentleness number is measured against). New work forks the
+reference and asserts the delta against the PARSED config objects.
+
+*METHOD LESSON, and it is the same shape as the `VIS_TO_TRUE` mesh leak: I picked a reference
+because it was NEAR the work (the collection recipe) rather than because it was the thing the
+result must be COMPARABLE TO (the training reference). "Which config did the last similar job use?"
+is the wrong question; "which config does the baseline I am comparing against use?" is the right
+one.*
+
+**⚠ SAME-DAY CORRECTION to the entry above — I was wrong that derivation could not rescue it.**
+`collect_demos_synth_v3._invert_actions_absolute` **hardcodes rot6d**: the collector records 10-dim
+absolute actions no matter what the experiment's `action:` says, and EVERY demo set on disk
+(mushroom, tofu, raspberry) is `action_dim: 10`. The 7-dim euler the policies train on has always
+been produced at CONVERSION — `.agent_tmp/build_3obj_generalist.sh` builds the generalist dataset
+with `--derive-action abs_pose_euler_abs_gripper.yaml --derive-source-action
+abs_pose_abs_gripper.yaml`, and `actions/derive.py` applies `euler_frame_offset_deg` there. So
+deriving 7d from a 10d recording is not a risky workaround, it is THE pipeline; the `oppsu` failure
+came from deriving with a config that lacked the offset, not from deriving at all.
+
+**What this changes:** the relaunch was justified by the **DR** error alone — that one was real,
+and it is the dangerous kind because it fails silently (a different object size/shape distribution
+than the baseline being compared against). The action-space half of my reasoning was wrong, and the
+running job records 10-dim exactly like every baseline set, which is correct. `docs/CHECKLISTS.md`
+§0 has been corrected accordingly: do not try to make a collection record 7-dim, and do not read
+`action_dim: 10` in a shard as a bug — what must be right is the DERIVE step.
+
+*LESSON: I read one config file's warning comment and generalised it into a claim about the whole
+pipeline without checking how existing datasets were actually built. The evidence that would have
+corrected me — every demo set being action_dim 10 — was one command away and I ran it only after
+the relaunch.*
+
+### 2026-08-30 — π0.5 ADAPTED WITH ZERO CHANGES TO openpi (config + CLI only)
+
+User constraint: *"the best is no internal code needs to be changed, only config modification, and
+maybe mild adaptation for our evaluation env"*. Achieved in full — `third_party/openpi` is a clean
+checkout at `215abfb` with nothing edited. The trick is to make OUR data match a config they
+already ship, rather than adding a config to their tree.
+
+| piece | how | where it lives |
+|---|---|---|
+| env | `uv sync` from **openpi's own uv.lock** on an aarch64 node | `third_party/openpi/.venv` |
+| dataset | emit libero's exact feature names: `image` / `wrist_image` / `state` / `actions` (+ `task`) | `gentle_manip/pi05/convert_to_lerobot.py` (OURS) |
+| training | stock `pi05_libero` + CLI overrides (`--data.repo-id`, `--batch-size`, ...) | no file at all |
+| inference | `LiberoOutputs` slices to the first **7** dims = exactly our action dim | unchanged |
+| eval | `Pi05EvalPolicy` driving the canonical `run_eval` | `gentle_manip/pi05/eval_policy.py` (OURS) |
+
+**Why `pi05_libero` fits us without editing it** — checked in their source, not assumed:
+`LiberoInputs` passes `state` and `actions` through with **no hardcoded dimension** (openpi pads to
+the model dim), so our 8-dim state and 7-dim action are fine. `LiberoOutputs` returns
+`data["actions"][..., :7]` — libero's action dim happens to equal ours, so it is correct for us
+verbatim. `repo_id` is a tyro field on `DataConfigFactory`, so the dataset is a pure CLI override.
+
+**FEASIBILITY, measured:** jax 0.5.3 (openpi's exact pin) has `manylinux2014_aarch64` cp311/cp312
+wheels for `jaxlib` / `jax-cuda12-pjrt` / `jax-cuda12-plugin`; verified on the GH200 —
+`jax.devices()` → 4 `CudaDevice`s, matmul runs. ⚠ **openpi's `torch==2.7.1` resolves to a CPU-ONLY
+aarch64 wheel** (99 MB vs 821 MB on x86_64). Harmless here: openpi's JAX path uses torch only for
+the LeRobot dataloader, all compute is JAX. Worth knowing before someone "fixes" it.
+
+**ACTIONS — derived, not recorded.** The LeRobot `actions` are the 7-dim euler absolute set derived
+with the generalist's exact recipe (`--derive-action abs_pose_euler_abs_gripper`,
+`--derive-source-action abs_pose_abs_gripper`, lookahead 1). Validated on real episodes: decoding
+the derived actions back through `ActionPipeline` reproduces the commanded targets to **0.000 mm
+position / 0.038° max rotation / 0.000 mm gripper**, with **0/237 roll seam crossings**. That
+round-trip is the check `oppsu` failed.
+
+**TWO CAMERA VARIANTS FROM ONE DATASET.** `--cameras ext_wrist` (both views) vs `--cameras ext`
+(wrist_image zero-filled — openpi's own idiom for a missing camera, what they do for
+`right_wrist_0_rgb`). Stated honestly: `LiberoInputs` hardcodes the left-wrist mask to True, so the
+ext-only variant still spends image tokens on a blank frame rather than masking it off. It is a
+fair "no wrist information" ablation, not a free lunch. The real rig has no wrist camera, so `ext`
+is the deployable variant and `ext_wrist` a sim-only upper bound.
+
+**⚠ QUALITATIVE FINDING — NEIGHBOURING ENVS ARE VISIBLE IN cam_ext.** Rendering the recorded RGB to
+video (`gentle_manip/pi05/visualize_rgb.py`) shows two more XArms on the horizon at lift height.
+Cause: soft/MPM scenes must use the per-env bound-camera path with `env_separate_rigid=False` (the
+rasterizer cannot separate MPM geometry per env), so at `ENV_SPACING = 2.5 m` each env's camera
+sees its neighbours. **The point cloud has never been affected** — it is cropped to
+`[0.2,-0.215,0.004]–[0.71,0.215,0.45]` — which is exactly why this never surfaced before. RGB has
+no crop. It is consistent between train and eval so it does not bias the π0.5-vs-DPPO comparison,
+but it is a sim artifact absent on the real rig, and the neighbours MOVE (dynamic distractors).
+Options: accept+document / crop the RGB to the workspace / collect at `num_envs=1` (~8× slower).
+Recommended: accept and document, since both arms of the comparison see it.
+
+*Method note: this was found only by RENDERING THE RECORDED OBSERVATION STREAM and looking at it —
+not by any assertion. The collector's own `videos/` come from a separate free-flying camera and
+would never have shown it.*
+
+### 2026-08-30 — ⚠ TWO TODOs BEFORE THE SERIOUS MULTI-OBJECT RGB COLLECTION (user, 2026-08-30)
+
+Both found by LOOKING at the rendered observation streams. The current 250-episode mushroom
+collection (job 1797457) KEEPS RUNNING and is fine as a smoke/plumbing dataset — the user's
+decision. These must be fixed before the multi-object collection that real comparisons rest on.
+
+**TODO 1 — WRIST CAMERA IS INSIDE THE GRIPPER.** `xarm7_config.EE_T_CAM_WRIST` is an **identity
+placeholder**, not a calibration: the file's own TODO says *"must be replaced with calibrated
+transform"* and *"NOT used by the current rig (no wrist camera)"*. With identity the camera sits at
+the gripper BASE-LINK origin looking along +tool-z at fingertips 171 mm away — i.e. embedded in the
+gripper body, which is exactly what the wrist frames show (fingers filling the top and bottom
+edges). ⚠ **I earlier described this as "the calibrated OpenCV extrinsic" — WRONG, and the user
+caught it.** (The separate OpenCV→OpenGL flip earlier today was still necessary and correct; it
+turned a backwards camera into a forward one, but cannot fix a placeholder pose.)
+
+*Fix:* adopt the calibrated matrix CLAUDE.md already documents but which never reached the code —
+translation `[+0.07132349, -0.00272051, -0.16624549]`, optical axis ≈ +tool-z. That puts the camera
+**337 mm behind the fingertips and 71 mm off-axis: outside the gripper, looking past the jaws**,
+which is what the user asked for ("a bit outside of the gripper in the axis direction"). If that
+matrix is judged stale, fall back to a simple standoff along −tool-z. Either way, re-run the three
+geometric checks from `.agent_tmp/test_rgb_obs.py` (extrinsic round-trip, forward axis, near
+geometry) AND look at a frame — the round-trip check passes for ANY self-consistent pose, including
+a placeholder, so it cannot catch this class on its own.
+
+**TODO 2 — NEIGHBOURING ENVS VISIBLE IN cam_ext.** At `ENV_SPACING = 2.5 m`, soft/MPM scenes must
+use the per-env bound-camera path with `env_separate_rigid=False` (the rasterizer cannot separate
+MPM geometry per env), so each env's external camera sees its neighbours on the horizon — and they
+MOVE, so they are dynamic distractors. The point cloud was never affected (cropped to
+`[0.2,-0.215,0.004]–[0.71,0.215,0.45]`), which is why this never surfaced before RGB.
+
+*Options, best first:*
+1. **Backdrop occluder** — add a wall/plane fixture behind the workspace, outside the robot's
+   reach. Occludes the neighbours AND makes the scene more real-lab-like (a real rig has a
+   background), so it reduces the sim2real gap rather than just hiding an artifact. Cheap.
+2. Raise `ENV_SPACING` — neighbours shrink but stay in frame. Partial.
+3. Collect RGB at `num_envs=1` — clean, ~8× slower. Only if 1 proves insufficient.
+
+*Method note applying to BOTH: neither was caught by any assertion. Both were caught by rendering
+the recorded observation stream to video and looking at it. The collector's own `videos/` come from
+a separate free-flying camera and would never have shown either one.*
+
+### 2026-08-30 — π0.5 TRAINS ON OUR DATA (smoke PASS), OOM was a SLURM allocation bug, full run chained
+
+**SMOKE PASS (job 1797898):** restored `pi05_base` params (12.5 GiB) in 4.2 s → **10/10 steps at
+2.2 s/it** → blocking save 5.65 s → *"Save Finalize is done on all hosts"* → checkpoint finalized as
+`.../pi05_smoke/9`, `rc=0`. End to end on our data with **openpi unmodified**.
+
+**THE OOM WAS OURS, NOT openpi's.** The previous attempt (1797884) trained all 10 steps and was then
+**OOM-killed during the checkpoint save**, leaving a `9.orbax-checkpoint-tmp-0` that never
+finalized. Orbax stages params (12.5 GiB) + train_state (37.5 GiB) into **HOST** memory to write,
+and the job had SLURM's default per-CPU allocation of ~102 GB — while the node has ~485 GB. Adding
+**`#SBATCH --mem=0`** fixed it outright. Checkpoint size is set by MODEL size, not dataset size, so
+this does not regress on the 250-episode run.
+
+⚠ **Note the failure shape: it trains fine and dies at SAVE.** A long run would have burned hours
+and produced nothing. Smoke tests must therefore run far enough to WRITE A CHECKPOINT — a smoke
+that stops at "loss went down" would have passed this and taught us nothing.
+
+*GPU-side fallbacks, from openpi's README, if ever needed (host RAM was the issue here, not GPU):*
+`XLA_PYTHON_CLIENT_MEM_FRACTION=0.9` (now set), `--fsdp-devices 4`, or disable EMA. Full fine-tune
+needs >70 GB and the GH200 has 97.8 GB, so it fits on one GPU; LoRA (>22.5 GB) is not required.
+
+**FULL RUN CHAINED (survives the session — SLURM dependencies, not a watcher):**
+| job | what | depends on |
+|---|---|---|
+| 1797457 | collection, 250 eps → `26-08-30-lyr` | — |
+| **1797916** | convert BOTH variants + norm stats → `dataset/lerobot/gm/mushroom250_{ext_wrist,ext}` | afterok 1797457 |
+| **1797917** | fine-tune `pi05_mushroom250_ext_wrist` | afterok 1797916 |
+| **1797918** | fine-tune `pi05_mushroom250_ext` | afterok 1797916 |
+
+Training: stock `pi05_libero` + CLI overrides only, `--batch-size 32 --num-train-steps 12000
+--save-interval 2000`, 24 h wall. Steps/batch are a JUDGEMENT CALL, not a tuned value — 250 eps ×
+~220 frames ≈ 55k frames, so 12k steps at batch 32 is ~7 epochs. `save-interval 2000` means usable
+checkpoints exist even if the wall clock runs out. Revisit once the first loss curve is visible.
+
+`afterok` means a FAILED collection silently cancels the whole chain rather than training on
+partial data — the intended behaviour, but check `squeue`/the run dir rather than assuming
+training started.
+
+### 2026-08-30 — π0.5 EVAL RUNS THROUGH THE CANONICAL HARNESS (smoke PASS, plumbing only)
+
+`gentle_manip/pi05/eval_harness.py` + `eval_policy.py` route a fine-tuned π0.5 checkpoint through
+`gentle_manip.evaluation.run_eval` over the SAME `GenesisMultiStepVecEnv` + `serl_sim_server`
+bridge every DPPO/DP3 eval uses (CLAUDE.md hard requirement #1), so π0.5 and DPPO face identical
+scenarios, seeds, DR and metrics. Verified on the 10-step smoke checkpoint (job 1798196):
+5 episodes, per-episode video (750 frames each), `summary.json` + `episodes.csv`, **success 0.000 —
+which is the CORRECT result for 10 training steps.** This validated the path, not the policy.
+
+**Modelled on `eval_dp3_harness.py`**: DP3 also normalizes internally, and solves it by building the
+venv with IDENTITY normalization so the venv's normalize/unnormalize become no-ops. Same trick here,
+so π0.5 emits actions directly in the ActionPipeline [-1,1] space — the space
+`derive_action_set` wrote into the LeRobot dataset. Train and eval agree by construction.
+
+**FIVE integration defects, each one layer deeper, all in OUR code (openpi untouched):**
+1. **norm stats looked up under the wrong asset id.** `create_trained_policy` resolves
+   `assets/<asset_id>/norm_stats.json` with `asset_id = assets.asset_id or repo_id`; passing the
+   STOCK `pi05_libero` config looked for `physical-intelligence/libero`. The checkpoint stores them
+   under OUR repo_id. Fixed by inferring repo_id from the checkpoint's own `assets/` tree, so it
+   cannot be passed inconsistently with the checkpoint being loaded.
+2. **`--view student` has no images.** Added an ADDITIVE `pi05: [images]` view (teacher/student
+   untouched) → `[ee_pos, ee_quat, gripper_width, image_cam_ext, image_cam_wrist]`, no point cloud
+   (π0.5 ignores it, and dropping it avoids a per-step depth render).
+3. **the sim server never set `render_rgb_obs`.** Now DERIVED from the view
+   (`obs_cfg.images is not None`), not a new CLI flag, so render and requested keys cannot
+   disagree. `None → False` for every existing experiment ⇒ current runs byte-identical.
+4. **`PolicyEnv` needs `rgb_shape` when `images` is set** and the server passed None. Now derived
+   from the task's `scene_spec` cameras, asserting every image camera agrees (the obs space
+   declares ONE (H, W)).
+5. **the venv does not expose raw `ee_pos`.** It packs proprio into a stacked `state` array in
+   PROPRIO_VIEW order — the same 8-dim vector the LeRobot `state` feature was written with — with
+   an n_obs_steps axis on every modality. The policy now takes the LAST obs step.
+
+*None of these would have been found by reading code; each needed a run. Worth the five iterations
+now, on a throwaway checkpoint, rather than after a multi-hour fine-tune.*
+
+**Known cost, stated so it is not mistaken for a property of π0.5:** openpi's `Policy.infer` takes
+ONE observation, so `act()` loops over the 5 envs. A 5-episode eval took ~10 min. The canonical
+200-episode protocol will be slow; batching inference is the obvious optimisation if it matters.
+
+### 2026-08-30 — LARGE-SCALE v4 COLLECTION LAUNCHED (6 categories x 500 eps) + a reproducibility fix v4 was missing
+
+Merged the local agent's v4 work (`origin/master` 12c0dd9) into `integrate-all-2026-08-29`. **No
+conflicts** — the anticipated raspberry clash did not occur because they had already merged our
+branch (e8fbb20). `collect_demos_synth_v3.py` was auto-merged with edits from BOTH sides; verified
+by grep that ours survived (RGB passthrough, `_want_rgb`, `image_quality`, `encode_images`,
+`dataset_idx`, `cma_seed`) alongside theirs (`regrasp`, `episode_type`).
+
+**⚠ v4 WAS MISSING THE CSV<->DATASET JOIN, and it is not a cosmetic gap.** v4 writes a
+`dr_params.csv` row for EVERY attempt, inline, before the save loop — with no `dataset_idx`. And a
+`success=1` row still may not be saved: the `n_episodes` cap truncates the last batch, and v4
+silently drops "succeeded-by-crushing" fallback demos (`total_fallback_dropped`). So "the successes,
+in order" is WRONG, and the DR parameters could not be matched to the episodes they produced. This
+is exactly the defect the user had me fix in v3 ("Make sure the recorded stuff are reproducible"),
+about to be baked into 3000 episodes. Ported the v3 mechanism (buffer rows → stamp `dataset_idx` in
+the save loop → write after, −1 for unsaved) and added the `scan_metric` column that guardrail #3
+requires. Both **APPENDED** to the header so no existing column index shifts. Validated on a
+6-episode post-patch run: `dataset_idx` contiguous from 0, `scan_metric`=p98.
+
+*Process note: the six smokes were launched BEFORE the patch, so none of them exercised it — a
+separate tiny run was needed. Also: I edited v4 while three smokes were still running. They were
+unharmed (ProcessPoolExecutor forks rather than re-imports), but it was an avoidable risk I had
+explicitly declined to take earlier in the day with v3. Don't edit a module that running jobs may
+re-import.*
+
+**SMOKE VERIFICATION (16 eps, `--mesh-cycle`, per category — guardrail #1). 5/6 match or beat the
+handoff's expectations; sub-yield meets or beats target EVERYWHERE:**
+
+| category | exp succ | got | exp sub-yield | got | peak top10/yield (med/max) |
+|---|---|---|---|---|---|
+| raspberry | ~100% | 100% | ~88% | 87.5% | 0.81 / 1.16 |
+| cherry_tomato | ~75% | 70.8% | ~80% | **87.5%** | 0.82 / 1.20 |
+| tomato | ~80% | **50%** | ~100% | 100% | 0.35 / 0.91 |
+| tofu | ~65% | **87.5%** | ~100% | 100% | 0.42 / 0.77 |
+| strawberry | ~45% | 45.0% | ~94% | **100%** | 0.32 / 0.74 |
+| banana_chunk | ~40% | 40.0% | ~100% | 100% | 0.40 / 0.71 |
+
+tomato is the one deviation (50% vs ~80% success) but its sub-yield is perfect — a THROUGHPUT
+difference, not a data-quality one (~1000 attempts for 500 eps ≈ 18 h, inside the 48 h allocation).
+Material DR confirmed live (2–4 distinct `mat_E` per smoke — "silently inert" was a real past bug).
+
+**LAUNCHED (500 eps/category, user's number; the handoff specifies 250):** raspberry 1800346,
+cherry_tomato 1800347, tomato 1800348, tofu 1800349, strawberry 1800350, banana_chunk 1800351.
+Recipe = handoff verbatim + `--regrasp-prob 0.2` (user) + `--scan-metric p98`, no manual
+`--closure-gain`. NO pasta_bundle; mushroom NOT recollected (the 26-08-28-jgr 250-set stands).
+`-t 48:00:00`, `--mem=0`. Wall-clock estimated from the mushroom run's measured 1.06 min/attempt:
+raspberry ~9 h → banana_chunk ~22 h.
+
+**Still open after collection (handoff §Filtering):** `filter_pinch_episodes.py` + drop episodes
+with `priv_stress` top10 ≥ 1.0 (expect ~12% on raspberry and cherry_tomato, ~0 elsewhere — the
+smokes' 87.5% sub-yield on both predicts exactly that).
+
+### 2026-08-30 — π0.5 BASELINE: FIRST NUMBERS (20-ep screen). Underpowered; the real finding is lift-then-drop
+
+Both variants fine-tuned 12000 steps on the 250-episode mushroom set (batch 32, 1.9 it/s, ~1.7 h
+each; checkpoints finalized at `11999`, rc=0). Screened through the CANONICAL harness, 20 episodes,
+num_envs 5.
+
+| variant | success | ever | SUSTAINED stress | succ eps |
+|---|---|---|---|---|
+| ext+wrist | **0.400** | 0.65 | 23,782 | 8/20 |
+| ext-only (DEPLOYABLE — no wrist on the real rig) | **0.150** | 0.45 | 22,033 | 3/20 |
+
+**THE WRIST GAP IS NOT SIGNIFICANT AT n=20.** 8/20 vs 3/20 → two-proportion z ≈ 1.84, p ≈ 0.07;
+95% CIs ~[0.19,0.64] vs ~[0.03,0.38], heavily overlapping. Per-batch success swung 0.00–0.80 in
+BOTH arms (5 eps/batch). State it as "directionally favours the wrist, underpowered", never as a
+result. Mid-run I called the early 0.40-vs-0.00 split "striking"; batch 3 reversed it (0.00 vs
+0.40). *A 2-batch lead at 5 eps/batch is noise — do not narrate partial evals.*
+
+**THE ROBUST OBSERVATION IS THE `ever` >> `success` GAP** (0.65→0.40 and 0.45→0.15, both arms):
+π0.5 REACHES the success height band and fails to HOLD it for the required 30 steps. That is
+lift-then-drop — a weak/slipping grasp, not a failure to find the object. Same signature this
+project logged for CFG earlier (§0-CFG: "the 0.33 ever-minus-success gap is the lift-then-drop
+signature"). It is the most actionable thing in these numbers.
+
+**Against the DPPO plain baseline (~0.905 on mushroom), π0.5 is far behind — but the caveats are
+load-bearing and were PRE-REGISTERED**: 12k fine-tune steps (openpi's own `pi05_libero` uses 30k),
+250 episodes of ONE object, ONE scripted behaviour, ONE instruction, and a 20-episode screen.
+A loss in this regime says more about our data than about π0.5. Do not report it as "π0.5 is worse"
+without those qualifiers, and preferably not before the canonical 200-episode protocol.
+
+**NOT RUN: the canonical 200-episode eval** (~6.7 h/variant at the current per-env inference rate)
+— it would contend with four running v4 collections for a constrained GPU-minutes budget. Do it
+after collection, and consider a longer fine-tune first.
+
+*Artifacts:* `third_party/openpi/checkpoints/pi05_libero/pi05_mushroom250_{ext_wrist,ext}/11999`
+and their `eval/26-08-30-172510/` (summary.json, episodes.csv, per-episode video).
+
+### 2026-08-30 — ⚠ CORRECTION: the π0.5 screening numbers were measured on ONE GEOMETRY
+
+Setting up the width probe exposed that `EvalSpec.scene_group_size` defaults to **0 = a single
+fixed object geometry for the whole eval** (only pose/orientation vary per batch), and
+`gentle_manip/pi05/eval_harness.py` never overrode it. So the screen I reported —
+**ext+wrist 0.400 / ext-only 0.150** — ran all 20 episodes at `obj_scale` **1.407**, one shape,
+one size. Verified directly: `episodes.csv` has exactly ONE distinct `obj_scale`.
+
+**What this does and does not invalidate.** The two variants still faced IDENTICAL scenarios, so
+the ext-vs-wrist comparison is internally consistent (and was already not significant, p≈0.07).
+What is void is any comparison to numbers measured under the canonical 40-geometry protocol —
+notably DPPO's ~0.905 on mushroom. Do NOT put 0.400 next to 0.905 in a table: they are different
+protocols, which is precisely the B1 error class this project keeps re-learning.
+
+**Fixed:** `--scene-group-size` added to the π0.5 harness, **default 1**, and it now prints the
+resulting distinct-geometry count at startup. `docs/CHECKLISTS.md` §3.1 makes "check `obj_scale`
+has >1 distinct value in episodes.csv before believing any size-related number" an explicit step.
+
+*LESSON: a default that silently narrows the experiment is worse than a missing argument. I chose
+`EvalSpec()` defaults deliberately "to stay canonical" — but the canonical trio is
+(n_episodes, num_envs, seed); `scene_group_size` is NOT part of it and defaults to the degenerate
+value. Check what a default actually IS, rather than trusting that a config named canonical is
+canonical in every field.*
+
+### 2026-08-30 — WIDTH PROBE: binned design added (user request), method written into CHECKLISTS §3.1
+
+`gentle_manip/pi05/width_probe.py` + `configs/dr/wprobe_{1p000,1p125,1p250,1p375,1p500}.yaml` +
+matching experiments. Pins `object_scale` to 5 levels across the DR range, each asserted in code to
+differ from the reference experiment by `object_scale` ALONE; `scene_group_size=1` keeps shape and
+material varying so every bin yields several DISTINCT GEOMETRIES at a FIXED size.
+
+**Why binned beats random draws here:** (a) LEVERAGE — slope SE ∝ 1/sd(x), so pinning the extremes
+reaches the precision of ~40 random draws clustered mid-range with fewer geometries; (b)
+DE-CONFOUNDING — under random DR, size and shape co-vary, and pinning size isolates the size term.
+It buys precision, NOT immunity from the 40-geometry rule: a borderline CI at low k is UNRESOLVED,
+not negative, and `width_probe.py` prints that warning itself when k < 40.
+
+π0.5 now writes the SAME dump format as the DPPO probe (`GM_WIDTH_DUMP` →
+`.agent_tmp/<tag>_widthcmd_b*.npz` with `width_cmd_mm` + `ee_z_m`), so one analysis serves every
+policy. Launched on ext+wrist: jobs 1805040-1805044, 5 bins x 15 eps.
+
+### 2026-08-30 — NOTE: π0.5 CANNOT be trained on the REAL demos — they carry no RGB
+
+Checked every real-demo pkl (`single_lift_mushroom_real*`, incl. the 9 mm-x-shift-corrected
+`..._real_merged_shift9mm`, 55 episodes, 7-dim actions recorded natively). Observations are
+`[ee_pos, ee_quat, gripper_width, point_cloud]` — **no image keys anywhere**. They were collected
+for a point-cloud student, so RGB was never recorded.
+
+π0.5 is image-conditioned, so the real-data path is blocked until real demos are RE-RECORDED with
+RGB. That is feasible whenever the rig is next available — the L515 (`cam_ext`) already streams
+colour, and `record.py` goes through `PerceptionPipeline`, so it needs only an obs config with an
+`images:` block (the `superset_soft_armfocus_rgb` fork is the template). No wrist camera exists on
+the rig any more, so a real π0.5 would be the EXT-ONLY variant — which is the deployable arm we are
+already measuring in sim.
+
+*Do not "solve" this by rendering pseudo-images from the point cloud: the appearance would match
+neither the real camera nor the sim training distribution, and a policy trained on it could not be
+deployed against a real RGB stream in any meaningful sense.*
+
+### 2026-08-30 — "the mushroom is black in eval but white in the demos" — record camera ≠ policy input
+
+User asked whether the π0.5 comparison is fair given the object looks different. Checked three
+frames from the same collection/eval:
+
+| source | mushroom |
+|---|---|
+| collection VIDEO (free-flying record camera, close) | white/light speckled ball, prominent |
+| eval VIDEO (record camera, farther back) | small dark speckled blob |
+| **training OBSERVATION `image_cam_ext` — what π0.5 actually consumes** | **small DARK low-contrast object**; frame mean 46/255 |
+
+**Verdict: fair on this axis.** The "white" is the COLLECTION RECORD CAMERA, which is not the
+policy's input and is framed differently in collection vs eval. The policy's actual input has
+always shown a small dark object, consistent between training and eval (identical `cam_ext` entry,
+same task config). *Generalises: `videos/` and `render/*.mp4` come from a separate free-flying
+camera. NEVER reason about train/eval appearance from them — decode `image_*` from the dataset and
+dump the eval obs instead.* (Same trap as 2026-08-30's wrist camera: the collector's videos would
+never have shown that bug either.)
+
+**Two honest caveats, recorded rather than smoothed over:**
+1. Compared training-obs against eval-VIDEO, not eval-OBS. Identical camera specs make them match
+   by construction, but it is not directly measured. Dump eval obs RGB if certainty is needed.
+2. **There IS a real observation-level train/eval difference**: `cam_ext` sees neighbouring parallel
+   envs (the leakage TODO), so the BACKGROUND depends on `num_envs` — collection ran **8**, the
+   screening eval ran **5**, the width probe runs **8**. The probe matches training; the screening
+   eval did not. Another reason those screening numbers are soft, on top of the single-geometry bug.
+
+**Worth carrying into the writeup:** in the external view the object is small, dark and low-contrast.
+Consistent across train and eval so it does not bias the comparison, but a plausible contributor to
+π0.5's weak absolute numbers — and exactly what a close, bright wrist view should help with, which
+is the hypothesis the ext-vs-ext+wrist arms test.
+
+### 2026-08-30 (night) — OVERNIGHT PLAN, left durable in case the session dies
+
+**RUNNING (21 jobs).** v4.1 collections, 500 eps each, 13 objects: 7 food (raspberry,
+cherry_tomato, tomato, tofu, strawberry, banana_chunk, mushroom) + 6 primitives (cylinder, sphere,
+lamp, cuboid, ellipsoid, torus). Every 500-run is gated `afterok` on its own 16-ep `--mesh-cycle`
+smoke, and smokes now record FULL renderings (upstream rule c03f9f3; my earlier smokes used
+`--record-video 4` — a violation). Recipe verbatim: p98, `--regrasp-prob 0.2`,
+`--grasp-extra-close auto`, no manual `--closure-gain`. 500 (not the handoff's 250) so all 13
+objects weigh equally in the generalist.
+
+Plus the π0.5 low-data pair: 25 mushroom + 25 tofu RGB episodes, **wrist camera 12 cm outside the
+gripper + BLACK backdrop** (user-approved from `.agent_tmp/obs_fixed_mushroom`).
+
+**THEN, unattended, in order:**
+1. Verify each collection (schema incl. `dataset_idx`/`scan_metric`, per-object sub-yield, success
+   vs the handoff table). Recover `data.pkl` with `scripts/merge_shards.py` for anything cut at its
+   walltime — shards survive, only the final merge is lost.
+2. **Document the final dataset composition** (per object: run dir, episodes, success, sub-yield).
+3. `.agent_tmp/build_generalist13.sh` — convert each slice with the generalist's derive flags
+   (7d euler target ← 10d rot6d source), merge, then launch the ×3 paired-reg generalist.
+   * **normalization is JOINT and AFTER the merge** (user requirement). `merge_npz_datasets`
+     already does this; the build now ASSERTS it — merged actions must SPAN [-1,1] (fitting inside
+     is not enough; per-slice normalization would also fit) and the joint stats must differ from at
+     least one slice's.
+   * **EPOCHS ARE SOLVED, NOT COPIED.** ddgrl = 350 epochs × (254,340/128) = **695,461 gradient
+     steps**. The 13-object set is ~5× larger, so 350 epochs would be ~5× the budget — a different
+     experiment. Solve `n_epochs` from the realised `train.npz`; scale `save_model_freq` by the same
+     ratio (projected 69 epochs / save every 10). Recompute at build time: per-object success rates
+     differ, so the realised count is not 13×500×199.
+   * paired term uses `paired_cube3_clouds_shift9.npz` (9 mm corrected; ddgrl used the UNcorrected
+     one). ⚠ residual **−8.4 mm x / +7.1 mm y** remains — the regulariser is being asked to equate
+     clouds that still differ. Flagged, not silently shipped.
+   * NO real co-training (real exists only for mushroom).
+4. π0.5 low-data: convert 50 demos → two FULL fine-tunes (ext-only, ext+wrist) at openpi's
+   documented small-dataset budget (20k @ batch 64) → controlled width-size probe
+   (`GM_FIXED_SCALES` + `GM_FIXED_POSE` + `GM_FIXED_YAW_DEG`, CHECKLISTS §3.2).
+5. **THEN LoRA** (user-approved): `gentle_manip/pi05/train_lora.py`, same two variants, as the
+   COMPARISON to the full fine-tune — 50 demos is exactly where a full fine-tune of a 3B VLA
+   overfits. LoRA is impossible via openpi's CLI (`freeze_filter` is an nnx Filter object, and
+   setting only the variant strings would add adapters while freezing NOTHING), so the config is
+   built in our code from their classes and handed to their unmodified `main()`.
+
+**OPEN QUESTIONS FOR THE MORNING (do not silently resolve):** the paired-cloud residual above;
+and whether the dark, low-contrast object in `cam_ext` is depressing π0.5's absolute numbers — the
+backdrop fixed the background, not the object's own lighting.
+
+### 2026-08-31 — ⚠ RASPBERRY v4.1 500-ep: 55% OF SAVED DEMOS EXCEED YIELD, and it is SIZE-DEPENDENT
+
+`26-08-30-iqe`, 500/500 saved, 99.0% demonstrator success — but **sub-yield 223/500 (44.6%)**,
+median peak top10 **1.02×** yield, max 1.28. The 16-ep smoke said 87.5% sub-yield and the handoff
+expected ~88%; its filtering step budgets "≤12% on raspberry". We have 55.4% over-yield.
+
+**IT IS A SIZE EFFECT, NOT NOISE.**
+
+| stratum | over-yield |
+|---|---|
+| small third (`scene_scale` < 0.93) | **85.6%** |
+| large third (`scene_scale` > 1.12) | **19.5%** |
+
+`corr(peak, scene_scale) = -0.524`, `corr(peak, grasp width_mm) = -0.621`,
+`corr(peak, closure_cmd_mm) = +0.468`, `corr(peak, mat_E) = +0.267`. Re-grasp and standard episodes
+are equally affected (54.3% vs 55.7%), so the `--regrasp-prob` start state is not the cause. The
+v4.1 p98 closure rule simply commands too firm a grasp on SMALL raspberries — and raspberry is
+already the smallest category (~1.5 cm), so scale 0.93 is a ~1.4 cm berry.
+
+**⚠ DO NOT "FIX" THIS BY FILTERING.** Dropping the 277 over-yield episodes leaves 223 that are
+SIZE-BIASED toward large berries — which would corrupt precisely the width-vs-size analysis this
+dataset exists to support (§3.1/§3.2), and would do so invisibly. A size-biased slice is worse than
+a smaller unbiased one.
+
+**WHY THE SMOKE MISSED IT.** 16 episodes, and `--mesh-cycle` cycles MESHES, not SCALES — the draw
+happened to land on kinder (larger) samples: smoke median peak 0.81 vs 1.02 over 500. *A 16-episode
+smoke cannot see a stratified failure that only appears in one third of the size range.* The
+guardrail is still worth keeping (it caught torus's walltime), but it certifies "runs and is
+schema-clean", not "the data is gentle across the DR range".
+
+**THIS ALSO QUESTIONS THE p98-vs-masked DECISION.** Upstream chose p98 over `masked` specifically
+because "the raspberry saves demos at only 56% sub-yield" under masked. At 500 episodes, p98 on
+raspberry gives 44.6% sub-yield — i.e. p98 is behaving on the full run the way masked did on the
+smoke that disqualified it. Both metrics were compared on 16-episode runs; that sample cannot
+resolve a size-stratified effect either.
+
+**OPEN — needs a decision, not a silent workaround:** (a) re-collect raspberry with a size-aware
+closure floor, (b) drop raspberry from the generalist, or (c) keep it and report the dataset's
+sub-yield honestly per object. Every other finished object is clean: tomato 99.8%, tofu 100.0%,
+mushroom 99.8%.
+
+### 2026-08-31 — RASPBERRY: pinch-filtered and KEPT (user decision), with the residuals documented
+
+User's call: filter and keep, rather than re-collect or drop. `26-08-30-iqe` → `-iqe-filt`.
+
+| | before | after pinch filter |
+|---|---|---|
+| episodes | 500 | **307** (193 dropped) |
+| sub-yield | 44.6% | **60.9%** |
+| peak top10/yield (median) | 1.02 | 0.94 |
+
+**The filter finds real artifacts.** 81.3% of DROPPED episodes were also over-yield vs 39.1% of
+KEPT — pinches (object dangling from the fingertips, near-minimum width) and crushes are largely
+the same episodes, which is what the user saw in the rendered videos.
+
+**TWO RESIDUALS THAT MUST TRAVEL WITH THIS DATASET:**
+1. **120 of the 307 survivors (39.1%) still exceed yield.** Filtering mitigates, it does not fix.
+2. **The kept set is SIZE-SKEWED.** Small raspberries are both likelier to be pinched AND likelier
+   to be crushed, so filtering removes them preferentially: small-third share **32.0% → 14.0%**,
+   median `scene_scale` 1.027 → 1.105. Acceptable as a mild distribution shift for GENERALIST
+   TRAINING; **NOT acceptable for a raspberry width-vs-size claim** — 14% small examples cannot
+   support a size slope, so raspberry is EXCLUDED from per-object width-size conclusions (§3.1/3.2).
+3. Raspberry therefore contributes **307** episodes where every other object contributes 500 —
+   unequal weighting, to be stated wherever the dataset is described.
+
+**⚠ BUG FOUND AND FIXED IN `filter_pinch_episodes.py`:** it copied the source `dr_params.csv`
+verbatim into the filtered run dir, so `dataset_idx` still indexed the UNFILTERED episode order
+(0..499) against a 307-episode `data.pkl`. Every DR-param↔episode join on a filtered dataset would
+have paired the WRONG rows — silently, because the stale indices are all individually valid. Now
+remapped (kept rows renumbered 0..n-1, dropped marked -1) and verified contiguous. Same broken-join
+class as the v3/v4 `dataset_idx` fixes; that makes three occurrences, so **treat "does the join
+survive this transformation?" as a standing check for any script that subsets episodes.**
+
+### 2026-08-31 — PRIMITIVES SWITCHED TO MUSHROOM MATERIAL (upstream 38b46a0/fdbc320)
+
+Upstream added additive `single_lift_prim_*_mush_soft_abs_action_armfocus` variants (mushroom
+material) and the instruction is to collect THOSE, not the plain `prim_*` (tofu material). Their
+measurements: cylinder & sphere **53% → 100%** success, lamp 57% (geometry-limited, collect
+anyway), cuboid/ellipsoid/torus smokes still running on their side, "torus only if wall-clock
+acceptable".
+
+**Cancelled all six tofu-material primitive jobs** (prim_lamp had ~18/500 — discarded, wrong
+material) and relaunched the `_mush` variants: smoke (16 eps, `--mesh-cycle`, FULL renderings) →
+500-run gated `afterok`. Diff confirmed the `_mush` experiments differ from the plain ones by
+exactly `task` and `dr` (mushroom material + its DR ranges); recipe verbatim otherwise.
+
+**torus is deliberately NOT auto-released.** Its tofu-material smoke measured 20% success →
+32.6 h projected for 500 eps, which is why its walltime had already been raised to 44 h. Upstream's
+own caveat is "only if wall-clock acceptable", so its 500-run is HELD until I measure the `_mush`
+smoke's rate — an `afterok` gate checks the exit code, not whether the job can finish in time.
+
+### 2026-08-31 — WIDTH-SIZE PROBING, CONTROLLED: the earlier 0.50 slope may have been a POSE ARTIFACT
+
+First fully-controlled probe (`GM_FIXED_SCALES` + `GM_FIXED_POSE` + `GM_FIXED_YAW_DEG`, 5 sizes x
+8 eps, all 5 dumps written after the final-batch flush fix):
+
+| model | probe | slope | 95% CI | R2 | verdict |
+|---|---|---|---|---|---|
+| 250-demo mushroom, ext+wrist | **UNcontrolled**, 4 bins | **0.50** | [0.26, 0.73] | 0.81 | ADAPTS |
+| 50-demo mixed, ext+wrist | **CONTROLLED**, 5 bins | **0.04** | [-0.05, 0.13] | 0.14 | NO ADAPTATION |
+
+**These two are NOT comparable — they differ in TWO ways at once** (training data 250-mushroom vs
+50-mixed, AND probe controls). I will not attribute the drop to data size on this evidence.
+
+**The likelier reading is that the 0.50 was an artifact.** §3.2's whole point is that pose/yaw leak
+into the size slope when unpinned; the uncontrolled run had pose free to vary across only 4 usable
+size bins, which is exactly the configuration where a chance pose-size correlation manufactures a
+slope. The controlled run, with pose pinned per sub-env, finds nothing.
+
+**Disambiguating run launched:** the SAME 250-demo checkpoint under the FULL controls. If it also
+comes back ~0, the 0.50 was pose leakage and must be retracted; if it stays ~0.5, the difference is
+genuinely data size and the low-data regime loses size tracking. Either way the uncontrolled number
+does not stand on its own.
+
+*Method note: this is the second time an uncontrolled width measurement produced a confident-looking
+slope that a controlled one erased — the first was the 12-vs-40-geometry reversal (DEVLOG
+2026-08-27). Width slopes are unusually good at manufacturing false positives.*
+
+### 2026-08-31 — the controlled 250-demo probe's 0.000 was a CAMERA MISMATCH; π0.5 pipeline verdict
+
+`EE_T_CAM_WRIST` changed at 08-30 23:01 (identity → 12 cm outward). The 250-demo model's data
+(15:02) and training (17:19) both predate it, so the controlled probe at 08-31 11:48 showed it a
+wrist view it had never seen: **0.000/40**, against 0.425 on the uncontrolled probe at 22:20 the
+night before — which ran BEFORE the change. Not a result about controls, data size, or adaptation.
+
+**What this costs:** the 250-vs-50 comparison is unavailable without re-collecting and retraining
+(~7 h), and the 0.50 slope is now unreproducible because the configuration that produced it no
+longer exists. User's call (2026-08-31): don't rebuild it — the pipeline is proven, move on.
+
+**WHAT STANDS (data and eval share the 12 cm camera, so internally valid):**
+- π0.5 trains and evaluates end-to-end on our data with **openpi completely unmodified** —
+  stock `pi05_libero` + CLI overrides for training; our adapters only for conversion, norm stats
+  and the canonical-harness eval.
+- 50-demo (25 mushroom + 25 tofu), ext+wrist, fully-controlled probe: success 0.225,
+  width slope **0.04 [-0.05, 0.13]**, R² 0.14 → **no size adaptation**.
+- The `ever == success` equality in that run (0.225/0.225) differs from the 250-demo model's
+  `ever` >> `success` lift-then-drop signature — worth a look once there is a comparable pair.
+
+**Retracted:** the 250-demo width slope 0.50 and the ext-vs-wrist gap derived from the uncontrolled
+probes. Both were measured under a camera that no longer exists, on top of the pose-control caveat.
+
+---
+
+### 2026-08-31 — POLICY SELECTION UNDER NON-DOMINANCE: adopt a damage-rate CONSTRAINT, not a weight
+
+**Question (user):** two policies, neither Pareto-dominating the other — safety says pick the
+gentler, performance says pick the more successful. Fixed weight? But the right weight depends on
+the material. Should the criterion be sub-yield on `top20_ttop20`?
+
+**ANSWER: yes to the statistic, no to the weight.** Written up as **CHECKLISTS §3.3**, adopted as
+the standing selection criterion and the intended paper presentation format. User is taking it to
+colleagues, so §3.3 is explicitly open for refinement.
+
+**Criterion: maximize success subject to `damage_rate ≤ ε`,** where
+`damage_rate = mean(stress_top20_ttop20 / mat_yield ≥ 1.0)` over episodes, aggregated across
+objects by **max**, not mean.
+
+Why a constraint rather than `success − λ·stress`:
+- λ has units (success per Pa) — a value tuned on mushroom cannot transfer to tofu or raspberry,
+  which is the very material-dependence it is supposed to abstract away;
+- yield is a PHYSICAL boundary (elastic/recoverable below, plastic/permanent above), so exceedance
+  is a binary with a non-arbitrary cutoff. ε is then one dimensionless, auditable number.
+
+**NEW MEASUREMENT — peak stress is empirically dead as a ranking axis.** Across the 200-episode
+mushroom evals on disk, `stress_max_tmax / mat_yield ≥ 1.0` in **91–100% of episodes for EVERY
+policy**. Zero discrimination. The plan's "no PEAK comparisons (past saturation)" rule was argued
+from the 1.23–1.34× yield figure; this is the measured form of it. SUSTAINED damage rate spans
+5.0–66.0% over the same runs, i.e. it discriminates by an order of magnitude more.
+
+**NEW MEASUREMENT — the mean hides the tail.** lulkx `slope_base` (0.905, mean sust/Y 0.69) and
+luqsl `state_249_eval235` (0.900, 0.66) are indistinguishable on success and mean stress but differ
+by **10 points of damage rate** (25.0% vs 15.5%, ±6.0 / ±5.0 at n=200). Reporting the mean was
+averaging away the only axis that separated them.
+
+**A SHARPER JUSTIFICATION FOR BINARIZING than "it's simpler".** Above yield the MPM model has no
+plasticity, so the MAGNITUDE of an over-yield von-Mises value is an elastic extrapolation past the
+regime where the constitutive law holds — it carries no physical information. Only the FACT of
+exceedance does. So thresholding at yield is not a coarsening of a good continuous signal; it is
+the correct use of a signal that is only valid sub-yield. This is the same footing as the standing
+"von Mises is a proxy valid sub-yield only" caveat, now turned from a limitation into a method.
+
+⚠ **The §3.3 illustration table is NOT a ranking** — its five rows sit on different eval protocols
+(`slope_base` vs `eval235`, two of them `dppo-finetune`). Kept because it demonstrates the metric's
+discrimination; labelled in place so it cannot be misread as a result. A real ranking needs all
+arms on one protocol.
+
+**TODO:** add `dmg_rate` + CI as a default eval-summary column so it is produced at eval time
+rather than re-derived per analysis.
+
+### 2026-08-31 — LoRA at 50 demos: 0.000 success, strictly worse than full fine-tuning
+
+Controlled width probes 1852065 / 1852066 landed. All four arms on the SAME probe (40 episodes,
+`GM_FIXED_SCALES` + `GM_FIXED_POSE` + `GM_FIXED_YAW_DEG`, checkpoint step 19999):
+
+| arm | success | ever | sustained stress |
+|---|---|---|---|
+| full-FT ext | 0.025 | 0.025 | 17,333 |
+| **full-FT ext+wrist** | **0.225** | 0.225 | 18,820 |
+| LoRA ext | **0.000** | 0.000 | — |
+| LoRA ext+wrist | **0.000** | 0.000 | — |
+
+**VERIFIED NOT A PIPELINE DEFECT** (checked before reporting, because a hard 0.000 usually is one):
+- LoRA training CONVERGED — loss 0.093 → 0.0008 over 20k steps, both arms;
+- `action_dim=7`, `action_horizon=10` probed correctly at eval — no action-space mismatch;
+- **`norm_stats.json` byte-identical between the LoRA and full-FT checkpoints** for both repo_ids
+  (`cmp` on `*/19999/assets/gm/lowdata50_*/norm_stats.json`) — the assets-dir trap is ruled out;
+- same `repo_id`, same step count, same probe → the only difference is LoRA vs full FT.
+- the arm is NOT frozen: LoRA emits a 44–50 mm gripper swing per episode and lifts 0.085 m mean.
+  It moves, closes, lifts — and never carries the object.
+
+**READING.** Train loss 0.0008 on 50 demos with 0.000 success is memorization that does not
+transfer. The mechanistic story: LoRA freezes the base and applies low-rank updates, but our target
+action space (**7-D absolute euler**) is not the space π0.5 was pretrained on; moving the action
+expert to a new absolute space plausibly needs full-rank capacity. Fitting the 50 training
+trajectories is achievable low-rank; generalizing to new geometries and poses is not.
+
+**STATISTICS — only ONE of the two comparisons is conclusive.** ext+wrist 9/40 vs 0/40 is real
+(p<0.005). ext 1/40 vs 0/40 is NOT separable at n=40; both are floor. Do not report "LoRA is worse
+on both cameras" — report it for ext+wrist, and say ext is uninformative because the full-FT
+baseline there is itself at the floor.
+
+**CAVEAT that limits how far this generalizes:** this is the 50-demo low-data regime by design.
+It does NOT establish that LoRA fails at 250 demos or on a delta-action space; it establishes that
+LoRA does not substitute for full FT *here*. The LoRA arm is finished; no further runs planned.
+
+### 2026-08-31 — The RGB scene was DARK because of a wall SHADOW, not because the wall blocked light
+
+**User report:** the pi0.5 scene renders very dark; "the wall behind blocks the scene light".
+
+**Actual mechanism — a shadow, and from the SIDE wall, not the back one.** Genesis' default
+`VisOptions` is ONE `DirectionalLight(dir=(-1,-1,-1))` (light ARRIVING from +x+y+z),
+`ambient_light=(0.1,0.1,0.1)`, `shadow=True`. A wall of height h at y=+1.2 therefore casts a
+shadow band over `y in [1.3-h, 1.3]` at table height. At **h=1.5 that band is [-0.20, +1.30]**,
+which swallows the entire workspace (`|y| <= 0.30`). The BACK wall (x=-0.55) is irrelevant: the
+light comes from +x, so its shadow falls away from the robot.
+
+Measured on the shipped RGB dataset (`26-08-30-edq`), whole episodes, every 5th frame:
+
+| stream | mean | p95 | %<32 |
+|---|---|---|---|
+| cam_ext BEFORE | 31.7 | 90.0 | 57.7% |
+| cam_wrist BEFORE | 41.2 | 90.0 | 59.3% |
+
+**p95 pinned at exactly 90 in every stream** — even the brightest surfaces reached only 35% of
+range, so this was global underexposure ON TOP of the shadow. Both had to be fixed.
+
+**FIX 1 — walls 1.5 m -> 0.9 m.** At h=0.9 the shadow band is [+0.40, +1.30] and clears the
+workspace. Occlusion is not weakened: cam_ext (x=0.989, VFOV 46 -> HFOV 59) sees the back wall
+at 1.54 m where the **frame top is z=0.774**, so 0.9 m covers the full frame with 0.13 m margin;
+and the side walls first enter frame at x=-1.13, i.e. already behind the back wall.
+
+**FIX 2 — three-point lighting, scoped to backdrop scenes** (`scene_builder._backdrop_lighting`):
+key light unchanged, plus a weaker y-opposite fill and a near-vertical top light, ambient
+0.1 -> 0.35. Returns `{}` for non-backdrop scenes, so no point-cloud experiment changes. (Depth is
+lighting-invariant, so this is belt-and-braces — but scoping means the claim needs no argument.)
+
+**RESULT** (6-episode smoke, job 1855381, same measurement):
+
+| stream | mean | p95 | %<32 | %>=250 |
+|---|---|---|---|---|
+| cam_ext AFTER | 73.6 (+42) | 254 | 10.0% (-48) | 5.99% |
+| cam_wrist AFTER | 104.0 (+63) | 254 | 7.3% (-52) | 6.06% |
+
+**The clipping is on the WHITE ARM, not the object** — checked, because +6% saturated pixels
+would otherwise be a regression. Wrist-camera centre crop (where the mushroom sits):
+**86 -> 245 distinct intensity levels**, %>=250 only **1.11%**, %<32 53.7% -> 21.3%. Nearly 3x the
+tonal resolution on the thing the policy has to see. The MPM particle structure is now visible.
+
+**Occlusion re-verified BY LOOKING, not assumed** (the standing lesson from the wrist-camera bug):
+the backdrop region of cam_ext is uniformly dark with no bright robot blobs. A first automated
+check reported "19% of upper rows > 100" — that was the WHITE ARM passing through the crop, i.e.
+my test region was badly chosen, not a leak.
+
+**One residual, benign:** a dark moving shape at frame left (temporal std 4.7, vs 5.6 in the
+arm-sweep region — so it genuinely moves). It is DARK (mean 51) where a lit neighbour robot would
+be bright, it sits just above the table line i.e. ON the wall, and geometry says neighbours at
+y=+-2.5 are occluded by the back wall. It therefore reads as OUR OWN ARM'S SHADOW cast on the
+backdrop — legitimate scene content that the real rig would also have. Stated as a reading, not a
+proof: I verified the occlusion geometry, not the identity of the blob.
+
+**ARTEFACTS:** `docs/figures/backdrop_lighting_before_after.png`,
+`docs/figures/pi05_obs_AFTER_lit/` and `pi05_obs_BEFORE_dark/` (4 episodes each, the RECORDED
+observation streams via `pi05/visualize_rgb.py`, not the collector's render camera).
+
+⚠ **THE EXISTING RGB DATASETS WERE COLLECTED DARK.** `26-08-30-edq` (mushroom) and `26-08-30-vyi`
+(tofu) — and therefore the 50-demo lowdata models and both LoRA runs — are all pre-fix. Any RGB
+policy trained on them and evaluated under the new lighting is a train/eval MISMATCH, exactly the
+class that invalidated the 250-demo model when the wrist camera moved. Re-collect before comparing
+across the fix; do not mix.
+
+### 2026-08-31 — Generalist-12 round: setup APPROVED and frozen (CHECKLISTS §1.1)
+
+Full resolved setup written to **CHECKLISTS §1.1** as the reference record. Summary of the
+decisions taken this session:
+
+- **12 objects**, torus dropped (wall-clock), pasta_bundle never collected. All slices pinch+NaN
+  filtered; **normalization applied AFTER the merge**, asserted in code.
+- **Architecture MATCHES `ddgrl` exactly** — `[3072]x3`, `visual_feature_dim 512`,
+  `category_embed_dim None`. **RETRACTED:** my earlier description of this round as "x3 network
+  size vs ddgrl" was wrong — ddgrl IS already `[3072]x3`; the "x3" referred to ddgrl's size
+  relative to the older `[1024]x3` baseline. Nothing is being scaled up.
+- **Gradient budget held equal to ddgrl at 695,461 steps**, NOT epoch count. ddgrl's `train.npz`
+  is 1,248 episodes / 254,340 transitions / 203.8 mean length -> 1,987 steps/epoch x 350. The
+  12-object set is ~4.5x larger, so ~79 epochs. Matching EPOCHS instead would have given this run
+  4.5x ddgrl's optimisation — epochs are not comparable across dataset sizes.
+- **`save_model_freq = 8`** (user decision). ~10 ckpts/seed, ~4.8 GB over 3 seeds. Rejected
+  `save_freq = val_freq` (~17 GB) as too expensive. Accepted consequence: the val minimum can sit
+  up to 4 epochs (~5% of schedule) from the nearest checkpoint, so the val-min epoch must be
+  reported alongside the chosen checkpoint's epoch. Revisit this number if the dataset grows.
+- **Seeds 42, 27, 321**; **2 checkpoints each** (closest-to-val-min, later on a near tie; and
+  last) = 6 evals, all on one protocol.
+
+**NEW FINDING that motivated the checkpoint-pair design.** `ddgrl` uses `val_freq: 10` but
+`save_model_freq: 50` — so its own val minimum at **epoch 280 has NO checkpoint** (saved set is
+50,100,...,350). Copying the reference verbatim would have made "the checkpoint closest to the val
+minimum" approximate by construction. Worth knowing for any re-analysis of ddgrl itself: its
+best-by-val checkpoint is not on disk, and 250/300 are the only nearby options.
+
+**Why evaluate val-min AND last:** both alzey and ddgrl finished PAST their val optimum (+16% and
++11% above their minima). Holding ddgrl's gradient budget inherits a schedule that also ends past
+its optimum, so the pair measures directly whether that overtraining costs success or gentleness.
+
+**Backdrop + 3-point lighting stays RGB-only** (user, 2026-08-31): "keep this only for
+rgb-required case". Verified scoping — `backdrop: true` appears in exactly 2 of 32 task configs
+(`single_lift_{mushroom,tofu}_soft_pi05rgb`); `_backdrop_lighting` returns `{}` for every other
+scene and the walls are not built at all. The point-cloud generalist path is untouched.
+
+### 2026-09-01 — Generalist-12 LAUNCHED: 3 seeds, provenance-guarded
+
+**Dataset built and verified** — `dataset/dppo/single_lift_generalist_12obj/`:
+train **4,931 trajs / 950,741 transitions**, val **551 trajs / 105,940 transitions**, `action_dim=7`,
+range exactly [-1,+1], and **all 12 slices differ from the joint `action_min`** (i.e. normalization
+was genuinely recomputed AFTER merging, not inherited from one slice). Build job 1857892, 15m29s.
+
+**Resolved schedule** (solved from the realised `train.npz`, not assumed):
+950,741/128 = 7,428 steps/epoch -> **n_epochs 94**, **val_freq 3**, **save_model_freq 8** (user).
+**698,200 gradient steps vs ddgrl's 695,461 — within 0.4%.**
+
+| seed | job |
+|---|---|
+| 42 | 1858149 |
+| 27 | 1858150 |
+| 321 | 1858151 |
+
+**PROVENANCE GUARD (`​.agent_tmp/verify_round_provenance.py`) — user requirement, no earlier round
+may leak in.** Runs THREE times: login node before submit, inside the build job, inside the
+launcher before sbatch. Two independent checks: (1) the 12 collections, pinned by exact path
+derived from each SLURM job's own log rather than a glob; (2) the MERGE INPUT LIST, which is where
+an earlier round would physically enter.
+
+**It caught two real things.** The merge list on disk was **STALE with only 9 entries** (generated
+before the last 3 primitives were filtered). And the mushroom directory holds `26-08-25-clq-filt`
+and `26-08-26-cze-filt` from EARLIER rounds beside this round's `26-08-30-urg-filt` — mushroom has
+**46 run dirs**, tofu 14, raspberry 5, so a glob would have silently mixed rounds.
+
+**Paired regulariser verified BY CONTENT, not filename:** `paired_cube3_clouds_shift9.npz` differs
+from the uncorrected file by **+9.03 mm in x**. Note **both ddgrl AND alzey used the UNCORRECTED
+`paired_cube3_clouds.npz`** — the two files sit side by side, so this was a live trap. Swapping in
+the corrected file is the single intended change vs ddgrl; architecture, weight and budget match.
+
+**THREE BUGS CAUGHT BEFORE THEY RAN — all silent-failure class:**
+1. `build_generalist12.sh` passed `EXTRA_OVERRIDES`, but `dppo_pretrain.sbatch` reads
+   **`GM_EXTRA_OVERRIDES`**; and it placed `--export` AFTER the script path, where sbatch treats it
+   as a script ARGUMENT, not an option. Together these would have dropped EVERY override —
+   architecture, paired-reg model, action_dim, seed — yielding a plain `[1024]x3` `DiffusionModel`
+   that looked like a successful run and would have been compared against ddgrl as if matched.
+2. My build sbatch called `envs/sim/.venv/bin/python` (the **x86 login-node venv**) on an
+   **aarch64** GPU node -> `Exec format error`, dead in 25 s. Cluster is dual-arch; compute-node
+   work must go through `uv run --project envs/*_arrhenius`.
+3. The generalist hydra cfg is NOT in the main repo — it lives in the **`gm_generalist` worktree**
+   (`.../cfg/single_lift_mushroom_simreal_realws_noos_cmd_v32`, `config_name pre_diffusion_pointnet`),
+   discovered from ddgrl's `.hydra/hydra.yaml` `config_sources`. The base cfg there is
+   `[1024,1024,1024]` + plain `DiffusionModel`; ddgrl's `[3072]x3` + paired reg came ENTIRELY from
+   overrides. So a dropped override would not error — it would quietly train the wrong model.
+
+**Walltime checked:** ddgrl did 300 epochs in 3h44m -> 695k steps ~= 4.4 h. Same gradient budget and
+batch size here, so GPU work is identical; only dataloading grows (950k vs 254k transitions).
+sbatch limit 22 h, ample. `--mem=0` retained (the earlier OOM was at checkpoint SAVE, not training);
+~11 GB of point clouds resident at 950k x 1024 x 3 float32.
+
+**Filtering completed the set:** prim_cuboid 500->489 (11 pinch), prim_lamp 500->**405** (95 pinch,
+19% — the geometry-limited shape, consistent with its 57% demonstrator success at smoke).
+
+**NEXT:** verify all 3 survive startup with the overrides ACTUALLY applied (model target, mlp_dims,
+seed, normalization) — a dropped override is invisible in the result. Then per seed evaluate 2
+checkpoints: closest to the val-loss minimum (later one on a near tie) and the last, all 6 on one
+canonical protocol (`scene_group_size=1`, `record_batches=null`, dumps on), reported per §3.3
+(success + damage rate with CI, max over objects).
+
+**STARTUP VERIFIED from the RESOLVED config** (2026-09-01 00:15). Run IDs:
+
+| run | seed | job | model | mlp_dims | paired npz | w | epochs | save/val | action_dim |
+|---|---|---|---|---|---|---|---|---|---|
+| `kklef` | 42 | 1858149 | PairedRegDiffusionModel | [3072]x3 | shift9 | 0.5 | 94 | 8 / 3 | 7 |
+| `ctzhi` | 27 | 1858150 | PairedRegDiffusionModel | [3072]x3 | shift9 | 0.5 | 94 | 8 / 3 | 7 |
+| `dgxtd` | 321 | 1858151 | PairedRegDiffusionModel | [3072]x3 | shift9 | 0.5 | 94 | 8 / 3 | 7 |
+
+All three loaded `States (950741, 8)` (8-dim quat proprio) and `Actions (950741, 7)`.
+
+⚠ **LESSON — a startup check that reads the sbatch's ECHO proves nothing.** My first monitor
+reported "STARTED ... model=PairedRegDiffusionModel mlp_dims=[3072,3072,3072] seed=42" for all
+three within a minute. That was a FALSE POSITIVE twice over: the `.out` file contains only the
+sbatch's `[sbatch] pretrain: ... overrides=...` echo, so (a) the grep for `epoch|loss` matched
+`train.n_epochs=94` inside that echo rather than any training progress, and (b) every "confirmed"
+setting was read back out of the string that was PASSED, not the config that was BUILT. Since the
+whole risk here is overrides being silently DROPPED (bug #1 above), reading them back from the
+command line is circular. **Verify from `<run>/.hydra/config.yaml` — the resolved config Hydra
+actually instantiated — and from `<run>/run.log`, never from the launcher's own echo.**
+
+### 2026-09-01 — FIRST LAUNCH FAILED IN 2m05s: matching the GRADIENT BUDGET broke the LR SCHEDULE
+
+All three seeds died at init, identically:
+
+```
+File "third_party/dppo/util/scheduler.py", line 55, in __init__
+    assert warmup_steps < first_cycle_steps
+AssertionError
+```
+
+**Root cause — a direct consequence of the epoch rescaling, and a trap for any future run that
+holds the gradient budget instead of the epoch count.** The LR schedule is expressed in **EPOCHS**,
+not gradient steps. `first_cycle_steps: ${train.n_epochs}` auto-tracks and so silently became 94,
+but `warmup_steps: 100` is a LITERAL and did not. ddgrl ran 350 epochs, so 100 was a legal 28.6%
+warmup; at 94 epochs the same literal exceeds the whole run.
+
+**FIX — scale warmup by ddgrl's FRACTION, not to whatever is merely legal.** 100/350 = 28.6% ->
+`round(94 * 100/350)` = **27** (28.7% of training), so the cosine shape matches ddgrl rather than
+just clearing the assert. Derived in the launcher and asserted (`assert wu < ep`) so it cannot
+silently regress if the dataset size changes again.
+
+**GENERAL LESSON (record for the paper's method section too): when you hold the GRADIENT BUDGET
+constant and let the epoch count fall, EVERY hyperparameter expressed in epochs silently changes
+meaning.** Here that was warmup (crashed loudly, cheap) — but `save_model_freq` and `val_freq`
+are the same class and fail SILENTLY, just producing a different checkpoint/validation density.
+Both were already scaled deliberately; the audit rule is: **enumerate every epoch-denominated
+knob and rescale or re-decide each one explicitly.** For this round that set is
+{`n_epochs`, `warmup_steps`, `val_freq`, `save_model_freq`}, and `first_cycle_steps` which
+auto-tracks.
+
+Failed run dirs `kklef`/`ctzhi`/`dgxtd` deleted (0 checkpoints, died at init) and `experiments.csv`
+reconciled, so the relaunch gets clean IDs.
+
+**RELAUNCH SUCCEEDED (2026-09-01 00:27), warmup=27.** Verified by REAL training progress plus the
+resolved `.hydra/config.yaml` (not the launcher echo — see the lesson above):
+
+| run | seed | job | warmup | epochs | paired npz | epoch-1 train loss | s/epoch |
+|---|---|---|---|---|---|---|---|
+| `ydvlr` | 42 | 1859102 | 27 | 94 | shift9 | 0.1126 | 166 |
+| `cvzth` | 27 | 1859103 | 27 | 94 | shift9 | 0.1129 | 175 |
+| `fyetc` | 321 | 1859104 | 27 | 94 | shift9 | 0.1138 | 181 |
+
+94 epochs x ~175 s = **~4.6 h**, against 4.4 h predicted from ddgrl's measured rate (300 epochs in
+3h44m at the same batch size). The two agreeing is independent evidence the gradient budget really
+is matched rather than merely arithmetically equal — different dataset size, same wall-clock per
+gradient step.
+
+Seed spread at epoch 1 is 0.1126-0.1138 (~1%), i.e. the seeds differ as expected and are not
+accidentally identical.
+
+### 2026-09-01 — Generalist-12 TRAINING DONE: NO OVERFITTING at matched gradient budget
+
+All 3 seeds COMPLETED (4h15m / 4h40m / 4h45m), 94 epochs, 12 checkpoints each.
+
+| run | seed | val min | @ep | final | vs min | train final | train/val gap |
+|---|---|---|---|---|---|---|---|
+| `ydvlr` | 42 | 0.00050 | 93 | 0.00050 | **+0.0%** | 0.00040 | **1.25x** |
+| `cvzth` | 27 | 0.00050 | 93 | 0.00050 | **+0.0%** | — | — |
+| `fyetc` | 321 | 0.00050 | 93 | 0.00050 | **+0.0%** | — | — |
+| ddgrl (3obj) | — | 0.00090 | 280/350 | 0.00100 | +11.0% | 0.00050 | 2.00x |
+| alzey | — | 0.00250 | 450 | 0.00290 | +16.0% | 0.00090 | 3.22x |
+
+**HEADLINE: val loss fell MONOTONICALLY to the final epoch on all three seeds — no overfitting
+point exists in this schedule.** ddgrl's val minimum sat at 80% of its run and it finished +11%
+above it; alzey +16%. Ours finish AT their minimum with a train/val gap of 1.25x versus ddgrl's
+2.00x and alzey's 3.22x. **At the SAME gradient budget, the 3.7x larger dataset (950,741 vs
+254,340 transitions) does not reach its overfitting point.** That is a data-scale result, not a
+schedule artifact — the optimisation is identical by construction.
+
+**IMPLICATION FOR THE SCHEDULE:** 94 epochs may UNDER-train this dataset. ddgrl's budget was
+chosen to match ddgrl; since val is still improving at the end, a longer run is a live option and
+should be considered before treating these numbers as the ceiling for 12 objects.
+
+**CONSEQUENCE FOR THE USER'S CHECKPOINT SPEC — degenerate, and handled explicitly.** "Closest to
+val-min" and "last" are the SAME checkpoint (`state_94`) on every seed. Running one checkpoint
+twice and reporting two results would be meaningless, so the second arm is the **EARLIEST
+checkpoint statistically tied with the minimum** (`state_80`; the tie set runs ep78-93). That
+answers the useful form of the question — did the final ~15% of training buy anything in success
+or gentleness? **This is a DEVIATION from the requested selection, forced by the data; it must be
+labelled as such wherever these results are reported.**
+
+⚠ **Precision caveat:** losses are logged to 4 decimals, so the 0.00050 plateau from ep78 may be
+partly display quantization. This STRENGTHENS treating ep78-93 as tied, but "val min at 93" is
+precise only to the logged resolution.
+
+**EVAL GUARD FIRED CORRECTLY (first 6 submissions, 1863689-94, all FAILED in 5 s):**
+```
+[sbatch] NORMALIZATION MISMATCH — refusing to run.
+  checkpoint trained on env : single_lift_generalist_12obj
+  NORM points at dataset    : single_lift_mushroom_soft_pcd
+```
+`dppo_eval.sbatch` defaults `NORM` to the mushroom-only dataset. Decoding 12-object-normalized
+actions with mushroom min/max would have produced silently WRONG commands and a plausible-looking
+success number. **The guard refused instead of skipping** — the correct design (contrast §5.2's
+"a guard that SKIPS is worse than no guard"). Fixed by passing
+`NORM=dataset/dppo/single_lift_generalist_12obj/normalization.npz`; resubmitted as 1863751-56.
+
+**Eval protocol (all 6 identical):** `canon_mushroom_200geo40` — 200 episodes, 5 envs,
+`scene_group_size=1` (40 distinct geometries), `record_batches=null`, dumps on. This is the exact
+protocol the 3-object generalists were measured on, so the numbers are directly comparable to
+ddgrl. **SCOPE LIMIT:** mushroom only. ddgrl was also evaluated on tofu and raspberry, and §3.3's
+max-over-objects aggregation needs a per-object breakdown — that extension is NOT yet run.
+
+**EVAL ATTEMPT 2 ALSO FAILED (1863751-56, 2m49s) — the eval cfg rebuilds the WRONG ARCHITECTURE.**
+
+```
+RuntimeError: Error(s) in loading state_dict for PointNetDiffusionMLP:
+  size mismatch for mlp_mean.layers.0.weight: copying a param with shape [3072, 572]
+  from checkpoint, the shape in current model is [1024, 572]
+```
+`Number of network parameters: 2890828` at eval vs **20902988** at training — it built `[1024]x3`.
+
+**The eval config `eval_diffusion_pointnet.yaml` hardcodes `mlp_dims: [1024, 1024, 1024]` with the
+comment "big net — must match the afucm-twin training cfg". That comment is FALSE for every
+[3072]x3 run**: ddgrl's own eval `.hydra/config.yaml` shows `[3072,3072,3072]`, i.e. it passed the
+override. Training-time architecture lives ONLY in the training overrides; the eval cfg does not
+inherit it (CHECKLISTS §2.1 already warns about this for `proprio_encoder` — the same class).
+Fixed with `GM_EXTRA_OVERRIDES="model.network.mlp_dims=[3072,3072,3072]"`; resubmitted 1863942-47.
+
+**Why this one was lucky:** a WIDTH mismatch is unloadable, so it crashed. A architecture flag that
+changes behaviour without changing tensor shapes (e.g. `proprio_encoder`) would build a different
+network, load cleanly, and return a plausible success number. **Verify the eval's
+`Number of network parameters` against the training log's before trusting any eval result.**
+
+**RUNNING TALLY of silent-failure-class problems caught this round — all would have produced
+plausible-looking results:** (1) `EXTRA_OVERRIDES` vs `GM_EXTRA_OVERRIDES` + `--export` after the
+script path -> every override dropped; (2) epoch-denominated `warmup_steps` after rescaling epochs
+to hold the gradient budget; (3) eval `NORM` defaulting to the mushroom-only dataset; (4) eval cfg
+rebuilding `[1024]x3` instead of the trained `[3072]x3`. Only (2) and (4) crashed; (1) and (3)
+were caught by a guard or by reading the resolved config.
+
+### 2026-09-01 — GENERALIST-12 RESULTS (6 canonical mushroom evals, all COMPLETED)
+
+Protocol identical for all six and for the 3-object references: `canon_mushroom_200geo40`
+(200 eps, 5 envs, `scene_group_size=1` -> 40 geometries). Eval arch verified at 20,902,988 params
+= the trained `[3072]x3`.
+
+**PER ARM (n=200 each)**
+
+| run | seed | ckpt | succ% | ever% | sust/Y | dmg% |
+|---|---|---|---|---|---|---|
+| cvzth | 27 | ep80 | 72.0 | 77.5 | 0.45 | 9.0 |
+| cvzth | 27 | ep94 | 72.0 | 79.0 | 0.51 | 16.5 |
+| fyetc | 321 | ep80 | 71.5 | 77.5 | 0.45 | 9.5 |
+| fyetc | 321 | ep94 | 72.0 | 77.5 | 0.50 | 13.0 |
+| ydvlr | 42 | ep80 | 73.5 | 76.5 | 0.52 | 15.0 |
+| ydvlr | 42 | ep94 | 74.5 | 80.0 | 0.48 | 10.5 |
+
+**POOLED (n=600) vs the 3-OBJECT REFERENCES**
+
+| arm | n | succ% | sust/Y | dmg% |
+|---|---|---|---|---|
+| 12obj early (ep80) | 600 | 72.3 ± 3.6 | 0.47 | **11.2 ± 2.5** |
+| 12obj last (ep94) | 600 | 72.8 ± 3.6 | 0.50 | **13.3 ± 2.7** |
+| ddgrl 3obj | 200 | 70.5 ± 6.3 | 0.46 | 11.0 ± 4.3 |
+| bwmcy 3obj | 200 | **84.0 ± 5.1** | 0.68 | **24.0 ± 5.9** |
+
+**1. THE 12-OBJECT GENERALIST MATCHES ddgrl ON MUSHROOM — it does not beat it.** 72.3-72.8% vs
+70.5%, difference ~2 pts against CIs of ±3.6/±6.3. Damage rate 11.2-13.3% vs 11.0%:
+indistinguishable. **The defensible claim is generalisation WITHOUT DEGRADATION — 4x the object
+categories at no measurable cost on the reference object — not an improvement.** Do not report
+this as "the bigger dataset helped" on mushroom.
+
+**2. THE LAST 15% OF TRAINING BOUGHT NOTHING MEASURABLE.** ep80 -> ep94: success +0.5 pts (noise),
+damage +2.1 pts with overlapping CIs, and the per-seed DIRECTION is inconsistent (dmg 9.0->16.5,
+9.5->13.0, but 15.0->10.5). **This matters because VAL LOSS WAS STILL IMPROVING over that span
+(0.0006 -> 0.0005).** Val-loss gains at this magnitude do NOT translate into eval success or
+gentleness — so "val is still falling, train longer" is not by itself an argument for a longer run.
+That tempers the under-training implication recorded earlier: the schedule may be under-trained by
+val, but the extra epochs are not visibly paying off in the metrics we care about.
+
+**3. §3.3's DAMAGE-RATE CONSTRAINT DOES REAL WORK HERE — the winner depends entirely on eps:**
+* eps=10%: **NOTHING admissible** (best is 12obj early at 11.2%)
+* eps=15%: {12obj early, 12obj last, ddgrl} -> winner **12obj last** (72.8% succ, 13.3% dmg)
+* eps=25%: bwmcy becomes admissible -> winner **bwmcy** (84.0% succ, 24.0% dmg)
+
+**bwmcy has the HIGHEST success of anything measured (84.0%) and is excluded at eps<=15% because it
+damages 24% of grasps.** That is exactly the trade a scalarised "score" would have hidden, and it
+is the strongest concrete evidence so far that the constraint form is the right presentation.
+
+⚠ **NOISE FLOOR — single-seed damage rate at n=200 is NOT reliable.** Across the six evals the
+damage rate spans **9.0-16.5%**, a 7.5-point spread, while each individual CI is only ±4-5. That
+spread EXCEEDS the ep80-vs-ep94 effect. Pooling 3 seeds (n=600) tightens to ±2.5. **Any future
+damage-rate comparison must pool seeds or it will manufacture differences.** ddgrl and bwmcy are
+single-seed n=200 here, so their ±4.3/±5.9 bars overlap much of the field — the bwmcy-vs-rest gap
+survives that, the 12obj-vs-ddgrl difference does not.
+
+**SCOPE LIMIT (unchanged):** mushroom only. §3.3's max-over-objects aggregation needs tofu and
+raspberry (ddgrl has both) — NOT yet run. A 12-object policy judged on one object is a weak test,
+and the per-object breakdown is the obvious next step.
