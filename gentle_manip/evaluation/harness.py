@@ -114,7 +114,16 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
         # early_stop_on_success (opt-in): once an env's success first fires, freeze its
         # action to a no-op (zero delta -- normalized action space, 0 == no movement for
         # any delta-mode task) instead of continuing to act on an already-solved episode.
-        done_mask = np.zeros(n, bool)
+        done_mask = np.zeros(n, bool)      # frozen (stopped acting) -- success OR lifted-clear
+        succ_done = np.zeros(n, bool)      # reached REAL success at least once (for sticky `final`)
+        # crush-gate-free "lifted clear" latch: obj_z inside the success z-band for
+        # lifted_clear_hold_steps consecutive policy steps also freezes the env, so a
+        # hold-untrained BC policy can't carry a well-lifted object back down / re-press it
+        # into the table (pollutes the video + the whole-rollout gentleness mean). Success
+        # metric is untouched. No-op when the task has no absolute z-band (z_min is None).
+        band_hold = np.zeros(n, int)
+        lifted_latch = np.zeros(n, bool)
+        lc_need = max(1, int(getattr(spec, "lifted_clear_hold_steps", 2)))
         # Buffer the per-step SPATIAL reductions per env, so we can aggregate over TIME with tmax
         # / top-20%-mean (NOT plain time-mean — idle steps would dilute it, letting a dawdle-then-
         # grab policy look gentle). Spatial keys come from the venv info (see policy_env
@@ -141,16 +150,25 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
             ep_reward += np.asarray(reward, float).reshape(n)
             succ = np.asarray(info.get("success", np.zeros(n, bool))).reshape(n).astype(bool)
             if spec.early_stop_on_success:
-                # Sticky: an already-done env's `final` stays True regardless of what info
-                # reports now -- we intentionally stopped acting on it, so its post-freeze
-                # trajectory isn't meaningful policy behavior to re-judge against.
-                final = np.where(done_mask, final, succ)
+                # Sticky: an env that has ALREADY reached real success keeps `final` True
+                # regardless of what info reports now -- we intentionally stopped acting on
+                # it, so its post-freeze trajectory isn't policy behavior to re-judge. Keyed
+                # on succ_done (not done_mask): a lifted-clear freeze that hasn't yet earned
+                # full success must still be allowed to flip `final` when the hold completes.
+                final = np.where(succ_done, final, succ)
             else:
                 final = succ
             first_step = np.where((succ & ~ever) & (first_step < 0), t, first_step)
             ever |= succ
+            oz_now = info.get("obj_z")
+            if spec.early_stop_on_success and z_min is not None and oz_now is not None:
+                oz_now = np.asarray(oz_now, float).reshape(n)
+                inb = (oz_now >= z_min) & (oz_now <= z_max)
+                band_hold = np.where(inb, band_hold + 1, 0)
+                lifted_latch |= band_hold >= lc_need
             if spec.early_stop_on_success:
-                done_mask |= succ
+                succ_done |= succ
+                done_mask |= (succ | lifted_latch)
             for k in SKEYS:
                 v = info.get(k)
                 if v is not None:

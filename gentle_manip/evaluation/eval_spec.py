@@ -29,6 +29,15 @@ class EvalSpec:
                                  # and shortens per-episode wall-clock for early-succeeding envs.
                                  # Default OFF — every existing eval (canonical harness comparisons
                                  # across specialist/generalist/direct-generalist) is unaffected.
+    lifted_clear_hold_steps: int = 2  # only meaningful when early_stop_on_success is on: ALSO freeze
+                                 # an env once obj_z has sat inside the success z-band for this many
+                                 # consecutive policy steps, even if the crush gate / full hold_steps
+                                 # have not yet marked it `success`. A hold-untrained BC policy
+                                 # otherwise carries a well-lifted object back down and re-presses it
+                                 # into the table — breaks the per-episode video and inflates the
+                                 # whole-rollout gentleness mean with a 2nd table-contact stress hump.
+                                 # The success METRIC is unchanged (still needs hold_steps + crush
+                                 # gate). No-op for tasks with no absolute z-band (z_min unset).
 
     def __post_init__(self):
         if self.n_episodes % self.num_envs != 0:
