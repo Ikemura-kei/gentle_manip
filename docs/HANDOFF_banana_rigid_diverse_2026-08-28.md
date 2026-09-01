@@ -1172,3 +1172,19 @@ TOMATO SCENE BUG: tomato spawns at z~0.31 (mid-air) -> instant "success", 9-step
 tomato reuses cherry.obj + stiffest material (E 8e5) at grid 300 -> likely MPM launch.
 EXCLUDED tomato from yd_regrasp_snap.sh INDOMAIN pool. TODO: fix or exclude from final
 in-domain eval too (grape/cherry/raspberry still in; raspberry evals fine just hard).
+
+## 2026-09-01 15:00 — hold-action over-squeeze fixed; remaining stress = the grasp itself
+User: gripper keeps CLOSING during the hold -> over-squeeze. Cause: my hold_action had
+dgrip=-0.06 raw = continuous -3mm/step CLOSE held across the whole frozen window.
+FIX (committed): hold_action dgrip 0 (delta-mode maintain, no squeeze); dz +0.02 anti-sag
+only. grace 8->4 / 6->3. + straggler_budget=100: end batch 100 steps after the LAST
+success so frozen envs don't idle to 225. rec_ok already cuts a frozen env's stress
+recording at freeze+grace -> gentleness metric now only sees each success's approach+grasp.
+VERIFY2 (state_50 ep60): egg 5/5 g .57, banana 4/5 g .64, kiwi 4/5 g .85 (was .52/.59/.80).
+REMAINING: peak stress still > yield on egg_boiled (30k vs 22.5k) + banana (60k vs 45k)
+DURING THE GRASP/FIRM (~step 40-50), not the hold. = epoch-60 BC policy imitating firm
+CMA-ES demos (+ FIRM phase), no stress feedback / no per-object softness cue. WATCH as
+training continues (val 0.026@60 -> 0.022@100). If not gentler at convergence, options:
+reduce demo FIRM_EXTRA_CLOSE, add object-softness obs cue (or category one-hot), or
+re-collect with a gentleness cost. Old ueini banana was 0.687 too -> banana always borderline.
+- REGRASP lorap ep100 train 0.021 / val 0.022. BASELINE 1882124 running.
