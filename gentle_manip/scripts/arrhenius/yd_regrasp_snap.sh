@@ -16,13 +16,13 @@ CKPTS=$(ls -1v "$RUN_DIR"/checkpoint/state_*.pt 2>/dev/null | wc -l)
 # walltime with zero output (1897808 TIMEOUT). Small cats still get covered by the full
 # 12-cat eval; the snap is for a quick training-progress read, not full coverage.
 INDOMAIN="mushroom banana_lying kiwi egg_boiled"  # tomato excluded: spawns at z~0.31 (scene bug, see handoff)
-CATS=$(echo "$INDOMAIN" | tr ' ' '\n' | shuf -n3 | tr '\n' ' ')
+CATS=$(echo "$INDOMAIN" | tr ' ' '\n' | shuf -n2 | tr '\n' ' ')
 TS=$(date +%Y%m%d_%H%M)
 OUT="$RUN_DIR/snap/$TS"
 echo "$OUT" > "$REPO/logs/slurm_logs/last_regrasp_snap.txt"
 
 ENV_NAME=single_lift_gen8_regrasp_pcd RUN_DIR="$RUN_DIR" CATS="$CATS" \
-  NEP=5 SMALL_NEP=5 RECORD_BATCHES=1 NCAT_PAR=3 NOTRIM=1 OUT="$OUT" \
-  sbatch -t 00:30:00 --job-name=yd_rsnap \
+  NEP=5 SMALL_NEP=5 RECORD_BATCHES=1 NCAT_PAR=2 NOTRIM=1 OUT="$OUT" \
+  sbatch -t 00:20:00 --job-name=yd_rsnap \
   "$REPO/gentle_manip/scripts/arrhenius/yd_gen_eval.sbatch"
 echo "snap submitted -> $OUT   cats: $CATS   (best-val ckpt auto-picked from $CKPTS)"
