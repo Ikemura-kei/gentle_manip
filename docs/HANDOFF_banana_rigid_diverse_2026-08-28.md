@@ -1204,3 +1204,15 @@ re-collect with a gentleness cost. Old ueini banana was 0.687 too -> banana alwa
   Run it each tick once cats land; publishes into <!--GEN8_EVAL_START/END--> of regrasp_demos.html
   -> publish artifact 5682ac2f. gen8_eval_page.py shows "pending" for missing cats (graceful).
 - User asked: "put the two evals on webpage as in the placeholder" -> that's exactly this section.
+
+## 2026-09-01 19:58 — evals were ~13h (per-batch genesis rebuild); RELAUNCHED fast
+- scene_group_size=1 rebuilt genesis EVERY batch = ~13min/batch under contention (10
+  re-inits in 50min on mushroom). 12-cat eval projected ~13h. CANCELLED 1898658/1899143.
+- FIX committed: eval cfgs scene_group_size 1->0 (fixed nominal geometry; pose/orient
+  still vary per batch). RELAUNCHED:
+  * BASELINE 1899725 -> dthox/gen_eval_20260901_195735_fast (state_250), n=60/40, NCAT_PAR=4
+  * REGRASP  1899726 -> lorap/gen_eval_20260901_195735_fast_state_225, n=60/40, NCAT_PAR=4
+  last_baseline_geneval.txt + last_regrasp_geneval.txt updated. gen8_refresh.sh RE/BE globs
+  will pick the _fast dirs (newest). Est ~1.5-2h each now.
+- REGRASP eval batches at state_225 were 1.0/1.0/1.0/1.0 on first cat -> looking strong.
+- lorap pretrain ep240 val 0.0178, ~22:00 done -> FINAL auto-eval will ALSO be scene_group_size=0 now.
