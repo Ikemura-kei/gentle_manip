@@ -31,6 +31,10 @@ from gentle_manip.scripts.deploy_real import (                       # noqa: E40
 # Ordered proprio state view the DPPO point-cloud student was trained on (== PROPRIO_VIEW in
 # convert_demos): concat -> 8-dim state (3 + 4 + 1).
 _PROPRIO_VIEW = ["ee_pos", "ee_quat", "gripper_width"]
+# gen8 v2 policies (obs_dim 12) append the shared cloud-derived object-at-gripper cue;
+# --obs-dim 12 switches the state view to this. Computed IDENTICALLY to convert_demos /
+# the sim bridge (perception.pointcloud_ops.object_at_gripper).
+_PROPRIO_VIEW_OAG = ["ee_pos", "ee_quat", "gripper_width", "object_at_gripper"]
 
 
 class DPPOPolicyAdapter:
@@ -53,6 +57,7 @@ class DPPOPolicyAdapter:
         from gentle_manip.dppo.pointnet_diffusion import PointNetDiffusionMLP
 
         self.device = device
+        self._proprio_view = _PROPRIO_VIEW_OAG if int(obs_dim) == 12 else _PROPRIO_VIEW
         self.n_action_steps = int(act_steps)
         self._cond_steps = int(cond_steps)
         net = PointNetDiffusionMLP(
@@ -81,8 +86,16 @@ class DPPOPolicyAdapter:
 
     # ── obs handling (mirrors GenesisMultiStepVecEnv, n_envs=1) ────────────────────
     def _modalities(self, obs: dict) -> dict:
-        raw = np.concatenate(
-            [np.asarray(obs[k], np.float32).reshape(1, -1) for k in _PROPRIO_VIEW], axis=1)
+        cols = []
+        for k in self._proprio_view:
+            if k == "object_at_gripper" and k not in obs:
+                from gentle_manip.perception.pointcloud_ops import object_at_gripper
+                v = object_at_gripper(np.asarray(obs["point_cloud"], np.float32),
+                                      np.asarray(obs["ee_pos"], np.float32))
+            else:
+                v = np.asarray(obs[k], np.float32)
+            cols.append(v.reshape(1, -1))
+        raw = np.concatenate(cols, axis=1)
         state = (2.0 * (raw - self.obs_min) / self._obs_range - 1.0).astype(np.float32)
         pc = np.asarray(obs["point_cloud"], np.float32).reshape(1, -1, 3)   # raw xyz (meters)
         return {"state": state, "point_cloud": pc}
@@ -125,6 +138,8 @@ def main() -> None:
                    help="must match the student's training point-cloud processing (crop/1024/outlier)")
     p.add_argument("--action-config", type=Path,
                    default=_PKG / "configs/action/delta_pose_delta_gripper.yaml")
+    p.add_argument("--obs-dim", type=int, default=8,
+                   help="8 = [ee_pos,ee_quat,gripper_width]; 12 = + object_at_gripper cue (gen8 v2)")
     p.add_argument("--cond-steps", type=int, default=2)
     p.add_argument("--act-steps", type=int, default=4)
     p.add_argument("--max-steps", type=int, default=20000)
@@ -158,7 +173,7 @@ def main() -> None:
     backend = RealBackend(setup)
     env = PolicyEnv(backend, obs_config, action_config, task=None, max_episode_steps=10 ** 9)
     policy = DPPOPolicyAdapter(
-        args.ckpt, args.normalization, action_dim=action_config.action_dim,
+        args.ckpt, args.normalization, obs_dim=args.obs_dim, action_dim=action_config.action_dim,
         cond_steps=args.cond_steps, act_steps=args.act_steps,
         ft_denoising_steps=args.ft_denoising_steps, device=args.device)
     run_deploy_loop(env, policy, args.max_steps, args.rate,
