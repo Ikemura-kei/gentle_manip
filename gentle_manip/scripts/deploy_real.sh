@@ -407,20 +407,20 @@
 #   * big net auto-loads from downloaded_runs/qjzsf/.hydra; load-smoked.
 #   * Object placement: the real demos' own workspace (the realws box is a safe subset).
 #
-# ckpt=downloaded_runs/qjzsf/checkpoint/state_1000.pt
-# normalization=downloaded_runs/qjzsf/normalization.npz
+ckpt=downloaded_runs/qjzsf/checkpoint/state_1000.pt
+normalization=downloaded_runs/qjzsf/normalization.npz
 
-# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-#   --ckpt ${ckpt} \
-#   --ft-denoising-steps 0 \
-#   --normalization ${normalization} \
-#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
-#   --smooth-alpha 0.6 \
-#   --max-pos-step-m 0.0065 \
-#   --record dataset/real_deploy/qjzsf1000 \
-#   --shard-size 10 \
-#   --max-steps 5000
+uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+  --ckpt ${ckpt} \
+  --ft-denoising-steps 0 \
+  --normalization ${normalization} \
+  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+  --smooth-alpha 0.6 \
+  --max-pos-step-m 0.0065 \
+  --record dataset/real_deploy/qjzsf1000 \
+  --shard-size 10 \
+  --max-steps 5000
 
 # ── CLUSTER: lulkx/state_600 — v33b_shift9 + PAIRED-REG (item 16, w=0.5, cube3 pairs), seed 43.
 # The first entry on the FIXED dataset: v33b re-converted the real slice properly and shift9 uses
@@ -589,3 +589,23 @@
 #   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
 #   --record dataset/real_deploy/cvzth80_generalist --shard-size 10 \
 #   --max-steps 5000
+
+# ── PRE-DEPLOY CHECK: live view of the EXACT point cloud the policy sees ─────
+# (post-perception: crop + outlier removal + ARM-FOCUS + FPS subsample, driven
+# through PerceptionPipeline with a live robot connection — the armfocus filter
+# needs real ee_pos, so this runs record.py in view-only mode. Robot homes on
+# start; W/S etc. move it if pressed; just watch the cloud and ESC to quit,
+# save nothing.)
+#
+# uv run --project envs/deploy python -m gentle_manip.demos.record \
+#   --setup gentle_manip/configs/setup/real_lab.yaml \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --task-name pcd_preview --input keyboard --show-pointcloud
+#
+# Camera-only quick look (NO robot, so the armfocus filter is SKIPPED — crop +
+# outlier + subsample only; raw gray vs processed orange overlay + crop box):
+#
+# uv run --project envs/deploy python -m gentle_manip.visualization.point_cloud_viewer \
+#   --setup gentle_manip/configs/setup/real_lab.yaml \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --show-crop --show-processed
