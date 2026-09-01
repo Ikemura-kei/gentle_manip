@@ -7219,3 +7219,530 @@ have paired the WRONG rows — silently, because the stale indices are all indiv
 remapped (kept rows renumbered 0..n-1, dropped marked -1) and verified contiguous. Same broken-join
 class as the v3/v4 `dataset_idx` fixes; that makes three occurrences, so **treat "does the join
 survive this transformation?" as a standing check for any script that subsets episodes.**
+
+### 2026-08-31 — PRIMITIVES SWITCHED TO MUSHROOM MATERIAL (upstream 38b46a0/fdbc320)
+
+Upstream added additive `single_lift_prim_*_mush_soft_abs_action_armfocus` variants (mushroom
+material) and the instruction is to collect THOSE, not the plain `prim_*` (tofu material). Their
+measurements: cylinder & sphere **53% → 100%** success, lamp 57% (geometry-limited, collect
+anyway), cuboid/ellipsoid/torus smokes still running on their side, "torus only if wall-clock
+acceptable".
+
+**Cancelled all six tofu-material primitive jobs** (prim_lamp had ~18/500 — discarded, wrong
+material) and relaunched the `_mush` variants: smoke (16 eps, `--mesh-cycle`, FULL renderings) →
+500-run gated `afterok`. Diff confirmed the `_mush` experiments differ from the plain ones by
+exactly `task` and `dr` (mushroom material + its DR ranges); recipe verbatim otherwise.
+
+**torus is deliberately NOT auto-released.** Its tofu-material smoke measured 20% success →
+32.6 h projected for 500 eps, which is why its walltime had already been raised to 44 h. Upstream's
+own caveat is "only if wall-clock acceptable", so its 500-run is HELD until I measure the `_mush`
+smoke's rate — an `afterok` gate checks the exit code, not whether the job can finish in time.
+
+### 2026-08-31 — WIDTH-SIZE PROBING, CONTROLLED: the earlier 0.50 slope may have been a POSE ARTIFACT
+
+First fully-controlled probe (`GM_FIXED_SCALES` + `GM_FIXED_POSE` + `GM_FIXED_YAW_DEG`, 5 sizes x
+8 eps, all 5 dumps written after the final-batch flush fix):
+
+| model | probe | slope | 95% CI | R2 | verdict |
+|---|---|---|---|---|---|
+| 250-demo mushroom, ext+wrist | **UNcontrolled**, 4 bins | **0.50** | [0.26, 0.73] | 0.81 | ADAPTS |
+| 50-demo mixed, ext+wrist | **CONTROLLED**, 5 bins | **0.04** | [-0.05, 0.13] | 0.14 | NO ADAPTATION |
+
+**These two are NOT comparable — they differ in TWO ways at once** (training data 250-mushroom vs
+50-mixed, AND probe controls). I will not attribute the drop to data size on this evidence.
+
+**The likelier reading is that the 0.50 was an artifact.** §3.2's whole point is that pose/yaw leak
+into the size slope when unpinned; the uncontrolled run had pose free to vary across only 4 usable
+size bins, which is exactly the configuration where a chance pose-size correlation manufactures a
+slope. The controlled run, with pose pinned per sub-env, finds nothing.
+
+**Disambiguating run launched:** the SAME 250-demo checkpoint under the FULL controls. If it also
+comes back ~0, the 0.50 was pose leakage and must be retracted; if it stays ~0.5, the difference is
+genuinely data size and the low-data regime loses size tracking. Either way the uncontrolled number
+does not stand on its own.
+
+*Method note: this is the second time an uncontrolled width measurement produced a confident-looking
+slope that a controlled one erased — the first was the 12-vs-40-geometry reversal (DEVLOG
+2026-08-27). Width slopes are unusually good at manufacturing false positives.*
+
+### 2026-08-31 — the controlled 250-demo probe's 0.000 was a CAMERA MISMATCH; π0.5 pipeline verdict
+
+`EE_T_CAM_WRIST` changed at 08-30 23:01 (identity → 12 cm outward). The 250-demo model's data
+(15:02) and training (17:19) both predate it, so the controlled probe at 08-31 11:48 showed it a
+wrist view it had never seen: **0.000/40**, against 0.425 on the uncontrolled probe at 22:20 the
+night before — which ran BEFORE the change. Not a result about controls, data size, or adaptation.
+
+**What this costs:** the 250-vs-50 comparison is unavailable without re-collecting and retraining
+(~7 h), and the 0.50 slope is now unreproducible because the configuration that produced it no
+longer exists. User's call (2026-08-31): don't rebuild it — the pipeline is proven, move on.
+
+**WHAT STANDS (data and eval share the 12 cm camera, so internally valid):**
+- π0.5 trains and evaluates end-to-end on our data with **openpi completely unmodified** —
+  stock `pi05_libero` + CLI overrides for training; our adapters only for conversion, norm stats
+  and the canonical-harness eval.
+- 50-demo (25 mushroom + 25 tofu), ext+wrist, fully-controlled probe: success 0.225,
+  width slope **0.04 [-0.05, 0.13]**, R² 0.14 → **no size adaptation**.
+- The `ever == success` equality in that run (0.225/0.225) differs from the 250-demo model's
+  `ever` >> `success` lift-then-drop signature — worth a look once there is a comparable pair.
+
+**Retracted:** the 250-demo width slope 0.50 and the ext-vs-wrist gap derived from the uncontrolled
+probes. Both were measured under a camera that no longer exists, on top of the pose-control caveat.
+
+---
+
+### 2026-08-31 — POLICY SELECTION UNDER NON-DOMINANCE: adopt a damage-rate CONSTRAINT, not a weight
+
+**Question (user):** two policies, neither Pareto-dominating the other — safety says pick the
+gentler, performance says pick the more successful. Fixed weight? But the right weight depends on
+the material. Should the criterion be sub-yield on `top20_ttop20`?
+
+**ANSWER: yes to the statistic, no to the weight.** Written up as **CHECKLISTS §3.3**, adopted as
+the standing selection criterion and the intended paper presentation format. User is taking it to
+colleagues, so §3.3 is explicitly open for refinement.
+
+**Criterion: maximize success subject to `damage_rate ≤ ε`,** where
+`damage_rate = mean(stress_top20_ttop20 / mat_yield ≥ 1.0)` over episodes, aggregated across
+objects by **max**, not mean.
+
+Why a constraint rather than `success − λ·stress`:
+- λ has units (success per Pa) — a value tuned on mushroom cannot transfer to tofu or raspberry,
+  which is the very material-dependence it is supposed to abstract away;
+- yield is a PHYSICAL boundary (elastic/recoverable below, plastic/permanent above), so exceedance
+  is a binary with a non-arbitrary cutoff. ε is then one dimensionless, auditable number.
+
+**NEW MEASUREMENT — peak stress is empirically dead as a ranking axis.** Across the 200-episode
+mushroom evals on disk, `stress_max_tmax / mat_yield ≥ 1.0` in **91–100% of episodes for EVERY
+policy**. Zero discrimination. The plan's "no PEAK comparisons (past saturation)" rule was argued
+from the 1.23–1.34× yield figure; this is the measured form of it. SUSTAINED damage rate spans
+5.0–66.0% over the same runs, i.e. it discriminates by an order of magnitude more.
+
+**NEW MEASUREMENT — the mean hides the tail.** lulkx `slope_base` (0.905, mean sust/Y 0.69) and
+luqsl `state_249_eval235` (0.900, 0.66) are indistinguishable on success and mean stress but differ
+by **10 points of damage rate** (25.0% vs 15.5%, ±6.0 / ±5.0 at n=200). Reporting the mean was
+averaging away the only axis that separated them.
+
+**A SHARPER JUSTIFICATION FOR BINARIZING than "it's simpler".** Above yield the MPM model has no
+plasticity, so the MAGNITUDE of an over-yield von-Mises value is an elastic extrapolation past the
+regime where the constitutive law holds — it carries no physical information. Only the FACT of
+exceedance does. So thresholding at yield is not a coarsening of a good continuous signal; it is
+the correct use of a signal that is only valid sub-yield. This is the same footing as the standing
+"von Mises is a proxy valid sub-yield only" caveat, now turned from a limitation into a method.
+
+⚠ **The §3.3 illustration table is NOT a ranking** — its five rows sit on different eval protocols
+(`slope_base` vs `eval235`, two of them `dppo-finetune`). Kept because it demonstrates the metric's
+discrimination; labelled in place so it cannot be misread as a result. A real ranking needs all
+arms on one protocol.
+
+**TODO:** add `dmg_rate` + CI as a default eval-summary column so it is produced at eval time
+rather than re-derived per analysis.
+
+### 2026-08-31 — LoRA at 50 demos: 0.000 success, strictly worse than full fine-tuning
+
+Controlled width probes 1852065 / 1852066 landed. All four arms on the SAME probe (40 episodes,
+`GM_FIXED_SCALES` + `GM_FIXED_POSE` + `GM_FIXED_YAW_DEG`, checkpoint step 19999):
+
+| arm | success | ever | sustained stress |
+|---|---|---|---|
+| full-FT ext | 0.025 | 0.025 | 17,333 |
+| **full-FT ext+wrist** | **0.225** | 0.225 | 18,820 |
+| LoRA ext | **0.000** | 0.000 | — |
+| LoRA ext+wrist | **0.000** | 0.000 | — |
+
+**VERIFIED NOT A PIPELINE DEFECT** (checked before reporting, because a hard 0.000 usually is one):
+- LoRA training CONVERGED — loss 0.093 → 0.0008 over 20k steps, both arms;
+- `action_dim=7`, `action_horizon=10` probed correctly at eval — no action-space mismatch;
+- **`norm_stats.json` byte-identical between the LoRA and full-FT checkpoints** for both repo_ids
+  (`cmp` on `*/19999/assets/gm/lowdata50_*/norm_stats.json`) — the assets-dir trap is ruled out;
+- same `repo_id`, same step count, same probe → the only difference is LoRA vs full FT.
+- the arm is NOT frozen: LoRA emits a 44–50 mm gripper swing per episode and lifts 0.085 m mean.
+  It moves, closes, lifts — and never carries the object.
+
+**READING.** Train loss 0.0008 on 50 demos with 0.000 success is memorization that does not
+transfer. The mechanistic story: LoRA freezes the base and applies low-rank updates, but our target
+action space (**7-D absolute euler**) is not the space π0.5 was pretrained on; moving the action
+expert to a new absolute space plausibly needs full-rank capacity. Fitting the 50 training
+trajectories is achievable low-rank; generalizing to new geometries and poses is not.
+
+**STATISTICS — only ONE of the two comparisons is conclusive.** ext+wrist 9/40 vs 0/40 is real
+(p<0.005). ext 1/40 vs 0/40 is NOT separable at n=40; both are floor. Do not report "LoRA is worse
+on both cameras" — report it for ext+wrist, and say ext is uninformative because the full-FT
+baseline there is itself at the floor.
+
+**CAVEAT that limits how far this generalizes:** this is the 50-demo low-data regime by design.
+It does NOT establish that LoRA fails at 250 demos or on a delta-action space; it establishes that
+LoRA does not substitute for full FT *here*. The LoRA arm is finished; no further runs planned.
+
+### 2026-08-31 — The RGB scene was DARK because of a wall SHADOW, not because the wall blocked light
+
+**User report:** the pi0.5 scene renders very dark; "the wall behind blocks the scene light".
+
+**Actual mechanism — a shadow, and from the SIDE wall, not the back one.** Genesis' default
+`VisOptions` is ONE `DirectionalLight(dir=(-1,-1,-1))` (light ARRIVING from +x+y+z),
+`ambient_light=(0.1,0.1,0.1)`, `shadow=True`. A wall of height h at y=+1.2 therefore casts a
+shadow band over `y in [1.3-h, 1.3]` at table height. At **h=1.5 that band is [-0.20, +1.30]**,
+which swallows the entire workspace (`|y| <= 0.30`). The BACK wall (x=-0.55) is irrelevant: the
+light comes from +x, so its shadow falls away from the robot.
+
+Measured on the shipped RGB dataset (`26-08-30-edq`), whole episodes, every 5th frame:
+
+| stream | mean | p95 | %<32 |
+|---|---|---|---|
+| cam_ext BEFORE | 31.7 | 90.0 | 57.7% |
+| cam_wrist BEFORE | 41.2 | 90.0 | 59.3% |
+
+**p95 pinned at exactly 90 in every stream** — even the brightest surfaces reached only 35% of
+range, so this was global underexposure ON TOP of the shadow. Both had to be fixed.
+
+**FIX 1 — walls 1.5 m -> 0.9 m.** At h=0.9 the shadow band is [+0.40, +1.30] and clears the
+workspace. Occlusion is not weakened: cam_ext (x=0.989, VFOV 46 -> HFOV 59) sees the back wall
+at 1.54 m where the **frame top is z=0.774**, so 0.9 m covers the full frame with 0.13 m margin;
+and the side walls first enter frame at x=-1.13, i.e. already behind the back wall.
+
+**FIX 2 — three-point lighting, scoped to backdrop scenes** (`scene_builder._backdrop_lighting`):
+key light unchanged, plus a weaker y-opposite fill and a near-vertical top light, ambient
+0.1 -> 0.35. Returns `{}` for non-backdrop scenes, so no point-cloud experiment changes. (Depth is
+lighting-invariant, so this is belt-and-braces — but scoping means the claim needs no argument.)
+
+**RESULT** (6-episode smoke, job 1855381, same measurement):
+
+| stream | mean | p95 | %<32 | %>=250 |
+|---|---|---|---|---|
+| cam_ext AFTER | 73.6 (+42) | 254 | 10.0% (-48) | 5.99% |
+| cam_wrist AFTER | 104.0 (+63) | 254 | 7.3% (-52) | 6.06% |
+
+**The clipping is on the WHITE ARM, not the object** — checked, because +6% saturated pixels
+would otherwise be a regression. Wrist-camera centre crop (where the mushroom sits):
+**86 -> 245 distinct intensity levels**, %>=250 only **1.11%**, %<32 53.7% -> 21.3%. Nearly 3x the
+tonal resolution on the thing the policy has to see. The MPM particle structure is now visible.
+
+**Occlusion re-verified BY LOOKING, not assumed** (the standing lesson from the wrist-camera bug):
+the backdrop region of cam_ext is uniformly dark with no bright robot blobs. A first automated
+check reported "19% of upper rows > 100" — that was the WHITE ARM passing through the crop, i.e.
+my test region was badly chosen, not a leak.
+
+**One residual, benign:** a dark moving shape at frame left (temporal std 4.7, vs 5.6 in the
+arm-sweep region — so it genuinely moves). It is DARK (mean 51) where a lit neighbour robot would
+be bright, it sits just above the table line i.e. ON the wall, and geometry says neighbours at
+y=+-2.5 are occluded by the back wall. It therefore reads as OUR OWN ARM'S SHADOW cast on the
+backdrop — legitimate scene content that the real rig would also have. Stated as a reading, not a
+proof: I verified the occlusion geometry, not the identity of the blob.
+
+**ARTEFACTS:** `docs/figures/backdrop_lighting_before_after.png`,
+`docs/figures/pi05_obs_AFTER_lit/` and `pi05_obs_BEFORE_dark/` (4 episodes each, the RECORDED
+observation streams via `pi05/visualize_rgb.py`, not the collector's render camera).
+
+⚠ **THE EXISTING RGB DATASETS WERE COLLECTED DARK.** `26-08-30-edq` (mushroom) and `26-08-30-vyi`
+(tofu) — and therefore the 50-demo lowdata models and both LoRA runs — are all pre-fix. Any RGB
+policy trained on them and evaluated under the new lighting is a train/eval MISMATCH, exactly the
+class that invalidated the 250-demo model when the wrist camera moved. Re-collect before comparing
+across the fix; do not mix.
+
+### 2026-08-31 — Generalist-12 round: setup APPROVED and frozen (CHECKLISTS §1.1)
+
+Full resolved setup written to **CHECKLISTS §1.1** as the reference record. Summary of the
+decisions taken this session:
+
+- **12 objects**, torus dropped (wall-clock), pasta_bundle never collected. All slices pinch+NaN
+  filtered; **normalization applied AFTER the merge**, asserted in code.
+- **Architecture MATCHES `ddgrl` exactly** — `[3072]x3`, `visual_feature_dim 512`,
+  `category_embed_dim None`. **RETRACTED:** my earlier description of this round as "x3 network
+  size vs ddgrl" was wrong — ddgrl IS already `[3072]x3`; the "x3" referred to ddgrl's size
+  relative to the older `[1024]x3` baseline. Nothing is being scaled up.
+- **Gradient budget held equal to ddgrl at 695,461 steps**, NOT epoch count. ddgrl's `train.npz`
+  is 1,248 episodes / 254,340 transitions / 203.8 mean length -> 1,987 steps/epoch x 350. The
+  12-object set is ~4.5x larger, so ~79 epochs. Matching EPOCHS instead would have given this run
+  4.5x ddgrl's optimisation — epochs are not comparable across dataset sizes.
+- **`save_model_freq = 8`** (user decision). ~10 ckpts/seed, ~4.8 GB over 3 seeds. Rejected
+  `save_freq = val_freq` (~17 GB) as too expensive. Accepted consequence: the val minimum can sit
+  up to 4 epochs (~5% of schedule) from the nearest checkpoint, so the val-min epoch must be
+  reported alongside the chosen checkpoint's epoch. Revisit this number if the dataset grows.
+- **Seeds 42, 27, 321**; **2 checkpoints each** (closest-to-val-min, later on a near tie; and
+  last) = 6 evals, all on one protocol.
+
+**NEW FINDING that motivated the checkpoint-pair design.** `ddgrl` uses `val_freq: 10` but
+`save_model_freq: 50` — so its own val minimum at **epoch 280 has NO checkpoint** (saved set is
+50,100,...,350). Copying the reference verbatim would have made "the checkpoint closest to the val
+minimum" approximate by construction. Worth knowing for any re-analysis of ddgrl itself: its
+best-by-val checkpoint is not on disk, and 250/300 are the only nearby options.
+
+**Why evaluate val-min AND last:** both alzey and ddgrl finished PAST their val optimum (+16% and
++11% above their minima). Holding ddgrl's gradient budget inherits a schedule that also ends past
+its optimum, so the pair measures directly whether that overtraining costs success or gentleness.
+
+**Backdrop + 3-point lighting stays RGB-only** (user, 2026-08-31): "keep this only for
+rgb-required case". Verified scoping — `backdrop: true` appears in exactly 2 of 32 task configs
+(`single_lift_{mushroom,tofu}_soft_pi05rgb`); `_backdrop_lighting` returns `{}` for every other
+scene and the walls are not built at all. The point-cloud generalist path is untouched.
+
+### 2026-09-01 — Generalist-12 LAUNCHED: 3 seeds, provenance-guarded
+
+**Dataset built and verified** — `dataset/dppo/single_lift_generalist_12obj/`:
+train **4,931 trajs / 950,741 transitions**, val **551 trajs / 105,940 transitions**, `action_dim=7`,
+range exactly [-1,+1], and **all 12 slices differ from the joint `action_min`** (i.e. normalization
+was genuinely recomputed AFTER merging, not inherited from one slice). Build job 1857892, 15m29s.
+
+**Resolved schedule** (solved from the realised `train.npz`, not assumed):
+950,741/128 = 7,428 steps/epoch -> **n_epochs 94**, **val_freq 3**, **save_model_freq 8** (user).
+**698,200 gradient steps vs ddgrl's 695,461 — within 0.4%.**
+
+| seed | job |
+|---|---|
+| 42 | 1858149 |
+| 27 | 1858150 |
+| 321 | 1858151 |
+
+**PROVENANCE GUARD (`​.agent_tmp/verify_round_provenance.py`) — user requirement, no earlier round
+may leak in.** Runs THREE times: login node before submit, inside the build job, inside the
+launcher before sbatch. Two independent checks: (1) the 12 collections, pinned by exact path
+derived from each SLURM job's own log rather than a glob; (2) the MERGE INPUT LIST, which is where
+an earlier round would physically enter.
+
+**It caught two real things.** The merge list on disk was **STALE with only 9 entries** (generated
+before the last 3 primitives were filtered). And the mushroom directory holds `26-08-25-clq-filt`
+and `26-08-26-cze-filt` from EARLIER rounds beside this round's `26-08-30-urg-filt` — mushroom has
+**46 run dirs**, tofu 14, raspberry 5, so a glob would have silently mixed rounds.
+
+**Paired regulariser verified BY CONTENT, not filename:** `paired_cube3_clouds_shift9.npz` differs
+from the uncorrected file by **+9.03 mm in x**. Note **both ddgrl AND alzey used the UNCORRECTED
+`paired_cube3_clouds.npz`** — the two files sit side by side, so this was a live trap. Swapping in
+the corrected file is the single intended change vs ddgrl; architecture, weight and budget match.
+
+**THREE BUGS CAUGHT BEFORE THEY RAN — all silent-failure class:**
+1. `build_generalist12.sh` passed `EXTRA_OVERRIDES`, but `dppo_pretrain.sbatch` reads
+   **`GM_EXTRA_OVERRIDES`**; and it placed `--export` AFTER the script path, where sbatch treats it
+   as a script ARGUMENT, not an option. Together these would have dropped EVERY override —
+   architecture, paired-reg model, action_dim, seed — yielding a plain `[1024]x3` `DiffusionModel`
+   that looked like a successful run and would have been compared against ddgrl as if matched.
+2. My build sbatch called `envs/sim/.venv/bin/python` (the **x86 login-node venv**) on an
+   **aarch64** GPU node -> `Exec format error`, dead in 25 s. Cluster is dual-arch; compute-node
+   work must go through `uv run --project envs/*_arrhenius`.
+3. The generalist hydra cfg is NOT in the main repo — it lives in the **`gm_generalist` worktree**
+   (`.../cfg/single_lift_mushroom_simreal_realws_noos_cmd_v32`, `config_name pre_diffusion_pointnet`),
+   discovered from ddgrl's `.hydra/hydra.yaml` `config_sources`. The base cfg there is
+   `[1024,1024,1024]` + plain `DiffusionModel`; ddgrl's `[3072]x3` + paired reg came ENTIRELY from
+   overrides. So a dropped override would not error — it would quietly train the wrong model.
+
+**Walltime checked:** ddgrl did 300 epochs in 3h44m -> 695k steps ~= 4.4 h. Same gradient budget and
+batch size here, so GPU work is identical; only dataloading grows (950k vs 254k transitions).
+sbatch limit 22 h, ample. `--mem=0` retained (the earlier OOM was at checkpoint SAVE, not training);
+~11 GB of point clouds resident at 950k x 1024 x 3 float32.
+
+**Filtering completed the set:** prim_cuboid 500->489 (11 pinch), prim_lamp 500->**405** (95 pinch,
+19% — the geometry-limited shape, consistent with its 57% demonstrator success at smoke).
+
+**NEXT:** verify all 3 survive startup with the overrides ACTUALLY applied (model target, mlp_dims,
+seed, normalization) — a dropped override is invisible in the result. Then per seed evaluate 2
+checkpoints: closest to the val-loss minimum (later one on a near tie) and the last, all 6 on one
+canonical protocol (`scene_group_size=1`, `record_batches=null`, dumps on), reported per §3.3
+(success + damage rate with CI, max over objects).
+
+**STARTUP VERIFIED from the RESOLVED config** (2026-09-01 00:15). Run IDs:
+
+| run | seed | job | model | mlp_dims | paired npz | w | epochs | save/val | action_dim |
+|---|---|---|---|---|---|---|---|---|---|
+| `kklef` | 42 | 1858149 | PairedRegDiffusionModel | [3072]x3 | shift9 | 0.5 | 94 | 8 / 3 | 7 |
+| `ctzhi` | 27 | 1858150 | PairedRegDiffusionModel | [3072]x3 | shift9 | 0.5 | 94 | 8 / 3 | 7 |
+| `dgxtd` | 321 | 1858151 | PairedRegDiffusionModel | [3072]x3 | shift9 | 0.5 | 94 | 8 / 3 | 7 |
+
+All three loaded `States (950741, 8)` (8-dim quat proprio) and `Actions (950741, 7)`.
+
+⚠ **LESSON — a startup check that reads the sbatch's ECHO proves nothing.** My first monitor
+reported "STARTED ... model=PairedRegDiffusionModel mlp_dims=[3072,3072,3072] seed=42" for all
+three within a minute. That was a FALSE POSITIVE twice over: the `.out` file contains only the
+sbatch's `[sbatch] pretrain: ... overrides=...` echo, so (a) the grep for `epoch|loss` matched
+`train.n_epochs=94` inside that echo rather than any training progress, and (b) every "confirmed"
+setting was read back out of the string that was PASSED, not the config that was BUILT. Since the
+whole risk here is overrides being silently DROPPED (bug #1 above), reading them back from the
+command line is circular. **Verify from `<run>/.hydra/config.yaml` — the resolved config Hydra
+actually instantiated — and from `<run>/run.log`, never from the launcher's own echo.**
+
+### 2026-09-01 — FIRST LAUNCH FAILED IN 2m05s: matching the GRADIENT BUDGET broke the LR SCHEDULE
+
+All three seeds died at init, identically:
+
+```
+File "third_party/dppo/util/scheduler.py", line 55, in __init__
+    assert warmup_steps < first_cycle_steps
+AssertionError
+```
+
+**Root cause — a direct consequence of the epoch rescaling, and a trap for any future run that
+holds the gradient budget instead of the epoch count.** The LR schedule is expressed in **EPOCHS**,
+not gradient steps. `first_cycle_steps: ${train.n_epochs}` auto-tracks and so silently became 94,
+but `warmup_steps: 100` is a LITERAL and did not. ddgrl ran 350 epochs, so 100 was a legal 28.6%
+warmup; at 94 epochs the same literal exceeds the whole run.
+
+**FIX — scale warmup by ddgrl's FRACTION, not to whatever is merely legal.** 100/350 = 28.6% ->
+`round(94 * 100/350)` = **27** (28.7% of training), so the cosine shape matches ddgrl rather than
+just clearing the assert. Derived in the launcher and asserted (`assert wu < ep`) so it cannot
+silently regress if the dataset size changes again.
+
+**GENERAL LESSON (record for the paper's method section too): when you hold the GRADIENT BUDGET
+constant and let the epoch count fall, EVERY hyperparameter expressed in epochs silently changes
+meaning.** Here that was warmup (crashed loudly, cheap) — but `save_model_freq` and `val_freq`
+are the same class and fail SILENTLY, just producing a different checkpoint/validation density.
+Both were already scaled deliberately; the audit rule is: **enumerate every epoch-denominated
+knob and rescale or re-decide each one explicitly.** For this round that set is
+{`n_epochs`, `warmup_steps`, `val_freq`, `save_model_freq`}, and `first_cycle_steps` which
+auto-tracks.
+
+Failed run dirs `kklef`/`ctzhi`/`dgxtd` deleted (0 checkpoints, died at init) and `experiments.csv`
+reconciled, so the relaunch gets clean IDs.
+
+**RELAUNCH SUCCEEDED (2026-09-01 00:27), warmup=27.** Verified by REAL training progress plus the
+resolved `.hydra/config.yaml` (not the launcher echo — see the lesson above):
+
+| run | seed | job | warmup | epochs | paired npz | epoch-1 train loss | s/epoch |
+|---|---|---|---|---|---|---|---|
+| `ydvlr` | 42 | 1859102 | 27 | 94 | shift9 | 0.1126 | 166 |
+| `cvzth` | 27 | 1859103 | 27 | 94 | shift9 | 0.1129 | 175 |
+| `fyetc` | 321 | 1859104 | 27 | 94 | shift9 | 0.1138 | 181 |
+
+94 epochs x ~175 s = **~4.6 h**, against 4.4 h predicted from ddgrl's measured rate (300 epochs in
+3h44m at the same batch size). The two agreeing is independent evidence the gradient budget really
+is matched rather than merely arithmetically equal — different dataset size, same wall-clock per
+gradient step.
+
+Seed spread at epoch 1 is 0.1126-0.1138 (~1%), i.e. the seeds differ as expected and are not
+accidentally identical.
+
+### 2026-09-01 — Generalist-12 TRAINING DONE: NO OVERFITTING at matched gradient budget
+
+All 3 seeds COMPLETED (4h15m / 4h40m / 4h45m), 94 epochs, 12 checkpoints each.
+
+| run | seed | val min | @ep | final | vs min | train final | train/val gap |
+|---|---|---|---|---|---|---|---|
+| `ydvlr` | 42 | 0.00050 | 93 | 0.00050 | **+0.0%** | 0.00040 | **1.25x** |
+| `cvzth` | 27 | 0.00050 | 93 | 0.00050 | **+0.0%** | — | — |
+| `fyetc` | 321 | 0.00050 | 93 | 0.00050 | **+0.0%** | — | — |
+| ddgrl (3obj) | — | 0.00090 | 280/350 | 0.00100 | +11.0% | 0.00050 | 2.00x |
+| alzey | — | 0.00250 | 450 | 0.00290 | +16.0% | 0.00090 | 3.22x |
+
+**HEADLINE: val loss fell MONOTONICALLY to the final epoch on all three seeds — no overfitting
+point exists in this schedule.** ddgrl's val minimum sat at 80% of its run and it finished +11%
+above it; alzey +16%. Ours finish AT their minimum with a train/val gap of 1.25x versus ddgrl's
+2.00x and alzey's 3.22x. **At the SAME gradient budget, the 3.7x larger dataset (950,741 vs
+254,340 transitions) does not reach its overfitting point.** That is a data-scale result, not a
+schedule artifact — the optimisation is identical by construction.
+
+**IMPLICATION FOR THE SCHEDULE:** 94 epochs may UNDER-train this dataset. ddgrl's budget was
+chosen to match ddgrl; since val is still improving at the end, a longer run is a live option and
+should be considered before treating these numbers as the ceiling for 12 objects.
+
+**CONSEQUENCE FOR THE USER'S CHECKPOINT SPEC — degenerate, and handled explicitly.** "Closest to
+val-min" and "last" are the SAME checkpoint (`state_94`) on every seed. Running one checkpoint
+twice and reporting two results would be meaningless, so the second arm is the **EARLIEST
+checkpoint statistically tied with the minimum** (`state_80`; the tie set runs ep78-93). That
+answers the useful form of the question — did the final ~15% of training buy anything in success
+or gentleness? **This is a DEVIATION from the requested selection, forced by the data; it must be
+labelled as such wherever these results are reported.**
+
+⚠ **Precision caveat:** losses are logged to 4 decimals, so the 0.00050 plateau from ep78 may be
+partly display quantization. This STRENGTHENS treating ep78-93 as tied, but "val min at 93" is
+precise only to the logged resolution.
+
+**EVAL GUARD FIRED CORRECTLY (first 6 submissions, 1863689-94, all FAILED in 5 s):**
+```
+[sbatch] NORMALIZATION MISMATCH — refusing to run.
+  checkpoint trained on env : single_lift_generalist_12obj
+  NORM points at dataset    : single_lift_mushroom_soft_pcd
+```
+`dppo_eval.sbatch` defaults `NORM` to the mushroom-only dataset. Decoding 12-object-normalized
+actions with mushroom min/max would have produced silently WRONG commands and a plausible-looking
+success number. **The guard refused instead of skipping** — the correct design (contrast §5.2's
+"a guard that SKIPS is worse than no guard"). Fixed by passing
+`NORM=dataset/dppo/single_lift_generalist_12obj/normalization.npz`; resubmitted as 1863751-56.
+
+**Eval protocol (all 6 identical):** `canon_mushroom_200geo40` — 200 episodes, 5 envs,
+`scene_group_size=1` (40 distinct geometries), `record_batches=null`, dumps on. This is the exact
+protocol the 3-object generalists were measured on, so the numbers are directly comparable to
+ddgrl. **SCOPE LIMIT:** mushroom only. ddgrl was also evaluated on tofu and raspberry, and §3.3's
+max-over-objects aggregation needs a per-object breakdown — that extension is NOT yet run.
+
+**EVAL ATTEMPT 2 ALSO FAILED (1863751-56, 2m49s) — the eval cfg rebuilds the WRONG ARCHITECTURE.**
+
+```
+RuntimeError: Error(s) in loading state_dict for PointNetDiffusionMLP:
+  size mismatch for mlp_mean.layers.0.weight: copying a param with shape [3072, 572]
+  from checkpoint, the shape in current model is [1024, 572]
+```
+`Number of network parameters: 2890828` at eval vs **20902988** at training — it built `[1024]x3`.
+
+**The eval config `eval_diffusion_pointnet.yaml` hardcodes `mlp_dims: [1024, 1024, 1024]` with the
+comment "big net — must match the afucm-twin training cfg". That comment is FALSE for every
+[3072]x3 run**: ddgrl's own eval `.hydra/config.yaml` shows `[3072,3072,3072]`, i.e. it passed the
+override. Training-time architecture lives ONLY in the training overrides; the eval cfg does not
+inherit it (CHECKLISTS §2.1 already warns about this for `proprio_encoder` — the same class).
+Fixed with `GM_EXTRA_OVERRIDES="model.network.mlp_dims=[3072,3072,3072]"`; resubmitted 1863942-47.
+
+**Why this one was lucky:** a WIDTH mismatch is unloadable, so it crashed. A architecture flag that
+changes behaviour without changing tensor shapes (e.g. `proprio_encoder`) would build a different
+network, load cleanly, and return a plausible success number. **Verify the eval's
+`Number of network parameters` against the training log's before trusting any eval result.**
+
+**RUNNING TALLY of silent-failure-class problems caught this round — all would have produced
+plausible-looking results:** (1) `EXTRA_OVERRIDES` vs `GM_EXTRA_OVERRIDES` + `--export` after the
+script path -> every override dropped; (2) epoch-denominated `warmup_steps` after rescaling epochs
+to hold the gradient budget; (3) eval `NORM` defaulting to the mushroom-only dataset; (4) eval cfg
+rebuilding `[1024]x3` instead of the trained `[3072]x3`. Only (2) and (4) crashed; (1) and (3)
+were caught by a guard or by reading the resolved config.
+
+### 2026-09-01 — GENERALIST-12 RESULTS (6 canonical mushroom evals, all COMPLETED)
+
+Protocol identical for all six and for the 3-object references: `canon_mushroom_200geo40`
+(200 eps, 5 envs, `scene_group_size=1` -> 40 geometries). Eval arch verified at 20,902,988 params
+= the trained `[3072]x3`.
+
+**PER ARM (n=200 each)**
+
+| run | seed | ckpt | succ% | ever% | sust/Y | dmg% |
+|---|---|---|---|---|---|---|
+| cvzth | 27 | ep80 | 72.0 | 77.5 | 0.45 | 9.0 |
+| cvzth | 27 | ep94 | 72.0 | 79.0 | 0.51 | 16.5 |
+| fyetc | 321 | ep80 | 71.5 | 77.5 | 0.45 | 9.5 |
+| fyetc | 321 | ep94 | 72.0 | 77.5 | 0.50 | 13.0 |
+| ydvlr | 42 | ep80 | 73.5 | 76.5 | 0.52 | 15.0 |
+| ydvlr | 42 | ep94 | 74.5 | 80.0 | 0.48 | 10.5 |
+
+**POOLED (n=600) vs the 3-OBJECT REFERENCES**
+
+| arm | n | succ% | sust/Y | dmg% |
+|---|---|---|---|---|
+| 12obj early (ep80) | 600 | 72.3 ± 3.6 | 0.47 | **11.2 ± 2.5** |
+| 12obj last (ep94) | 600 | 72.8 ± 3.6 | 0.50 | **13.3 ± 2.7** |
+| ddgrl 3obj | 200 | 70.5 ± 6.3 | 0.46 | 11.0 ± 4.3 |
+| bwmcy 3obj | 200 | **84.0 ± 5.1** | 0.68 | **24.0 ± 5.9** |
+
+**1. THE 12-OBJECT GENERALIST MATCHES ddgrl ON MUSHROOM — it does not beat it.** 72.3-72.8% vs
+70.5%, difference ~2 pts against CIs of ±3.6/±6.3. Damage rate 11.2-13.3% vs 11.0%:
+indistinguishable. **The defensible claim is generalisation WITHOUT DEGRADATION — 4x the object
+categories at no measurable cost on the reference object — not an improvement.** Do not report
+this as "the bigger dataset helped" on mushroom.
+
+**2. THE LAST 15% OF TRAINING BOUGHT NOTHING MEASURABLE.** ep80 -> ep94: success +0.5 pts (noise),
+damage +2.1 pts with overlapping CIs, and the per-seed DIRECTION is inconsistent (dmg 9.0->16.5,
+9.5->13.0, but 15.0->10.5). **This matters because VAL LOSS WAS STILL IMPROVING over that span
+(0.0006 -> 0.0005).** Val-loss gains at this magnitude do NOT translate into eval success or
+gentleness — so "val is still falling, train longer" is not by itself an argument for a longer run.
+That tempers the under-training implication recorded earlier: the schedule may be under-trained by
+val, but the extra epochs are not visibly paying off in the metrics we care about.
+
+**3. §3.3's DAMAGE-RATE CONSTRAINT DOES REAL WORK HERE — the winner depends entirely on eps:**
+* eps=10%: **NOTHING admissible** (best is 12obj early at 11.2%)
+* eps=15%: {12obj early, 12obj last, ddgrl} -> winner **12obj last** (72.8% succ, 13.3% dmg)
+* eps=25%: bwmcy becomes admissible -> winner **bwmcy** (84.0% succ, 24.0% dmg)
+
+**bwmcy has the HIGHEST success of anything measured (84.0%) and is excluded at eps<=15% because it
+damages 24% of grasps.** That is exactly the trade a scalarised "score" would have hidden, and it
+is the strongest concrete evidence so far that the constraint form is the right presentation.
+
+⚠ **NOISE FLOOR — single-seed damage rate at n=200 is NOT reliable.** Across the six evals the
+damage rate spans **9.0-16.5%**, a 7.5-point spread, while each individual CI is only ±4-5. That
+spread EXCEEDS the ep80-vs-ep94 effect. Pooling 3 seeds (n=600) tightens to ±2.5. **Any future
+damage-rate comparison must pool seeds or it will manufacture differences.** ddgrl and bwmcy are
+single-seed n=200 here, so their ±4.3/±5.9 bars overlap much of the field — the bwmcy-vs-rest gap
+survives that, the 12obj-vs-ddgrl difference does not.
+
+**SCOPE LIMIT (unchanged):** mushroom only. §3.3's max-over-objects aggregation needs tofu and
+raspberry (ddgrl has both) — NOT yet run. A 12-object policy judged on one object is a weak test,
+and the per-object breakdown is the obvious next step.

@@ -63,6 +63,39 @@ class BuiltScene:
     object_base_pose: List[Optional[Tuple[np.ndarray, np.ndarray]]] = field(default_factory=list)  # rigid: (pos, quat)
 
 
+def _backdrop_lighting(spec: SceneSpec) -> dict:
+    """Lighting overrides for BACKDROP (RGB/VLA) scenes only; `{}` otherwise.
+
+    Genesis' default is ONE `DirectionalLight(dir=(-1,-1,-1))` (light arriving from +x+y+z)
+    plus `ambient_light=(0.1,0.1,0.1)`, with shadows on. That is a single hard key light and
+    almost no fill, so ANY occluder between +y and the workspace renders it nearly black. The
+    backdrop walls are exactly such an occluder — shortening them to 0.9 m moves the shadow band
+    off the workspace (see `single_lift.SingleLiftTask`), but a single key light still leaves the
+    object's -x -y face unlit and crushes detail the policy has to see.
+
+    So for backdrop scenes only: keep the key light, add a weaker FILL from the opposite side
+    (+ a soft top light), and lift ambient. This is standard three-point lighting, and it also
+    moves the render TOWARD the real lab rig (diffuse overhead room light), not away from it.
+
+    SCOPED ON PURPOSE. Returning `{}` for non-backdrop scenes keeps every existing point-cloud
+    experiment byte-identical. Point clouds come from DEPTH and are lighting-invariant anyway,
+    but scoping means that claim needs no argument.
+    """
+    if not any(f.fixture_type == "backdrop" for f in spec.fixtures):
+        return {}
+    return dict(
+        ambient_light=(0.35, 0.35, 0.35),
+        lights=[
+            # key: Genesis' default, unchanged, so the scene keeps its familiar shading
+            dict(type="directional", dir=(-1.0, -1.0, -1.0), color=(1.0, 1.0, 1.0), intensity=5.0),
+            # fill: opposite side in y, lower intensity -> softens the wall shadow, no new hard edge
+            dict(type="directional", dir=(-0.6, 1.0, -0.8), color=(1.0, 1.0, 1.0), intensity=2.5),
+            # top: near-vertical, lights the object's upper surface and the gripper interior
+            dict(type="directional", dir=(0.2, 0.1, -1.0), color=(1.0, 1.0, 1.0), intensity=2.0),
+        ],
+    )
+
+
 def build_scene(
     spec: SceneSpec,
     num_envs: int,
@@ -139,6 +172,7 @@ def build_scene(
             visualize_mpm_boundary=False,
             rendered_envs_idx=list(range(num_envs)),
             env_separate_rigid=use_batch_render,
+            **_backdrop_lighting(spec),
         ),
         show_viewer=show_viewer,
     )

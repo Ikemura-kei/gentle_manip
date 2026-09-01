@@ -8,7 +8,12 @@
 #   obs  -> superset_soft_armfocus_rgb   (adds image_cam_ext + image_cam_wrist)
 # Both changes are REQUIRED for an RGB/VLA dataset and are asserted at launch to be the ONLY ones.
 task: single_lift_tofu_soft_pi05rgb
-action: abs_pose_abs_gripper
+# 7-DIM EULER ABSOLUTE — the space the policy is TRAINED on (derived at conversion from the
+# collector's 10-dim rot6d recording) and therefore the space EVAL must decode. Getting this
+# wrong is silent at collection (the collector ignores this field and always writes rot6d)
+# and fatal at eval: ActionPipeline indexes [:, 9] for the gripper and an IndexError kills
+# the sim server mid-episode, surfacing only as 'socket closed mid-message' on the client.
+action: abs_pose_euler_abs_gripper
 dr: soft_orientation_realws_tofu
 augmentation: l515_noise
 

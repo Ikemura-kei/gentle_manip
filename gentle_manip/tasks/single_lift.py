@@ -78,13 +78,24 @@ class SingleLiftTask(BaseTask):
         # experiment stays bit-identical. Opt-in: only RGB/VLA tasks should enable it.
         _fixtures = [FixtureEntry(fixture_type="table")]
         if self.backdrop:
+            # HEIGHT 0.9 m, NOT 1.5 (2026-08-31). Genesis' single default light is
+            # DirectionalLight(dir=(-1,-1,-1)) — i.e. it comes from +x+y+z — and shadows are on,
+            # so the +y wall casts a shadow band over y in [1.3-h, 1.3] at table height. At
+            # h=1.5 that is [-0.20, 1.30], which covers the whole workspace (|y|<=0.30): the
+            # scene rendered DARK. At h=0.9 the band is [0.40, 1.30] and clears it.
+            # 0.9 m is still ample for OCCLUSION: cam_ext (pos x=0.989, VFOV 46 -> HFOV 59)
+            # sees the back wall at 1.54 m, where the frame top is z=0.77. So 0.9 covers the
+            # full frame with margin, and the side walls only enter frame at x=-1.13, i.e.
+            # already behind the back wall. Verified geometrically AND by looking at the
+            # recorded observation frames (see docs/figures/pi05_obs_*.mp4).
+            _H = 0.9
             _fixtures += [
-                FixtureEntry(fixture_type="backdrop", pose=(-0.55, 0.0, 0.75),
-                             params={"size": (0.02, 4.0, 1.5)}),      # behind the robot
-                FixtureEntry(fixture_type="backdrop", pose=(0.3, -1.2, 0.75),
-                             params={"size": (4.0, 0.02, 1.5)}),      # side wall -y
-                FixtureEntry(fixture_type="backdrop", pose=(0.3, 1.2, 0.75),
-                             params={"size": (4.0, 0.02, 1.5)}),      # side wall +y
+                FixtureEntry(fixture_type="backdrop", pose=(-0.55, 0.0, _H / 2),
+                             params={"size": (0.02, 4.0, _H)}),      # behind the robot
+                FixtureEntry(fixture_type="backdrop", pose=(0.3, -1.2, _H / 2),
+                             params={"size": (4.0, 0.02, _H)}),      # side wall -y
+                FixtureEntry(fixture_type="backdrop", pose=(0.3, 1.2, _H / 2),
+                             params={"size": (4.0, 0.02, _H)}),      # side wall +y
             ]
         return SceneSpec(
             objects=[ObjectEntry(name=self.object_name, object_type=self.object_type,

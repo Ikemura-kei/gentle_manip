@@ -4,7 +4,7 @@
 #
 # IDENTICAL to single_lift_mushroom_soft.yaml in every physics/reward/success field. Adds ONLY:
 #   wrist_camera: true  -> a second CameraEntry, re-posed each step from
-#                          world_T_ee @ EE_T_CAM_WRIST (now 7 cm OUTSIDE the gripper,
+#                          world_T_ee @ EE_T_CAM_WRIST (now 12 cm OUTSIDE the gripper,
 #                          aimed at the fingertips — was an identity placeholder INSIDE it)
 #   backdrop: true      -> walls that occlude the NEIGHBOURING PARALLEL ENVS which
 #                          otherwise appear on cam_ext's horizon and MOVE (dynamic
@@ -16,7 +16,7 @@ success_z_max: 0.275
 hold_steps: 30           # consecutive steps in the band for success (~1 s at 30 Hz)
 object_name: "mushroom"
 object_type: "soft"
-wrist_camera: true       # 7 cm outside the gripper (xarm7_config.EE_T_CAM_WRIST)
+wrist_camera: true       # 12 cm outside the gripper (xarm7_config.EE_T_CAM_WRIST)
 backdrop: true           # occlude neighbouring parallel envs in cam_ext      # MPM -> has von_mises_stress for the stress reward
 
 sim_substeps: 235

@@ -50,7 +50,12 @@ def main() -> None:
         cfg.model, paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora")
     cfg = dataclasses.replace(
         cfg,
-        name=f"{a.base_config}_lora",
+        # NAME IS DELIBERATELY UNCHANGED. `assets_dirs` is derived from config.name, so renaming
+        # to "<base>_lora" sends the norm-stats lookup to assets/<base>_lora/<repo_id>/ -- which
+        # does not exist, because compute_norm_stats wrote them under assets/<base>/. That fails
+        # as "Normalization stats not found", which reads like a missing prerequisite rather than
+        # a renamed directory. The run is still distinguishable: exp_name (and hence the
+        # checkpoint path) carries the `lora` label.
         model=lora_model,
         # The freeze filter MUST match the model config above -- openpi's own comment. Derive it
         # from the same object rather than hand-rolling a regex.

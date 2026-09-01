@@ -60,7 +60,34 @@ Never euler or rot6d for the OBSERVATION.
 PRIVILEGED metadata — a per-episode gentleness record — and the student view is an explicit key
 list, so it does not change training, eval, or any converted view.)*
 
-**DR — `soft_orientation_realws`.** `object_pos_x [0.29,0.48]`, `object_pos_y [-0.11,0.11]`,
+**DR — `soft_orientation_realws` FOR MUSHROOM; per-object variants for everything else.**
+
+⚠ **CORRECTED 2026-08-31 — this entry was STALE and would have triggered a false alarm.** The
+v4.1 round collects each object with its OWN `soft_orientation_realws_<object>` file. Only the
+SPAWN box, orientation DR and `coup_friction` are shared; **object_scale, the shape DR and the
+material range are per-object BY DESIGN** — a tofu cube must not get a mushroom's +-25 deg organic
+bend, and a 6.4 cm tomato must not get a 3.3 cm mushroom's scale range. Verified across all 12
+collections' `config.yaml` snapshots. CHECKLISTS §0's "WHAT MAY CHANGE" already permits this
+(object types are the one DR-adjacent field allowed to move); the text below simply had not been
+updated to say so.
+
+| object | object_scale | bend_deg |
+|---|---|---|
+| mushroom | [1.0, 1.5] | +-25 |
+| tofu | [0.8, 1.4] | +-3 |
+| raspberry | [0.8, 1.3] | +-25 |
+| strawberry | [0.8, 1.2] | +-25 |
+| tomato / cherry_tomato / banana_chunk | [0.9, 1.1] | +-25 |
+| prim_* (5) | [0.85, 1.15] | +-3 |
+
+⚠ **ANALYSIS CONSEQUENCE — unequal size leverage.** The width-vs-size slope (§3.1) regresses width
+on object size. Objects at [0.9, 1.1] span only +-10%, giving **almost no leverage** to fit a
+slope against; mushroom at [1.0, 1.5] spans 50%. So a per-object slope is only meaningful for
+mushroom, tofu, raspberry and strawberry — for tomato, cherry_tomato, banana_chunk and the prims
+a flat slope is uninformative, NOT evidence of a size-blind policy. Report the scale range beside
+every per-object slope, and never pool objects with different ranges into one regression.
+
+The shared mushroom values, for reference: `object_pos_x [0.29,0.48]`, `object_pos_y [-0.11,0.11]`,
 `object_nominal_xy [0.47,0]`, `robot_init_pos_xyz 0.02`, `object_yaw_deg 180`,
 `object_pitch_roll_deg 45`, `object_flip_prob 0.25`, `object_flip_deg [160,180]`,
 `object_scale [1.0,1.5]`, `object_bend_deg [-25,25]`, `object_twist_deg [-20,20]`,
@@ -101,7 +128,103 @@ config you copied the grasp knobs out of. A wrong DR is the dangerous one: it fa
 giving a different object size/shape distribution than the baseline being compared against.**
 
 ## 1. Launching training
-*(to be filled in)*
+
+### 1.1 GENERALIST-12 ROUND — the RESOLVED setup (approved by user 2026-08-31)
+
+**This is the setup for the 12-object generalist round. It is a record of what was APPROVED and
+run, not a template to re-derive.** Everything under CHECKLISTS §0 (FIXED SETUP) is inherited
+UNCHANGED; only the fields below are this round's choices.
+
+#### Dataset
+| item | value |
+|---|---|
+| objects | **12** — tofu, mushroom, strawberry, raspberry, tomato, cherry_tomato, banana_chunk, prim_cylinder, prim_sphere, prim_lamp, prim_ellipsoid, prim_cuboid |
+| dropped | **torus** (wall-clock); **pasta_bundle** (never collected — 43-50% demonstrator success) |
+| collector | v4.1 synth, frozen recipe, 500 target/object, re-grasp probability **0.2** |
+| filtering | pinch + NaN-stress filter on every slice (`filter_pinch_episodes.py`), `dr_params.csv` REMAPPED not copied |
+| conversion | `--derive-action abs_pose_euler_abs_gripper.yaml --derive-source-action abs_pose_abs_gripper.yaml` |
+| merge | all 12 slices merged FIRST, **normalization applied AFTER the merge** (joint min/max), asserted in `build_generalist12.sh` — per-slice normalization would scale each object differently and is the failure this guards |
+| caveat | **raspberry is 307/500 (60.9% sub-yield)** and its small-size share fell 32%->14% under filtering. Kept by user decision, with documentation; EXCLUDE raspberry from per-object width-size conclusions |
+
+#### Architecture — IDENTICAL to `ddgrl`, nothing scaled
+`mlp_dims [3072, 3072, 3072]`, `visual_feature_dim 512`, `residual_style true`,
+`horizon_steps 4`, `cond_steps 2`, `category_embed_dim: None` (unconditioned, matching ddgrl).
+
+⚠ **`ddgrl` is ALREADY `[3072]x3`.** An earlier note in this session described this round as "x3
+network size vs ddgrl" — WRONG, and retracted. This round MATCHES ddgrl's architecture; the "x3"
+referred to ddgrl's own size relative to the older `[1024]x3` baseline.
+
+#### Regularization
+`PairedRegDiffusionModel`, `paired_consistency_weight 0.5`,
+`paired_npz = paired_cube3_clouds_shift9.npz` (derived from `single_lift_cube3_rigid/26-08-23-oso`
+with the **9 mm shift compensation applied** — the raw file was NOT compensated; real-sim offset
+was -17.44 mm x).
+⚠ **Residual offset -8.44 mm x / +7.11 mm y remains** after compensation. This WEAKENS the encoder
+regulariser and must be stated wherever the paired-reg result is reported.
+No real-world demo cotraining (we only have real demos for mushroom).
+
+#### Training schedule — gradient budget HELD EQUAL to ddgrl
+| knob | ddgrl | this round | note |
+|---|---|---|---|
+| batch_size | 128 | 128 | fixed |
+| learning_rate | 1e-4 | 1e-4 | fixed |
+| transitions | 254,340 | ~1,133,000 | ~4.5x |
+| steps/epoch | 1,987 | ~8,850 | |
+| **gradient steps** | **695,461** | **695,461** | **the quantity held constant** |
+| n_epochs | 350 | **~79** | SOLVED from the actual merged `train.npz`, not assumed |
+| val_freq | 10 | **~2** | scaled by the same ratio |
+| **save_model_freq** | 50 | **8** | **user decision 2026-08-31** |
+
+**Why the gradient budget, not the epoch count, is the thing held fixed:** epochs are not
+comparable across datasets of different size. Matching epochs would have given this run ~4.5x
+ddgrl's optimisation.
+
+**`save_model_freq = 8` (user, 2026-08-31).** ~10 checkpoints/seed, ~4.8 GB across 3 seeds
+(159 MB/ckpt at this architecture). The alternative considered and REJECTED as too expensive was
+`save_freq = val_freq` (~35 ckpts/seed, ~17 GB), which would have made "closest to val-min" exact.
+**Consequence to report, not hide:** with val every ~2 epochs and checkpoints every 8, the val
+minimum can sit up to 4 epochs (~5% of the schedule) from the nearest checkpoint. Always report
+the val-min epoch ALONGSIDE the chosen checkpoint's epoch so the gap is visible.
+*If the dataset grows later, re-decide this number rather than inheriting 8.*
+
+#### Seeds
+**3 seeds: 42, 27, 321.** (Checklist §6 requires >=3 seeds for any between-run claim; seed noise
+spans -9%..+19% adaptation and 0.22 success.)
+
+#### Checkpoint selection for evaluation — 2 per seed, 6 evals total
+1. **The checkpoint closest to the VAL-LOSS MINIMUM**; on a near tie, prefer the **LATER** one.
+2. **The LAST checkpoint.**
+
+**Why both:** on the val curves, `alzey` and `ddgrl` BOTH finished past their val optimum
+(alzey +16% above its min, ddgrl +11%; ddgrl's min at epoch 280/350 = 80% through). Holding
+ddgrl's gradient budget inherits a schedule that also ends past its own optimum, so this pair is a
+DIRECT measurement of whether that overtraining costs success or gentleness. It is a designed
+comparison, not a hedge.
+
+#### Evaluation protocol — identical for all 6, no exceptions
+| knob | value | why |
+|---|---|---|
+| `EvalSpec` | `n_episodes=100`, `num_envs=5`, `seed=0` | canonical, fixed (hard req #1) |
+| `scene_group_size` | **1** | default is **0 = ONE geometry** — the trap that made screening evals meaningless |
+| `record_batches` | `null` | one clip per episode (hard req #2) |
+| dumps | on by default, actions + obs | standing user mandate |
+| protocol | the SAME for all 6 arms | cross-protocol comparison is the B1 error class (§5.2) |
+
+Report per §3.3: success, mean sustained/yield, and **damage rate** (`stress_top20_ttop20/mat_yield
+>= 1.0`) with CI, plus per-object breakdown aggregated by **max** over objects.
+
+#### Pre-launch assertions (run these, do not eyeball the YAML)
+```python
+ref = Experiment.load("single_lift_mushroom_soft_abs_action_armfocus_7d_realws")
+exp = Experiment.load("<this round's experiment>")
+assert exp.action_config == ref.action_config          # 7-dim euler abs
+assert exp.dr == ref.dr                                 # soft_orientation_realws
+assert exp.collection_obs().obs_keys() == ref.collection_obs().obs_keys()
+```
+Plus: `euler_frame_offset_deg [180,0,0]` present in the TARGET action config (absent -> low train
+loss, ~0% eval success, run `oppsu`); every `+train_dataset` override has its `+val_dataset` twin;
+`--mem=0` on the sbatch (checkpoint save, not training, is what OOM'd before).
+
 
 ## 2. Evaluation
 
@@ -273,6 +396,101 @@ pooled regression.
 enters the width and the per-yaw structure is unavailable. Usable as a first look; say so, and
 re-run with the full controls before any claim.
 
+### 3.3 CHOOSING BETWEEN NON-DOMINATED POLICIES — the damage-rate constraint
+
+**Question it answers:** two policies, neither Pareto-dominating the other (A more successful,
+B gentler). Which is better? Adopted 2026-08-31 as the standing selection criterion and the
+intended presentation format for the paper. Under discussion with colleagues — refine here.
+
+**DO NOT SCALARIZE WITH A FIXED WEIGHT.** `score = success − λ·stress` fails twice:
+* λ has units (success per Pa), so a value tuned on mushroom is meaningless on tofu or raspberry;
+* it is material-dependent in exactly the way it is meant to abstract away.
+A weight buries the safety decision in a number nobody can audit.
+
+**THE CRITERION: maximize success subject to `damage_rate ≤ ε`.**
+
+Yield is a physical boundary, not a preference knob: below it deformation is elastic and
+recoverable, above it plastic and permanent. That makes "did this episode damage the object" a
+**binary with a non-arbitrary cutoff** — which is what a constraint needs and what a weight
+discards. ε is then ONE dimensionless number, stated in a sentence ("we require ≤10% of grasps to
+exceed yield"), portable across objects and auditable by a reviewer.
+
+**THE STATISTIC**
+
+```
+per episode:  r = stress_top20_ttop20 / mat_yield      # dimensionless
+damage_rate = mean(r >= 1.0)                            # a RATE, over episodes
+report also:  success, mean(r), and per-object breakdown
+```
+
+1. **Normalize per episode by that episode's OWN `mat_yield`.** The eval randomizes E and yield
+   differs ~5x across the 12-object set; raw Pa is not comparable across objects, and within an
+   object the material DR moves the threshold episode to episode.
+2. **A RATE, not a mean.** The mean averages the tail away, and the tail IS the damage. A policy at
+   mean 0.66 with 15.5% over yield is not comparable to one at mean 0.69 with 25.0% over yield,
+   yet their means differ by 0.03.
+3. **SUSTAINED (`stress_top20_ttop20`) only — peak cannot rank anything.** Measured over the
+   200-episode mushroom evals on disk, `stress_max_tmax / mat_yield >= 1.0` in **91–100% of
+   episodes for every policy**. Zero discrimination; it is saturated. This is the measured form of
+   the plan's "no PEAK-stress comparisons" rule. Report peak as a stated limitation, never as a
+   selector.
+
+**WHY BINARIZING IS THE DEFENSIBLE CHOICE, NOT A SIMPLIFICATION.** Above yield the MPM model has no
+plasticity, so the MAGNITUDE of an over-yield von-Mises number is an elastic extrapolation past the
+regime where the constitutive law holds — physically meaningless. The FACT of exceedance is the only
+information in it. Treating stress as a continuous cost implicitly trusts numbers the model cannot
+produce; thresholding at yield uses exactly the part it can. (Same footing as the standing rule that
+von Mises is a proxy valid SUB-YIELD only; the true damage axis is plastic deformation, unmeasured.)
+
+**CROSS-OBJECT AGGREGATION: take the WORST object, not the mean.** `max` over per-object damage
+rates. A generalist that is gentle on tofu and pulps raspberries is not a gentle generalist, and a
+mean over 12 objects hides exactly that.
+
+**NOISE FLOOR.** At n=200 a 15% rate has SE ~2.5%, i.e. a ~+-5-point CI. Do not discriminate between
+policies inside that band; on a tie prefer the simpler / more deployable mechanism. Report the CI.
+
+**ILLUSTRATION — the metric discriminates where the mean does not.** 200-ep mushroom evals:
+
+| eval | succ | mean sust/Y | **dmg rate (sust)** | dmg rate (peak) |
+|---|---|---|---|---|
+| `..._v33b_shift9/lulkx/eval/slope_base` | 0.905 | 0.69 | **25.0%** | 97.5% |
+| `..._soft_pcd/luqsl/eval/state_249_eval235_200ep` | 0.900 | 0.66 | **15.5%** | 97.0% |
+| `..._soft_pcd/gxfya/eval/state_249_eval235_200ep` | 0.860 | 0.56 | **5.0%** | 95.0% |
+| `..._wide1k_n150/favel/eval/state_1500_eval235_200ep` | 0.850 | 0.53 | **14.5%** | 91.0% |
+| `..._wide1k_n150/gpieh/eval/state_2000_eval235_200ep` | 0.845 | 0.58 | **13.5%** | 94.5% |
+
+lulkx and luqsl differ by 0.005 success and 0.03 mean stress — indistinguishable — but by **10
+points of damage rate**. At eps=10% only gxfya is admissible; at eps=15% luqsl wins on success.
+That reordering is the point of the constraint form.
+
+> ⚠ **THIS TABLE IS AN ILLUSTRATION OF THE METRIC, NOT A RANKING.** The five rows sit on
+> DIFFERENT eval protocols (`slope_base` vs `eval235`) and two are `dppo-finetune` runs; comparing
+> across protocols is the B1 class of error (§5.2). A real ranking needs all arms on one protocol.
+
+**REPORTING FORMAT (the intended paper figure).** Scatter success (y) vs damage rate (x), one point
+per arm with its CI, a vertical line at the chosen eps, and the admissible region shaded. This shows
+the whole frontier AND makes the operating point explicit, instead of collapsing both into a scalar
+nobody can re-derive. Pair it with the per-object damage-rate table so the `max`-over-objects
+aggregation is visible rather than asserted.
+
+**REPRODUCE**
+```bash
+envs/sim/.venv/bin/python - <<'EOF'
+import csv, numpy as np
+r = list(csv.DictReader(open('<run>/eval/<tag>/episodes.csv')))
+s = np.array([float(x['stress_top20_ttop20']) for x in r])
+y = np.array([float(x['mat_yield'])           for x in r])
+su= np.array([float(x['success'])             for x in r])
+d = (s/y >= 1.0)
+se = (d.mean()*(1-d.mean())/len(d))**0.5
+print(f'n={len(d)} success={su.mean():.3f} mean_sust/Y={(s/y).mean():.2f} '
+      f'damage_rate={100*d.mean():.1f}% +-{100*1.96*se:.1f}')
+EOF
+```
+
+**TODO:** add `dmg_rate` (+ CI) as a default column of the eval summary so it is computed at eval
+time rather than re-derived per analysis.
+
 ## 4. Common practices — analysis methods, eval settings
 *(to be filled in)*
 
@@ -311,6 +529,14 @@ demos (data.pkl, RGB obs)                    ← collect_demos_synth_v3 with an 
 ```
 
 ### LoRA (`pi05/train_lora.py`) — why it cannot be CLI-only
+
+**RESULT (2026-08-31): LoRA at 50 demos gives 0.000 success vs full-FT's 0.225 (ext+wrist, n=40,
+step 19999, identical norm stats).** Train loss still converged 0.093 → 0.0008 — so **a converged
+LoRA loss is not evidence the adapter learned the task.** Our action space (7-D absolute euler) is
+not π0.5's pretraining space, and low-rank updates appear unable to move the action expert into it.
+Before believing any 0.000, check in this order: train loss converged? `action_dim` probed at eval?
+`norm_stats.json` byte-identical to the full-FT checkpoint (`cmp`)? gripper actually swinging in the
+width dump? All four passed here, which is what made it a result rather than a bug. See DEVLOG.
 LoRA needs `paligemma_variant`/`action_expert_variant` = `*_lora` (strings, CLI-settable) **and**
 `freeze_filter = Pi0Config(...).get_freeze_filter()` — an `nnx` Filter OBJECT that tyro cannot
 build. Setting only the variants adds LoRA adapters and freezes NOTHING: a full fine-tune with
@@ -318,6 +544,33 @@ extra parameters, the opposite of the intent. So the TrainConfig is built in our
 classes and handed to their unmodified `main()`. Use LoRA as the COMPARISON to the full fine-tune
 in low-data regimes (50 demos ≈ 11k frames ≈ 116 epochs at openpi's recipe — where a 3B VLA
 overfits), not as a replacement: the pair is the result.
+
+### A THIRD rendering defect that only LOOKING caught: the scene was DARK (fixed 2026-08-31)
+
+Genesis' default `VisOptions` is **one** `DirectionalLight(dir=(-1,-1,-1))` + `ambient_light=0.1`
+with `shadow=True`. That is a single hard key light with almost no fill, so ANY occluder between
++y and the workspace renders it near-black. The 1.5 m backdrop wall at y=+1.2 cast a shadow band
+over `y in [1.3-h, 1.3]` = `[-0.20, +1.30]` — the whole workspace. Symptom: cam_ext mean luma
+**31.7/255 with 58% of pixels below 32**, and p95 pinned at exactly 90, i.e. underexposed globally
+as well as shadowed.
+
+Fixed by (a) walls 1.5 -> **0.9 m** (band becomes [+0.40,+1.30]; still covers cam_ext's frame,
+whose top is only z=0.77 at the wall) and (b) `scene_builder._backdrop_lighting` — key + fill +
+top light, ambient 0.35, **scoped to backdrop scenes so no point-cloud run changes**.
+
+**LESSONS**
+1. **"The wall blocks the light" and "the wall's SHADOW covers the workspace" are different bugs
+   with different fixes.** Shortening the wall fixes the second; nothing fixes the first, because
+   a rasterizer has no global illumination — a black wall does not absorb light from the scene.
+   Work out the mechanism before choosing the remedy.
+2. **Check clipping whenever you raise light, and check it ON THE OBJECT.** Mean brightness going
+   up is not success: %>=250 went 0.5% -> 6.0%. It was fine only because the clipped pixels are
+   the white arm — the wrist centre crop went **86 -> 245 distinct levels** at 1.1% clipped. Report
+   the object crop, not the frame mean.
+3. **Choose the test region before trusting the test.** My first occlusion check ("19% of upper
+   rows > 100 => leak?") was measuring the white arm passing through the crop.
+4. **A lighting/camera change INVALIDATES every RGB model trained before it** — same class as the
+   wrist-camera move that voided the 250-demo probe. Re-collect; never compare across the change.
 
 ### Two camera defects that only LOOKING caught (both fixed 2026-08-30)
 1. **Wrist camera inside the gripper.** `EE_T_CAM_WRIST` was an IDENTITY placeholder, so the camera
@@ -439,6 +692,28 @@ stale index is individually valid. Previously the same class in `collect_demos_s
 **Rule: any script that DROPS or REORDERS episodes must remap every index that points at them, and
 the check is one line — the saved indices must be contiguous 0..n-1 against the new episode count.
 Run it after every such transformation.**
+
+**An experiment's `action:` is inert at COLLECTION and fatal at EVAL (2026-08-31).** I created new
+pi0.5 experiments with `action: abs_pose_abs_gripper` (10-dim rot6d). Collection was unaffected —
+`collect_demos_synth_*` hardcodes rot6d and never reads the field — so nothing complained for a
+whole 50-episode collection. At eval the sim server builds its ActionPipeline FROM that field,
+indexed `[:, 9]` for the gripper, and the 7-dim policy output raised IndexError inside the SERVER.
+The client saw only `ConnectionError: socket closed mid-message`, which names neither the cause nor
+the file. **Rule: the experiment's `action:` must be the space the POLICY OUTPUTS (7-dim euler,
+derived at conversion), not the space the collector happened to record. And when an rpc client
+reports a closed socket, read the SERVER log — the real traceback is only there.**
+
+**Changing a CALIBRATION CONSTANT retroactively invalidates every checkpoint trained before it
+(2026-08-31).** I moved `EE_T_CAM_WRIST` from an identity placeholder to a 12 cm mount. That is a
+change to the OBSERVATION SPACE, not a config knob: a model trained on the old wrist view scored
+**0.000/40** on the new one, having scored 0.425 the previous evening. The failure looked exactly
+like "the controlled probe broke the policy" and I nearly read it as a result about pose controls.
+Only the timeline (data 15:02 → train 17:19 → probe 22:20 → **extrinsic changed 23:01** → probe
+0.000 the next day) identified it. **Rules: (a) treat camera extrinsics/intrinsics, crop bounds and
+obs-config geometry as part of the DATA CONTRACT — version them with the dataset; (b) when a policy
+scores ~0 where it previously scored well, check what changed in the OBSERVATION before theorising
+about the policy; (c) a checkpoint should record the extrinsic it trained under so a mismatch fails
+loudly instead of silently scoring zero.**
 
 ### 5.2 Protocol
 
