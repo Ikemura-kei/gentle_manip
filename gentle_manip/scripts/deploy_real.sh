@@ -580,15 +580,15 @@
 # all DPPO deploys run in dppo_deploy) and the standard safety knobs added
 # (--smooth-alpha / --max-pos-step-m, conservative motion).
 #
-# ckpt=downloaded_runs/cvzth/checkpoint/state_80.pt
-# normalization=downloaded_runs/cvzth/normalization.npz
-# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
-#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
-#   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-#   --record dataset/real_deploy/cvzth80_generalist --shard-size 10 \
-#   --max-steps 5000
+ckpt=downloaded_runs/cvzth/checkpoint/state_80.pt
+normalization=downloaded_runs/cvzth/normalization.npz
+uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+  --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+  --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+  --record dataset/real_deploy/cvzth80_generalist --shard-size 10 \
+  --max-steps 5000
 
 # ── PRE-DEPLOY CHECK: live view of the EXACT point cloud the policy sees ─────
 # (post-perception: crop + outlier removal + ARM-FOCUS + FPS subsample, driven
@@ -600,11 +600,11 @@
 # NOTE --action-config is REQUIRED: record.py's DEFAULT is now the 10-dim ABSOLUTE
 # config (absolute-demo collection era), but teleop emits 7-dim deltas ->
 # "IndexError: index 9 out of bounds" in _process_absolute without it (hit 2026-09-01).
-uv run --project envs/deploy python -m gentle_manip.demos.record \
-  --setup gentle_manip/configs/setup/real_lab.yaml \
-  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-  --action-config gentle_manip/configs/action/delta_pose_delta_gripper_fast_rot.yaml \
-  --task-name pcd_preview --input keyboard --show-pointcloud
+# uv run --project envs/deploy python -m gentle_manip.demos.record \
+#   --setup gentle_manip/configs/setup/real_lab.yaml \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/delta_pose_delta_gripper_fast_rot.yaml \
+#   --task-name pcd_preview --input keyboard --show-pointcloud
 #
 # Camera-only quick look (NO robot, so the armfocus filter is SKIPPED — crop +
 # outlier + subsample only; raw gray vs processed orange overlay + crop box):
@@ -613,3 +613,26 @@ uv run --project envs/deploy python -m gentle_manip.demos.record \
 #   --setup gentle_manip/configs/setup/real_lab.yaml \
 #   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
 #   --show-crop --show-processed
+
+# ── REAL DEMO COLLECTION for the 12-obj generalist (cotrain) + pi0.5 VLA baseline ──
+# 20 eps per object; ONE collection feeds BOTH consumers:
+#   - point cloud view == the generalist's student/deploy view (same crop/armfocus/1024)
+#   - obs["image_cam_ext"] = PAIRED RGB inside the obs (idle-trimmed with all channels;
+#     the pi05 convert_to_lerobot.py path consumes this key). --record-rgb mp4 is
+#     presentation-only and NOT trim-paired — don't rely on it for training data.
+#   - SAVED action = 7d euler ABSOLUTE (matches cvzth training) via --record-action-config,
+#     while teleop drives in smooth delta mode.
+#   - input: SpaceMouse pose + Z/X keyboard gripper; SPACE save / BACKSPACE discard / ESC quit.
+#   - one run per object; task name = single_lift_<object>_real (naming convention);
+#     --description is stored in the run's config.yaml — put the object + intent there.
+#
+# obj=banana   # repeat per object: mushroom strawberry cherry_tomato raspberry tomato tofu ...
+# uv run --project envs/deploy python -m gentle_manip.demos.record \
+#   --setup gentle_manip/configs/setup/real_lab.yaml \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus_rgb.yaml \
+#   --action-config gentle_manip/configs/action/delta_pose_delta_gripper_fast_rot.yaml \
+#   --record-action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --task-name single_lift_${obj}_real \
+#   --input spacemouse-kb \
+#   --description "${obj}: 20 real eps, generalist-cotrain + pi0.5 RGB baseline" \
+#   --show-pointcloud
