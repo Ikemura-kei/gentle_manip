@@ -444,6 +444,56 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-08-31 — PROBE ANSWER: yes, a hard min-contact-area floor helps the lamp. 57.1 % -> 72.7 %
+at 100 % sub-yield, zero synthesis failures. OFF-RECIPE — the frozen v4.1 recipe is unchanged;
+this is a post-deadline v4.x candidate and paper-analysis material.**
+
+User question: "would raising the min contact area help the lamp?" Probe: lamp_mush, 16 eps,
+frozen recipe EXCEPT `--grasp-area-min-mm2 50` (hard) instead of `auto`
+(run `single_lift_prim_lamp_mush_soft/26-08-31-qpo`, clearly labelled ANALYSIS PROBE):
+
+| lamp_mush | success | sub-yield | median stress | synth failures |
+|---|---|---|---|---|
+| frozen recipe (auto floor) | 57.1 % | 100 % | 0.61x | 0 |
+| hard floor 50 mm2 | **72.7 %** | 100 % | 0.44x | **0** |
+
+The floor pruned the thin-pad neck/edge poses (failure min_pad 64 vs success 91 mm2) at zero
+feasibility cost — the on-record prediction ("modest at best, may even drop; pools may collapse
+to fallbacks") was too pessimistic; the user's instinct was right. The residual failures remain
+TILT-separated (0 vs 10 deg), which an area floor cannot bound — that is the 72.7 -> 100 gap and
+would need the (weight-0) w_tilt term or a hard tilt bound in a future version.
+
+Filed as v4.x candidate: object-conditional? No — the probe suggests a HIGHER GLOBAL hard floor
+might help geometry-limited shapes at no cost to others (cuboid/ellipsoid pads are huge), but that
+is untested cross-object and NOT for now. Freeze holds.
+
+
+**2026-08-31 — MATERIAL A/B COMPLETE on all six primitives (same meshes, same frozen recipe,
+tofu vs mushroom material). The force-budget theory holds with one honest miss.**
+
+| shape | tofu succ | mush succ | mush sub-yield | verdict (mush) |
+|---|---|---|---|---|
+| cylinder | 53.3 % | **100 %** | 100 % | PASS |
+| sphere | 53.3 % | **100 %** | 100 % | PASS |
+| ellipsoid | 72.7 % | **100 %** | 100 % | PASS |
+| cuboid | 88.9 % | 94.1 % | **81 %** (was 100) | PASS |
+| lamp | 57.1 % | 57.1 % (IDENTICAL) | 100 % | REVIEW |
+| torus | 19.0 % | **38.1 %** | 88 % (was 100) | REVIEW |
+
+Readings:
+1. **Where force was the binding constraint (curved convex bodies), the stiffer material fully
+   fixes success** — cylinder/sphere/ellipsoid all reach 100 %, at equal-or-LOWER median stress.
+2. **Where geometry binds, material does nothing or little**: lamp bit-identical at 57.1 %
+   (bulb-neck poses; tilt signature); torus doubled (19 -> 38 %) — MORE force effect than
+   predicted ("little change" was the prediction; wrong by half) but still pose-dominated.
+3. **The flip side, first seen here**: on shapes that never needed the force (cuboid), stiffness
+   costs gentleness margin — cuboid sub-yield 100 -> 81 %, torus 100 -> 88 %. Nothing is free;
+   the per-episode `priv_stress` filter covers the residue at conversion.
+
+Handoff annotations updated to the final numbers. The off-recipe lamp area-floor probe
+(hard 50 mm2) now runs behind the chain; the frozen recipe remains untouched throughout.
+
+
 **2026-08-31 — ADDITIVE `prim_*_mush` variants (mushroom material) replace the in-place material
 override; material A/B first rows: cylinder & sphere 53 % -> 100 %, lamp UNCHANGED at 57 %.**
 
