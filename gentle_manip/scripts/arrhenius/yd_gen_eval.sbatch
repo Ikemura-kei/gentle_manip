@@ -43,7 +43,7 @@ run_one() {           # $1 = category, $2 = port
   local SRV="$REPO/logs/slurm_logs/${SLURM_JOB_ID:-local}_srv_${cat}.log"
   local LOGDIR="$OUT/$cat"
   [ -f "$LOGDIR/summary.json" ] && { echo "[$cat] already done -> skip"; return 0; }
-  local EXP=single_lift_xcat_gen_eval NEP=100
+  local EXP=single_lift_xcat_gen_eval NEP=${NEP:-100}
   # small-fruit categories use the finer-grid _small task (grid 300 vs 190 -> ~6x slower
   # per step); cap them at 50 episodes so the 12-cat sweep still fits one walltime.
   case " $SMALL " in *" $cat "*) EXP=single_lift_xcat_gen_eval_small; NEP=${SMALL_NEP:-50} ;; esac
