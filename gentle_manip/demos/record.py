@@ -587,8 +587,13 @@ def main() -> None:
         w, h = setup["tactile"][obs_config.tactile.sensors[0]]["output_size"]
         tactile_shape = (int(h), int(w))
 
+    rgb_shape = None
+    if obs_config.images is not None:
+        cam0 = setup["cameras"][obs_config.images.cameras[0]]
+        rgb_shape = (int(cam0.get("height", 480)), int(cam0.get("width", 640)))
+
     env = PolicyEnv(backend, obs_config, action_config, task=None,
-                    tactile_shape=tactile_shape,
+                    tactile_shape=tactile_shape, rgb_shape=rgb_shape,
                     max_episode_steps=10 ** 9)  # huge → no auto-reset; keys bound episodes
 
     if args.input == "keyboard":
