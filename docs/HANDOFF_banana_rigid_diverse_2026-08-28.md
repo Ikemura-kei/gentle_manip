@@ -1095,3 +1095,30 @@ SCOPE OPTIONS for user:
  B +collection (~1.5d): A + regenerate failed_grasp + top-up small cats (~800 eps).
  C full (~2d): B + perception feature (1). The principled fix.
 AWAITING user pick. Nothing launched. 12-cat eval still paused.
+
+## 2026-09-01 11:30 — USER approved full retrain (scope ~C). LAUNCHED gen8 v2.
+User: add object-at-gripper feature (good) / rebalance (don't over-spend regenerating,
+less data OK w/ right ratio) / hold-tail "a bit" + eval TERMINATION on success (don't
+idle to 225). "gogo, parallel, stop previous eval".
+
+IMPLEMENTED + committed (d780ec1, + deploy follow-up):
+ - perception/pointcloud_ops.object_at_gripper(cloud, ee_pos) -> (…,4): near-TCP cloud
+   frac + near-centroid offset. Shared: convert_demos._episode_state (synth from stored
+   cloud), genesis_venv._raw_state, deploy_real_dppo._modalities (--obs-dim 12). obs_dim
+   8->12. Calibrated tcp_dz=+0.02, r=0.04 (grasped frac ~0.11 vs free ~0.03).
+ - _rebalance.py: --cap mode:frac, only drops. Pipeline (regrasp only): failed_grasp
+   0.12, mid_air 0.10, near_ground 0.09. baseline unchanged (already excl failed_grasp).
+ - _pad_hold_tail.py: +20 frames action~0 + grip-held on every committed-lift ep.
+ - harness early_stop: also freezes on crush-gate-free lifted-clear latch (prev commit),
+   NOW also ENDS the batch success_grace_steps(8) after ALL envs frozen + stops per-env
+   stress/z buffers past grace. venvs get finalize_episode() (video flush on early end).
+   EvalSpec.success_grace_steps. eval cfgs: obs_dim 12, obs_keys+=object_at_gripper,
+   state shape [12], success_grace_steps: 8, h=225 kept as safety max.
+ - yd_gen8_pipeline.sbatch: stage -> rebalance -> pad -> convert(--extra-state-keys
+   object_at_gripper) -> pretrain -> auto-submit yd_gen_eval.
+
+JOBS: 1879047 (regrasp) + 1879048 (baseline), PENDING(Priority), 12h each. Each:
+data-prep (~30m) -> BC pretrain (~5-6h) -> auto eval (~6-10h). New 5-letter run IDs
+(old ueini/lonau superseded). Local tests passed: rebalance/pad/state-synth/object_at_
+gripper all OK, all files ast-parse clean. Full pytest NOT run (aarch64, login can't).
+NEXT GATE: watch 1879047/8 data-prep for errors; then pretrain val loss; then eval.
