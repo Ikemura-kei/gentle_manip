@@ -1242,3 +1242,14 @@ re-collect with a gentleness cost. Old ueini banana was 0.687 too -> banana alwa
   The v2 fixes helped BOTH models. Comparison is now CLOSE, at least on kiwi. Need full 12
   cats before drawing conclusions -- regrasp's edge (if any) is on SR + recovery cases.
 - webpage b=1 r=3.
+
+## 2026-09-01 22:51 — 4 baseline cats; clear consistent pattern
+Per-cat (baseline vs regrasp-prelim), SR / gentleness / SRxg:
+  banana   B 0.62/0.686/0.651  R 0.98/0.626/0.805
+  egg      B 0.70/0.621/0.660  R 0.98/0.555/0.769
+  kiwi     B 0.62/0.746/0.681  R 0.67/0.727/0.697
+  mushroom B 0.60/0.663/0.632  R (pending; old ueini 0.58/0.77)
+VERDICT SHAPE: regrasp SR consistently +0.05..+0.36, baseline gentleness consistently
++0.02..+0.07. Regrasp SRxg wins every shared cat. The "regrasp lifts more, baseline
+grips gentler" tradeoff -- combined metric favors regrasp. Both models FIXED (no
+carry-down, no over-squeeze). webpage b=4 r=3.
