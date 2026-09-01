@@ -113,6 +113,9 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
             _hold_raw[6] = 0.0
         hold_action = (2.0 * (_hold_raw - _amin) / (_amax - _amin + 1e-6) - 1.0).astype(np.float32)
         print(f"[eval] early_stop hold action (normalized): {np.round(hold_action, 3)}", flush=True)
+    # after the first env freezes, give stragglers this many more policy steps to also
+    # succeed (covers a late in-place / replanned recovery) then end the batch regardless.
+    STRAGGLER_BUDGET = int(getattr(spec, "straggler_budget", 100))
 
     for i in range(spec.n_batches):
         # Per-group scene DR: rebuild the object geometry (size/shape/material) every K batches from
@@ -221,14 +224,19 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
                     if rec_ok[j]:
                         z_buf[j].append(float(oz[j]))
 
-            # END the batch once EVERY env is resolved (frozen + past grace). A never-
-            # succeeding env keeps froze_at<0 -> its episode runs the full horizon.
-            if (spec.early_stop_on_success and grace >= 0
-                    and np.all((froze_at >= 0) & (t - froze_at >= grace))):
-                t_end = t + 1
-                if hasattr(venv, "finalize_episode"):
-                    venv.finalize_episode()      # flush this batch's per-env clips
-                break
+            # END the batch when EVERY env is resolved (frozen + past grace), OR when the
+            # stragglers have had a full straggler-budget window past the LAST success to
+            # also succeed (a genuine late recovery lands within ~100 steps of the first
+            # attempt; beyond that a still-failing env is hopeless and just idles the
+            # already-frozen envs). Bounds the frozen tail on the successful envs.
+            if spec.early_stop_on_success and grace >= 0 and np.any(froze_at >= 0):
+                all_resolved = bool(np.all((froze_at >= 0) & (t - froze_at >= grace)))
+                straggler_done = (t - int(froze_at[froze_at >= 0].max())) >= STRAGGLER_BUDGET
+                if all_resolved or straggler_done:
+                    t_end = t + 1
+                    if hasattr(venv, "finalize_episode"):
+                        venv.finalize_episode()      # flush this batch's per-env clips
+                    break
         else:
             t_end = spec.max_policy_steps
 
