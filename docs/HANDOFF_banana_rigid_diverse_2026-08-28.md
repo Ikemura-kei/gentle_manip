@@ -1143,3 +1143,13 @@ NEXT: watch <jobid>_pretrain.log val loss (target best-val <~0.017).
   Montage: scratchpad/snap_montage.py <snapdir> <out.mp4> (15 clips, cat label burned in,
   2x, black gaps, 640x480). EACH TICK: if last snap job done -> build montage + SendUserFile;
   then run yd_regrasp_snap.sh again. Skips cleanly if no ckpt yet.
+
+## 2026-09-01 13:42 — first hourly snap sent; both pretrains healthy
+- REGRASP lorap ep63 train 0.025 (val 0.034@ep30, 0.026@ep60). BASELINE 1882124 ep62
+  train 0.028 (val 0.0475@ep20). ~2min & ~1.4min/epoch.
+- SNAP 1883773 (state_25.pt) DONE clean -> new early-terminating harness VERIFIED OK.
+  Results: egg_boiled 5/5, mushroom 1/5, raspberry 0/5 (early ckpt). Montage sent to user
+  (scratchpad/montages/regrasp_snap_20260901_1249.mp4). Sent-log:
+  logs/slurm_logs/regrasp_snap_sent.txt (grep the snap TS there before re-sending).
+- snap_montage.py: static imageio-ffmpeg has NO libfreetype -> drawtext unavailable;
+  use drawbox colour bars (teal/blue/orange = the 3 cats in sorted order, 5 clips each).
