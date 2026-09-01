@@ -109,6 +109,33 @@ v4.1 reference runs (same protocol): mushroom `26-08-30-wvz`, strawberry `26-08-
 cherry `26-08-30-tbm`, raspberry `26-08-30-jnd`, sphere_mush `26-08-31-ccd`, lamp_mush
 `26-08-31-fva` (under their respective task dirs).
 
+### E1 AGGREGATE — all methods × all objects (the paper's master table; 2026-09-01)
+
+Cell = success % | sub-yield % | median ×yield | max ×yield (stress over successful episodes,
+NaN-excluded). naive/antipodal/gpd/rigid/gn1b are gentleness-blind with their own width
+conventions; rigid_v41w = strong stress-blind poses + our FEM closure; v4.1 = ours (joint
+pose+closure). All through the same frozen executor, same DR recipe, ~16-success target or
+attempts cap.
+
+| object | naive | antipodal | GPD | GraspNet-baseline (gn1b) | rigid (B2) | rigid + v4.1 closure | **v4.1** |
+|---|---|---|---|---|---|---|---|
+| mushroom | 19.8 \| 100 \| 0.24 \| 0.34 | 66.7 \| 100 \| 0.25 \| 0.74 | 16.0 \| 100 \| 0.25 \| 0.42 | 51.6 \| 100 \| 0.41 \| 0.96 | 76.2 \| 100 \| 0.22 \| 0.68 | 100 \| 100 \| 0.29 \| 0.79 | **88.9 \| 100 \| 0.32 \| 0.62** |
+| strawberry | 0.0 (0/152) | 53.3 \| 100 \| 0.32 \| 0.39 | 1.5 \| 100 \| 0.22 \| 0.28 | 26.2 \| 81 \| 0.64 \| 1.09 | 34.8 \| 100 \| 0.33 \| 0.68 | 100 \| 100 \| 0.33 \| 0.57 | **45.7 \| 94 \| 0.32 \| 1.05** |
+| cherry | 72.7 \| 100 \| 0.55 \| 0.84 | 69.6 \| 46 \| 1.00 \| 1.15 | 17.8 \| 100 \| 0.49 \| 0.92 | 64.0 \| **36** \| **1.18** \| 1.22 | 69.6 \| 38 \| 1.06 \| 1.16 | 61.5 \| 19 \| 1.17 \| 1.18 | **76.2 \| 81 \| 0.74 \| 1.21** |
+| raspberry | 57.1 \| 100 \| 0.30 \| 0.56 | 88.9 \| 94 \| 0.45 \| 1.08 | 18.2 \| 69 \| 0.83 \| 1.15 | 26.2 \| **6** \| **1.24** \| 1.29 | 100 \| 100 \| 0.57 \| 1.00 | 100 \| 62 \| 0.96 \| 1.14 | **100 \| 88 \| 0.72 \| 1.19** |
+| sphere_mush | 76.2 \| 100 \| 0.20 \| 0.24 | 100 \| 100 \| 0.20 \| 0.28 | 25.0 \| 100 \| 0.17 \| 0.29 | 40.0 \| 100 \| 0.21 \| 0.55 | 76.2 \| 100 \| 0.21 \| 0.28 | 94.1 \| 100 \| 0.35 \| 0.62 | **100 \| 100 \| 0.37 \| 0.62** |
+| lamp_mush | 15.7 \| 100 \| 0.24 \| 0.33 | 80.0 \| 100 \| 0.23 \| 0.34 | 11.7 \| 100 \| 0.23 \| 0.41 | 34.0 \| 100 \| 0.25 \| 0.73 | 100 \| 100 \| 0.32 \| 0.58 | 100 \| 100 \| 0.55 \| 0.93 | **57.1 \| 100 \| 0.61 \| 0.95** |
+| **mean success** | 40.3 | 76.4 | 15.0 | 40.3 | 76.1 | 92.6 | **78.0** |
+| **min sub-yield** | 100* | 46 | 69 | **6** | 38 | 19 | **81** |
+
+\* survivor bias: naive's 100 % sub-yield cells coexist with 0–20 % success — its would-be-
+damaging grips fail as drops. Read success + sub-yield as a pair (finding 2). The two-line
+summary of the whole grid: **rigid+v4.1-closure has the best mean success (92.6) but a 19 %
+sub-yield worst case; v4.1 is the only method with BOTH high mean success (78.0) AND a
+bounded worst-case gentleness (min sub-yield 81 %).** Width-swap variants (gpd_v41w,
+antipodal_v41w) and the occ round are in their sections below; mushroom_antipodal_v41w
+(94.1 \| 100) shows the closure transfers to decent poses.
+
 ### E1/B2 RESULTS (4×6 grid COMPLETE, 2026-08-31)
 
 Cell = success % | sub-yield % | median ×yield | max ×yield (stress stats over successful
