@@ -47,4 +47,4 @@ cameras:
 # recalibration can replace this; until then this IS the calibrated value.
 # point_cloud_shift: [0.009, 0.0, 0.0]
 # point_cloud_shift: [0.00, 0.0, 0.0]
-point_cloud_shift: [0.009, 0.0, 0.0]
+point_cloud_shift: [0.009, 0.0, -0.0]
