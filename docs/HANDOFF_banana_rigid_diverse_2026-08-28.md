@@ -1234,3 +1234,11 @@ re-collect with a gentleness cost. Old ueini banana was 0.687 too -> banana alwa
 - REGRASP PRELIM results (state_225, kept visible until final overtakes): banana 0.98/0.626/0.805,
   egg_boiled 0.98/0.555/0.769, kiwi 0.67/0.727/0.697. All beat/match old ueini.
 - BASELINE eval 1899725 batch 8-10/12 wave 1, FPS ~0.6-0.8/env (heavy contention). Full ~00:00-00:30.
+
+## 2026-09-01 22:17 — first baseline cat: the NEW baseline is NOT a crusher
+- BASELINE kiwi (state_250): SR 0.62 / g 0.746 / SRxg 0.681.  REGRASP kiwi (state_225): 0.67 / 0.727 / 0.697.
+- KEY: the grasp-at-once baseline (obs_dim 12 + object_at_gripper + hold-tail + harness hold
+  fix) has gentleness ~0.75 -- the old "baseline crushes to yield (g~0)" headline is GONE.
+  The v2 fixes helped BOTH models. Comparison is now CLOSE, at least on kiwi. Need full 12
+  cats before drawing conclusions -- regrasp's edge (if any) is on SR + recovery cases.
+- webpage b=1 r=3.
