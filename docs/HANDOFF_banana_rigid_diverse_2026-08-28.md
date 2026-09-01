@@ -1017,3 +1017,44 @@ Per category now: banana 500+, kiwi ~166, egg ~163, mushroom ~160, + small 4.
 - GRES pool near-empty right now (only 1 sean job) -> resubmit will start immediately
   once approved. On approval: re-run ALL 12 cats at h=225 for both models (clear the
   3 stale h=150 summaries in gen_eval_20260831_233305 / _234353 first).
+
+## 2026-09-01 10:20 — USER flagged post-success carry-down; analyzed + eval fix
+OBSERVATION (user, from smoke montage): failed 1st attempt -> regrasp works well.
+But SUCCESSFUL 1st attempt -> policy lifts, then carries object back DOWN, opens
+fingers (release), EE descends to the z-floor (EE_BOUNDS_MIN z 0.1715), stuck there
+pressing, jaw slowly opens, no re-grasp, until episode end.
+
+ROOT CAUSE (3 layers):
+ 1. Demo terminal signal is a SATURATING command, not a fixed point. The scripted
+    lift/hold tail commands dz=+0.476 (norm ~max) + dgripper=-0.004 for ~46 frames
+    (31% of all demo frames) -- the EE target just clips at EE_BOUNDS_MAX z and the
+    object hangs. Demos NEVER contain "object at rest at height, EE still, action~0".
+    So the policy has no "task complete, hold here" attractor.
+ 2. Eval horizon (h=225 / 900 env steps) runs 4-5x past demo length (median 121,
+    max 185). Once the policy saturates the up-command against the workspace clip it
+    is OOD; the dominant dataset modes (approach = descend+open; failed_grasp recovery
+    = reopen+re-descend) take over -> carry-down + release. EE then clips at the LOWER
+    z bound -> "stuck at floor, jaw opening" = approach-mode behavior with no object.
+ 3. early_stop_on_success only froze on the FULL crush-gated success (band + hold_steps
+    + not-crushed). A firm-ish first grasp (brief >1.35x yield) or a lift that reversed
+    before hold_steps=4 -> success never latched -> ran free -> the ugly tail.
+
+FIX A (DONE, committed 422a79f-ish): harness early_stop also freezes an env on a
+ crush-gate-free "lifted clear" latch = obj_z in [z_min,z_max] for
+ lifted_clear_hold_steps (default 2) consecutive steps. Success METRIC unchanged.
+ Files: evaluation/harness.py, evaluation/eval_spec.py, dppo/eval_agent.py. Logic
+ unit-sim'd OK (env keeps earning real success while frozen; crushed env stays fail).
+ No-op for no-z-band tasks (rigid banana etc). -> clean videos + correct gentleness
+ (kills the 2nd table-contact stress hump that was deflating regrasp gentleness).
+
+FIX B (RECOMMENDED, NOT STARTED -- needs user OK, ~10-12h wall): pad every successful
+ demo with a genuine settled-hold tail (30-50 frames: small corrective dz, action~0,
+ grip held closed, obs = last frame held) so the policy learns a real fixed point.
+ Re-stage + retrain both gen8 models. This is the DURABLE fix + required for real
+ deploy (on hardware there is no harness freeze -> it WILL carry down and drop).
+
+FIX C (real deploy): scripted "grasped + high + stable K steps -> switch to hold
+ controller" wrapper. No retrain. Safety net on hardware.
+
+STATUS: full 12-cat eval still PAUSED. Resume plan unchanged (re-run all 12 at h=225
+ for both models) -- now also picks up FIX A. Awaiting user OK on resume + on FIX B.
