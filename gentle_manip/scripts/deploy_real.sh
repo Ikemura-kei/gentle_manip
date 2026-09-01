@@ -571,3 +571,21 @@
 #   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
 #   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
 #   --record dataset/real_deploy/orkam400 --shard-size 10 --max-steps 5000
+# ─────────────────────────────────────────────────────────────────────────────
+# GENERALIST 12-object policy (cluster run cvzth, ckpt 80) — added 2026-09-01.
+# Trained on the 12-object v4.1 dataset (cluster: "12-object generalist" commit aafb638);
+# action = 7d euler absolute (confirmed vs downloaded_runs/cvzth/config snapshot), obs =
+# superset -> point_cloud_1cam_armfocus deploy view. NOTE vs the cluster's suggested
+# command: envs/dppo_deploy (NOT envs/dp3 — that is the cluster's env name; on this box
+# all DPPO deploys run in dppo_deploy) and the standard safety knobs added
+# (--smooth-alpha / --max-pos-step-m, conservative motion).
+#
+# ckpt=downloaded_runs/cvzth/checkpoint/state_80.pt
+# normalization=downloaded_runs/cvzth/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/cvzth80_generalist --shard-size 10 \
+#   --max-steps 5000
