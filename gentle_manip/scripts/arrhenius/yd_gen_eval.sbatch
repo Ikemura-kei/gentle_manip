@@ -62,7 +62,7 @@ run_one() {           # $1 = category, $2 = port
   kill $P 2>/dev/null || true; sleep 3
   if [ "${NOTRIM:-0}" != "1" ]; then
     uv run --project envs/sim_arrhenius --no-sync python \
-      "$REPO/gentle_manip/scripts/arrhenius/_trim_eval_clips.py" "$LOGDIR" 4 16 || true
+      "$REPO/gentle_manip/scripts/arrhenius/_trim_eval_clips.py" "$LOGDIR" 4 40 || true
   fi
   echo "[$cat] DONE"
 }
