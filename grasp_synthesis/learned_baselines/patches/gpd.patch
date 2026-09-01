@@ -1,0 +1,72 @@
+diff --git a/cfg/eigen_params.cfg b/cfg/eigen_params.cfg
+index 73cc906..0f9d736 100644
+--- a/cfg/eigen_params.cfg
++++ b/cfg/eigen_params.cfg
+@@ -1,11 +1,11 @@
+ # Path to config file for robot hand geometry
+-hand_geometry_filename = ../cfg/hand_geometry.cfg
++hand_geometry_filename = /home/kei/kei/gentle_manip/third_party/gpd/cfg/hand_geometry.cfg
+ 
+ # Path to config file for volume and image geometry
+-image_geometry_filename = ../cfg/image_geometry_15channels.cfg
++image_geometry_filename = /home/kei/kei/gentle_manip/third_party/gpd/cfg/image_geometry_15channels.cfg
+ 
+ # Path to directory that contains neural network parameters
+-weights_file = ../models/lenet/15channels/params/
++weights_file = /home/kei/kei/gentle_manip/third_party/gpd/models/lenet/15channels/params/
+ 
+ # Preprocessing of point cloud
+ #   voxelize: if the cloud gets voxelized/downsampled
+@@ -73,10 +73,10 @@ num_selected = 5
+ #   plot_valid_grasps: plot the candidates that are identified as valid grasps
+ #   plot_clustered_grasps: plot the grasps that after clustering
+ #   plot_selected_grasps: plot the selected grasps (final output)
+-plot_normals = 1
++plot_normals = 0
+ plot_samples = 0
+-plot_candidates = 1
++plot_candidates = 0
+ plot_filtered_candidates = 0
+ plot_valid_grasps = 0
+ plot_clustered_grasps = 0
+-plot_selected_grasps = 1
++plot_selected_grasps = 0
+diff --git a/include/gpd/util/cloud.h b/include/gpd/util/cloud.h
+index 023c480..01bd274 100644
+--- a/include/gpd/util/cloud.h
++++ b/include/gpd/util/cloud.h
+@@ -110,7 +110,7 @@ class Cloud {
+      * \return true if they differ in at least one of the first three elements,
+      * false otherwise
+      */
+-    bool operator()(const Eigen::Vector4i &a, const Eigen::Vector4i &b) {
++    bool operator()(const Eigen::Vector4i &a, const Eigen::Vector4i &b) const {
+       for (int i = 0; i < a.size() - 1; i++) {
+         if (a(i) != b(i)) {
+           return true;
+diff --git a/src/detect_grasps.cpp b/src/detect_grasps.cpp
+index f3bce54..8a74043 100644
+--- a/src/detect_grasps.cpp
++++ b/src/detect_grasps.cpp
+@@ -80,7 +80,20 @@ int DoMain(int argc, char *argv[]) {
+   }
+ 
+   // Detect grasp poses.
+-  detector.detectGrasps(cloud);
++  auto hands = detector.detectGrasps(cloud);
++
++  // gentle_manip patch: emit machine-readable poses for the E1 baseline adapter.
++  for (size_t i = 0; i < hands.size(); i++) {
++    const auto &h = *hands[i];
++    const Eigen::Vector3d p_ = h.getPosition();
++    const Eigen::Vector3d a_ = h.getApproach();   // hand x: approach direction
++    const Eigen::Vector3d b_ = h.getBinormal();   // hand y: closing direction
++    const Eigen::Vector3d x_ = h.getAxis();       // hand z: finger axis
++    printf("GRASP_POSE %zu score %.4f pos %.6f %.6f %.6f approach %.6f %.6f %.6f "
++           "binormal %.6f %.6f %.6f axis %.6f %.6f %.6f width %.6f\n",
++           i, h.getScore(), p_(0), p_(1), p_(2), a_(0), a_(1), a_(2),
++           b_(0), b_(1), b_(2), x_(0), x_(1), x_(2), h.getGraspWidth());
++  }
+ 
+   return 0;
+ }

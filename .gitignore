@@ -110,6 +110,13 @@ obj_meshes/*/_*.png
 # report.json + _selection.json are the artifacts; the renders are large and regenerable.
 obj_meshes/*/selected/*.mp4
 obj_meshes/*/selected/*.gif
+# E1 external-baseline clones (setup recipes: grasp_synthesis/learned_baselines/SETUP.md)
+third_party/gpd/
+third_party/contact_graspnet/
+third_party/graspnet-baseline/
+third_party/graspnetAPI/
+third_party/gn1b_venv/
+third_party/cgn_venv/
 
 # openpi (π0.5 VLA baseline) — vendored as a PLAIN CHECKOUT, pinned upstream commit 215abfb
 # (recorded in docs/DEVLOG.md 2026-08-30). Ignored rather than tracked because the working tree
@@ -123,3 +130,5 @@ dataset/lerobot/
 # (18 of them); mp4s are not — they are large (~22 MB per batch) and regenerable from the eval
 # dirs on the cluster (<run>/eval/<subdir>/render/) or via gentle_manip/pi05/visualize_rgb.py.
 docs/figures/**/*.mp4
+
+dataset/transfer/

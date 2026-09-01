@@ -444,6 +444,128 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-09-01 — REAL paired-RGB demo campaign COMPLETE: 7 objects x 20(-21) eps, 141 episodes,
+all runs VERIFIED PASS.** Teleop (SpaceMouse pose + Z/X gripper), obs =
+`point_cloud_1cam_armfocus_rgb.yaml` (generalist student cloud view + PAIRED in-obs
+`image_cam_ext` 480x640 uint8 — idle-trimmed with all channels, so RGB step i == obs step i by
+construction), saved actions = 7d euler ABSOLUTE via --record-action-config (matches the cvzth
+generalist training config); point_cloud_shift [0.009,0,0] active BY USER INTENT (standing
+extrinsic compensation). Dual-purpose: DPPO generalist cotrain (cloud+abs actions) AND pi0.5
+VLA baseline (RGB; convert via gentle_manip/pi05/convert_to_lerobot.py). Per-object runs
+(dataset/demos/single_lift_<o>_real/<id>, paired videos in <run>/videos_paired/):
+
+| object | run | eps | gripper floor (mm) |
+|---|---|---|---|
+| mushroom | 26-09-01-xlb | 20 | 31 |
+| grape | 26-09-01-ioa | 20 | 16 |
+| tomato | 26-09-01-cfw | 20 | 63 |
+| padron_pepper | 26-09-01-euq | 20 | 13 |
+| cherry_tomato | 26-09-01-ezm | 20 | 24 |
+| strawberry | 26-09-01-biu | 20 | 22 |
+| tofu | 26-09-01-wbz | 21 | 26 |
+
+Verification = `gentle_manip/scripts/verify_real_demos.py` (pairing, schema, absolute-action
+sanity, crop bounds, quat canonicalization, config snapshot, paired-video render). Gripper
+floors track object size cleanly (13-63 mm) — good size signal for the generalist. Fixes that
+came out of this campaign (committed): record.py rgb_shape plumbing; checklist commands for
+pcd preview (delta action config) + collection recipe in deploy_real.sh.
+
+
+**2026-09-01 (morning) — Overnight COMPLETE: gn1b full 6-object row lands; CGN closed as
+unusable-on-stack; visual index built.** gn1b: 26–64 % success, and the WORST gentleness in
+the grid on compact fruits (raspberry 6 % sub-yield median 1.24×, cherry 36 %) — a modern
+learned 7-DOF planner + close-until-contact execution crushes exactly the objects
+gentleness targets; strongest external row for the paper table. CGN probe killed at batch 2
+(2/21 synth successes) — reported as integration-blocked, no number claimed. One adapter
+crash fixed mid-run (gn1b emitted a left-handed rotation on raspberry → guard + retry, clean
+100-ep... 16-ep retry OK). Visual review map: `docs/e1_visual_index.md` + per-object method
+contact sheets in `docs/figures/e1_sheets/`. Committed locally (NO push, per user).
+
+**2026-09-01 (overnight) — Learned-planner baselines: GraspNet-1Billion WORKING, Contact-
+GraspNet integrated-but-unstable; rigid_v41w_occ round near-complete (occ bound changes
+NOTHING on 5/5 so far — the challenger's wins are not occlusion-freedom).**
+
+- User-requested: adapt the two open AnyGrasp-class planners with original code+weights,
+  minimal glue. Both built from source (`learned_baselines/SETUP.md` = full recipes + the
+  measured pitfalls: conda toolchain hijack, stale shipped .so files, TF≥2.16 custom-op ABI
+  break → TF 2.15 venv, OkStatus rename, sm_89 gencode, ptxas-10.1-in-PATH XLA miscompile
+  → EMPTY predictions, LD_LIBRARY_PATH cudart mixing → illegal-address aborts).
+- **gn1b (`--baseline gn1b`)**: deterministic, 6–9 s/call; 16-ep × 6 smoke queued overnight.
+- **cgn (`--baseline cgn`)**: 2019-era pointnet2 TF ops nondeterministically broken on
+  RTX 4090+CUDA 12 (identical seeded input → 0/N/abort). Retry ×3 wrapper; 8-ep probe only;
+  proper fix = their pinned TF2.5/CUDA11 container (post-deadline).
+- **Adapter findings worth the paper**: (a) the classic ~54° tabletop viewpoint yields ZERO
+  executable proposals for our workspace (side approaches stab the table with 45 mm fingers
+  on 3–4 cm objects) — steep views (77°/90°) required; (b) learned planners emit PRE-SHAPE
+  openings — commanded literally they never touch the object; faithful conversion = local
+  cross-section at the final slice − 2 mm (close-until-contact semantics). Both mirror the
+  GPD width finding: rigid planners do not answer "how far to close".
+- Third-party clones/venvs/weights NOT committed (.gitignore); local patches exported to
+  `learned_baselines/patches/`.
+
+**2026-08-31 — E1 baseline comparison: GPD integrated as the ESTABLISHED rigid-body planner;
+18-run sweep (naive/antipodal/gpd × 6 objects) running. First results: naive < classical <
+v4.1 on mushroom; naive = 0 % on strawberry.**
+
+- **GPD (ten Pas et al., IJRR 2017) built + adapted** (`third_party/gpd`, local clone —
+  NOT a registered submodule). Build fights (documented for reproduction): const-comparator
+  patch in `cloud.h`; system toolchain (`CC=/usr/bin/gcc`, conda compilers hijack CMake);
+  conda-libffi link poisoning (sed miniconda3 tokens out of link.txt + link system
+  `libffi.so.7`). Local patches: `GRASP_POSE` stdout line per hand; `plot_* = 0` — GPD's PCL
+  viewer windows were blocking runs on the user's desktop until manually closed (an earlier
+  cfg edit was raced/reverted by a backgrounded task; re-applied with read-back verification).
+  Rebuild gotcha: the make target is `gpd_detect_grasps`, not `detect_grasps` (the latter
+  silently no-ops).
+- **Adapter** (`baseline_synth.gpd_planner`, `--baseline gpd`): privileged dense surface cloud
+  (15 k area-weighted pts) → GPD → hand frame [approach, binormal, axis] mapped to our TCP as
+  columns [−axis, binormal, approach]; hand-base + depth/2 = pad mid-plane centre; first
+  candidate passing the v4.1 geometric validity ladder wins. ~3 s/call. Verified in-collector:
+  sensible cap-straddling mushroom grasps, width ≈ aperture − 2 mm.
+- **Attempts cap 200 (wrapper-only, v4.1 untouched):** the collector runs until N SUCCESSES,
+  so strawberry_naive (0/152) would never have terminated. The wrapper captures v4's live args
+  namespace and trips `n_episodes` at 200 attempts → graceful exit, honest stats. Lesson:
+  success-count collection loops + near-0 % policies = non-termination; cap attempts for any
+  baseline/ablation sweep.
+- **Sweep protocol:** two parallel chains (naive+antipodal chain, gpd chain) on matched
+  experiment configs, 16-ep target, videos on, watchdog v2 (18 runs). Full table + analysis in
+  `docs/paper/synthesis_experiments.md` §4 when done.
+- **COMPLETE (same day): full 4×6 grid + mushroom width-swaps done.** Full table + five
+  findings in `docs/paper/synthesis_experiments.md` §4 (results + run-dir/video map).
+  Headlines: (1) only v4.1 holds success AND sub-yield simultaneously across the set —
+  blind baselines either drop (GPD 1.5–25 % everywhere: rigid planners never answer "how
+  far to close") or damage (cherry antipodal/rigid at-yield, 38–46 % sub-yield); (2) the
+  surrogate CLOSURE transfers: antipodal poses + v4.1 closure = 94.1 % on mushroom
+  (= v4.1) at sub-yield stress; (3) honest exceptions: lamp (rigid 100 % > v4.1 57 % —
+  area-floor limitation, third confirmation), sphere (tie, gentler), cherry naive slightly
+  gentler. One silent run death (raspberry_rigid, coincided with a WiFi/kernel hiccup, no
+  OOM/traceback) — retried clean: 100 %. **gpd_v41w × 6 COMPLETE (all 31 runs done):**
+  closure lifts GPD everywhere (16→46, 1.5→29, 18→28, 18→23, 25→67, 12→21 %) but raspberry
+  shows the limit — closure on bad poses secures them PAST yield (19 % sub-yield, median
+  1.10×). Refined finding 3: closure transfers to decent poses; joint pose+closure
+  optimization is required to hold success AND gentleness. Full width-swap table in
+  synthesis_experiments.md §4.
+- **rigid_v41w × 6 COMPLETE (23:20): object-dependent split.** Strong rigid poses + v4.1
+  closure WINS on mushroom (100|100), strawberry (100|100 — fixes v4.1's p98 degeneracy
+  there: flush poses → healthy 2.5–4 mm commands), lamp (100|100); LOSES gentleness on
+  cherry (19 % sub-yield, median 1.17×) and raspberry (62 %, 0.96×) — stress-blind poses
+  force the closure to yield. Conclusion: stress-aware POSE selection earns its cost
+  exactly on compact fragile fruits; strawberry indicts v4.1's own pose search (limitation
+  to state). Full table + caveats in synthesis_experiments.md §4. Occ-bounded re-run
+  (rigid_v41w_occ) auto-started. 100-ep confirmatory round designed (feasible ~2 days,
+  2 lanes; paired-geometry fix needed — same-seed scene draws diverge once failure paths
+  differ; wrapper will pin a dedicated batch-indexed scene-DR stream + `--baseline v41`
+  passthrough) — awaiting user decision. Full design doc: `docs/e1_100ep_ablation_design.md`
+  (protocol, 7 methods incl. naive−5mm, occ-bound-everywhere, paired-geometry fix,
+  implementation deltas, cost, cluster suitability). EXECUTION ON HOLD per user
+  (2026-08-31 night) — cluster may run it instead of local.
+- **Follow-ups (same day):** `docs/paper/related_work_synthesis.md` written (parallel-jaw-only
+  related-work map: rigid pose planners / grip-force control / deformable squeeze precedents,
+  with the positioning claim); `method_v4.md` re-audited line-by-line against the frozen v4.1
+  code (A.9/A.10 exact — note the 2.0/2.5 mm FIRM_* module constants are v3 leftovers
+  overridden by `_firm_base=0.0` at runtime; B.3 marked complete, B.5 rewritten to cite the
+  finished E1/B2 grid). **rigid_v41w × 6 chain launched** (strong rigid re-ranker poses +
+  v4.1 FEM closure) — the sharpest "rigid planner + our width" test.
+
 **2026-08-31 — PROBE ANSWER: yes, a hard min-contact-area floor helps the lamp. 57.1 % -> 72.7 %
 at 100 % sub-yield, zero synthesis failures. OFF-RECIPE — the frozen v4.1 recipe is unchanged;
 this is a post-deadline v4.x candidate and paper-analysis material.**
