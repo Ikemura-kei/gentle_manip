@@ -1194,3 +1194,13 @@ re-collect with a gentleness cost. Old ueini banana was 0.687 too -> banana alwa
 - 12-cat eval job 1898658 RUNNING (started 19:05, GPU freed immediately). Eval dir: find via
   logs/slurm_logs/last_gen_eval_dir.txt (or dthox/eval/<ts> or dthox/gen_eval_<ts>).
 - REGRASP lorap still training, ep~225 val 0.0180. GPU freed by baseline -> snap relaunched.
+
+## 2026-09-01 19:12 — both 12-cat evals launched; webpage refresh pinned
+- BASELINE eval 1898658 -> dthox/gen_eval_20260901_190536 (state_250). RUNNING, 0 cats done yet.
+- REGRASP eval 1899143 -> lorap/gen_eval_20260901_..._ep225 (state_225, MID-TRAINING best).
+  PENDING (GRES). lorap keeps training -> will auto-submit a FINAL eval ~22:00; use whichever
+  dir is more complete for the final table.
+- gen8_refresh.sh now pins BE=dthox/gen_eval_*, RE=lorap/gen_eval_* (override BE_DIR/RE_DIR).
+  Run it each tick once cats land; publishes into <!--GEN8_EVAL_START/END--> of regrasp_demos.html
+  -> publish artifact 5682ac2f. gen8_eval_page.py shows "pending" for missing cats (graceful).
+- User asked: "put the two evals on webpage as in the placeholder" -> that's exactly this section.
