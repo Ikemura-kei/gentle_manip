@@ -82,7 +82,7 @@
 #   --ckpt ${ckpt} \
 #   --ft-denoising-steps 10 \
 #   --normalization ${normalization} \
-#   --action-config gentle_manip/configs/action/delta_pose_delta_gripper.yaml \
+#   --action-config gentle_manip/configs/action/delta_pose_delta_gripper_fast_rot.yaml \
 #   --pose-scale 0.999 \
 #   --record dataset/real_deploy/luqsl249 \
 #   --shard-size 10
@@ -603,7 +603,7 @@
 uv run --project envs/deploy python -m gentle_manip.demos.record \
   --setup gentle_manip/configs/setup/real_lab.yaml \
   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-  --action-config gentle_manip/configs/action/delta_pose_delta_gripper.yaml \
+  --action-config gentle_manip/configs/action/delta_pose_delta_gripper_fast_rot.yaml \
   --task-name pcd_preview --input keyboard --show-pointcloud
 #
 # Camera-only quick look (NO robot, so the armfocus filter is SKIPPED — crop +
