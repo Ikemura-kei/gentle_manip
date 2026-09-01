@@ -43,9 +43,11 @@ run_one() {           # $1 = category, $2 = port
   local SRV="$REPO/logs/slurm_logs/${SLURM_JOB_ID:-local}_srv_${cat}.log"
   local LOGDIR="$OUT/$cat"
   [ -f "$LOGDIR/summary.json" ] && { echo "[$cat] already done -> skip"; return 0; }
-  local EXP=single_lift_xcat_gen_eval
-  case " $SMALL " in *" $cat "*) EXP=single_lift_xcat_gen_eval_small ;; esac
-  echo "=== [$cat] ($EXP) port $port ==="
+  local EXP=single_lift_xcat_gen_eval NEP=100
+  # small-fruit categories use the finer-grid _small task (grid 300 vs 190 -> ~6x slower
+  # per step); cap them at 50 episodes so the 12-cat sweep still fits one walltime.
+  case " $SMALL " in *" $cat "*) EXP=single_lift_xcat_gen_eval_small; NEP=${SMALL_NEP:-50} ;; esac
+  echo "=== [$cat] ($EXP, n=$NEP) port $port ==="
   uv run --project envs/sim_arrhenius --no-sync python -m gentle_manip.scripts.serl_sim_server \
     --experiment "$EXP" --dr eval_cat_${cat} --view student \
     --num-envs 5 --render-rgb --subprocess --port "$port" > "$SRV" 2>&1 &
@@ -55,7 +57,7 @@ run_one() {           # $1 = category, $2 = port
   grep -q SIM_SERVER_READY "$SRV" || { echo "[$cat] SKIP (no server)"; kill $P 2>/dev/null||true; return 1; }
   uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.train \
     --config-path "$CFG_DIR" --config-name eval_diffusion_pointnet \
-    base_policy_path="$CKPT" ft_denoising_steps=0 experiment="$EXP" \
+    base_policy_path="$CKPT" ft_denoising_steps=0 experiment="$EXP" n_episodes="$NEP" \
     record_batches="$RECORD_BATCHES" env.specific.port="$port" logdir="$LOGDIR" || echo "[$cat] eval failed"
   kill $P 2>/dev/null || true; sleep 3
   uv run --project envs/sim_arrhenius --no-sync python \
