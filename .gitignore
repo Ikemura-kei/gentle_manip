@@ -131,3 +131,4 @@ dataset/lerobot/
 # dirs on the cluster (<run>/eval/<subdir>/render/) or via gentle_manip/pi05/visualize_rgb.py.
 docs/figures/**/*.mp4
 
+dataset/transfer/
