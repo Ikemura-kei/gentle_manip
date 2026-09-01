@@ -1281,3 +1281,14 @@ eval_cat_*_reactive.yaml (prob 0.75, speed 0.15-0.55 m/s, frame 24-104). yd_reac
 sample_perturb tested locally (deterministic, prob gate works). NOT yet sim-tested (GPU busy).
 GATE: current gen8 v2 baseline-vs-regrasp eval must finish first -> final table + campaign
 summary + publish, THEN Phase B (zero-shot reactive eval of lorap/state_300).
+
+## 2026-09-02 01:42 — gen8 v2 verdict posted (partial); reactive Phase B smoke launched
+- EXPERIMENT.md written for lorap + dthox (in their run dirs -- logs/ is gitignored so on-disk only).
+  experiments.csv: lorap + dthox -> done.
+- gen8 v2 VERDICT (large in-domain n=60): regrasp SR .81/g .70/SRxg .78 vs baseline .64/.68/.66.
+  Recovery-driven. Baseline collapses on small fruit (raspberry .05). Verdict block on webpage.
+- gen8 evals STILL running (baseline 7/12 on OOD wave, RF 4 real on small-fruit wave) -- slow
+  (ikemura 7 jobs). Keep updating webpage as cats land; full campaign summary to chat once complete.
+- REACTIVE SMOKE launched: 1907954, mushroom, lorap state_300, NEP=15, -t 25min,
+  OUT=logs/dppo/dppo-pretrain/single_lift_gen8_regrasp_pcd/lorap/reactive_smoke_0141.
+  NEXT: montage its clips, check the kick works (object slides 3-9cm mid-approach, lorap re-approaches).
