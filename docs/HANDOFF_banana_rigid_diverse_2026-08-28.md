@@ -1130,3 +1130,16 @@ NEXT GATE: watch 1879047/8 data-prep for errors; then pretrain val loss; then ev
 object_at_gripper synth + --extra-state-keys wired correctly in both. net params 1748940
 (was 1724364 @ obs_dim 8). Both now in BC pretrain (~5-6h) -> auto yd_gen_eval.
 NEXT: watch <jobid>_pretrain.log val loss (target best-val <~0.017).
+
+## 2026-09-01 11:55 — USER: focus regrasp; baseline=grasp-at-once; hourly regrasp video
+- CANCELLED baseline 1879048. Relaunched as 1882124 = GRASP-AT-ONCE: STAGE_ARGS
+  --modes home,near_object,mid_approach,above_object (NO recovery data). Eval h=120 /
+  max_episode_steps 480 / grace 6. obs_dim 12 + object_at_gripper kept (same obs space).
+- REGRASP job 1879047, run id = lorap. Pretrain ~ep12, train 0.057 / val 0.061 @ep10.
+  save_model_freq=25 -> first ckpt ~ep25 (~12:20).
+- HOURLY REGRASP SNAPSHOT (user req): gentle_manip/scripts/arrhenius/yd_regrasp_snap.sh
+  -> picks best-val ckpt, 15 rollouts / 3 RANDOM in-domain cats (n=5 each), RECORD_BATCHES=1,
+  NOTRIM=1, -t 45min, OUT=<run>/snap/<ts>, writes path to logs/slurm_logs/last_regrasp_snap.txt.
+  Montage: scratchpad/snap_montage.py <snapdir> <out.mp4> (15 clips, cat label burned in,
+  2x, black gaps, 640x480). EACH TICK: if last snap job done -> build montage + SendUserFile;
+  then run yd_regrasp_snap.sh again. Skips cleanly if no ckpt yet.
