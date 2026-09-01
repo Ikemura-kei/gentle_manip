@@ -7796,3 +7796,198 @@ survives that, the 12obj-vs-ddgrl difference does not.
 **SCOPE LIMIT (unchanged):** mushroom only. §3.3's max-over-objects aggregation needs tofu and
 raspberry (ddgrl has both) — NOT yet run. A 12-object policy judged on one object is a weak test,
 and the per-object breakdown is the obvious next step.
+
+### 2026-09-01 — First-frame OBJECT-CROP labelling (idea assessed, labelled, NOT trained)
+
+**User idea:** condition the policy on an object embedding taken from the FIRST frame (crop the
+cloud below a fixed height), because once the object is between the fingers its points merge with
+the gripper's. Gated by the user: no training until the labelling is reviewed.
+
+**PRIOR ART — the idea EXISTS and was tested NEGATIVE.** `first_frame_context`
+(`dppo/pointcloud_dataset.py`) + `use_first_frame_context` (`dppo/pointnet_diffusion.py`) encode
+the episode's first cloud with the SAME PointNet backbone and concatenate its 512-d feature.
+DEVLOG item 12, run `ptpii`: **success 0.380 vs 0.685 baseline — HALVED**, "NOT taken to real",
+filed under CONCLUDED NEGATIVE. **The user's variant differs in exactly one way: an OBJECT-ONLY
+CROP rather than the whole frame** — which plausibly targets the failure mechanism (a 512-d
+episode-constant vector over the whole scene is a high-capacity nuisance channel the denoiser can
+use as an episode ID). The DEVLOG's own listed follow-ups were feature-side ("bottlenecked
+context, FiLM, gating"); an input-side crop is not among them.
+
+⚠ **RETRACTED from my own earlier analysis:** I argued an embedding might beat `ixjgp`'s 1-d
+`feed_width_pred` because 1 dim in 572 is ignorable. Item 12 fed **512 dims** and made things
+much WORSE. The bandwidth argument does not survive.
+
+**t=0 GEOMETRY (measured, 4931 episodes).** `ee_z` at the first frame is BIMODAL:
+79.2% at ~0.198 m (home) and **20.8% at 0.066-0.142 m** — matching `regrasp_prob 0.2`, i.e. the
+retry-aware episodes start hovering ABOVE the object, exactly as the user warned. Minimum EE
+origin **0.0661 m**, so a 10 cm crop catches the EE in ~11% of episodes, 7 cm in ~1%, 5 cm in none.
+User set the crop at **6 cm** (TCP sits just below the finger ends, so fingers dip below the TCP
+only under significant tilt).
+
+**LABELLING RESULT** (`gentle_manip/scripts/label_first_frame_object.py`, writes
+`first_frame_object.npz` per slice; figures via `plot_first_frame_object.py` in
+`docs/figures/first_frame_object/`):
+
+| finding | number |
+|---|---|
+| empty crops | **0 / 4931** — the crop always finds the object |
+| episodes with "outliers" | 79 / 4931 (**1.6%**); 0 in cherry_tomato/prim_ellipsoid/prim_sphere/raspberry |
+| **TRUNCATED (object cut by the 6 cm ceiling)** | **tomato 256/445 = 57.5%**, prim_cylinder 74/437 = 16.9%, prim_lamp 4 |
+| point-count spread | raspberry mean 15.8 (**min 1**) vs tomato 163.7 — 10x |
+
+**THE OUTLIER FILTER IS PROBABLY WRONG — it removes OBJECT points, not contamination.**
+Largest-voxel-component ranking kept 19 points and rejected 25 in prim_lamp ep128 (voxel count,
+not point count, decides). Validating against `aux_object_pos`: 44/79 kept the cluster FARTHER
+from the true COM — **but that criterion is CONFOUNDED**: the cloud is a single-view SURFACE, so
+its centroid is offset from the volumetric COM by ~the object radius (both clusters sit 20-50 mm
+away), letting a 3-8 point cluster near the centre win by geometry. Better reading: both clusters
+are the SAME object, severed by 1 cm voxel connectivity at a thin/occluded waist — supported by
+mushroom 12/12 and prim_cuboid 3/3 having the SMALL cluster closer to the COM (a finger would be
+farther), and by the prim_lamp clusters sitting 3.0-3.5 cm apart against a 5.2 cm object.
+**Recommendation: drop the outlier step or coarsen the merge; it is deleting real points.**
+
+⚠ **METHOD ERROR I made and corrected:** the first validation compared RAW cloud coordinates
+against `aux_object_pos` without noticing it is normalized to [-1,1] like the states — giving
+1.0-1.6 m "distances" and a meaningless 54/79 figure. De-normalize with `obs_min/obs_max[:3]`
+first. **Any aux_* array in a converted dppo npz is normalized; never compare it to raw clouds.**
+
+**OPEN FOR THE USER:** truncation is the blocking issue, not outliers. At 6 cm more than half of
+tomato episodes lose the object's top, so its "object embedding" would systematically encode a
+partial object; raspberry can be a ONE-POINT cloud. Both bound what this conditioning could do.
+NOT TRAINED — awaiting review.
+
+### 2026-09-01 — Per-object eval sweep: 12/36 died on MPM/rigid NaN; retried at 2x substeps
+
+Sweep = 11 objects + pasta_bundle (OOD) x 3 seeds, `state_94`, protocol identical to
+`canon_mushroom_200geo40`. Outcome: 17 completed, 6 running, **13 FAILED**.
+
+**Client symptom was `ConnectionError: socket closed mid-message` — a RED HERRING.** As CHECKLISTS
+§0 warns, that is what a dead sim SERVER looks like from the client. The real error is only in
+`logs/slumr_logs/<jid>_<subdir>_simserver.log`:
+```
+GenesisWorker 'reset' failed in subprocess:
+genesis.GenesisException: Invalid constraint forces causing 'nan'.
+    Please decrease Rigid simulation timestep.
+```
+**Always read the SIM-SERVER log, never the client traceback, for an eval that dies mid-episode.**
+
+**One "failure" was cosmetic:** `strawberry` seed 42 wrote **200 episodes + 200 clips**
+(success 0.675, ever 0.730, sustained 14,390) and only failed at TEARDOWN. Its data is valid and
+is being used. So 12 genuine failures, not 13 — **check for `summary.json` before discarding a
+FAILED eval.**
+
+**Failure pattern is per-OBJECT, not per-seed:** tomato / cherry_tomato / banana_chunk /
+pasta_bundle failed 3/3. tomato died after ~12 resets (3 min); the others 28-34 min in. So it is
+an early STOCHASTIC instability, not a config that never starts.
+
+⚠ **NO simple substeps ordering explains it** — tomato has the LOWEST `sim_substeps` (175) and
+cherry_tomato among the highest (330), both 3/3 failures, while raspberry (350) and the prims
+(190) all pass. And the exception comes from the RIGID solver, not MPM. So "raise substeps" is a
+mitigation whose mechanism is not established, not a diagnosis.
+
+**RETRY: 12 evals relaunched at 2x substeps** via `GM_SIM_SUBSTEPS` (honoured by
+`scene_builder`, so no config edit): tomato 175->350, cherry_tomato 330->660,
+banana_chunk 290->580, pasta_bundle 220->440. Subdir suffixed `_ss<N>` so the fidelity is visible
+in the path and can never be silently compared against the 1x runs. Walltime raised to 8 h (2x
+substeps ~= 2x slower).
+
+⚠ **REPORT THIS CAVEAT:** these 4 objects are evaluated at a DIFFERENT sim fidelity than their own
+COLLECTION used, and than the other 8 objects. Per-object substeps already vary by design
+(175-350) and each object is reported separately, so the cross-object table survives — but the
+train/eval fidelity mismatch for these 4 must be stated wherever their numbers appear.
+
+**ALTERNATIVE HYPOTHESIS NOT YET EXCLUDED:** collection ran 500 episodes/object at 1x substeps
+with no such crash, using the CMA-ES scripted demonstrator. The eval differs by running a LEARNED
+policy, which can drive the arm into configurations the demonstrator never visits. If the retries
+still fail, the cause is more likely policy-induced arm/table interaction than integrator
+fidelity, and the fix would be elsewhere.
+
+### 2026-09-01 — Per-object eval RESULTS (7/13 objects) + which objects failed at what substeps
+
+**12-object generalist `state_94`, 200 eps / 40 geometries per seed, mean ± SD over seeds
+{42,27,321}. Eval seed 42 / num_envs 5 / n_episodes 200 on EVERY eval (verified identical,
+including the 3-object references ddgrl/bwmcy/xaqnb) — so within-object cross-seed and
+cross-policy comparisons are scenario-identical.**
+
+| object | seeds | success % | sust/yield | damage % | yield kPa |
+|---|---|---|---|---|---|
+| prim_cylinder | 3 | 83.7 ± 1.8 | 0.59 | **19.2 ± 2.5** | 40 |
+| prim_sphere | 3 | 77.8 ± 2.1 | 0.49 | 11.2 ± 3.8 | 40 |
+| mushroom | 3 | 72.8 ± 1.4 | 0.50 | 13.3 ± 3.0 | 40 |
+| strawberry | **2** | 69.0 ± 2.1 | 0.60 | **26.6 ± 2.9** | 18 |
+| tofu | 3 | 59.7 ± 8.5 | 0.31 | **0.7 ± 1.2** | 20 |
+| prim_lamp | 3 | 47.2 ± 1.5 | 0.35 | 4.2 ± 2.0 | 40 |
+| raspberry | 3 | **24.7 ± 10.5** | 0.22 | 9.7 ± 4.6 | 15 |
+
+Unweighted mean success **62.1%** (range 24.7-83.7). **§3.3 max-over-objects damage rate = 26.6%
+(strawberry)** — the number the constraint binds on. Mushroom alone reads 13.3%, so
+**mushroom-only reporting understates this policy's damage by half.** Strongest concrete
+argument yet for max-over-objects rather than a single-object headline.
+
+**Success and gentleness are NOT aligned across objects:** prim_cylinder has the BEST success
+(83.7%) and near-worst damage (19.2%); tofu is mid-success (59.7%) and essentially never damages
+(0.7%). Ranking objects by success inverts the gentleness ranking.
+
+⚠ **strawberry is 2 seeds, and its numbers EXCLUDE one NaN-stress episode.** NaN >= 1 evaluates
+False, so a NaN row silently counts as SAFE in a damage rate — always mask NaN explicitly.
+(Only strawberry had any: 1 row in 1 seed.)
+
+⚠ **MY ERROR, corrected:** I earlier reported "strawberry seed 42 completed with 200 episodes,
+success 0.675". That was `ls ... | head -1` picking a DIFFERENT run's directory — 0.675 is
+`cvzth` (seed 27). Strawberry seed 42 genuinely failed and has no data. **Never identify a run by
+the first glob match.**
+
+**EVALS THAT FAILED, with substeps (revisit later; user deferred):**
+
+| object | task sim_substeps | 1x result | retry substeps | retry result |
+|---|---|---|---|---|
+| tomato | 175 | FAILED 3/3 (died 3 min) | **350** | **RUNNING 58+ min, 0 exceptions -> FIXED** |
+| cherry_tomato | 330 | FAILED 3/3 (34 min) | 660 | **FAILED 3/3 again, same NaN** |
+| banana_chunk | 290 | FAILED 3/3 (34 min) | 580 | FAILED (2/3 same NaN) |
+| pasta_bundle (OOD) | 220 | FAILED 3/3 (28 min) | 440 | pending |
+| strawberry | 260 | FAILED 1/3 | — | not retried (2 seeds suffice for now) |
+| prim_cuboid, prim_ellipsoid | 235 | running at 1x | — | — |
+
+**The 2x-substeps mitigation SPLIT the failures, which is the informative part:**
+* **tomato (175 = the LOWEST substeps in the set) is FIXED by 350** — it was genuinely
+  under-integrated.
+* **cherry_tomato (330, already among the highest) still NaNs at 660** — doubling an
+  already-high value changes nothing, so its mechanism is NOT integrator fidelity.
+I was wrong to apply a blanket 2x to all four; tomato at 175 and cherry_tomato at 330 were never
+the same problem. **Do not escalate substeps further for cherry_tomato/banana_chunk.**
+
+**LEADING HYPOTHESIS for the remaining failures:** collection ran 500 eps/object at 1x substeps
+with the CMA-ES scripted demonstrator and never crashed; the eval runs a LEARNED policy that
+reaches configurations the demonstrator never visits. The exception comes from the **RIGID**
+solver ("Invalid constraint forces causing 'nan'"), not MPM — consistent with arm/table
+constraint violation rather than soft-body integration. Next step is the obs/action dumps in the
+moments before the NaN, not more substeps.
+
+⚠ **Retries run at DIFFERENT sim fidelity than their own collection and than the other objects.**
+Subdirs carry `_ss<N>`; state this wherever those numbers appear.
+
+**OUTLIER FILTER REMOVED (user, 2026-09-01): "what you rejected are part of the lamp. The
+rejection filter is unnecessary if a height crop works, the rest are all object pnts."**
+
+Confirmed from three independent directions and now the default:
+1. **EE height** — across all 79 flagged episodes the EE at t=0 has MEDIAN **19.8 cm**, 14 cm
+   above the 6 cm ceiling; only 2/79 sit below 8 cm. **No gripper point can be inside the crop**,
+   so the rejected clusters were never finger contamination.
+2. **Geometry** — the two components sat 3.0-3.5 cm apart on a 5.2 cm prim_lamp: inside one object.
+3. **User inspection** of the rotating 3D renders.
+
+The largest-connected-component step was severing ONE object at a thin/occluded waist and
+deleting real points. `--outlier-filter` is retained to reproduce the old behaviour but is OFF.
+
+⚠ **The reasoning that led me astray:** two well-separated clusters in a 2D projection LOOK like
+object-plus-contamination. The 2D panels collapse exactly the axis that disambiguates them, and
+my `aux_object_pos` check was confounded (single-view SURFACE centroid is offset from the
+volumetric COM by ~the object radius, so a 3-point cluster near the centre "wins"). **The cheap
+decisive check was the EE height — a number I already had — not a clustering metric.** Reach for
+the measurement that rules out the hypothesis outright before building a discriminator.
+
+**Rotating 3D renders** (`gentle_manip/scripts/video_first_frame_object.py`,
+`docs/figures/first_frame_object/rotating/`) are what made this judgeable: 360 deg orbit, grey =
+above crop, blue = kept, red = rejected, green star = EE at t=0, orange plane = the ceiling.
+Keep this tool for any future point-cloud labelling question -- 2D projections were actively
+misleading here.
