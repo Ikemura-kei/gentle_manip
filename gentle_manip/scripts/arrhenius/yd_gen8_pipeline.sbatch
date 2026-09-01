@@ -43,13 +43,29 @@ uv run --project envs/dppo_arrhenius --no-sync python \
   "$REPO/gentle_manip/scripts/arrhenius/_gen8_stage.py" "$STAGE" "${STAGE_ARGS[@]}"
 [ -f "$STAGE/data.pkl" ] || { echo "[gen8] staging produced no data.pkl"; exit 1; }
 
+# ── rebalance start-mode mix (regrasp only: cap failed_grasp share so it stops
+#    hijacking committed grasps -- BC mode-2 fix) ────────────────────────────────
+REBAL_CAPS=${REBAL_CAPS:-}
+if [ "$VARIANT" != "baseline" ]; then REBAL_CAPS=${REBAL_CAPS:-"--cap failed_grasp:0.12 --cap mid_air:0.10 --cap near_ground:0.09"}; fi
+if [ -n "$REBAL_CAPS" ]; then
+  echo; echo "========== rebalance ($REBAL_CAPS) =========="
+  uv run --project envs/dppo_arrhenius --no-sync python \
+    "$REPO/gentle_manip/scripts/arrhenius/_rebalance.py" "$STAGE/data.pkl" "$STAGE/data.pkl" $REBAL_CAPS --seed 0
+fi
+
+# ── settled "task done, hold here" tail on every committed-lift episode (BC mode-1 fix) ──
+echo; echo "========== hold-aloft tail (+${HOLD_TAIL:-20}) =========="
+uv run --project envs/dppo_arrhenius --no-sync python \
+  "$REPO/gentle_manip/scripts/arrhenius/_pad_hold_tail.py" "$STAGE/data.pkl" "$STAGE/data.pkl" --tail "${HOLD_TAIL:-20}"
+
 if [ "${SKIP_TRAIN:-0}" = "1" ] && [ -n "${RUN_DIR:-}" ]; then
   echo "[gen8] SKIP_TRAIN -> RUN_DIR=$RUN_DIR"
 else
   echo; echo "========== convert -> $DPPO_DATA_DIR/$ENV_NAME =========="
   uv run --project envs/dppo_arrhenius --no-sync python -m gentle_manip.dppo.convert_demos \
     "$STAGE" --out "$DPPO_DATA_DIR/$ENV_NAME" \
-    --experiment "$EXPERIMENT" --view student --point-cloud --val-split 0.1
+    --experiment "$EXPERIMENT" --view student --point-cloud --val-split 0.1 \
+    --extra-state-keys object_at_gripper       # 4-dim cloud-derived "object in gripper" cue (BC fix); obs_dim 8 -> 12
   uv run --project envs/dppo_arrhenius --no-sync python -c \
     "import numpy as np; d=np.load('$DPPO_DATA_DIR/$ENV_NAME/train.npz'); print('train', {k:d[k].shape for k in d.files})" || true
 

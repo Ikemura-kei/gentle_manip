@@ -124,6 +124,14 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
         band_hold = np.zeros(n, int)
         lifted_latch = np.zeros(n, bool)
         lc_need = max(1, int(getattr(spec, "lifted_clear_hold_steps", 2)))
+        # success_grace_steps: once EVERY env is frozen (success or lifted-clear), run this
+        # many more policy steps (so a marginal lift settles / the video shows the hold) then
+        # END the batch -- don't idle all 5 envs to max_policy_steps. Also: an env stops
+        # growing its stress/z buffers `grace` steps after it froze, so a long frozen tail
+        # can't dilute its whole-rollout gentleness mean.
+        froze_at = np.full(n, -1, int)
+        grace = max(0, int(getattr(spec, "success_grace_steps", 8)))
+        t_end = spec.max_policy_steps
         # Buffer the per-step SPATIAL reductions per env, so we can aggregate over TIME with tmax
         # / top-20%-mean (NOT plain time-mean — idle steps would dilute it, letting a dawdle-then-
         # grab policy look gentle). Spatial keys come from the venv info (see policy_env
@@ -169,17 +177,33 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
             if spec.early_stop_on_success:
                 succ_done |= succ
                 done_mask |= (succ | lifted_latch)
+                froze_at = np.where(done_mask & (froze_at < 0), t, froze_at)
+            # per-env: stop recording stress/z once an env is `grace` steps past its freeze
+            rec_ok = ~(spec.early_stop_on_success & (froze_at >= 0) & (t - froze_at > grace))
             for k in SKEYS:
                 v = info.get(k)
                 if v is not None:
                     v = np.asarray(v, float).reshape(n)
                     for j in range(n):
-                        buf[k][j].append(float(v[j]))
+                        if rec_ok[j]:
+                            buf[k][j].append(float(v[j]))
             oz = info.get("obj_z")
             if oz is not None:
                 oz = np.asarray(oz, float).reshape(n)
                 for j in range(n):
-                    z_buf[j].append(float(oz[j]))
+                    if rec_ok[j]:
+                        z_buf[j].append(float(oz[j]))
+
+            # END the batch once EVERY env is resolved (frozen + past grace). A never-
+            # succeeding env keeps froze_at<0 -> its episode runs the full horizon.
+            if (spec.early_stop_on_success and grace >= 0
+                    and np.all((froze_at >= 0) & (t - froze_at >= grace))):
+                t_end = t + 1
+                if hasattr(venv, "finalize_episode"):
+                    venv.finalize_episode()      # flush this batch's per-env clips
+                break
+        else:
+            t_end = spec.max_policy_steps
 
         if dump_pcd:                                   # save one npz per episode (batch i, env j)
             for j in range(n):
@@ -223,7 +247,7 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
                 "episode": i * n + j, "batch": i, "env": j, "scenario_seed": seed_i,
                 "success": int(bool(final[j])), "ever_success": int(bool(ever[j])),
                 "ever_in_band": (int(bool(ever_in_band[j])) if ever_in_band[j] is not None else None),
-                "first_success_step": int(first_step[j]), "steps": spec.max_policy_steps,
+                "first_success_step": int(first_step[j]), "steps": int(t_end),
                 "episode_reward": float(ep_reward[j]),
                 # 8 metrics = 4 spatial x {tmax (worst instant), ttop20 (interaction-window mean)}
                 "stress_mean_tmax": _tmax(b["stress_mean"]),

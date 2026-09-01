@@ -22,6 +22,11 @@ class EvalSpec:
     max_policy_steps: int = 75   # task horizon in POLICY steps (sim max_episode_steps / act_steps)
     scene_group_size: int = 0    # rebuild the object geometry (size/shape/material) every K
                                  # batches — 0 = fixed nominal geometry (only pose/orientation vary)
+    success_grace_steps: int = 8  # with early_stop_on_success: once EVERY env in a batch is frozen
+                                 # (success or lifted-clear), run this many more policy steps then
+                                 # END the batch — don't idle all envs to max_policy_steps. Also
+                                 # caps how many post-freeze steps enter an env's gentleness mean.
+                                 # A never-succeeding env still runs the full horizon.
     early_stop_on_success: bool = False  # opt-in (2026-08-24, retry-specialist experiment): once an
                                  # env's `success` first fires, freeze its action to a no-op (zero
                                  # delta) for the rest of the batch instead of continuing to act on

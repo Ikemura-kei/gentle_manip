@@ -28,7 +28,7 @@ experiment: single_lift_xcat_diverse_eval
 seed: 42
 device: cuda:0
 env_name: single_lift_gen8_baseline_pcd
-obs_dim: 8
+obs_dim: 12
 action_dim: 7
 denoising_steps: 20
 ft_denoising_steps: 0
@@ -45,6 +45,7 @@ n_episodes: 100
 scene_group_size: 1
 record_batches: null
 early_stop_on_success: true
+success_grace_steps: 8   # after success/lifted-clear, run this many more policy steps then END the episode (don't idle to n_steps)
 n_steps: 225
 render_num: 5
 
@@ -62,13 +63,13 @@ env:
     act_steps: ${act_steps}
     normalization_path: ${normalization_path}
     port: 5571
-    obs_keys: [ee_pos, ee_quat, gripper_width]
+    obs_keys: [ee_pos, ee_quat, gripper_width, object_at_gripper]
     pointcloud_key: point_cloud
 
 shape_meta:
   obs:
     state:
-      shape: [8]
+      shape: [12]
     point_cloud:
       shape: [1024, 3]
   action:

@@ -49,9 +49,23 @@ def _load_episodes(paths: Sequence[Path]) -> list:
 
 
 def _episode_state(ep: dict, obs_keys: Sequence[str]) -> np.ndarray:
-    """(T, obs_dim) flat state = the obs_keys concatenated per timestep, in order."""
+    """(T, obs_dim) flat state = the obs_keys concatenated per timestep, in order.
+
+    `object_at_gripper` is DERIVED (not recorded): synthesized from the stored point
+    cloud + ee_pos via the shared perception helper, so training data carries the exact
+    same 4-dim cue the sim bridge / real deploy compute live. See pointcloud_ops.
+    """
     obs = ep["observations"]
-    cols = [np.asarray(obs[k], np.float32).reshape(len(ep["actions"]), -1) for k in obs_keys]
+    T = len(ep["actions"])
+    cols = []
+    for k in obs_keys:
+        if k == "object_at_gripper" and k not in obs:
+            from gentle_manip.perception.pointcloud_ops import object_at_gripper
+            v = object_at_gripper(np.asarray(obs["point_cloud"], np.float32),
+                                  np.asarray(obs["ee_pos"], np.float32))
+        else:
+            v = np.asarray(obs[k], np.float32)
+        cols.append(v.reshape(T, -1))
     return np.concatenate(cols, axis=1)
 
 
@@ -184,6 +198,11 @@ def main() -> None:
                     help="also store a per-timestep Stage-5 category conditioning vector, "
                          "derived from each input file's stem -- requires demo files named "
                          "'<category>.pkl' (merge_cross_category_demos.py's convention)")
+    ap.add_argument("--extra-state-keys", nargs="+", default=None,
+                    help="append these keys to the state view AFTER the experiment/default "
+                         "keys (e.g. 'object_at_gripper' -- derived from the stored cloud + "
+                         "ee_pos by _episode_state, not recorded). Must match the eval cfg's "
+                         "env.specific.obs_keys and obs_dim.")
     ap.add_argument("--embed-source", default="registry", choices=["registry", "vlm"],
                     help="which category_embed to compute: 'registry' (Track A, "
                          "gentle_manip.dppo.category_embedding, cheap one-hot+features "
@@ -205,6 +224,10 @@ def main() -> None:
         print(f"    {obs_keys}")
     else:
         obs_keys = args.obs_keys or (PROPRIO_VIEW if args.pc_key else STATE_VIEW)
+
+    if args.extra_state_keys:
+        obs_keys = list(obs_keys) + [k for k in args.extra_state_keys if k not in obs_keys]
+        print(f"  + extra state keys: {args.extra_state_keys} -> obs_keys {obs_keys}")
 
     paths = _find_demo_pkls(args.demos)
     print(f"converting {len(paths)} demo file(s): {[str(p) for p in paths]}")

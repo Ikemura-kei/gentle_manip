@@ -5,6 +5,51 @@ from typing import Tuple
 import numpy as np
 
 
+def object_at_gripper(
+    points: np.ndarray,
+    ee_pos: np.ndarray,
+    radius: float = 0.04,
+    tcp_dz: float = 0.02,
+) -> np.ndarray:
+    """Shared sim+real "is there an object held in / near the gripper" cue, derived from
+    the point cloud ALONE (no privileged state), so sim and real produce it identically.
+
+    Args:
+        points: (..., K, 3) cloud in the robot-base frame — the SAME cloud the policy sees.
+        ee_pos: (..., 3) end-effector position (robot-base frame). Leading dims must match
+                `points` minus its trailing (K, 3).
+        radius: sphere radius around the TCP that counts as "near" (m).
+        tcp_dz: z shift from ee_pos to the grasp point / TCP (m). Calibrated on the
+                cross-category demos (near-TCP centroid sits ~+2 cm above ee_pos here).
+
+    Returns:
+        (..., 4) — [frac_near, cx, cy, cz]:
+          frac_near : fraction of cloud points within `radius` of the TCP
+          cx,cy,cz  : centroid of those near points minus the TCP (all-0 if < 3 near pts)
+
+    A secured top-down grasp -> frac_near high and the near-centroid sits between the
+    fingers and tracks the gripper on lift; a slipped / empty close -> frac_near low
+    and/or the centroid offset grows. Fed per-frame over cond_steps this lets the policy
+    tell "I have it, hold/lift" from "I missed, reopen" — states otherwise ALIASED in
+    [ee_pos, ee_quat, gripper_width] + a sparse cloud (the cross-category BC failure mode).
+    """
+    pts = np.asarray(points, np.float32)
+    ee = np.asarray(ee_pos, np.float32)
+    lead = pts.shape[:-2]
+    pts = pts.reshape(-1, pts.shape[-2], 3)
+    ee = ee.reshape(-1, 3)
+    tcp = ee.copy()
+    tcp[:, 2] += tcp_dz
+    out = np.zeros((pts.shape[0], 4), np.float32)
+    for i in range(pts.shape[0]):
+        d = np.linalg.norm(pts[i] - tcp[i], axis=1)
+        m = d < radius
+        out[i, 0] = float(m.mean())
+        if int(m.sum()) >= 3:
+            out[i, 1:] = pts[i][m].mean(0) - tcp[i]
+    return out.reshape(*lead, 4)
+
+
 def crop_pointcloud(
     points: np.ndarray,
     valid: np.ndarray,

@@ -62,8 +62,18 @@ class GenesisMultiStepVecEnv:
 
     # ── normalization ──────────────────────────────────────────────────────────
     def _raw_state(self, obs: dict) -> np.ndarray:  # SimEnvClient obs -> (n_envs, obs_dim)
-        return np.concatenate(
-            [np.asarray(obs[k], np.float32).reshape(self.n_envs, -1) for k in self.obs_keys], axis=1)
+        cols = []
+        for k in self.obs_keys:
+            if k == "object_at_gripper" and k not in obs:
+                # derived cue (cloud + ee_pos), computed IDENTICALLY to the demo converter
+                # and real deploy -- see perception.pointcloud_ops.object_at_gripper
+                from gentle_manip.perception.pointcloud_ops import object_at_gripper
+                v = object_at_gripper(np.asarray(obs["point_cloud"], np.float32),
+                                      np.asarray(obs["ee_pos"], np.float32))
+            else:
+                v = np.asarray(obs[k], np.float32)
+            cols.append(v.reshape(self.n_envs, -1))
+        return np.concatenate(cols, axis=1)
 
     def _norm_obs(self, raw: np.ndarray) -> np.ndarray:            # -> [-1, 1]
         return (2.0 * (raw - self.obs_min) / self._obs_range - 1.0).astype(np.float32)
@@ -149,7 +159,8 @@ class GenesisMultiStepVecEnv:
             success = np.array([bool(d.get("success", False)) for d in sub_info])
             if self.record_raw:
                 for j in range(self.n_envs):
-                    rec = {k: np.asarray(obs[k], np.float32)[j] for k in self.obs_keys}
+                    rec = {k: np.asarray(obs[k], np.float32)[j]
+                           for k in self.obs_keys if k in obs}   # skip derived keys (object_at_gripper)
                     if self.pointcloud_key is not None:
                         rec[self.pointcloud_key] = np.asarray(obs[self.pointcloud_key], np.float32)[j]
                     rec["action"] = np.asarray(raw_action, np.float32)[j]
@@ -212,6 +223,12 @@ class GenesisMultiStepVecEnv:
             return self.client.render()             # (H,W,3) uint8 env-0 frame, or None
         except Exception:
             return None
+
+    def finalize_episode(self):
+        """Harness early-termination hook: flush this batch's per-env clips when the
+        harness ends the batch before max_episode_steps (all envs resolved). The next
+        reset_arg would flush too, but the LAST batch has no following reset."""
+        self._rec.flush()
 
     def close(self):
         self._rec.flush()                           # write any in-progress recording

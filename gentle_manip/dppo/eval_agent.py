@@ -51,6 +51,7 @@ class EvalHarnessAgent(EvalAgent):
             scene_group_size=int(self.cfg.get("scene_group_size", 0)),
             early_stop_on_success=bool(self.cfg.get("early_stop_on_success", False)),
             lifted_clear_hold_steps=int(self.cfg.get("lifted_clear_hold_steps", 2)),
+            success_grace_steps=int(self.cfg.get("success_grace_steps", 8)),
         )
         policy = _DiffusionPolicy(self.model, self.obs_keys, self.device, self.act_steps)
         # ONE folder: hydra's run.dir already IS <base_policy_run>/eval/<datetime> (via the

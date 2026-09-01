@@ -70,7 +70,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("inp")
     ap.add_argument("out")
-    ap.add_argument("--tail", type=int, default=32, help="frames to append (~1s at 30 Hz)")
+    ap.add_argument("--tail", type=int, default=20, help="frames to append (~0.7s at 30 Hz)")
     ap.add_argument("--hold-dz", type=float, default=0.04,
                     help="normalized +dz held during the tail (non-saturating gravity-sag correction)")
     ap.add_argument("--lift-frac", type=float, default=0.6)

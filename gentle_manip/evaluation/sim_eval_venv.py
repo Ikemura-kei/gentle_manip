@@ -54,6 +54,10 @@ class SimEvalVenv:
             self._cnt[:] = 0
         return obs_out, np.asarray(r, np.float32).reshape(self.num_envs), terminated, truncated, out
 
+    def finalize_episode(self):
+        """Harness early-termination hook (see GenesisMultiStepVecEnv.finalize_episode)."""
+        self._rec.flush()
+
     def scenario_params(self):
         return getattr(self.client, "last_scenario", None)
 
