@@ -148,6 +148,17 @@ def save_deformed(nominal_path, params: Dict[str, float], rng, out_dir) -> Path:
     """Deform the mesh at nominal_path and write it to out_dir as a temp .obj; return the path."""
     mesh = trimesh.load(str(nominal_path), process=False, force="mesh")
     out = deform_mesh(mesh, params, rng)
+    # Keep the "rests on the plane" invariant: bend/taper/axis_scale can drop the mesh's
+    # lowest vertex a few mm below the nominal bottom, and the scene builder places the
+    # object by the NOMINAL default_pos -> the deformed mesh then clips the floor and MPM
+    # raises "particles outside solver boundary". Re-seat the deformed bottom (z only) to
+    # the nominal bottom so placement stays valid for every draw.
+    if out is not mesh:
+        dz = float(mesh.vertices[:, 2].min() - out.vertices[:, 2].min())
+        if abs(dz) > 1e-6:
+            v = out.vertices.copy()
+            v[:, 2] += dz
+            out = trimesh.Trimesh(vertices=v, faces=out.faces, process=False)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     dst = out_dir / f"{Path(nominal_path).stem}_deformed_{rng.integers(1_000_000):06d}.obj"
