@@ -11,7 +11,7 @@ RUN_DIR=${RUN_DIR%/}
 CKPTS=$(ls -1v "$RUN_DIR"/checkpoint/state_*.pt 2>/dev/null | wc -l)
 [ "$CKPTS" -ge 1 ] || { echo "no checkpoint in $RUN_DIR yet ($CKPTS) -- skip this snap"; exit 0; }
 
-INDOMAIN="mushroom banana_lying kiwi egg_boiled grape cherry tomato raspberry"
+INDOMAIN="mushroom banana_lying kiwi egg_boiled grape cherry raspberry"  # tomato excluded: spawns at z~0.31 (scene bug, see handoff)
 CATS=$(echo "$INDOMAIN" | tr ' ' '\n' | shuf -n3 | tr '\n' ' ')
 TS=$(date +%Y%m%d_%H%M)
 OUT="$RUN_DIR/snap/$TS"

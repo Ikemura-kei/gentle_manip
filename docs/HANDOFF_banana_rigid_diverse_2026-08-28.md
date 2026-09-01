@@ -1153,3 +1153,22 @@ NEXT: watch <jobid>_pretrain.log val loss (target best-val <~0.017).
   logs/slurm_logs/regrasp_snap_sent.txt (grep the snap TS there before re-sending).
 - snap_montage.py: static imageio-ffmpeg has NO libfreetype -> drawtext unavailable;
   use drawbox colour bars (teal/blue/orange = the 3 cats in sorted order, 5 clips each).
+
+## 2026-09-01 14:10 — HARNESS BUG FOUND+FIXED (the real carry-down cause)
+User still saw carry-down in the ep25 snap video. ROOT CAUSE: harness early_stop froze
+done envs with action=0.0 in NORMALIZED space, but the demo action dist is min-max
+normalized + asymmetric: dz range ~[-1,+0.48] -> normalized 0.0 un-normalizes to raw
+dz=-0.26 (DOWN) and dgrip=+0.03 (OPEN). So every frozen/early-stopped env was ACTIVELY
+driven down + opened == the exact "carry down, release, hit floor, jaw opens" behavior,
+even with early_stop active. NOT a policy bug.
+FIX (committed 2 commits): harness computes hold_action from venv.action_min/max ->
+normalized vector that un-normalizes to raw [.. dz=+0.03 .. dgrip=-0.06] (gentle up +
+keep closed). lifted_clear_hold_steps 2->1 (early ckpt reverses fast). Printed:
+"early_stop hold action (normalized): [-0 -0 0.39 -0 -0 -0 -0.218]".
+VERIFIED (state_50, ep60): egg 5/5 / banana 5/5 / kiwi 4/5, obj_z HELD at ~0.14 through
+the hold (was dropping to 0.04-0.10 pre-fix), episodes end 56-118 steps not 225.
+mushroom NOW 5/5 @ep60 (was 1/5 @ep25 -- training). Sent both montages to user.
+TOMATO SCENE BUG: tomato spawns at z~0.31 (mid-air) -> instant "success", 9-step eps.
+tomato reuses cherry.obj + stiffest material (E 8e5) at grid 300 -> likely MPM launch.
+EXCLUDED tomato from yd_regrasp_snap.sh INDOMAIN pool. TODO: fix or exclude from final
+in-domain eval too (grape/cherry/raspberry still in; raspberry evals fine just hard).
