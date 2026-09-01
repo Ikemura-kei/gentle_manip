@@ -44,7 +44,7 @@ use_ddim: False
 ddim_steps: ${ft_denoising_steps}
 
 n_episodes: 100
-scene_group_size: 1
+scene_group_size: 0
 record_batches: null
 early_stop_on_success: true
 lifted_clear_hold_steps: 1   # freeze the instant the object first clears into the z-band (dont wait -- an early ckpt reverses fast)
