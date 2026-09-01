@@ -1271,3 +1271,13 @@ Regrasp: SR +0.26..+0.36, gentleness TIED-to-+0.04, SRxg +0.15. The "baseline ge
 read was a state_225 artifact -- state_300 gentleness matches/beats baseline while
 keeping the huge SR lead. Both models free of carry-down + over-squeeze.
 webpage b=4 r=3(real). Baseline still stuck on slow small fruit (batch ~3-4/8).
+
+## 2026-09-02 00:25 — USER: build a REACTIVE policy (object dragged mid-approach). Plan + Phase A done.
+PLAN: docs/PLAN_reactive_policy_2026-09-02.md (A perturb mechanism / B zero-shot eval lorap /
+C collect reactive-recovery demos / D retrain regrasp v3 / E eval v3). User away 12h.
+PHASE A DONE (committed): perturbation mechanism -- DRConfig.object_perturb_*, GenesisWorker
+_apply_perturbation (set_particles_vel kick at a sim-frame), threaded through reset. Configs
+eval_cat_*_reactive.yaml (prob 0.75, speed 0.15-0.55 m/s, frame 24-104). yd_reactive_eval.sbatch.
+sample_perturb tested locally (deterministic, prob gate works). NOT yet sim-tested (GPU busy).
+GATE: current gen8 v2 baseline-vs-regrasp eval must finish first -> final table + campaign
+summary + publish, THEN Phase B (zero-shot reactive eval of lorap/state_300).
