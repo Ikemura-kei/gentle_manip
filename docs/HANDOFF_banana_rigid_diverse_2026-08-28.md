@@ -864,3 +864,129 @@ Per category now: banana 500+, kiwi ~166, egg ~163, mushroom ~160, + small 4.
 - Resubmitted: 1826960 (regrasp, all modes) + 1826961 (baseline, minus failed_grasp).
   Both PENDING. Each: stage->convert->BC pretrain 300ep->auto yd_gen_eval (8+4 x100,
   scene_group_size 1). Commit 8c... pushed to cross-category-dp? NO -- user must push.
+
+---
+## 2026-08-31 13:07 — gen8 walltime 20h->12h (GRES headroom), now queued on Priority
+- 1826960/1826961 (20h) pended on AssocGrpGRESRunMinutes: the account GrpTRESRunMins
+  gres/gpu=36000 min headroom couldn't fit 2x20h alongside ikemura's ~5 running 30h
+  jobs. Resubmitted 1827009 (regrasp) + 1827010 (baseline) at -t 12:00:00 -> reason
+  flipped to Priority (normal wait). 12h is enough: stage ~15m + convert ~25m +
+  BC pretrain early-stops ~5-8h (patience 15, ckpt every 25ep).
+- sbatch default walltime bumped to 12h + committed.
+
+---
+## 2026-08-31 13:14 — gen8 REGRASP training (1827009 -> run ueini)
+- STAGE ok: 4400 eps (xcat_regrasp 2065 + xcat_small 1835 + banana_soft 500), 16 src
+  dirs incl orphan-shard merges. start_mode mix: mid_approach 1211, failed_grasp 1123
+  (25.5%), above 561, near_object 491, mid_air 377, home 320, near_ground 317.
+- CONVERT ok: 3960 train / 440 val traj, 665660 steps, pc [1024,3].
+- PRETRAIN running: run dir ueini, net 1.72M params (768x3 / vfeat 384). epoch1 loss
+  0.462, ~2.1 min/epoch -> early-stop (patience 15) expected ~100-200 ep (~4-7h).
+  EXPERIMENT.md written.
+- 1827010 (baseline, minus failed_grasp -> ~3277 eps) PENDING on GRES (regrasp ate the
+  headroom). Starts when regrasp frees / slot opens.
+- yd_gen_eval auto-submits after pretrain (8 in-domain + 4 OOD x100, scene_group_size 1).
+
+---
+## 2026-08-31 14:33 — both gen8 jobs RUNNING
+- 1827010 baseline STARTED (n173). STAGE ok: exactly 3277 eps = 4400 - 1123 failed_grasp
+  (start_mode mix confirms zero recovery: near_obj 491, mid_approach 1211, above 561,
+  mid_air 377, home 320, ground 317). Now converting.
+- 1827009 regrasp 'ueini': ep39 train 0.030, val 0.061@10->0.041@20->0.033@30, clean.
+- Both auto-submit yd_gen_eval after pretrain. ETA pretrain ~2-3h each.
+
+---
+## 2026-08-31 15:03 — artifact: removed the flawed egg-fixed-geometry subsection
+- User asked to drop the 5 baseline clips + the whole "Regrasp generalist vs
+  non-regraspable baseline - egg, fixed geometry" subsection (the buggy scene_group_size 0
+  eval). Removed 37 lines (both video grids + metrics + caveat). Artifact 5682ac2f
+  republished (4.39MB -> 3.52MB, 71 clips). The proper per-category gen8 eval replaces it.
+
+---
+## 2026-08-31 22:57 — LIVE eval webpage wired (montages + metrics)
+- lonau (baseline) pretrain DONE ep300 val 0.0170 -> eval job 1854786 RUNNING (n64),
+  on cat 1/12 (mushroom, SR ~0.33 first 3 batches). ueini (regrasp) pretrain ep272,
+  val 0.0165, done ~23:45 -> its eval auto-submits.
+- NEW realtime webpage pipeline (scratchpad, x86 login-node tools):
+  - gen8tools/ venv: x86 imageio-ffmpeg (login node has NO ffmpeg / module broken).
+  - gen8_montage.py: per (model,cat) -> 15 random eval clips, 2x speed, 300x234, 10fps,
+    crf33, 0.35s black gaps -> montages/montage_<model>_<cat>.mp4 (~260KB each; 24 total ~6MB).
+  - gen8_eval_page.py: reads each model's gen_eval_*/<cat>/summary.json (success_rate,
+    gentleness_score, combined_sr_gentleness), emits the fragment (8 in-domain + 4 OOD,
+    per-cat metric bar + 2 side-by-side montages + block means).
+  - gen8_refresh.sh: builds all montages, splices fragment between <!--GEN8_EVAL_START/END-->
+    markers in regrasp_demos.html.
+- EACH TICK now also: `bash <scratchpad>/gen8_refresh.sh` then republish artifact 5682ac2f.
+  Published once already (baseline mushroom montage live, metrics pending until summary.json).
+
+---
+## 2026-09-01 ~23:32 — eval was ~37h serial; rewrote yd_gen_eval parallel+record3
+- 1854786 (old serial baseline eval) measured 9.3 min/batch -> 12 cats x 20 batches
+  = ~37h, would NOT finish in 24h walltime. CANCELLED.
+- yd_gen_eval.sbatch rewritten + committed: NCAT_PAR=3 (3 cats concurrent on 1 GPU,
+  each sim server ~7GB), RECORD_BATCHES=3 (only 15 eps/cat rendered = the montage
+  need; metrics still over all 100). Self-resubmits for missing cats (reuses OUT).
+- Resubmitted baseline eval -> 1856565 (n415). ueini (regrasp) pretrain ep293, done
+  ~23:45 -> auto-submits its eval with the NEW script.
+- Live webpage refresh (gen8_refresh.sh) unchanged - picks newest gen_eval_* dir per model.
+
+---
+## 2026-09-01 ~23:53 — hi-res montages + both evals running
+- User: higher-res video. gen8_montage.py now 448x336 / 14fps / crf25 (was 300/10/33),
+  +7s per-clip cap (trim=end=7) so failure-heavy montages don't balloon. ~520KB/montage
+  untrimmed, less once _trim_eval_clips shortens successes.
+- gen8_refresh.sh size guard: embed_ood=0 if all montages >8.6MB mp4 (b64 x1.33 + ~4MB
+  demo clips vs 16MB cap); warns if in-domain alone >8.6MB.
+- 1856565 (baseline eval) producing clips: mushroom/banana/kiwi first batch done.
+- 1856838 (regrasp eval) running, servers spinning up.
+- Page republished 4.73MB. gen8_* scripts copied to docs/.
+
+---
+## 2026-09-01 00:49 — evals mid batch-5, montage CRF 25->28
+- Both evals ~1h15m: batch 4-5/20 on mushroom/banana/kiwi (3 concurrent each).
+  Batch rate ~13min/cat (soft-MPM eval + scene rebuild every batch). ~17h/eval -> both
+  done ~17:00-18:00 today. Fits 24h walltime.
+- Early per-batch SR comparable baseline~ours on these 3 (~0.6-0.8). One regrasp batch
+  grasp-but-no-hold (SR0/in_band0.8) - watch.
+- montage CRF 25->28 (still 448x336, well above first-pass 300px) so 24 montages fit
+  16MB b64 with OOD; in-domain (16) always embedded, size guard drops OOD b64 if total
+  montage mp4 >8.6MB (keeps OOD metrics).
+- No full-cat summary.json yet. Refresh+publish each tick.
+
+---
+## 2026-09-01 02:50 — kiwi eval crashed (floor-clip), fixed + re-eval
+- BOTH gen8 evals: kiwi cat crashed at batch 15/20 -> MPM "particles outside solver
+  boundary". Cause: a scene-DR deform draw (bend/taper/axis_scale) dropped the kiwi
+  mesh's min-z ~0.1mm below the MPM effective floor (specified -0.03 minus ~26mm
+  safety pad at grid 190); scene builder places by nominal default_pos so the
+  deformed mesh clipped the plane.
+- FIX (committed): mesh_deform.save_deformed re-seats the deformed mesh bottom (z) to
+  the nominal bottom -> always rests on the plane. Helps collection too.
+- Re-submitted kiwi-only eval for BOTH models into the SAME OUT dirs: 1861733 (baseline),
+  1861734 (regrasp), NCAT_PAR=1. Fresh sim servers -> pick up the fix. Main jobs'
+  future categories (egg_boiled onward) also spawn fresh servers -> fixed.
+- 4 eval jobs now: 1856565 + 1856838 (main, on egg/grape) + 1861733 + 1861734 (kiwi).
+
+---
+## 2026-09-01 04:36 — FIRST 2 COMPARISON PAIRS: regrasp WINS ALL 3 METRICS, big gentleness gap
+                          baseline SR/gentle/SRxg   regrasp SR/gentle/SRxg
+  mushroom                0.43 / 0.008 / 0.219      0.58 / 0.772 / 0.676
+  banana_lying            0.67 / 0.000 / 0.335      0.85 / 0.687 / 0.769
+- HEADLINE: baseline succeeds by CRUSHING (gentleness ~0 = internal stress at yield on
+  every successful grasp). Regrasp generalist grasps successfully AND gently. The
+  diverse-start + failed_grasp recovery data taught a lighter re-approach vs the
+  baseline's commit-and-clamp.
+- Kiwi floor-clip fix WORKED: both kiwi re-evals (1861733/1861734) passed batch 15 with
+  no boundary crash. Will complete + drop kiwi/summary.json into the main OUT dirs.
+- Main evals on grape/cherry now (cat 5-6). ~7h to full 12.
+
+---
+## 2026-09-01 08:32 — eval too slow: small-fruit grid 300 = ~6x; capped small cats at n=50
+- Diagnosed: _small eval task (grape/cherry/tomato/raspberry/blackberry/scallop) uses
+  grid_density 300 vs 190 -> ~6x slower/step. Full 12x100 sweep -> ~28h, over 24h walltime.
+  Round 2 was stuck ~batch 13-17 after 3.5h.
+- FIX (committed): yd_gen_eval run_one caps SMALL cats at n_episodes=50 (SMALL_NEP), large
+  stay 100. Killed 1856565/1856838, cleared partial round-2 dirs (no summary.json),
+  resubmitted -> 1866095 (baseline) + 1866096 (regrasp). Skip mushroom/banana/kiwi
+  (summary.json kept). New ETA full 12 ~18:00-19:00, fits walltime.
+- NOTE for final table: small-fruit categories n=50, large n=100. Document.

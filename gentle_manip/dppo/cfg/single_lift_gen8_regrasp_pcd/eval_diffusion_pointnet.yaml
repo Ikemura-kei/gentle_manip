@@ -45,14 +45,14 @@ n_episodes: 100
 scene_group_size: 1
 record_batches: null
 early_stop_on_success: true
-n_steps: 150
+n_steps: 225
 render_num: 5
 
 env:
   n_envs: 5
   name: ${env_name}
   env_type: genesis
-  max_episode_steps: 600
+  max_episode_steps: 900
   reset_at_iteration: False
   save_video: True
   use_image_obs: True

@@ -60,8 +60,10 @@ run_one() {           # $1 = category, $2 = port
     base_policy_path="$CKPT" ft_denoising_steps=0 experiment="$EXP" n_episodes="$NEP" \
     record_batches="$RECORD_BATCHES" env.specific.port="$port" logdir="$LOGDIR" || echo "[$cat] eval failed"
   kill $P 2>/dev/null || true; sleep 3
-  uv run --project envs/sim_arrhenius --no-sync python \
-    "$REPO/gentle_manip/scripts/arrhenius/_trim_eval_clips.py" "$LOGDIR" 4 16 || true
+  if [ "${NOTRIM:-0}" != "1" ]; then
+    uv run --project envs/sim_arrhenius --no-sync python \
+      "$REPO/gentle_manip/scripts/arrhenius/_trim_eval_clips.py" "$LOGDIR" 4 16 || true
+  fi
   echo "[$cat] DONE"
 }
 
