@@ -224,6 +224,16 @@ pre-shape openings converted to width commands via local cross-section − 2 mm
     for any method; the only camera coupling is v4.1's occlusion bound (occ round: no
     effect). Clean single-object clouds also make our setting EASIER than their clutter
     benchmark.
+  - **Their width IS a network output — with rigid semantics.** OperationNet regresses
+    `grasp_width_pred` per (view, angle, depth) bin; decode = 1.2 × prediction, clamped to
+    10 cm (their `models/graspnet.py:87`). Supervision: the annotated antipodal
+    contact-pair SEPARATION on the rigid object (≤ GRASP_MAX_WIDTH mask in loss_utils).
+    So even as a trained regression target, width means "opening at which fingers meet the
+    surface" ×1.2 pre-shape — execution still closes to a force limit; nothing in the label
+    relates width to object response. Measured on our objects: 43–77 mm predictions for a
+    33 mm mushroom — commanded literally the fingers never touch, hence the adapter's
+    close-until-contact conversion. This sharpens the related-work claim: even when width
+    is learned, its semantics are rigid contact separation, not a closing decision.
   - **Their score.** GraspNet-1B labels each grasp s = 1.1 − μ_min, where μ_min is the
     smallest friction coefficient at which the grasp is force-closure (s=1 ⇒ works nearly
     frictionless = robust; s=0.1 ⇒ needs μ=1.0 = marginal); their tables slice by these
