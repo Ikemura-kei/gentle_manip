@@ -1058,3 +1058,40 @@ FIX C (real deploy): scripted "grasped + high + stable K steps -> switch to hold
 
 STATUS: full 12-cat eval still PAUSED. Resume plan unchanged (re-run all 12 at h=225
  for both models) -- now also picks up FIX A. Awaiting user OK on resume + on FIX B.
+
+## 2026-09-01 10:45 — USER flagged failure mode 2 (aborted-good-grasp); full retrain plan
+MODE 2 (user): 1st-attempt approach + close correct, THEN policy reopens + lifts empty
++ retries. = BC mode averaging at "commit vs abort".
+
+DATA COMPOSITION (all 4400 eps, from _pad/tally):
+  mid_approach 27.5%  failed_grasp 25.5%  above_object 12.8%  near_object 11.2%
+  mid_air 8.6%  home 7.3%  near_ground 7.2%
+  (collector v2 --start-modes default: sweep:0.44,failed:0.30,above:0.10,ground:0.09,air:0.07)
+
+ROOT CAUSE mode 2 = OBSERVATION ALIASING. failed_grasp demo's "reopen" moment: ee at
+grasp pose, gripper_width ~0.040, object present. Clean post-grasp: ee at grasp pose,
+gripper_width ~0.037-0.045, object present. gripper_width does NOT separate them
+(checked: failed minclose 0.040 vs near_object 0.040 vs above 0.045 -- fully overlapped)
+-- a "failed" grasp in these demos still contacts the 3cm soft object. The recovery
+trigger is only in privileged state (contact force / secured), invisible to the
+[ee_pos,ee_quat,gripper_width]+1024pt-cloud student. So at that state the policy
+sees 2 action targets (lift / reopen) and blends -> weak grasp -> drop.
+
+FIX PLAN (priority order):
+ 1. [biggest lever] shared sim+real perception feature "object-at-gripper": near-TCP
+    point-cloud density + centroid offset (3-4 dims -> state). Breaks aliasing for BOTH
+    modes. perception/pipeline.py + re-convert + retrain.
+ 2. failed_grasp weight 0.30->0.12; sweep 0.44->0.58. AND regenerate failed_grasp from a
+    genuine-miss start (lateral err > finger half-width so gripper_width -> ~0.005, OR
+    an evident post-slip pose: gripper lifted 3-6cm empty + object on table). Then the
+    trigger is observable.
+ 3. settled hold-aloft tail on every committed-lift ep: _pad_hold_tail.py (DONE, tested
+    -- +32 frames, action~0 +small dz, grip held). Fixes mode 1 attractor.
+ 4. eval knobs, no retrain: deterministic=False (sample -> commit to one mode/rollout),
+    act_steps 4->6 (don't flip mode mid-grasp).
+
+SCOPE OPTIONS for user:
+ A minimal (~12h): reweight (2 partial) + pad (3) + retrain 2 models. No new collection.
+ B +collection (~1.5d): A + regenerate failed_grasp + top-up small cats (~800 eps).
+ C full (~2d): B + perception feature (1). The principled fix.
+AWAITING user pick. Nothing launched. 12-cat eval still paused.
