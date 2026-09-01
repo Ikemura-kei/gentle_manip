@@ -990,3 +990,30 @@ Per category now: banana 500+, kiwi ~166, egg ~163, mushroom ~160, + small 4.
   resubmitted -> 1866095 (baseline) + 1866096 (regrasp). Skip mushroom/banana/kiwi
   (summary.json kept). New ETA full 12 ~18:00-19:00, fits walltime.
 - NOTE for final table: small-fruit categories n=50, large n=100. Document.
+
+---
+## 2026-09-01 09:00 — USER caught eval horizon too short; PAUSED evals + smoke test
+- User: eval episodes look too short for a 2nd attempt. CONFIRMED: eval max_policy_steps
+  = max_episode_steps(600)/act_steps(4) = 150, but training demos run to 185 policy steps
+  (failed_grasp median 166, mid_air median 178). Eval first_success_step already hit
+  137/150 on recovery episodes -> recovery attempts were being cut off.
+- FIX (committed): eval cfgs max_episode_steps 600->900 (n_steps 150->225). Also added
+  NOTRIM=1 + NEP overrides to yd_gen_eval.
+- PAUSED main evals 1866095/1866096. Launched SMOKE: 1868585 = regrasp ckpt on mushroom,
+  NEP=15, NOTRIM=1, h=225, OUT=.../ueini/smoke_h225_0900. When done -> build 10-rollout
+  full-length montage (scratchpad/smoke_montage.py: 480x360 crf24, CLIPCAP 40s) for user
+  inspection BEFORE resuming the full 12-cat eval.
+- The 3 completed cats (mushroom/banana/kiwi) were run at h=150 -> will need re-run at
+  h=225 for consistency once horizon is confirmed. (Regrasp still won all 3 at h=150.)
+
+## 2026-09-01 09:45 — Smoke test PASSED, h=225 validated, still HOLDING for user OK
+- Smoke 1868585 done: regrasp ckpt state_275, mushroom, 15 eps @ h=225.
+  SR 0.73 (11/15) / gentleness 0.817 / SRxg 0.775  (vs old h=150: 0.58/0.772/0.676)
+- HORIZON FIX CONFIRMED: 3 of 11 successes had first_success_step = 157/199/204
+  -> old h=150 truncated those as failures. Genuine miss->reapproach->gentle-regrasp
+  visible in the montage. fss maxes at 204/225 => 225 has headroom.
+- Sent 10-rollout montage to user (scratchpad/montages/montage_smoke_mushroom.mp4).
+- Full evals still CANCELLED/paused. NOT resuming until user confirms the horizon fix.
+- GRES pool near-empty right now (only 1 sean job) -> resubmit will start immediately
+  once approved. On approval: re-run ALL 12 cats at h=225 for both models (clear the
+  3 stale h=150 summaries in gen_eval_20260831_233305 / _234353 first).
