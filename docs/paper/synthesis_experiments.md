@@ -297,3 +297,86 @@ Findings (the paper narrative):
    on both axes — the auto contact-area floor over-constrains bulb-like geometry; third
    independent confirmation), cherry (naive slightly gentler at similar success — v4.1's
    cherry closure runs firm).
+
+---
+
+## 5. MAINTAINED — baseline implementation reference + how to run (keep current)
+
+Operational reference for studying/reproducing the E1 experiments and for the cluster
+agent's 100-episode round. Update this section whenever the wrapper/adapters change.
+Code: `grasp_synthesis/baseline_synth.py` (methods), `collect_demos_baseline.py` (wrapper),
+`learned_baselines/` (external-planner CLIs + `SETUP.md` build recipes + `patches/`),
+`run_baseline.sh` (launcher). The frozen v4.1 collector is NEVER modified — the wrapper
+monkeypatches `fg.synthesize_grasp` (and, for `own` width, no-ops the closure scan).
+
+### 5.1 Per-method implementation (pose | width | modifications vs original)
+
+| method | pose selection | width command | modified vs original? |
+|---|---|---|---|
+| `naive` | object centre, uniform-random yaw within the recipe yaw bound | global cross-section along closing axis − 2 mm | n/a (ours) |
+| `antipodal` | 600 surface point-pairs, in-cone (Nguyen) filter, rank by cone margin | pair distance − 2 mm | n/a (ours) |
+| `rigid` | 4000-pair sweep → top-40 re-ranked by align − 5·lever/size + 0.3·pad-area bonus (v4.1's geometric terms MINUS stress) | pair distance − 2 mm | n/a (ours) |
+| `gpd` | GPD binary (candidate sweep + CNN), full privileged dense cloud, first valid of 20 by CNN score | GPD aperture (`getGraspWidth` = enclosed-slice extent) − 2 mm | 3 build patches, NO algorithm change: const comparator fix; `GRASP_POSE` stdout line; `plot_*=0` + XArm hand geometry cfg (`cfg/gm_gpd.cfg`, aperture ≤ 79 mm, approach ≤ 0.7 rad off vertical). `patches/gpd.patch` |
+| `gn1b` | GraspNet-baseline network + their realsense ckpt; demo.py pipeline (20 k pts, collision det., NMS, sort); 2 steep virtual views (77°/90°), first valid by score | network REGRESSES width (contact-pair separation ×1.2, ≤10 cm — rigid pre-shape semantics, §4) → adapter replaces with local cross-section at final slice − 2 mm (close-until-contact equivalent) | ZERO source changes; extensions compiled for torch 2.5/cu121/sm_89; inference CLI `gn1b_infer.py` adds seeding only |
+| `cgn` | Contact-GraspNet + sigma_001 ckpt, segmented local-regions mode | as gn1b (cross-section − 2 mm) | build-compat only (`OkStatus`, yaml Loader, c++17, path order): `patches/contact_graspnet.patch`. UNSTABLE on RTX4090/CUDA12 — do not use for numbers (§4) |
+| any + `--baseline-width v41` | pose from the method | v4.1's frozen surrogate closure scan (p98, λ=4.92) at that pose | — |
+
+Shared adapter tail (`_rank_to_tcp`): frame mapping (planner columns → our TCP: tool z =
+approach, tool y = closing), tilt filter approach-z ≤ −0.45 (~63°), degenerate-rotation
+guard, table clearance by backing off along −approach with cross-section re-measurement at
+the new slice, and the SAME geometric validity ladder v4.1 uses (`score_finger_grasp`
+status ok). Learned planners: retry ×3 with shifted seeds on crash/empty (CGN instability);
+subprocess env needs cuda-12.1 in PATH (ptxas) and `LD_LIBRARY_PATH=/usr/local/cuda-12.1/
+lib64` (libcudart mixing) — measured failure modes, see SETUP.md.
+
+### 5.2 Wrapper flags (all extracted before v4's own argparse)
+
+- `--baseline {naive,antipodal,rigid,gpd,gn1b,cgn}` — synthesizer to swap in.
+- `--baseline-width {own,v41}` — own = the method's width column above (closure scan
+  no-oped); v41 = keep the frozen v4.1 closure on the baseline's pose.
+- `--baseline-occ` — forward v4.1's HARD camera-azimuth bound (cam_pos + 60°) into the
+  method's search (implemented for `rigid`; occ round measured: no effect, §4).
+- env `GM_MAX_ATTEMPTS` (default 200) — attempts cap; the collector otherwise runs until
+  `--n-episodes` SUCCESSES (a ~0 % method never terminates). Cap trip ends the run
+  gracefully with true attempt/success counts in stats.yaml.
+- Everything else passes through UNCHANGED to the frozen v4.1 recipe.
+
+### 5.3 Tutorial — running one baseline experiment
+
+```bash
+# one run = one (method, object): 16-success target, videos on, frozen v4.1 recipe flags
+bash grasp_synthesis/run_baseline.sh <experiment> <n_episodes> <method> [own|v41] [extra flags]
+# examples (the exact commands behind every table row in §4):
+bash grasp_synthesis/run_baseline.sh single_lift_mushroom_soft_armfocus_stress 16 gpd
+bash grasp_synthesis/run_baseline.sh single_lift_strawberry_soft_abs_action_armfocus 16 rigid v41
+GM_MAX_ATTEMPTS=100 bash grasp_synthesis/run_baseline.sh single_lift_cherry_tomato_soft_abs_action_armfocus 999 gn1b own
+```
+Experiments used (object → experiment name): mushroom → `single_lift_mushroom_soft_armfocus_stress`;
+strawberry/cherry_tomato/raspberry → `single_lift_<o>_soft_abs_action_armfocus`;
+sphere/lamp → `single_lift_prim_<o>_mush_soft_abs_action_armfocus`.
+Prereqs: envs/sim synced (+torch); for gpd/gn1b/cgn build per `learned_baselines/SETUP.md`
+(one-time, ~30–60 min each). One GPU per run; two concurrent runs fit in 24 GB.
+Outputs land in `dataset/demos/<task>/<date-id>/`: `data.pkl` (successes incl. per-step
+`priv_stress`), `dr_params.csv` (every attempt incl. `closure_cmd_mm`), `stats.yaml`
+(success/attempts), `videos/` + `videos_failed/` (+ `*_grasp.png` pose renders).
+Metrics: success from stats.yaml; sub-yield/median/max from episode-peak
+`priv_stress[:,1]` over data.pkl (NaN-episodes excluded, count reported) — see
+`compile_e1_table.py` pattern in the session scratchpad or re-derive from §4 cells.
+
+### 5.4 The 100-episode confirmatory round (design; NOT yet run)
+
+Full rationale in `docs/e1_100ep_ablation_design.md`; operational summary:
+
+- Per (method × object) cell: **100 fixed ATTEMPTS** — `--n-episodes 999` +
+  `GM_MAX_ATTEMPTS=100`; `--n-envs 5 --scene-dr-every 1` → 20 batches × 5 envs over 20
+  distinct geometries. Videos on. All methods under the SAME occlusion bound.
+- Methods (7 × 6 objects = 42 independent single-GPU jobs, < 4 h each): v4.1 passthrough,
+  naive(−2 mm), naive(−5 mm), antipodal, rigid, rigid+v41-width, gpd. (gn1b optional 8th;
+  cgn excluded — unstable.)
+- **Implementation deltas REQUIRED before launch** (≈1–2 h, wrapper/baseline files only,
+  v4.1 untouched — see design doc §4): `--baseline v41` passthrough mode; pinned
+  scene-DR stream (paired geometries across methods — same-seed pairing is otherwise
+  broken by differing failure paths, measured); `--baseline-squeeze` for naive−5;
+  occ filter for naive/antipodal/gpd (rigid has it).
+- Analysis: Wilson CIs per cell + McNemar paired tests on the shared 20 geometries for
+  the key contrasts (v4.1 vs rigid_v41w, v4.1 vs antipodal, naive−2 vs naive−5).
