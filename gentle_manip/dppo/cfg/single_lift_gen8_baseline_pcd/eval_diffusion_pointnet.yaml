@@ -1,6 +1,8 @@
 # [dppo-eval] Canonical harness eval of the rigid-banana diverse-start BC policy.
 # Routes through gentle_manip.evaluation.run_eval (EvalSpec: num_envs=5, seed=0).
 # n_episodes=100, per-episode video (record_batches=null). Long horizon +
+# GRASP-AT-ONCE control: trained on direct-approach demos only (no recovery family).
+# Short horizon (h=120 / 480 env steps) -- it commits to one grasp; no redescend budget.
 # early_stop_on_success so a would-be-failed first attempt has room to redescend/
 # regrasp -- the behaviour this campaign is testing for.
 #
@@ -45,15 +47,15 @@ n_episodes: 100
 scene_group_size: 1
 record_batches: null
 early_stop_on_success: true
-success_grace_steps: 8   # after success/lifted-clear, run this many more policy steps then END the episode (don't idle to n_steps)
-n_steps: 225
+success_grace_steps: 6   # after success/lifted-clear, run this many more policy steps then END the episode (don't idle to n_steps)
+n_steps: 120
 render_num: 5
 
 env:
   n_envs: 5
   name: ${env_name}
   env_type: genesis
-  max_episode_steps: 900
+  max_episode_steps: 480
   reset_at_iteration: False
   save_video: True
   use_image_obs: True

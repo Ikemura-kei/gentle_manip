@@ -29,7 +29,10 @@ VARIANT=${VARIANT:-regrasp}
 STAGE_ARGS=()
 if [ "$VARIANT" = "baseline" ]; then
   ENV_NAME=single_lift_gen8_baseline_pcd
-  STAGE_ARGS=(--exclude-modes failed_grasp)   # drop only the post-failure recovery family
+  # GRASP-AT-ONCE control: keep ONLY the direct-approach start families -- NO recovery
+  # data at all (failed_grasp / mid_air / near_ground all dropped). The policy commits to
+  # one approach+grasp; its eval horizon is correspondingly short (see eval cfg).
+  STAGE_ARGS=(--modes home,near_object,mid_approach,above_object)
 else
   ENV_NAME=single_lift_gen8_regrasp_pcd
 fi
