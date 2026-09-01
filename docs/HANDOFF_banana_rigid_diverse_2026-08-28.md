@@ -1188,3 +1188,9 @@ training continues (val 0.026@60 -> 0.022@100). If not gentler at convergence, o
 reduce demo FIRM_EXTRA_CLOSE, add object-softness obs cue (or category one-hot), or
 re-collect with a gentleness cost. Old ueini banana was 0.687 too -> banana always borderline.
 - REGRASP lorap ep100 train 0.021 / val 0.022. BASELINE 1882124 running.
+
+## 2026-09-01 19:05 — BASELINE pretrain done (dthox), 12-cat eval running
+- BASELINE grasp-at-once run id = dthox. Final train 0.0105 / val 0.0156. ckpts to state_300.
+- 12-cat eval job 1898658 RUNNING (started 19:05, GPU freed immediately). Eval dir: find via
+  logs/slurm_logs/last_gen_eval_dir.txt (or dthox/eval/<ts> or dthox/gen_eval_<ts>).
+- REGRASP lorap still training, ep~225 val 0.0180. GPU freed by baseline -> snap relaunched.
