@@ -1355,3 +1355,18 @@ object -> retrain should close the gap. Montage sent.
 - gen8 RF eval 1904528 ENDED at 9/11 real (missing dumpling, gelatin OOD -- lowest-value,
   baseline had them at .35/.10). Did NOT self-resubmit. Acceptable for the verdict.
 - RX (lorap zero-shot reactive) 1911798 still running, 4/7 (grape/cherry/raspberry left).
+
+## 2026-09-02 08:55 — REACTIVE Phase B COMPLETE (lorap zero-shot under perturbation, 7/7)
+       RF clean     RX zero-shot-reactive
+mush   0.72/.718    0.60/.674
+banana 0.83/.677    0.77/.645
+kiwi   0.88/.786    0.65/.754
+egg    1.00/.623    0.80/.593
+grape  0.47/.813    0.57/.749    (+.10 -- small-fruit noise, n=40)
+cherry 0.42/.883    0.28/.846
+rasp   0.10/.860    0.20/.763    (+.10 noise)
+LARGE-4 mean: SR 0.86 -> 0.71 (-0.15). Gentleness ~held.
+=> lorap is meaningfully but not catastrophically degraded by the drag; retrain should
+   close/exceed. montage reactive_zeroshot7.mp4.
+- Phase D pretrain ep150 val .0254 (bumped from .0246@140 -- watch for overfit; small dataset).
+- RX eval DONE -> only Phase D running. When D pretrain done -> auto reactive eval + submit v3-clean eval.
