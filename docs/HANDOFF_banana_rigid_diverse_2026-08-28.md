@@ -1399,3 +1399,14 @@ LARGE-4 mean: SR 0.86 -> 0.71 (-0.15). Gentleness ~held.
   -> ALL_KB >> 8600 -> EMBED_OOD=0 always. Fixed guard to count montage_*.mp4 only
   (real montage set is 4.1MB: in-domain 2.6 + OOD 1.5). OOD will embed on next refresh.
 - Queue: 1915481 reactive-eval, 1915094 v3-clean, 1915498/1915499 tomato. ikemura flooding.
+
+## 2026-09-02 12:45 — tomato re-eval done, page updated
+- tomato E=5.0e5 fix WORKS: baseline(dthox) SR 0.275 / gentleness 0.885 / combined 0.580;
+  regrasp(lorap) SR 0.30 / gentleness 0.887 / combined 0.594. No crash, no false-1.00.
+  Sits with the other <=2cm fruit (grape/cherry ~0.6 combined, raspberry ~0.48).
+- Spliced the real tomato eval into the montage source dirs (RE gen_eval_20260901_215958_final,
+  BE gen_eval_20260901_195735_fast). tomato montages now 341KB/503KB (were 17KB broken).
+- Verdict prose updated: IN-DOMAIN now 8 cats -> SR 0.59 vs 0.47, gentleness 0.78 vs 0.76
+  (7-cat was 0.63 vs 0.50 / 0.77 vs 0.75). "tomato excluded" line removed.
+- Republished artifact 5682ac2f (8.64 MB). OOD montages now embedded (guard fix).
+- Still running: 1915481 v3-reactive (batch 3/12, slow), 1915094 v3-clean (batch 11/12).
