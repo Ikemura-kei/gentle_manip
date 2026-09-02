@@ -580,15 +580,15 @@
 # all DPPO deploys run in dppo_deploy) and the standard safety knobs added
 # (--smooth-alpha / --max-pos-step-m, conservative motion).
 #
-ckpt=downloaded_runs/cvzth/checkpoint/state_80.pt
-normalization=downloaded_runs/cvzth/normalization.npz
-uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-  --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
-  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
-  --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/cvzth80_generalist --shard-size 10 \
-  --max-steps 5000
+# ckpt=downloaded_runs/cvzth/checkpoint/state_80.pt
+# normalization=downloaded_runs/cvzth/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/cvzth80_generalist --shard-size 10 \
+#   --max-steps 5000
 
 # GENERALIST 12-object + ALL 7 REAL objects (cluster run zdwii, ckpt 91) — added 2026-09-02.
 # THE LATEST GENERALIST TRAINED WITH REAL-WORLD DATA. Dataset
@@ -696,12 +696,34 @@ uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.p
 # depths (lr 1e-5, 400 ep, val flat 0.0026-0.0035, NO overfit). RECOMMENDED ckpt state_280.
 # NOTE normalization = cvzth's JOINT stats (finetune data was renormalized into them).
 #
-# ckpt=logs/dppo/dppo-pretrain/single_lift_real7_cvzthnorm/zjdmn/checkpoint/state_280.pt
+ckpt=logs/dppo/dppo-pretrain/single_lift_real7_cvzthnorm/zjdmn/checkpoint/state_400.pt
+normalization=downloaded_runs/cvzth/normalization.npz
+uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+  --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+  --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+  --record dataset/real_deploy/zjdmn400_ft --shard-size 10 \
+  --max-steps 5000
+
+# ── LONG-CHUNK finetune (xdxvc: cvzth base, horizon 16) — 2026-09-02 ──
+# The close-INITIATION fix: horizon_steps 4 -> 16 so a sampled close is EXECUTED long enough
+# to enter the close (at pre-onset states only ~1/3-1/5 samples initiate; re-sampling every 4
+# steps kept drawing "hover"). Warm-started 25/28 tensors from cvzth/state_80 (PointNet + MLP
+# trunk); the 3 horizon-shaped tensors retrained.
+#
+# ⚠ --act-steps 16 IS REQUIRED. The CLI default is 4: training long chunks but executing 4
+#   re-samples just as often and reproduces the hesitation. horizon_steps itself is read from
+#   the run's .hydra/config.yaml automatically.
+# ⚠ normalization = cvzth's JOINT stats (the finetune data was renormalized into them).
+#
+# ckpt=logs/dppo/dppo-pretrain/single_lift_real7_cvzthnorm/xdxvc/checkpoint/state_400.pt
 # normalization=downloaded_runs/cvzth/normalization.npz
 # uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
 #   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
 #   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
 #   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --act-steps 16 \
 #   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-#   --record dataset/real_deploy/zjdmn280_ft --shard-size 10 \
+#   --record dataset/real_deploy/xdxvc400_h16 --shard-size 10 \
 #   --max-steps 5000

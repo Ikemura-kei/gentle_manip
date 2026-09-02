@@ -42,10 +42,25 @@ def main(cfg):
     if base:
         sd = torch.load(base, map_location=agent.device if hasattr(agent, "device") else "cpu",
                         weights_only=True)
-        agent.model.load_state_dict(sd["model"])
-        agent.ema_model.load_state_dict(sd["ema"])
-        print(f"[finetune_bc] warm-started model+EMA from {base} (epoch {sd.get('epoch')})",
-              flush=True)
+
+        def _partial(dst, src):
+            """Load every parameter whose NAME and SHAPE match; report the rest.
+
+            Needed when the finetune changes horizon_steps: the diffusion MLP's first and
+            last layers carry horizon*action_dim (noisy-trajectory input / chunk output), so
+            they cannot transfer, while the PointNet encoder and MLP trunk can."""
+            cur = dst.state_dict()
+            take = {k: v for k, v in src.items() if k in cur and cur[k].shape == v.shape}
+            skip = sorted(set(cur) - set(take))
+            dst.load_state_dict({**cur, **take})
+            return len(take), len(cur), skip
+
+        n, tot, skip = _partial(agent.model, sd["model"])
+        _partial(agent.ema_model, sd["ema"])
+        print(f"[finetune_bc] warm-started {n}/{tot} tensors from {base} "
+              f"(epoch {sd.get('epoch')})", flush=True)
+        if skip:
+            print(f"[finetune_bc] re-initialized (shape/name mismatch): {skip}", flush=True)
     else:
         print("[finetune_bc] WARNING: no +base_ckpt given — training from scratch", flush=True)
     agent.run()
