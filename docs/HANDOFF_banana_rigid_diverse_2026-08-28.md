@@ -1345,3 +1345,13 @@ object -> retrain should close the gap. Montage sent.
 - Collection: 207 reactive_recover in ~1.4h (2 collectors ~150/hr). Phase D threshold
   LOWERED to 350 demos or 07:30.
 - gen8 RF 9/11 (dumpling, gelatin OOD left).
+
+## 2026-09-02 06:57 — PHASE D reactive retrain FIRED
+- yd_reactive_pipeline 1912548 RUNNING. Staged: 1096 v2 regrasp + 309 reactive_recover
+  = 1405 eps, reactive frac 0.22. Now converting (obs_dim 12) -> pretrain single_lift_gen8_reactive_pcd.
+  Auto-submits yd_reactive_eval on finish. ETA pretrain ~5-6h (small dataset -> maybe faster).
+- CANCELLED collectors 1912155/1912207 (405 reactive demos on disk, staged). Could collect
+  more + retrain a better v3 later if desired.
+- gen8 RF eval 1904528 ENDED at 9/11 real (missing dumpling, gelatin OOD -- lowest-value,
+  baseline had them at .35/.10). Did NOT self-resubmit. Acceptable for the verdict.
+- RX (lorap zero-shot reactive) 1911798 still running, 4/7 (grape/cherry/raspberry left).
