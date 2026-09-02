@@ -158,7 +158,9 @@ class GenesisWorker:
         p = self._perturb
         if p is None:
             return
-        hits = np.nonzero(p["fire_frame"] == self._frame)[0]
+        HOLD = 4   # sustain the impulse for a few frames -> unambiguous 5-15cm slide
+        hits = np.nonzero((p["fire_frame"] >= 0) & (self._frame >= p["fire_frame"])
+                          & (self._frame < p["fire_frame"] + HOLD))[0]
         if hits.size == 0:
             return
         for obj, otype, base_particles in zip(

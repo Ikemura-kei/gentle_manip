@@ -13,5 +13,5 @@ object_scale:      [0.90, 1.12]
 
 # ── reactive perturbation: lateral velocity impulse to the object mid-approach ──
 object_perturb_prob:  0.75          # 75%% of episodes get a kick; 25%% stay clean
-object_perturb_speed: [0.15, 0.55]  # impulse speed (m/s) -> ~3-9 cm slide after friction
-object_perturb_frame: [24, 104]     # sim-frame window (act_steps=4 -> policy step ~6..26, during approach)
+object_perturb_speed: [0.30, 0.85]  # per-frame speed, sustained 4 frames -> ~5-15cm slide
+object_perturb_frame: [56, 152]     # sim frames (policy step ~14-38): near the object, limited reaction time
