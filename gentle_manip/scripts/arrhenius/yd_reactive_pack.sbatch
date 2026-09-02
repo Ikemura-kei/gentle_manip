@@ -24,10 +24,10 @@ source "$REPO/gentle_manip/scripts/arrhenius/yd_env_common.sh"
 N_PACK=${N_PACK:-3}
 PER_CAT_TARGET=${PER_CAT_TARGET:-400}
 SEED0=${SEED0:-200}
-MAXFEVALS=${MAXFEVALS:-700}
+MAXFEVALS=${MAXFEVALS:-350}
 # reactive-heavy starts: mostly clean approaches (the DRAG is the perturbation); no failed_grasp
 START_MODES=${START_MODES:-sweep:0.72,above:0.16,ground:0.08,air:0.04}
-N_ENVS=${N_ENVS:-10}
+N_ENVS=${N_ENVS:-14}
 
 echo "[rpack] N_PACK=$N_PACK per_cat=$PER_CAT_TARGET seed0=$SEED0"
 nvidia-smi --query-gpu=memory.total,memory.used --format=csv || true
