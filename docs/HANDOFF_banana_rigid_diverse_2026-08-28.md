@@ -1292,3 +1292,15 @@ summary + publish, THEN Phase B (zero-shot reactive eval of lorap/state_300).
 - REACTIVE SMOKE launched: 1907954, mushroom, lorap state_300, NEP=15, -t 25min,
   OUT=logs/dppo/dppo-pretrain/single_lift_gen8_regrasp_pcd/lorap/reactive_smoke_0141.
   NEXT: montage its clips, check the kick works (object slides 3-9cm mid-approach, lorap re-approaches).
+
+## 2026-09-02 03:12 — REACTIVE Phase B: lorap PARTIALLY reactive
+- Perturbation mechanism working (sustained 4-frame velocity drag, 0.3-0.85 m/s, frame 56-152).
+- Smoke (mushroom, n=15): lorap state_300 SR 0.60 under drag vs 0.72 clean (-0.12). 9/15 succeed;
+  ~6 fail with object dragged off (zmax<0.12). One recovery at fss=98. -> lorap tracks the
+  moved object via point cloud but drops ~12pt. Moderate effect -> Phase C+D worthwhile.
+- BASELINE gen8 eval DONE (11/12, tomato excluded): IN-DOMAIN(7) mean SR .50/g .745/SRxg .621
+  (incl. small fruit: raspberry .05 cherry .38 grape .53). OOD(4) mean SR .45/g .578/SRxg .514
+  (blackberry .68 dumpling .35 gelatin .10 scallop .68). Cancelled the tomato-only resubmit.
+- LAUNCHED lorap zero-shot reactive eval 1911798 -> lorap/reactive_eval_20260902_0312_lorap_zeroshot
+  (7 in-domain cats, NEP 60/40). RF (clean regrasp final) 1904528 still running (5h12, 4 real cats).
+- NEXT: Phase C -- extend collect_demos_diverse_start_v2.py --reactive (perturb + FSM grasp re-target).
