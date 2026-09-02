@@ -1304,3 +1304,20 @@ summary + publish, THEN Phase B (zero-shot reactive eval of lorap/state_300).
 - LAUNCHED lorap zero-shot reactive eval 1911798 -> lorap/reactive_eval_20260902_0312_lorap_zeroshot
   (7 in-domain cats, NEP 60/40). RF (clean regrasp final) 1904528 still running (5h12, 4 real cats).
 - NEXT: Phase C -- extend collect_demos_diverse_start_v2.py --reactive (perturb + FSM grasp re-target).
+
+## 2026-09-02 03:18 — gen8 v2 in-domain COMPLETE (7 cats, both models)
+                baseline   regrasp-final   d
+  mushroom      0.60/.663  0.72/.718   +.12
+  banana_lying  0.62/.686  0.83/.677   +.21
+  kiwi          0.62/.746  0.88/.786   +.26
+  egg_boiled    0.70/.621  1.00/.623   +.30
+  grape         0.53/.773  0.47/.813   -.06
+  cherry        0.38/.827  0.42/.883   +.04
+  raspberry     0.05/.898  0.10/.860   +.05
+  IN-DOM MEAN   0.50/~.75  0.63/~.78   SR +.13, gentleness ~tied
+BASELINE OOD(4): blackberry .68/.682, scallop .68/.444, dumpling .35/.259, gelatin .10/.927.
+REGRASP OOD: still running (1904528, 5h17).
+STORY: regrasp beats baseline on in-domain SR +.13 (driven by 3-6cm objects: egg/kiwi/banana
++.21..+.30); marginal/tied on <=2cm fruit (both weak) and on gentleness. tomato excluded (bug).
+- REACTIVE: Phase C collector coded+committed (--reactive). lorap zero-shot reactive eval
+  1911798 RUNNING. Phase B smoke: lorap -0.12 SR under drag.
