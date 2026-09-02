@@ -1333,3 +1333,15 @@ STORY: regrasp beats baseline on in-domain SR +.13 (driven by 3-6cm objects: egg
 - PHASE D plan: when ~1200 reactive_recover on disk -> stage (merge v2 gen8_regrasp data +
   reactive demos, reactive ~30%) -> cfg single_lift_gen8_reactive_pcd (cp regrasp cfg) ->
   retrain -> yd_reactive_eval 3-way. yd_gen8_pipeline.sbatch needs a VARIANT=reactive branch OR run steps manually.
+
+## 2026-09-02 06:29 — REACTIVE Phase B (4/7 cats): lorap ~70% reactive
+RF clean vs RX lorap-zeroshot-under-perturbation (SR/gentleness):
+  mushroom  0.72/.72  ->  0.60/.67   (-0.12)
+  banana    0.83/.68  ->  0.77/.65   (-0.06)
+  kiwi      0.88/.79  ->  0.65/.75   (-0.23)
+  egg       1.00/.62  ->  0.80/.59   (-0.20)
+Mean SR drop ~0.15 (0.86 -> 0.71). Gentleness ~held. lorap partially tracks the moved
+object -> retrain should close the gap. Montage sent.
+- Collection: 207 reactive_recover in ~1.4h (2 collectors ~150/hr). Phase D threshold
+  LOWERED to 350 demos or 07:30.
+- gen8 RF 9/11 (dumpling, gelatin OOD left).
