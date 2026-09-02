@@ -1370,3 +1370,15 @@ LARGE-4 mean: SR 0.86 -> 0.71 (-0.15). Gentleness ~held.
    close/exceed. montage reactive_zeroshot7.mp4.
 - Phase D pretrain ep150 val .0254 (bumped from .0246@140 -- watch for overfit; small dataset).
 - RX eval DONE -> only Phase D running. When D pretrain done -> auto reactive eval + submit v3-clean eval.
+
+## 2026-09-02 10:58 — Reactive Phase D done, Phase E launched
+- Phase D pretrain `1912548` finished ep300 (run `pkoie`, `single_lift_gen8_reactive_pcd`).
+  best val 0.0219 @ ep250 (state_250.pt) — flat since ~ep210, mild overfit on the 1405-ep set
+  (1096 v2 regrasp + 309 reactive_recover, ~22% reactive, obs_dim 12).
+- Auto-submitted `yd_reactive_eval` `1914946` = v3 UNDER PERTURBATION, 7 in-domain cats
+  (mushroom/banana/kiwi/egg n=60 parallel, then grape/cherry/raspberry n=40).
+- Also submitted v3-CLEAN eval `1915094` (job yd_geneval): mushroom banana_lying kiwi egg_boiled
+  n=60, OUT=pkoie/gen_eval_clean_1058 — no perturbation, to isolate whether the reactive data
+  cost anything on the undisturbed task.
+- Next: 3-way per-cat table [RX lorap-zeroshot-reactive / v3-reactive / v3-clean]; KEY question
+  = did v3 recover the -0.15 large-object SR gap the drag opened, keeping gentleness.
