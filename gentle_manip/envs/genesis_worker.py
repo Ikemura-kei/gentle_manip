@@ -145,31 +145,40 @@ class GenesisWorker:
                 self._perturb = {"fire_frame": ff, "vel": vv}
         return self.read_state()
 
+    @staticmethod
+    def _to_np(x):
+        return x.detach().cpu().numpy() if hasattr(x, "detach") else (
+            x.cpu().numpy() if hasattr(x, "cpu") else np.asarray(x))
+
     def _apply_perturbation(self) -> None:
         """One-frame lateral velocity impulse to the object for any env whose
-        fire_frame == current frame. MPM soft: set every particle's velocity; the
-        solver then carries the momentum and friction decelerates it."""
+        fire_frame == current frame. MPM soft: add the impulse to every particle's
+        velocity for that env; the solver carries the momentum and friction
+        decelerates it. Never raises (a perturb failure must not kill a rollout)."""
         p = self._perturb
         if p is None:
             return
         hits = np.nonzero(p["fire_frame"] == self._frame)[0]
         if hits.size == 0:
             return
-        for obj, otype in zip(self.handle.objects, self.handle.object_types):
+        for obj, otype, base_particles in zip(
+            self.handle.objects, self.handle.object_types, self.handle.object_base_particles,
+        ):
+            n_part = 0 if otype == "rigid" else int(
+                np.asarray(base_particles).reshape(self.num_envs, -1, 3).shape[1])
             for e in hits:
-                v = p["vel"][e]
+                v = np.asarray(p["vel"][int(e)], np.float32)
                 try:
                     if otype == "rigid":
-                        cur = obj.get_vel()
-                        cur = cur.cpu().numpy() if hasattr(cur, "cpu") else np.asarray(cur)
-                        cur = np.asarray(cur, np.float32).reshape(self.num_envs, -1)
-                        cur[e, :3] = v
+                        cur = self._to_np(obj.get_vel()).astype(np.float32).reshape(self.num_envs, -1)
+                        cur[int(e), :3] = v
                         obj.set_vel(cur)
                     else:
-                        n = np.asarray(obj.get_particles_pos(envs_idx=[int(e)])).reshape(-1, 3).shape[0]
-                        obj.set_particles_vel(np.tile(v, (n, 1)).astype(np.float32),
-                                              envs_idx=[int(e)])
-                except Exception as ex:              # never let a perturb error kill the rollout
+                        pv = self._to_np(obj.get_particles_vel(envs_idx=[int(e)])).astype(np.float32)
+                        pv = pv.reshape(n_part, 3)
+                        obj.set_particles_vel((pv + v[None, :]).astype(np.float32), envs_idx=[int(e)])
+                    print(f"[perturb] frame {self._frame} env {int(e)} v={np.round(v, 3).tolist()}", flush=True)
+                except Exception as ex:
                     print(f"[perturb] env {int(e)} kick failed: {ex}", flush=True)
 
     def _settle(self) -> None:
