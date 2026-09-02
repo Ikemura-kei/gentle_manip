@@ -150,17 +150,20 @@ class GenesisWorker:
         return x.detach().cpu().numpy() if hasattr(x, "detach") else (
             x.cpu().numpy() if hasattr(x, "cpu") else np.asarray(x))
 
+    _PERTURB_HOLD = 4   # SET the object velocity for this many consecutive frames -> a
+                        # bounded "dragged away" slide (not a compounding add). `perturb_vel`
+                        # is the per-frame speed; ~4 frames * dt gives a ~5-15 cm displacement.
+
     def _apply_perturbation(self) -> None:
-        """One-frame lateral velocity impulse to the object for any env whose
-        fire_frame == current frame. MPM soft: add the impulse to every particle's
-        velocity for that env; the solver carries the momentum and friction
-        decelerates it. Never raises (a perturb failure must not kill a rollout)."""
+        """Sustained lateral velocity drag on the object over a short window starting at
+        `fire_frame` ("dragged away by a random force"). MPM soft: set every particle's
+        velocity for that env; rigid: set the body velocity. The solver then relaxes it.
+        Never raises (a perturb failure must not kill a rollout)."""
         p = self._perturb
         if p is None:
             return
-        HOLD = 4   # sustain the impulse for a few frames -> unambiguous 5-15cm slide
         hits = np.nonzero((p["fire_frame"] >= 0) & (self._frame >= p["fire_frame"])
-                          & (self._frame < p["fire_frame"] + HOLD))[0]
+                          & (self._frame < p["fire_frame"] + self._PERTURB_HOLD))[0]
         if hits.size == 0:
             return
         for obj, otype, base_particles in zip(
@@ -169,19 +172,19 @@ class GenesisWorker:
             n_part = 0 if otype == "rigid" else int(
                 np.asarray(base_particles).reshape(self.num_envs, -1, 3).shape[1])
             for e in hits:
-                v = np.asarray(p["vel"][int(e)], np.float32)
+                v = np.asarray(p["vel"][int(e)], np.float32)          # per-frame drag velocity
                 try:
                     if otype == "rigid":
                         cur = self._to_np(obj.get_vel()).astype(np.float32).reshape(self.num_envs, -1)
                         cur[int(e), :3] = v
                         obj.set_vel(cur)
                     else:
-                        pv = self._to_np(obj.get_particles_vel(envs_idx=[int(e)])).astype(np.float32)
-                        pv = pv.reshape(n_part, 3)
-                        obj.set_particles_vel((pv + v[None, :]).astype(np.float32), envs_idx=[int(e)])
-                    print(f"[perturb] frame {self._frame} env {int(e)} v={np.round(v, 3).tolist()}", flush=True)
+                        obj.set_particles_vel(np.tile(v, (n_part, 1)).astype(np.float32),
+                                              envs_idx=[int(e)])
+                    if self._frame == int(p["fire_frame"][int(e)]):   # log once per kick
+                        print(f"[perturb] frame {self._frame} env {int(e)} drag v={np.round(v, 3).tolist()}", flush=True)
                 except Exception as ex:
-                    print(f"[perturb] env {int(e)} kick failed: {ex}", flush=True)
+                    print(f"[perturb] env {int(e)} drag failed: {ex}", flush=True)
 
     def _settle(self) -> None:
         """Run sim steps until all rigid objects come to rest (vel < thresh) or
