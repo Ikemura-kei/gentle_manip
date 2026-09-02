@@ -93,6 +93,7 @@ class DPPOPolicyAdapter:
                  proprio_view: "list | None" = None,
                  visual_feature_dim: int = 256, mlp_dims: "list | None" = None,
                  time_dim: int = 16, pc_cond_steps: int = 1, pointnet: "dict | None" = None,
+                 action_config=None, warmup_steps: int = 0,
                  device: str = "cuda:0") -> None:
         import torch  # noqa: F401
         from model.diffusion.diffusion_eval import DiffusionEval
@@ -100,6 +101,15 @@ class DPPOPolicyAdapter:
 
         self.device = device
         self.n_action_steps = int(act_steps)
+        # WARM-UP MASK: the first observations after a reset are unstable (camera/robot settling),
+        # and a diffusion chunk conditioned on them can lurch. For `warmup_steps` env steps the
+        # policy still SEES the obs and runs inference normally, but its output is replaced by a
+        # HOLD-POSE command (absolute mode: the raw action that maps back to the CURRENT measured
+        # pose, via invert_absolute_action; delta mode: zeros). User request 2026-09-02.
+        self._action_config = action_config
+        self._warmup_steps = int(warmup_steps)
+        self._steps_emitted = 0
+        self._last_obs = None
         self._cond_steps = int(cond_steps)
         # proprio keys, in order, whose concat forms the normalized "state" (quat OR rot6d student).
         self._view = list(proprio_view) if proprio_view else ["ee_pos", "ee_quat", "gripper_width"]
@@ -166,10 +176,26 @@ class DPPOPolicyAdapter:
         return {k: np.stack([s[k] for s in h], axis=1) for k in h[0]}
 
     # ── run_deploy_loop interface ──────────────────────────────────────────────────
+    def _stay_put(self) -> "np.ndarray":
+        """Raw [-1,1] action chunk that commands the CURRENT pose (absolute) / no motion (delta)."""
+        o = self._last_obs
+        mode = getattr(self._action_config, "mode", "absolute") if self._action_config else "absolute"
+        if mode != "absolute" or o is None:
+            return np.zeros((self.n_action_steps, 7), dtype=np.float32)
+        from gentle_manip.actions.pipeline import invert_absolute_action
+        a = invert_absolute_action(np.asarray(o["ee_pos"]).reshape(-1, 3),
+                                   np.asarray(o["ee_quat"]).reshape(-1, 4),
+                                   np.asarray(o["gripper_width"]).reshape(-1),
+                                   self._action_config)[0]
+        return np.repeat(a[None].astype(np.float32), self.n_action_steps, axis=0)
+
     def reset(self, obs: dict) -> None:
+        self._steps_emitted = 0
+        self._last_obs = obs
         self._hist = deque([self._modalities(obs)], maxlen=self._cond_steps + 1)
 
     def push(self, obs: dict) -> None:
+        self._last_obs = obs
         self._hist.append(self._modalities(obs))
 
     def predict(self) -> np.ndarray:
@@ -179,6 +205,13 @@ class DPPOPolicyAdapter:
         with torch.no_grad():
             traj = self.model(cond=cond, deterministic=True).trajectories.cpu().numpy()
         chunk = traj[0, : self.n_action_steps]        # (act_steps, action_dim) normalized [-1, 1]
+        if self._steps_emitted < self._warmup_steps:
+            self._steps_emitted += self.n_action_steps
+            held = self._stay_put()
+            print(f"[policy] WARMUP hold ({self._steps_emitted}/{self._warmup_steps} steps) — "
+                  f"inference ran, output masked to stay-put", flush=True)
+            return held
+        self._steps_emitted += self.n_action_steps
         # un-normalize to the raw [-1, 1] action PolicyEnv.step expects (it applies ActionPipeline).
         raw = ((chunk + 1.0) / 2.0 * self._act_range + self.action_min).astype(np.float32)
         # RAW policy actions this chunk: net output (normalized [-1,1]) and the un-normalized raw
@@ -211,6 +244,11 @@ def main() -> None:
                         "encoding, so the deploy config must be the one it trained with)")
     p.add_argument("--cond-steps", type=int, default=2)
     p.add_argument("--act-steps", type=int, default=4)
+    p.add_argument("--warmup-steps", type=int, default=16,
+                   help="env steps after each reset during which the policy still observes "
+                        "and infers normally, but its output is masked to a HOLD-POSE "
+                        "command (absolute mode) / zeros (delta) — rides out the unstable "
+                        "first frames after a reset. 0 disables.")
     p.add_argument("--max-steps", type=int, default=20000)
     p.add_argument("--rate", type=float, default=30.0, help="control rate (Hz)")
     p.add_argument("--pose-scale", type=float, default=1.0,
@@ -281,6 +319,7 @@ def main() -> None:
         action_dim=arch.get("action_dim", action_config.action_dim),
         proprio_view=proprio_view,
         cond_steps=arch.get("cond_steps", args.cond_steps), act_steps=args.act_steps,
+        action_config=action_config, warmup_steps=args.warmup_steps,
         horizon_steps=arch.get("horizon_steps", 4),
         denoising_steps=arch.get("denoising_steps", 20),
         ft_denoising_steps=args.ft_denoising_steps,
