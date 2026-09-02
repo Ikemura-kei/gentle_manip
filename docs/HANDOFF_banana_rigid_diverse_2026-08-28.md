@@ -1321,3 +1321,15 @@ STORY: regrasp beats baseline on in-domain SR +.13 (driven by 3-6cm objects: egg
 +.21..+.30); marginal/tied on <=2cm fruit (both weak) and on gentleness. tomato excluded (bug).
 - REACTIVE: Phase C collector coded+committed (--reactive). lorap zero-shot reactive eval
   1911798 RUNNING. Phase B smoke: lorap -0.12 SR under drag.
+
+## 2026-09-02 05:05 — REACTIVE Phase C collector WORKING; full collection launched
+- 3rd iteration (hover-then-descend re-approach + n_appr 44 + drag 0.12-0.38 + start_mode
+  tag): test = 8 saved eps, 7/8 = reactive_recover. The drag+re-target now produces
+  genuine reactive-recovery demos. Yield ~50%/batch (failures discarded).
+- LAUNCHED yd_reactive_pack 1912155 -> dataset/demos/single_lift_xcat_reactive/ (target ~1500
+  reactive_recover demos, mushroom/banana/kiwi/egg, self-resubmits <1400). Montage sent to user.
+- gen8 RF-OOD eval 1904528 (7h05) + lorap zero-shot reactive eval 1911798 (1h53) STILL 0 new
+  cats -- brutal contention.
+- PHASE D plan: when ~1200 reactive_recover on disk -> stage (merge v2 gen8_regrasp data +
+  reactive demos, reactive ~30%) -> cfg single_lift_gen8_reactive_pcd (cp regrasp cfg) ->
+  retrain -> yd_reactive_eval 3-way. yd_gen8_pipeline.sbatch needs a VARIANT=reactive branch OR run steps manually.
