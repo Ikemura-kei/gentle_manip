@@ -109,7 +109,27 @@ v4.1 reference runs (same protocol): mushroom `26-08-30-wvz`, strawberry `26-08-
 cherry `26-08-30-tbm`, raspberry `26-08-30-jnd`, sphere_mush `26-08-31-ccd`, lamp_mush
 `26-08-31-fva` (under their respective task dirs).
 
-### E1 AGGREGATE — all methods × all objects (the paper's master table; 2026-09-01)
+### E1 AGGREGATE (primary layout) — methods × objects, 3 sub-columns per object
+
+Sub-columns per object: **succ** = success % (collection success at hold-end — for these
+runs identical to ever-success within the episode horizon) | **sub-y** = sub-yield % of
+successful episodes | **med** = median peak stress ×yield. Right-most: per-method mean
+success and worst-case (min) sub-yield. naive/strawberry: 0 % success ⇒ no stress stats.
+
+| method | mushroom<br>succ · sub-y · med | strawberry<br>succ · sub-y · med | cherry<br>succ · sub-y · med | raspberry<br>succ · sub-y · med | sphere_mush<br>succ · sub-y · med | lamp_mush<br>succ · sub-y · med | mean succ | min sub-y |
+|---|---|---|---|---|---|---|---|---|
+| naive | 19.8 · 100 · 0.24 | 0.0 · — · — | 72.7 · 100 · 0.55 | 57.1 · 100 · 0.30 | 76.2 · 100 · 0.20 | 15.7 · 100 · 0.24 | 40.3 | 100* |
+| antipodal | 66.7 · 100 · 0.25 | 53.3 · 100 · 0.32 | 69.6 · **46** · **1.00** | 88.9 · 94 · 0.45 | 100 · 100 · 0.20 | 80.0 · 100 · 0.23 | 76.4 | 46 |
+| GPD | 16.0 · 100 · 0.25 | 1.5 · 100 · 0.22 | 17.8 · 100 · 0.49 | 18.2 · 69 · 0.83 | 25.0 · 100 · 0.17 | 11.7 · 100 · 0.23 | 15.0 | 69 |
+| GraspNet-baseline (gn1b) | 51.6 · 100 · 0.41 | 26.2 · 81 · 0.64 | 64.0 · **36** · **1.18** | 26.2 · **6** · **1.24** | 40.0 · 100 · 0.21 | 34.0 · 100 · 0.25 | 40.3 | **6** |
+| rigid (B2) | 76.2 · 100 · 0.22 | 34.8 · 100 · 0.33 | 69.6 · **38** · **1.06** | 100 · 100 · 0.57 | 76.2 · 100 · 0.21 | 100 · 100 · 0.32 | 76.1 | 38 |
+| rigid + v4.1 closure | 100 · 100 · 0.29 | 100 · 100 · 0.33 | 61.5 · **19** · **1.17** | 100 · 62 · 0.96 | 94.1 · 100 · 0.35 | 100 · 100 · 0.55 | 92.6 | 19 |
+| **v4.1 (ours)** | **88.9 · 100 · 0.32** | **45.7 · 94 · 0.32** | **76.2 · 81 · 0.74** | **100 · 88 · 0.72** | **100 · 100 · 0.37** | **57.1 · 100 · 0.61** | **78.0** | **81** |
+
+\* survivor bias — naive's sub-yield is 100 % only because its would-be-damaging grips fail
+as drops (success 0–76 %); read succ and sub-y as a pair.
+
+### E1 AGGREGATE — all methods × all objects (method-major variant with max ×yield; 2026-09-01)
 
 Cell = success % | sub-yield % | median ×yield | max ×yield (stress over successful episodes,
 NaN-excluded). naive/antipodal/gpd/rigid/gn1b are gentleness-blind with their own width
