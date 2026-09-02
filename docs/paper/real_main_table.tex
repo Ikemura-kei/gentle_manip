@@ -1,0 +1,38 @@
+% MAIN real-world experiment table — TEMPLATE (all cells placeholder "--").
+% 7 methods x 7 real objects x 3 metrics, grouped-header layout matching e1_table.tex.
+% Metrics (define once in text): Succ = lift-and-hold success rate (%); Safe = fraction of
+% episodes where the object was NOT damaged, UNCONDITIONAL on success (a dropped-but-intact
+% object counts safe; a lifted-but-bruised one does not); S-Safe = safe fraction among
+% SUCCESSFUL episodes only. Specialists are trained per-object: cells for objects outside
+% their training set are N/A. Requires: \usepackage{booktabs, multirow, graphicx}
+\begin{table*}[t]
+\centering
+\caption{Real-world manipulation results on seven deformable objects ($n{=}\textit{TODO}$
+episodes per cell). Succ: lift-and-hold success (\%). Safe: episodes with no object damage
+(\%, unconditional). S-Safe: undamaged fraction of successful episodes (\%). Specialist
+policies are trained on a single object; N/A marks untrained objects. Means for
+specialists are over trained objects only.}
+\label{tab:real_main}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}l ccc ccc ccc ccc ccc ccc ccc cc@{}}
+\toprule
+& \multicolumn{3}{c}{Mushroom} & \multicolumn{3}{c}{Grape} & \multicolumn{3}{c}{Tomato}
+& \multicolumn{3}{c}{Padr\'on pepper} & \multicolumn{3}{c}{Cherry tomato}
+& \multicolumn{3}{c}{Strawberry} & \multicolumn{3}{c}{Tofu}
+& \multirow{2}{*}{\shortstack{Mean\\Succ}} & \multirow{2}{*}{\shortstack{Mean\\Safe}} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}\cmidrule(lr){11-13}\cmidrule(lr){14-16}\cmidrule(lr){17-19}\cmidrule(lr){20-22}
+Method & Succ & Safe & S-Safe & Succ & Safe & S-Safe & Succ & Safe & S-Safe
+& Succ & Safe & S-Safe & Succ & Safe & S-Safe & Succ & Safe & S-Safe
+& Succ & Safe & S-Safe & & \\
+\midrule
+Point-cloud DP (real)            & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- \\
+RGB DP (real)                    & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- \\
+$\pi_{0.5}$ (VLA)~\cite{pi05}    & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- \\
+Point-cloud DP specialist        & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- \\
+RGB DP specialist                & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- \\
+RGB--tactile DP (real)           & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- \\
+\midrule
+\textbf{Ours (sim+real cotrain)} & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- \\
+\bottomrule
+\end{tabular}}
+\end{table*}
