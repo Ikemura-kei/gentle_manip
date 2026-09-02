@@ -14,7 +14,7 @@ H     = 336
 FPS   = 14
 CRF   = 28           # 448px keeps it well above the first pass; fits 16MB with OOD
 GAP   = 0.3
-CLIPCAP = 7.0        # seconds of each source clip (pre-2x) -> caps montage length / size
+CLIPCAP = 40.0       # no effective cap: _trim_eval_clips already bounds success clips to fss+16 (keeps full recovery); do NOT re-cut here
 
 
 def main():

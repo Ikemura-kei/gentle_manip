@@ -100,8 +100,20 @@ def main():
     nR = sum(1 for c in INDOMAIN+OOD if load(re_, c))
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     frag = [
-        '<h2>Act 3.5 &mdash; Cross-category generalist eval <span style="font-family:\'IBM Plex Mono\',monospace;'
+        '<h2>Headline result &mdash; cross-category generalist eval <span style="font-family:\'IBM Plex Mono\',monospace;'
         'font-size:.7rem;color:var(--warm)">LIVE</span></h2>',
+        '<div style="border-left:3px solid var(--accent);padding:.6rem 0 .6rem 1rem;margin:.4rem 0 1.2rem;'
+        'background:color-mix(in srgb, var(--accent) 6%, transparent)">'
+        '<b>Verdict.</b> The direct regrasp generalist beats the grasp-at-once baseline on both '
+        'metrics. <b>In-domain (7 cats):</b> success rate <b>0.63 vs 0.50</b>, gentleness '
+        '<b>0.77 vs 0.75</b>. <b>OOD zero-shot (blackberry, scallop):</b> SR <b>0.74 vs 0.68</b>, '
+        'gentleness <b>0.60 vs 0.56</b>. The gain is <i>recovery-driven</i>: after the v2 fixes (a '
+        'point-cloud &ldquo;object-in-gripper&rdquo; cue that de-aliases commit-vs-reopen, a settled '
+        'hold-tail so the arm stops carrying objects back down, three eval-harness bugs) <i>both</i> '
+        'policies grasp at reasonable gentleness &mdash; the regrasp policy additionally re-approaches '
+        'a missed grasp, so it lands the lift far more often (egg 1.00 vs 0.70, kiwi 0.88 vs 0.62). '
+        '<span style="color:var(--ink-muted)">Both weak on the &le;2&nbsp;cm fruit (grape/cherry/'
+        'raspberry) &mdash; a sim-fidelity limit at that scale. tomato excluded (scene bug).</span></div>',
         f'<p>The 8-object regrasp generalist (<b>ours</b>, ~4.4k diverse-start demos incl. recovery starts) vs the '
         f'<b>non-regraspable baseline</b> (same data &amp; architecture, the <span class="tag tag-fail">failed_grasp</span> '
         f'recovery family removed). Canonical harness: <b>100 rollouts / category</b>, EE start spanning home&harr;near-object, '

@@ -7,8 +7,36 @@ PY=$SP/gen8tools/bin/python
 MDIR=$SP/montages
 CATS="mushroom banana_lying kiwi egg_boiled grape cherry tomato raspberry blackberry scallop dumpling gelatin"
 
-BE=$(ls -dt $REPO/logs/dppo/dppo-pretrain/single_lift_gen8_baseline_pcd/*/gen_eval_* 2>/dev/null | head -1)
-RE=$(ls -dt $REPO/logs/dppo/dppo-pretrain/single_lift_gen8_regrasp_pcd/*/gen_eval_* 2>/dev/null | head -1)
+# gen8 v2: pick, per model, the CURRENT run's gen_eval_* dir with the MOST completed
+# categories (summary.json count), newest on tie -- so a just-started re-eval (0 cats)
+# doesn't wipe the page while an earlier run of the same policy still has data.
+# Override with BE_DIR / RE_DIR.
+_pick() {  # $1 = glob of candidate dirs
+  local best="" bn=-1 d n
+  for d in $(ls -dt $1 2>/dev/null); do
+    n=$(ls "$d"/*/summary.json 2>/dev/null | wc -l)
+    [ "$n" -gt "$bn" ] && { bn=$n; best=$d; }
+  done
+  echo "$best"
+}
+BE=${BE_DIR:-$(_pick "$REPO/logs/dppo/dppo-pretrain/single_lift_gen8_baseline_pcd/dthox/gen_eval_*")}
+# regrasp: the FINAL (state_300) eval dir is authoritative; backfill any cat it hasn't
+# reached yet from the state_225 preliminary so the page never regresses. RFINAL's own
+# real result overwrites (cp -n won't clobber, so remove the stale copy first if RFINAL
+# now has its own -- handled by rm before cp).
+RFINAL=${RE_DIR:-$(ls -dt "$REPO"/logs/dppo/dppo-pretrain/single_lift_gen8_regrasp_pcd/lorap/gen_eval_*_final 2>/dev/null | head -1)}
+RPRELIM="$REPO/logs/dppo/dppo-pretrain/single_lift_gen8_regrasp_pcd/lorap/gen_eval_20260901_195735_fast_state_225"
+if [ -n "$RFINAL" ] && [ -d "$RPRELIM" ]; then
+  for c in $(ls "$RPRELIM" 2>/dev/null); do
+    [ -f "$RPRELIM/$c/summary.json" ] || continue
+    # RFINAL has its own real result (not a backfill marker) -> leave it
+    [ -f "$RFINAL/$c/.s225_backfill" ] && [ -f "$RFINAL/$c/summary.json" ] && continue
+    if [ ! -f "$RFINAL/$c/summary.json" ]; then
+      cp -r "$RPRELIM/$c" "$RFINAL/" && touch "$RFINAL/$c/.s225_backfill"
+    fi
+  done
+fi
+RE=${RFINAL:-$(_pick "$REPO/logs/dppo/dppo-pretrain/single_lift_gen8_regrasp_pcd/lorap/gen_eval_*")}
 echo "baseline eval: ${BE:-none}"
 echo "regrasp  eval: ${RE:-none}"
 
@@ -19,7 +47,7 @@ done
 
 # size guard: in-domain montages always embedded; OOD only if total stays well under 16MB
 INDOM_KB=$(du -ck $MDIR/montage_*_{mushroom,banana_lying,kiwi,egg_boiled,grape,cherry,tomato,raspberry}.mp4 2>/dev/null | tail -1 | cut -f1)
-ALL_KB=$(du -ck $MDIR/*.mp4 2>/dev/null | tail -1 | cut -f1)
+ALL_KB=$(du -ck $MDIR/montage_*.mp4 2>/dev/null | tail -1 | cut -f1)   # only the gen8 montages, not the showcase/demo clips also living here
 # b64 inflates ~1.33x; ~4 MB of demo clips already in the file; artifact cap 16 MB.
 EMBED_OOD=1
 [ "${ALL_KB:-0}" -gt 8600 ] && EMBED_OOD=0
