@@ -727,3 +727,24 @@ uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.p
   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
   --record dataset/real_deploy/xdxvc800_3_h16 --shard-size 10 \
   --max-steps 5000
+
+# ── REAL-WORLD MAIN-TABLE BASELINES (h16, 141 real eps, no sim) — 2026-09-02 ──
+# Both REQUIRE --act-steps 16. Each uses its OWN normalization (they are standalone policies).
+#
+# (1) PURE-REAL POINT-CLOUD DP  (tiatg, val low @520)
+# ckpt=logs/dppo/dppo-pretrain/single_lift_generalist_real7/tiatg/checkpoint/state_500.pt
+# normalization=dataset/dppo/single_lift_generalist_real7/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --act-steps 16 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/tiatg500_purereal_pc --shard-size 10 --max-steps 5000
+#
+# (2) RGB DP (uirro, val low @320) — ⚠ NOT deployable with deploy_real_dppo.py as-is: that
+#     adapter builds a PointNetDiffusionMLP and feeds `point_cloud`. An RGB deploy needs a
+#     VisionDiffusionMLP branch + 96x96 cam_ext frames in the obs (obs config
+#     point_cloud_1cam_armfocus_rgb.yaml already records image_cam_ext). TODO before the RGB
+#     row of the real table can be measured on-robot.
+# ckpt=logs/dppo/dppo-pretrain/single_lift_real7_rgb/uirro/checkpoint/state_300.pt
+# normalization=dataset/dppo/single_lift_real7_rgb/normalization.npz

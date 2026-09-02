@@ -444,6 +444,32 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-09-02 (night) — Real-world main-table baselines trained: MODALITY barely matters,
+SIM PRETRAINING matters a lot (offline metric).** Three runs, identical arch (PointNet or ViT
++ [3072]^3 MLP), proprio, horizon 16, batch/lr/schedule; the same 141 real teleop eps:
+
+| policy | best val (16-step chunk) | @epoch | behaviour after low |
+|---|---|---|---|
+| point cloud, pure real (tiatg) | 0.0113 | 520 | overfits -> 0.0160 @1200 |
+| RGB 96x96 ViT, pure real (uirro) | 0.0110 | 320 | overfits -> 0.0175 @1200 |
+| **point cloud, SIM-PRETRAINED (xdxvc)** | **0.0073** | 600 | **flat through 800** |
+
+RGB ~= point cloud on held-out loss (0.0110 vs 0.0113, indistinguishable), while sim
+pretraining is worth ~35% AND acts as a regularizer (no overfit where both pure-real runs turn
+by ep320-520). Figure: examples/sim2real_diagnose/figures/real_baselines_val.png.
+⚠ This is an OFFLINE proxy — the real-table numbers are on-robot success/safe rate, and the
+RGB run carries two flagged caveats (full-frame vs the cloud's crop+arm-focus prior;
+from-scratch ViT rather than ImageNet-pretrained ResNet18). Recommended ckpts: tiatg
+state_500, uirro state_300 (both keep 12 ckpts).
+⚠ RGB is NOT yet deployable: deploy_real_dppo.py hardcodes the PointNet branch; an RGB deploy
+adapter (VisionDiffusionMLP + image obs) is TODO before that row of the real table exists.
+Dataset/config additions: convert_demos --images/--image-size (additive), cfg
+pre_diffusion_rgb.yaml, dataset dataset/dppo/single_lift_real7_rgb.
+Process note (repeat offender): a chain script's `pgrep -f "dppo.train.*<env>"` wait-condition
+matched one of the agent's OWN shell wrappers, so the queued run never fired — always use
+bracketed patterns (`[d]ppo.train`) in wait/kill conditions.
+
+
 **2026-09-02 (evening) — LONGER ACTION CHUNKS FIX THE HESITATION (confirmed on the robot).**
 xdxvc (cvzth sim-generalist -> real7 finetune, horizon 4 -> 16, deployed with --act-steps 16):
 across 6 checkpoints / 10 episodes there were **0 abort waves**, and the commanded width lands
