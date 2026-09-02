@@ -636,3 +636,19 @@ uv run --project envs/deploy python -m gentle_manip.demos.record \
   --input spacemouse-kb \
   --description "${obj}: 20 real eps, generalist-cotrain + pi0.5 RGB baseline" \
   --show-pointcloud
+
+# ── REAL-ONLY generalist (run xgwhc, 7-object real BC, 141 eps) — added 2026-09-02 ──
+# Trained LOCALLY on dataset/dppo/single_lift_generalist_real7 (the 09-01 paired-RGB bundle,
+# plain DiffusionModel, [3072]^3, stopped early at ep~1385 on val overfit).
+# RECOMMENDED ckpt: state_1000 (val low at ep1118); conservative: state_750.
+# Same obs/action wiring as collection: armfocus cloud view + 7d euler ABSOLUTE actions.
+#
+# ckpt=logs/dppo/dppo-pretrain/single_lift_generalist_real7/xgwhc/checkpoint/state_1000.pt
+# normalization=dataset/dppo/single_lift_generalist_real7/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/xgwhc1000_real7 --shard-size 10 \
+#   --max-steps 5000
