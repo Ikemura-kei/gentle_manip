@@ -580,15 +580,15 @@
 # all DPPO deploys run in dppo_deploy) and the standard safety knobs added
 # (--smooth-alpha / --max-pos-step-m, conservative motion).
 #
-# ckpt=downloaded_runs/cvzth/checkpoint/state_80.pt
-# normalization=downloaded_runs/cvzth/normalization.npz
-# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
-#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
-#   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-#   --record dataset/real_deploy/cvzth80_generalist --shard-size 10 \
-#   --max-steps 5000
+ckpt=downloaded_runs/cvzth/checkpoint/state_80.pt
+normalization=downloaded_runs/cvzth/normalization.npz
+uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+  --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+  --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+  --record dataset/real_deploy/cvzth80_generalist --shard-size 10 \
+  --max-steps 5000
 
 # GENERALIST 12-object + ALL 7 REAL objects (cluster run zdwii, ckpt 91) — added 2026-09-02.
 # THE LATEST GENERALIST TRAINED WITH REAL-WORLD DATA. Dataset
@@ -662,7 +662,7 @@
 #   - one run per object; task name = single_lift_<object>_real (naming convention);
 #     --description is stored in the run's config.yaml — put the object + intent there.
 #
-# obj=tofu   # repeat per object: mushroom strawberry cherry_tomato raspberry tomato tofu ...
+# obj=red_cube   # repeat per object: mushroom strawberry cherry_tomato raspberry tomato tofu ...
 # uv run --project envs/deploy python -m gentle_manip.demos.record \
 #   --setup gentle_manip/configs/setup/real_lab.yaml \
 #   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus_rgb.yaml \
@@ -681,12 +681,27 @@
 #
 # NOTE: state_2250 exists only in the FULL run xagzg (xgwhc early-stopped at 1250) —
 # run corrected accordingly; record path tracks the ckpt actually deployed.
-ckpt=logs/dppo/dppo-pretrain/single_lift_generalist_real7/xagzg/checkpoint/state_2250.pt
-normalization=dataset/dppo/single_lift_generalist_real7/normalization.npz
-uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-  --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
-  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
-  --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/xagzg2250_real7 --shard-size 10 \
-  --max-steps 5000
+# ckpt=logs/dppo/dppo-pretrain/single_lift_generalist_real7/xagzg/checkpoint/state_1500.pt
+# normalization=dataset/dppo/single_lift_generalist_real7/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/xagzg2250_real7 --shard-size 10 \
+#   --max-steps 5000
+
+# ── SIM-PRETRAIN -> REAL-FINETUNE generalist (zjdmn: cvzth/state_80 + 141 real eps) — 2026-09-02 ──
+# The mode-conflict fix, insurance track: decisive sim close style finetuned to real-gentle
+# depths (lr 1e-5, 400 ep, val flat 0.0026-0.0035, NO overfit). RECOMMENDED ckpt state_280.
+# NOTE normalization = cvzth's JOINT stats (finetune data was renormalized into them).
+#
+# ckpt=logs/dppo/dppo-pretrain/single_lift_real7_cvzthnorm/zjdmn/checkpoint/state_280.pt
+# normalization=downloaded_runs/cvzth/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/zjdmn280_ft --shard-size 10 \
+#   --max-steps 5000
