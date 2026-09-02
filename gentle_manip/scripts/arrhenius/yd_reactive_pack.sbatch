@@ -56,7 +56,7 @@ PYH
       --experiment single_lift_xcat_diverse --task-name single_lift_xcat_reactive \
       --n-episodes 4000 --n-envs "$N_ENVS" --maxfevals "$MAXFEVALS" \
       --scene-dr-every 1 --seed "$SEED" --start-modes "$START_MODES" \
-      --reactive --reactive-prob 0.85 \
+      --reactive --reactive-prob 0.85 --reactive-speed 0.15 0.48 \
       --per-cat-target "$PER_CAT_TARGET" --cat-have "${CAT_HAVE:-}" \
       --crush-frac 1.20 --record-video 0 --out-dir "$REPO/dataset/demos"
   ) > "$LOG" 2>&1 &

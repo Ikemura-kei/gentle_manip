@@ -484,11 +484,14 @@ def execute_and_collect_diverse_v2(
         cur_obs_list = next_obs_list
         prev_pos[:], prev_quat[:], prev_grip[:] = cp, cq, cg
 
-        # REACTIVE re-target: once the drag window has closed for an env and the object
-        # has actually moved, shift the scripted grasp/lift targets by the observed
-        # object displacement and re-enter the approach phase from the current EE pose.
+        # REACTIVE re-target: WAIT for the object to stop sliding after the drag
+        # (rx_hold + RX_SETTLE frames), then shift the scripted grasp/lift targets by
+        # the object's FINAL displacement and re-enter the approach phase from the
+        # current EE pose. Reading mid-slide (the old bug) re-targeted to a spot the
+        # object had already left -> grasp missed.
+        RX_SETTLE = 16
         if reactive:
-            done_drag = (rx_fire >= 0) & (it >= rx_fire + rx_hold) & (rx_retargets < 2)
+            done_drag = (rx_fire >= 0) & (it >= rx_fire + rx_hold + RX_SETTLE) & (rx_retargets < 2)
             for i in np.nonzero(done_drag & active)[0]:
                 obj_now = np.asarray(state["object_center"][i], np.float32)
                 disp = obj_now - obj_at_plan[i]
@@ -570,7 +573,7 @@ def main() -> None:
     p.add_argument("--reactive", action="store_true",
                    help="collect reactive-recovery demos: random mid-approach object drag + scripted re-target")
     p.add_argument("--reactive-prob", type=float, default=0.6)
-    p.add_argument("--reactive-speed", type=float, nargs=2, default=[0.30, 0.85])
+    p.add_argument("--reactive-speed", type=float, nargs=2, default=[0.15, 0.50])
     p.add_argument("--reactive-frame", type=int, nargs=2, default=[12, 45],
                    help="recorded-loop iter window to start the drag (during approach)")
     p.add_argument("--per-cat-target", type=int, default=0,
