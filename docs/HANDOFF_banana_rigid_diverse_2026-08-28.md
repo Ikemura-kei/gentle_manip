@@ -1382,3 +1382,20 @@ LARGE-4 mean: SR 0.86 -> 0.71 (-0.15). Gentleness ~held.
   cost anything on the undisturbed task.
 - Next: 3-way per-cat table [RX lorap-zeroshot-reactive / v3-reactive / v3-clean]; KEY question
   = did v3 recover the -0.15 large-object SR gap the drag opened, keeping gentleness.
+
+## 2026-09-02 11:25 — user feedback: perturbation freq, tomato, OOD montages
+- Reactive eval perturbation was too subtle (visible object slide ~1/3 rollouts). Bumped
+  object_perturb_prob 0.75->0.90, speed [0.30,0.85]->[0.40,0.95] in all 16
+  eval_cat_*_reactive.yaml. Killed the slow first reactive eval (1914946, only batch 1-2/12
+  after 33min under contention), relaunched as 1915481.
+- tomato "flashes away" root-caused: E=8.0e5 at grid300 = CFL-unstable, 2cm MPM body
+  explodes on grasp contact -> NaN -> sim worker socket closes mid-eval ([tomato] eval
+  failed, no summary.json), and the exploded centroid trips a false lifted-clear success
+  (batches 1-4 all showed 1.00 before the crash). Fix: tomato E 8.0e5->5.0e5 (tracks
+  cherry's 4.0e5, same mesh, stable), E-DR top 1.5->1.3, substeps_override 380->480.
+  Re-evaluating tomato: 1915498 (baseline dthox) + 1915499 (regrasp lorap), n=40, RB=2.
+- OOD montages were missing from the webpage: gen8_refresh.sh size guard counted ALL
+  $MDIR/*.mp4 (incl. the ~25MB of reactive/snap/verify showcase clips living in that dir)
+  -> ALL_KB >> 8600 -> EMBED_OOD=0 always. Fixed guard to count montage_*.mp4 only
+  (real montage set is 4.1MB: in-domain 2.6 + OOD 1.5). OOD will embed on next refresh.
+- Queue: 1915481 reactive-eval, 1915094 v3-clean, 1915498/1915499 tomato. ikemura flooding.
