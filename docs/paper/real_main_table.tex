@@ -1,5 +1,8 @@
 % MAIN real-world experiment table — TEMPLATE (all cells placeholder "--").
 % 7 methods x 7 real objects x 3 metrics, grouped-header layout matching e1_table.tex.
+% Specialist rows: currently only the MUSHROOM specialist is planned/trained -> its cells are
+% placeholders and the other six objects are N/A; flip N/A -> ... per object as more
+% specialists get trained (means stay over trained objects only, per the caption).
 % Metrics (define once in text): Succ = lift-and-hold success rate (%); Safe = fraction of
 % episodes where the object was NOT damaged, UNCONDITIONAL on success (a dropped-but-intact
 % object counts safe; a lifted-but-bruised one does not); S-Safe = safe fraction among
@@ -25,14 +28,14 @@ Method & Succ & Safe & S-Safe & Succ & Safe & S-Safe & Succ & Safe & S-Safe
 & Succ & Safe & S-Safe & Succ & Safe & S-Safe & Succ & Safe & S-Safe
 & Succ & Safe & S-Safe & & \\
 \midrule
-Point-cloud DP (real)            & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- \\
-RGB DP (real)                    & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- \\
-$\pi_{0.5}$ (VLA)~\cite{pi05}    & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- \\
-Point-cloud DP specialist        & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- \\
-RGB DP specialist                & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- \\
-RGB--tactile DP (real)           & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- \\
+Point-cloud DP (real)            & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... \\
+RGB DP (real)                    & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... \\
+$\pi_{0.5}$ (VLA)~\cite{pi05}    & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... \\
+Point-cloud DP specialist        & ... & ... & ... & N/A & N/A & N/A & N/A & N/A & N/A & N/A & N/A & N/A & N/A & N/A & N/A & N/A & N/A & N/A & N/A & N/A & N/A & ... & ... \\
+RGB DP specialist                & ... & ... & ... & N/A & N/A & N/A & N/A & N/A & N/A & N/A & N/A & N/A & N/A & N/A & N/A & N/A & N/A & N/A & N/A & N/A & N/A & ... & ... \\
+RGB--tactile DP (real)           & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... \\
 \midrule
-\textbf{Ours (sim+real cotrain)} & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- \\
+\textbf{Ours (sim+real cotrain)} & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... & ... \\
 \bottomrule
 \end{tabular}}
 \end{table*}
