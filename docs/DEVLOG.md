@@ -444,6 +444,24 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-09-02 — Real-deploy hesitation ROOT-CAUSED: close-INITIATION is a minority diffusion
+mode under stochastic human close timing (not gripper speed, not actuation lag, not only the
+sim/real style conflict).** Diagnostic chain (figures in examples/sim2real_diagnose/figures/):
+(1) deploy gripper traces (3 policies): cotrained = command-level close/abort waves; sim-only
+= decisive deep close (crushes); real-only = smooth but timid. Obs tracks commands -> lag
+refuted. (2) cvzth->real finetune (zjdmn, lr 1e-5, 400ep, val 0.0026 flat, NO overfit; ckpt
+state_280) still never closes (min cmd 71-88mm). (3) teacher-forced probes: policy matches
+demo actions EXACTLY on mid-close states; reaches demo close-onset height at deploy; but at
+PRE-onset states only ~1/3-1/5 samples initiate closing (demo: firm 1.0->0.81 chunk). Human
+timing stochasticity dilutes per-state initiation probability; receding-horizon re-sampling
+(act 4) keeps drawing hover -> hesitation. Sim's scripted deterministic timing masks this.
+RECOMMENDED (standard, no data change): longer action chunks (act/horizon 4 -> ~16), the
+canonical fix for exactly this; complements (does not replace) the close-style question the
+v5 discussion covers. Encoder probe (paired red-cube): PairedReg encoders align sim/real
+features well (cos .95-.99 vs .69 unreg) but cotrained alignment dips exactly in the grasp
+window. Runs: zjdmn (finetune), paired replay + probes under sim2real_diagnose/figures/.
+
+
 **2026-09-01 — REAL paired-RGB demo campaign COMPLETE: 7 objects x 20(-21) eps, 141 episodes,
 all runs VERIFIED PASS.** Teleop (SpaceMouse pose + Z/X gripper), obs =
 `point_cloud_1cam_armfocus_rgb.yaml` (generalist student cloud view + PAIRED in-obs
