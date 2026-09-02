@@ -102,7 +102,7 @@
 #   --shard-size 10 \
 #   --max-steps 5000
 
-# ckpt=logs/dppo/dppo-pretrain/single_lift_mushroom_soft_abs_pcd_rot6d/bwvei/checkpoint/state_400.pt
+# ckpt=logs/dppo/dppo-pretrain/single_lift_mushroom_soft_abs_pcd_rot6d/bwvei/checkpoint/state_600.pt   # val low; state_400 = user's mid-run test
 # normalization=dataset/dppo/single_lift_mushroom_soft_abs_pcd_rot6d/normalization.npz
 # uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
 #   --normalization ${normalization} \
@@ -186,7 +186,7 @@
 #   --shard-size 10 \
 #   --max-steps 5000
   
-# ckpt=/home/kei/kei/gentle_manip/logs/dppo/dppo-pretrain/single_lift_mushroom_rigid/vqgsn/checkpoint/state_400.pt
+# ckpt=/home/kei/kei/gentle_manip/logs/dppo/dppo-pretrain/single_lift_mushroom_rigid/vqgsn/checkpoint/state_600.pt   # val low; state_400 = user's mid-run test
 # normalization=/home/kei/kei/gentle_manip/dataset/dppo/single_lift_mushroom_rigid/26-08-19-ibx/normalization.npz
 # # vqgsn trained with the ARM-FOCUS cloud (superset_rigid_armfocus) -> deploy with the matching
 # # arm-focus obs (point_cloud_1cam_armfocus), NOT plain outlier, or the cloud distribution won't match.
@@ -218,7 +218,7 @@
 #   --shard-size 10 \
 #   --max-steps 5000
 
-# ckpt=/home/kei/kei/gentle_manip/downloaded_runs/jfhlu/checkpoint/state_400.pt
+# ckpt=/home/kei/kei/gentle_manip/downloaded_runs/jfhlu/checkpoint/state_600.pt   # val low; state_400 = user's mid-run test
 # normalization=/home/kei/kei/gentle_manip/dataset/dppo/single_lift_mushroom_soft_abs_pcd_hwo/normalization.npz
 # uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
 #   --normalization ${normalization} \
@@ -270,7 +270,7 @@
 #   * REAL TABLE PLACEMENT: object inside x [0.29, 0.48], y [-0.11, 0.11] (robot-base frame)
 #     — the realws box this policy trained on.
 #
-# ckpt=downloaded_runs/afucm/checkpoint/state_400.pt
+# ckpt=downloaded_runs/afucm/checkpoint/state_600.pt   # val low; state_400 = user's mid-run test
 # normalization=downloaded_runs/afucm/normalization.npz
 
 # uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
@@ -476,7 +476,7 @@
 # Verified: normalization identical to lulkx's and clean; 28 keys, no paired-reg extras; probe
 # PASSES (cmd z 0.1983 +-0.8 mm descending — the tightest spread of the family, grip 80.0 mm).
 #
-# ckpt=downloaded_runs/mqlxj/checkpoint/state_400.pt
+# ckpt=downloaded_runs/mqlxj/checkpoint/state_600.pt   # val low; state_400 = user's mid-run test
 # normalization=downloaded_runs/mqlxj/normalization.npz
 
 # uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
@@ -495,7 +495,7 @@
 # Because the two differ ONLY by seed, running both measures seed variance on the real robot —
 # useful context for reading any single real number, since our real trial counts are ~30.
 #
-# ckpt=downloaded_runs/avfnp/checkpoint/state_400.pt
+# ckpt=downloaded_runs/avfnp/checkpoint/state_600.pt   # val low; state_400 = user's mid-run test
 # normalization=downloaded_runs/avfnp/normalization.npz
 
 # uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
@@ -563,7 +563,7 @@
 # normalization MUST be orkam's own (v33 union stats — new collection, NOT afucm's).
 # REAL TABLE PLACEMENT: x [0.29, 0.48], y [-0.11, 0.11] (robot-base frame).
 #
-# ckpt=downloaded_runs/orkam/checkpoint/state_400.pt
+# ckpt=downloaded_runs/orkam/checkpoint/state_600.pt   # val low; state_400 = user's mid-run test
 # normalization=downloaded_runs/orkam/normalization.npz
 # uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
 #   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
@@ -696,15 +696,15 @@
 # depths (lr 1e-5, 400 ep, val flat 0.0026-0.0035, NO overfit). RECOMMENDED ckpt state_280.
 # NOTE normalization = cvzth's JOINT stats (finetune data was renormalized into them).
 #
-ckpt=logs/dppo/dppo-pretrain/single_lift_real7_cvzthnorm/zjdmn/checkpoint/state_400.pt
-normalization=downloaded_runs/cvzth/normalization.npz
-uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-  --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
-  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
-  --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/zjdmn400_ft --shard-size 10 \
-  --max-steps 5000
+# ckpt=logs/dppo/dppo-pretrain/single_lift_real7_cvzthnorm/zjdmn/checkpoint/state_600.pt   # val low; state_400 = user's mid-run test
+# normalization=downloaded_runs/cvzth/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/zjdmn400_ft --shard-size 10 \
+#   --max-steps 5000
 
 # ── LONG-CHUNK finetune (xdxvc: cvzth base, horizon 16) — 2026-09-02 ──
 # The close-INITIATION fix: horizon_steps 4 -> 16 so a sampled close is EXECUTED long enough
@@ -717,13 +717,13 @@ uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.p
 #   the run's .hydra/config.yaml automatically.
 # ⚠ normalization = cvzth's JOINT stats (the finetune data was renormalized into them).
 #
-# ckpt=logs/dppo/dppo-pretrain/single_lift_real7_cvzthnorm/xdxvc/checkpoint/state_400.pt
-# normalization=downloaded_runs/cvzth/normalization.npz
-# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
-#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
-#   --act-steps 16 \
-#   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-#   --record dataset/real_deploy/xdxvc400_h16 --shard-size 10 \
-#   --max-steps 5000
+ckpt=logs/dppo/dppo-pretrain/single_lift_real7_cvzthnorm/xdxvc/checkpoint/state_720.pt
+normalization=downloaded_runs/cvzth/normalization.npz
+uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+  --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+  --act-steps 16 \
+  --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+  --record dataset/real_deploy/xdxvc720_h16 --shard-size 10 \
+  --max-steps 5000
