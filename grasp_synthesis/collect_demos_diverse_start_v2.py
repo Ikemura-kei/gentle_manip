@@ -254,6 +254,8 @@ def execute_and_collect_diverse_v2(
     yield_stress: Optional[float] = None,   # soft only: reject episodes whose top10 von Mises exceeds this
     crush_frac: float = 1.25,
     task_name_hint: Optional[str] = None,
+    reactive: Optional[dict] = None,        # {"prob","speed":(lo,hi),"hold":int,"frame":(lo,hi)} or None:
+                                            # random mid-approach object drag + scripted re-target
 ):
     """Per-env phase FSM (like collect_demos_synth_v3): every env advances through
     approach -> settle -> grasp -> lift -> hold independently, so a mode with a
@@ -397,6 +399,26 @@ def execute_and_collect_diverse_v2(
     phase_idx  = np.zeros(num_envs, np.int64)
     phase_step = np.zeros(num_envs, np.int64)
 
+    # ── REACTIVE: a random lateral drag on the object mid-approach, then re-target the
+    #    scripted grasp to the object's new position and re-enter the approach phase.
+    #    `reactive` = {"prob","speed":(lo,hi),"hold":int,"frame":(lo,hi)} or None.
+    rx_vel = np.zeros((num_envs, 3), np.float32)   # per-frame drag velocity (0 => no drag)
+    rx_fire = np.full(num_envs, -1, np.int64)      # recorded-loop iter to start the drag
+    rx_hold = 4
+    if reactive:
+        rx_hold = int(reactive.get("hold", 4))
+        lo_s, hi_s = reactive["speed"]
+        lo_f, hi_f = reactive.get("frame", (10, 40))
+        for i in range(num_envs):
+            if labels[i] == "failed_grasp" or rng.random() >= reactive["prob"]:
+                continue
+            th = rng.uniform(0, 2 * np.pi); sp = rng.uniform(lo_s, hi_s)
+            rx_vel[i] = (np.cos(th) * sp, np.sin(th) * sp, 0.0)
+            rx_fire[i] = int(rng.integers(int(lo_f), int(hi_f) + 1))
+    rx_retargets = np.zeros(num_envs, np.int64)
+    obj_at_plan = obj_center.copy()
+    it = 0
+
     while np.any(phase_idx < N_PHASES):
         active = phase_idx < N_PHASES
         cp = np.zeros((num_envs, 3), np.float32)
@@ -407,6 +429,21 @@ def execute_and_collect_diverse_v2(
                 cp[i], cq[i], cg[i] = _env_target(i, int(phase_idx[i]), int(phase_step[i]))
             else:
                 cp[i], cq[i], cg[i] = lift_b[i], quat_b[i], width_cls[i]
+
+        # REACTIVE drag: hold the object velocity for rx_hold frames from rx_fire (only
+        # while still approaching -- phase 1/2). Applied BEFORE worker.step so it takes
+        # this frame.
+        if reactive and object_type != "rigid":
+            dragging = active & (rx_fire >= 0) & (it >= rx_fire) & (it < rx_fire + rx_hold) \
+                       & np.isin(phase_idx, (1, 2))
+            for i in np.nonzero(dragging)[0]:
+                try:
+                    obj0 = worker.handle.objects[0]
+                    npart = int(np.asarray(worker.handle.object_base_particles[0]).reshape(num_envs, -1, 3).shape[1])
+                    obj0.set_particles_vel(np.tile(rx_vel[i], (npart, 1)).astype(np.float32),
+                                           envs_idx=[int(i)])
+                except Exception as ex:
+                    print(f"  [reactive] env {int(i)} drag failed: {ex}", flush=True)
 
         if action_config.mode == "absolute":
             actions = v1._invert_actions_absolute(cp, cq, cg, action_config)
@@ -447,6 +484,32 @@ def execute_and_collect_diverse_v2(
         cur_obs_list = next_obs_list
         prev_pos[:], prev_quat[:], prev_grip[:] = cp, cq, cg
 
+        # REACTIVE re-target: once the drag window has closed for an env and the object
+        # has actually moved, shift the scripted grasp/lift targets by the observed
+        # object displacement and re-enter the approach phase from the current EE pose.
+        if reactive:
+            done_drag = (rx_fire >= 0) & (it >= rx_fire + rx_hold) & (rx_retargets < 2)
+            for i in np.nonzero(done_drag & active)[0]:
+                obj_now = np.asarray(state["object_center"][i], np.float32)
+                disp = obj_now - obj_at_plan[i]
+                if float(np.hypot(disp[0], disp[1])) < 0.012:      # not enough to matter
+                    rx_fire[i] = -1
+                    continue
+                d3 = np.array([disp[0], disp[1], 0.0], np.float32)
+                pos_b[i] += d3; grasp_pos[i] += d3; lift_b[i] += d3
+                obj_center[i] = obj_now; obj_at_plan[i] = obj_now
+                ee_now = np.asarray(state["ee_pos"][i], np.float32)
+                start_pos[i] = ee_now
+                rec_slerps[i] = Slerp([0., 1.], Rot.concatenate(
+                    [_wxyz_to_rot(quat_b[i]), _wxyz_to_rot(quat_b[i])]))
+                n_appr[i] = max(24, v1.N_HOME_TO_PRE // 3)         # PHASE_DUR[1] shares this array
+                phase_idx[i] = 1; phase_step[i] = 0
+                rx_retargets[i] += 1
+                rx_fire[i] = -1                                    # one drag per env (retry loop caps re-targets)
+                print(f"  [reactive] env {int(i)} re-target: object moved "
+                      f"{np.round(disp[:2], 3).tolist()} m -> re-approach", flush=True)
+
+        it += 1
         phase_step[active] += 1
         dur_now = np.array([int(PHASE_DUR[min(int(p), N_PHASES - 1)][i])
                             for i, p in enumerate(phase_idx)])
@@ -504,6 +567,12 @@ def main() -> None:
     p.add_argument("--record-video", dest="record_video", nargs="?", type=int,
                    const=10**9, default=0,
                    help="record an RGB clip per saved episode; N = first N only")
+    p.add_argument("--reactive", action="store_true",
+                   help="collect reactive-recovery demos: random mid-approach object drag + scripted re-target")
+    p.add_argument("--reactive-prob", type=float, default=0.6)
+    p.add_argument("--reactive-speed", type=float, nargs=2, default=[0.30, 0.85])
+    p.add_argument("--reactive-frame", type=int, nargs=2, default=[12, 45],
+                   help="recorded-loop iter window to start the drag (during approach)")
     p.add_argument("--per-cat-target", type=int, default=0,
                    help="cross-category: once a category has this many demos (this run + "
                         "--cat-have preseed), DROP it from the pool so the rest get the "
@@ -561,6 +630,10 @@ def main() -> None:
                                                              # --per-cat-target are dropped so
                                                              # the rest get the freed budget
     per_cat_target = args.per_cat_target or 0
+    reactive_cfg = ({"prob": float(args.reactive_prob),
+                     "speed": tuple(args.reactive_speed), "hold": 4,
+                     "frame": tuple(args.reactive_frame)} if args.reactive else None)
+    if reactive_cfg: print(f"  [reactive] {reactive_cfg}")
     cat_saved: Dict[str, int] = {c: 0 for c in xcat_pool}
     for tok in filter(None, (t.strip() for t in args.cat_have.split(","))):
         k, _, v = tok.partition(":")
@@ -725,6 +798,7 @@ def main() -> None:
                 yield_stress=(scene_yield if xcat_pool else _yield),
                 crush_frac=args.crush_frac,
                 task_name_hint=(scene_cat if xcat_pool else task.object_name),
+                reactive=reactive_cfg,
             )
             print(f"  success: {success.tolist()}")
 
