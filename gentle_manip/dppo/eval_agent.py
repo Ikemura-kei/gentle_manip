@@ -59,6 +59,25 @@ class _DiffusionPolicy:
         # bug happened. Requires GM_WIDTH_NORM=<dataset>/normalization.npz.
         self._floor_margin = 0.0
         self._latch_drop = None      # normalized-unit drop that defines "closure has begun"
+        # FIRST-FRAME OBJECT CROP AT EVAL (2026-09-01). A policy trained with
+        # `train_dataset.obj_crop=true` + `model.network.obj_cond_mode=raw|embed` expects
+        # cond["obj_points"]; without it the eval feeds a DIFFERENT input than training saw.
+        # Enabled by GM_OBJ_CROP_NORM=<dataset>/normalization.npz (needed to de-normalize z_ee).
+        # The rule is IDENTICAL to pointcloud_dataset.obj_crop: ceiling = min(zmax, z_ee - margin),
+        # sampled/padded to K points, LATCHED on the first act() of the episode (the object is
+        # unoccluded only at t=0 -- recomputing later would read the occluded, in-gripper view,
+        # which is the exact mistake the width floor made before it was latched).
+        self._obj_norm = os.environ.get("GM_OBJ_CROP_NORM")
+        self._obj_latch = None
+        if self._obj_norm:
+            _nz = np.load(self._obj_norm)
+            self._o_lo, self._o_hi = _nz["obs_min"][:3], _nz["obs_max"][:3]
+            self._obj_zmax = float(os.environ.get("GM_OBJ_CROP_ZMAX", 0.15))
+            self._obj_margin = float(os.environ.get("GM_OBJ_CROP_MARGIN", 0.01))
+            self._obj_k = int(os.environ.get("GM_OBJ_CROP_POINTS", 128))
+            self._obj_rng = np.random.default_rng(0)
+            print(f"[eval] OBJ CROP active: ceiling min({self._obj_zmax}, z_ee-"
+                  f"{self._obj_margin}), {self._obj_k} pts, norm={self._obj_norm}", flush=True)
         self._w_open = None          # per-env commanded width on the episode's first act()
         margin_mm = float(os.environ.get("GM_WIDTH_FLOOR_MARGIN_MM", "0") or 0)
         latch_mm = float(os.environ.get("GM_WIDTH_FLOOR_LATCH_MM", "0") or 0)
@@ -292,6 +311,7 @@ class _DiffusionPolicy:
         # Latch on the first act() of each episode and hold.
         self._flush_dump()
         self._floor_latch = None
+        self._obj_latch = None          # object crop is per-EPISODE (see __init__)
         self._w_open = None
         self._act_calls = 0
         self._held_width = None
@@ -364,6 +384,23 @@ class _DiffusionPolicy:
             elif os.environ.get("GM_BLIND_GRIPPER_WIDTH"):
                 cond["state"] = cond["state"].clone()
                 cond["state"][..., -1] = 0.0
+            if self._obj_norm:
+                if self._obj_latch is None:        # latch on the FIRST act() of the episode
+                    pc = np.asarray(obs["point_cloud"])[:, -1]      # (n_env, N, 3) most recent
+                    st = np.asarray(obs["state"])[:, -1]            # (n_env, Do) normalized
+                    zee = (st[:, :3] + 1) / 2 * (self._o_hi - self._o_lo) + self._o_lo
+                    out = np.zeros((len(pc), self._obj_k, 3), np.float32)
+                    for i in range(len(pc)):
+                        q = pc[i]; q = q[np.any(q != 0, axis=1)]
+                        ceil = min(self._obj_zmax, float(zee[i, 2]) - self._obj_margin)
+                        c = q[q[:, 2] < ceil]
+                        if len(c):
+                            out[i] = c[self._obj_rng.choice(len(c), self._obj_k,
+                                                            replace=len(c) < self._obj_k)]
+                    self._obj_latch = torch.from_numpy(out).float().to(self.device)
+                    print(f"[eval] obj crop latched: {(np.abs(out).sum(axis=(1,2))>0).sum()}"
+                          f"/{len(out)} envs non-empty", flush=True)
+                cond["obj_points"] = self._obj_latch[:, None]       # (B,1,K,3)
             if self._cat_embed is not None:
                 # CATEGORY CONDITIONING AT EVAL (2026-08-27). The dataset supplies
                 # cond["category_embed"] during TRAINING, but the eval path never did — so a

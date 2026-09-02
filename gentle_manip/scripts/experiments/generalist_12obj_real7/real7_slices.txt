@@ -1,0 +1,7 @@
+cherry_tomato /nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip/dataset/transfer/real_paired_7obj_2026-09-01/single_lift_cherry_tomato_real/26-09-01-ezm
+grape /nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip/dataset/transfer/real_paired_7obj_2026-09-01/single_lift_grape_real/26-09-01-ioa
+mushroom /nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip/dataset/transfer/real_paired_7obj_2026-09-01/single_lift_mushroom_real/26-09-01-xlb
+padron_pepper /nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip/dataset/transfer/real_paired_7obj_2026-09-01/single_lift_padron_pepper_real/26-09-01-euq
+strawberry /nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip/dataset/transfer/real_paired_7obj_2026-09-01/single_lift_strawberry_real/26-09-01-biu
+tofu /nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip/dataset/transfer/real_paired_7obj_2026-09-01/single_lift_tofu_real/26-09-01-wbz
+tomato /nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip/dataset/transfer/real_paired_7obj_2026-09-01/single_lift_tomato_real/26-09-01-cfw

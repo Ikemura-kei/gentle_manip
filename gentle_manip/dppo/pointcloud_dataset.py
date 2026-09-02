@@ -21,6 +21,8 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
                  max_n_episodes=10000, device="cuda:0",
                  cloud_pose_jitter_trans=0.0, cloud_pose_jitter_rot_deg=0.0,
                  first_frame_context=False, aux_grasp_width=False,
+                 obj_crop=False, obj_crop_zmax=0.15, obj_crop_margin=0.01,
+                 obj_crop_points=128,
                  normalization_path=None, residual_width=False, width_window_weight=0.0,
                  blind_gripper_width=False, grasp_window_flag=False, blind_proprio=False,
                  gap_phase_json=None):
@@ -48,12 +50,52 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
         self.jit_rot = float(cloud_pose_jitter_rot_deg)
         self.first_frame_context = bool(first_frame_context)
         data = np.load(dataset_path, allow_pickle=False)
+        # FIRST-FRAME OBJECT CROP (2026-09-01). Once the object is between the fingers its points
+        # merge with the gripper's (measured: width-head corr 0.850 at phase 0.0 -> 0.565 at 0.6),
+        # and with pc_cond_steps=1 the policy never sees the pre-occlusion view again. This
+        # extracts the object from frame 0, where it is unoccluded.
+        #
+        # ADAPTIVE CEILING = min(obj_crop_zmax, z_ee(t=0) - obj_crop_margin). A FIXED 6 cm ceiling
+        # truncated tomato in 57.5% of episodes and prim_cylinder in 16.9%. The TCP sits just below
+        # the finger ends, so EVERYTHING gripper-related is ABOVE z_ee -> z_ee is the principled
+        # ceiling. EE height at t=0 is bimodal with an empty band (low/regrasp 6.6-13.6 cm, home
+        # 17.9-21.8 cm), so 79.2% of episodes get the full 15 cm cap and truncate nothing.
+        #
+        # Computed HERE from the cloud + proprio, NOT from a precomputed label file: it must run
+        # identically at eval/deploy, where only those two are available (user requirement).
+        self.obj_crop = bool(obj_crop)
         total = int(np.sum(data["traj_lengths"][:max_n_episodes]))
         self.point_clouds = torch.from_numpy(data["point_cloud"][:total]).float().to(device)
         # item 12: map every global step -> its episode's FIRST step (for the first-frame
         # context cloud). Never jittered — the anchor frame is the trustworthy view.
         # (Placed AFTER the data load; the first revision referenced `data` before it
         # existed -> UnboundLocalError, run gzjkf died at init.)
+        if self.obj_crop:
+            assert normalization_path, "obj_crop needs normalization_path to de-normalize z_ee"
+            _tl = data["traj_lengths"][:max_n_episodes]
+            _epf = np.concatenate([[0], np.cumsum(_tl)[:-1]]).astype(int)
+            _nz = np.load(normalization_path)
+            _lo, _hi = _nz["obs_min"][:3], _nz["obs_max"][:3]
+            _cl, _st = data["point_cloud"], data["states"]
+            K = int(obj_crop_points); _rng = np.random.default_rng(0)
+            _op = np.zeros((len(_epf), K, 3), np.float32)
+            _n = np.zeros(len(_epf), np.int32); _ceils = np.zeros(len(_epf), np.float32)
+            for _i, _e in enumerate(_epf):
+                _p = _cl[_e]; _p = _p[np.any(_p != 0, axis=1)]
+                _zee = (_st[_e, :3] + 1) / 2 * (_hi - _lo) + _lo
+                _c = min(float(obj_crop_zmax), float(_zee[2]) - float(obj_crop_margin))
+                _ceils[_i] = _c
+                _k = _p[_p[:, 2] < _c]
+                _n[_i] = len(_k)
+                if len(_k):
+                    _op[_i] = _k[_rng.choice(len(_k), K, replace=len(_k) < K)]
+            self.obj_points = torch.from_numpy(_op).float().to(device)
+            _eos = np.repeat(np.arange(len(_tl)), _tl)[:total]
+            self.ep_of_step = torch.from_numpy(_eos.astype(np.int64)).to(device)
+            print(f"[dataset] OBJ CROP: ceiling median {np.median(_ceils)*100:.1f}cm "
+                  f"(min {_ceils.min()*100:.1f}, max {_ceils.max()*100:.1f}); "
+                  f"points/episode mean {_n.mean():.1f} min {_n.min()} "
+                  f"({int((_n==0).sum())} EMPTY of {len(_n)}) -> padded/sampled to {K}", flush=True)
         if self.first_frame_context:
             tl = data["traj_lengths"][:max_n_episodes]
             firsts = np.repeat(np.concatenate([[0], np.cumsum(tl)[:-1]]), tl)[:total]
@@ -176,6 +218,8 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
         conditions["point_cloud"] = pc               # (pc_cond_steps, N, 3)
         if self.first_frame_context:
             conditions["first_point_cloud"] = self.point_clouds[self.first_idx[start]][None]  # (1,N,3)
+        if self.obj_crop:
+            conditions["obj_points"] = self.obj_points[self.ep_of_step[start]][None]  # (1,K,3)
         if self.aux_contact is not None:
             conditions["aux_contact"] = self.aux_contact[start]        # (1,) binary
         if self.aux_object_pos is not None:
