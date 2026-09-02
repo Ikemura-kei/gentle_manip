@@ -1,0 +1,12 @@
+raspberry /nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip/dataset/demos/single_lift_raspberry_soft_stable/26-08-30-iqe-filt
+cherry_tomato /nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip/dataset/demos/single_lift_cherry_tomato_soft/26-08-30-bqp-filt
+tomato /nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip/dataset/demos/single_lift_tomato_soft/26-08-30-hgx-filt
+tofu /nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip/dataset/demos/single_lift_tofu_soft/26-08-30-zwo-filt
+strawberry /nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip/dataset/demos/single_lift_strawberry_soft/26-08-30-mge-filt
+banana_chunk /nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip/dataset/demos/single_lift_banana_chunk_soft/26-08-31-phi-filt
+mushroom /nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip/dataset/demos/single_lift_mushroom_soft/26-08-30-urg-filt
+prim_cylinder /nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip/dataset/demos/single_lift_prim_cylinder_mush_soft/26-08-31-hpo-filt
+prim_sphere /nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip/dataset/demos/single_lift_prim_sphere_mush_soft/26-08-31-xcl-filt
+prim_lamp /nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip/dataset/demos/single_lift_prim_lamp_mush_soft/26-08-31-ppj-filt
+prim_cuboid /nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip/dataset/demos/single_lift_prim_cuboid_mush_soft/26-08-31-bjp-filt
+prim_ellipsoid /nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip/dataset/demos/single_lift_prim_ellipsoid_mush_soft/26-08-31-ctq-filt

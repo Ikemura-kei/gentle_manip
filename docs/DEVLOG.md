@@ -8113,3 +8113,45 @@ the measurement that rules out the hypothesis outright before building a discrim
 above crop, blue = kept, red = rejected, green star = EE at t=0, orange plane = the ceiling.
 Keep this tool for any future point-cloud labelling question -- 2D projections were actively
 misleading here.
+
+### 2026-09-01 — TOMATO: the object the policy lifts BEST is the one it DESTROYS
+
+tomato eval completed (3/3 seeds, retried at 350 substeps). It inverts the headline:
+
+| object | n | success % | sust/Y | damage % | yield kPa |
+|---|---|---|---|---|---|
+| **tomato** | 3 | **91.8 ± 1.6** | **0.98** | **70.5 ± 2.0** | 25 |
+| prim_cylinder | 3 | 83.7 ± 1.8 | 0.59 | 19.2 ± 2.5 | 40 |
+| prim_sphere | 3 | 77.8 ± 2.1 | 0.49 | 11.2 ± 3.8 | 40 |
+| mushroom | 3 | 72.8 ± 1.4 | 0.50 | 13.3 ± 3.0 | 40 |
+| prim_cuboid | 3 | 71.0 ± 3.0 | 0.52 | 14.3 ± 4.2 | 40 |
+| strawberry | 2 | 69.0 ± 2.1 | 0.60 | 26.6 ± 2.9 | 18 |
+| prim_ellipsoid | 3 | 60.0 ± 5.6 | 0.38 | 8.8 ± 1.2 | 40 |
+| tofu | 3 | 59.7 ± 8.5 | 0.31 | **0.7 ± 1.2** | 20 |
+| prim_lamp | 3 | 47.2 ± 1.5 | 0.35 | 4.2 ± 2.0 | 40 |
+| raspberry | 3 | 24.7 ±10.5 | 0.22 | 9.7 ± 4.6 | 15 |
+
+**1. tomato: 91.8% success at a mean sustained stress of 0.98x YIELD.** The policy grips it at
+essentially exactly the bruising threshold and exceeds it in 70.5% of episodes.
+
+**2. §3.3 max-over-objects damage jumps 26.6% (strawberry) -> 70.5% (tomato).** Under the
+constraint form this policy is inadmissible at any sensible eps. **Mushroom alone reads 13.3% —
+the single-object headline understates the true damage by MORE THAN FIVEFOLD.** This is the
+strongest evidence so far that the max-over-objects aggregation is the right presentation and that
+mushroom-only reporting would have been actively misleading.
+
+**3. success and damage CORRELATE +0.59 across the 10 objects.** On this policy, being better at
+the task means gripping harder. That is the opposite of what a success-only evaluation implies and
+belongs in the paper's problem statement.
+
+⚠ **CONFOUND — NOT YET EXCLUDED, and it bears directly on the headline.** tomato is the object
+re-run at **350 substeps, 2x its collection's 175** (its 1x eval crashed on the rigid-solver NaN).
+Higher substeps integrate MPM stress more accurately, so tomato's stress is NOT measured on the
+same footing as the other nine objects, nor as its own training data. Finer integration may resolve
+stress peaks the 1x runs smooth over, which would inflate tomato's damage RELATIVE to everything
+else. tomato is also the LOWEST-fidelity object by default (substeps 175, grid 180) — suspicious
+in itself. **Distinguishing "tomato is genuinely crushed" from "tomato is measured differently"
+needs a 1x tomato eval — exactly the run that crashes.** Top follow-up; do not treat 70.5% as
+settled, and do not quote it without this caveat.
+
+Still missing: cherry_tomato / banana_chunk / pasta_bundle (unresolved NaN), strawberry seed 42.

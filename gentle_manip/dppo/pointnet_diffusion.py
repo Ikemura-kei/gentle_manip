@@ -83,7 +83,7 @@ class PointNetDiffusionMLP(nn.Module):
                  proprio_dropout_prob=0.0, proprio_encoder=False, gap_damp=False, gap_lambda=1.0,
                  proprio_encoder_identity_init=True,
                  aux_hidden=128,
-                 use_first_frame_context=False):
+                 use_first_frame_context=False, obj_cond_mode="none"):
         super().__init__()
         pn = dict(pointnet or {})
         pn.setdefault("out_channels", visual_feature_dim)
@@ -94,11 +94,24 @@ class PointNetDiffusionMLP(nn.Module):
         # feature — a persistent context token carrying object shape/size/grasp-width
         # information through later gripper occlusion. Off (default) = bit-identical.
         self.use_first_frame_context = bool(use_first_frame_context)
+        # FIRST-FRAME OBJECT CONDITIONING (2026-09-01). cond["obj_points"] = the object extracted
+        # from frame 0 by an adaptive height crop (see pointcloud_dataset.obj_crop).
+        #   "raw"   -> object points APPENDED to the observation cloud; ONE PointNet pass sees
+        #              both. No extra parameters and no extra conditioning width.
+        #   "embed" -> object points encoded by the SAME backbone, feature CONCATENATED to the
+        #              conditioning (the item-12 path, but fed the CROP, not the whole frame).
+        # "none" (default) is bit-identical to before.
+        # PRIOR: item 12 fed the WHOLE first frame this way and HALVED success (ptpii 0.380 vs
+        # 0.685 baseline). The crop is the one thing that differs -- a 512-d whole-scene context
+        # is a high-capacity nuisance channel a denoiser can exploit as an episode identifier.
+        assert obj_cond_mode in ("none", "raw", "embed"), obj_cond_mode
+        self.obj_cond_mode = str(obj_cond_mode)
         self.time_dim = time_dim
         self.time_embedding = nn.Sequential(
             SinusoidalPosEmb(time_dim), nn.Linear(time_dim, time_dim * 2), nn.Mish(),
             nn.Linear(time_dim * 2, time_dim))
         ctx_dim = visual_feature_dim if self.use_first_frame_context else 0
+        ctx_dim += visual_feature_dim if self.obj_cond_mode == "embed" else 0
         # item 18b (planner-executor): append the width head's own DETACHED prediction to the
         # conditioning — an explicit 1-d planned-grasp-width input for the denoiser. Prediction
         # (not label) is fed in training too (no exposure bias); stop-grad keeps the head
@@ -144,7 +157,8 @@ class PointNetDiffusionMLP(nn.Module):
         # BETWEEN-category width constant but carries no per-episode size, so it does not address
         # within-category variation (see the plan §4c).
         self.category_embed_dim = int(category_embed_dim)
-        self._visual_dim = int(visual_feature_dim) * (2 if use_first_frame_context else 1)
+        self._visual_dim = int(visual_feature_dim) * (
+            1 + int(bool(use_first_frame_context)) + int(self.obj_cond_mode == "embed"))
         # cond_encoded layout: [visual (+ctx) | proprio (cond_dim) | category_embed]. Proprio sits
         # at a FIXED offset from the START, so trailing concatenations (feed_width_pred, category)
         # do not move it.
@@ -274,7 +288,19 @@ class PointNetDiffusionMLP(nn.Module):
         """[pointnet_feat ⊕ flattened proprio] — the shared conditioning feature."""
         B = cond["state"].shape[0]
         state = cond["state"].view(B, -1)
-        feat = _encode_clouds(self.backbone, cond["point_cloud"], self.pc_cond_steps)
+        pc = cond["point_cloud"]
+        if self.obj_cond_mode == "raw" and "obj_points" in cond:
+            op = cond["obj_points"]
+            if op.dim() == 3:                     # (B,K,3) from a live env -> add the time axis
+                op = op[:, None]
+            op = op[:, -1:].expand(-1, pc.shape[1], -1, -1)   # one object cloud, every step
+            pc = torch.cat([pc, op], dim=2)                   # (B,Tpc,N+K,3): one PointNet pass
+        feat = _encode_clouds(self.backbone, pc, self.pc_cond_steps)
+        if self.obj_cond_mode == "embed" and "obj_points" in cond:
+            op = cond["obj_points"]
+            if op.dim() == 3:
+                op = op[:, None]
+            feat = torch.cat([feat, _encode_clouds(self.backbone, op[:, -1:], 1)], dim=-1)
         if self.use_first_frame_context:
             feat = torch.cat([feat, _encode_clouds(self.backbone, cond["first_point_cloud"], 1)], dim=-1)
         if self.proprio_encoder is not None:
