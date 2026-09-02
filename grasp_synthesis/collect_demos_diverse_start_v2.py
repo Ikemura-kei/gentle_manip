@@ -501,11 +501,15 @@ def execute_and_collect_diverse_v2(
                 d3 = np.array([disp[0], disp[1], 0.0], np.float32)
                 pos_b[i] += d3; grasp_pos[i] += d3; lift_b[i] += d3
                 obj_center[i] = obj_now; obj_at_plan[i] = obj_now
+                # re-approach STARTS from a safe hover above the object's NEW spot (lift
+                # straight up from wherever the arm is, then come down on the new pose) --
+                # a direct lateral lerp at grasp height knocks/misses the moved object.
                 ee_now = np.asarray(state["ee_pos"][i], np.float32)
-                start_pos[i] = ee_now
+                start_pos[i] = np.array([ee_now[0], ee_now[1],
+                                         max(float(ee_now[2]), float(pos_b[i][2]) + 0.11)], np.float32)
                 rec_slerps[i] = Slerp([0., 1.], Rot.concatenate(
                     [_wxyz_to_rot(quat_b[i]), _wxyz_to_rot(quat_b[i])]))
-                n_appr[i] = max(24, v1.N_HOME_TO_PRE // 3)         # PHASE_DUR[1] shares this array
+                n_appr[i] = max(44, v1.N_HOME_TO_PRE // 2)         # PHASE_DUR[1] shares this array
                 phase_idx[i] = 1; phase_step[i] = 0
                 rx_retargets[i] += 1
                 rx_fire[i] = -1                                    # one drag per env (retry loop caps re-targets)
@@ -543,7 +547,7 @@ def execute_and_collect_diverse_v2(
             if frame_bufs[i]:
                 frame_bufs[i] = frame_bufs[i][:cut_at]
 
-    return obs_bufs, act_bufs, rew_bufs, success, frame_bufs, n_preroll_steps
+    return obs_bufs, act_bufs, rew_bufs, success, frame_bufs, n_preroll_steps, (rx_retargets > 0)
 
 
 def main() -> None:
@@ -573,7 +577,7 @@ def main() -> None:
     p.add_argument("--reactive", action="store_true",
                    help="collect reactive-recovery demos: random mid-approach object drag + scripted re-target")
     p.add_argument("--reactive-prob", type=float, default=0.6)
-    p.add_argument("--reactive-speed", type=float, nargs=2, default=[0.15, 0.50])
+    p.add_argument("--reactive-speed", type=float, nargs=2, default=[0.12, 0.38])
     p.add_argument("--reactive-frame", type=int, nargs=2, default=[12, 45],
                    help="recorded-loop iter window to start the drag (during approach)")
     p.add_argument("--per-cat-target", type=int, default=0,
@@ -794,7 +798,7 @@ def main() -> None:
             print(f"  start modes: {modes}")
 
             want_video = bool(args.record_video) and total_saved < args.record_video
-            obs_bufs, act_bufs, rew_bufs, success, frame_bufs, _npr = execute_and_collect_diverse_v2(
+            obs_bufs, act_bufs, rew_bufs, success, frame_bufs, _npr, rx_flags = execute_and_collect_diverse_v2(
                 worker, all_best_x, init_obs_batch, perception, action_config,
                 modes, rng, priv_cfg=priv_cfg, dr_vec=dr_vec, record_video=want_video,
                 object_type=task.object_type,
@@ -818,7 +822,10 @@ def main() -> None:
                     "observations": {k: np.stack([o[k] for o in obs_list]) for k in keys},
                     "actions": np.stack(act_bufs[i]),
                     "rewards": np.asarray(rew_bufs[i], np.float32),
-                    "start_mode": modes[i],
+                    # a re-targeted episode is a reactive-recovery demo (object dragged
+                    # mid-approach -> arm redirected); tag it so the stager/rebalancer can
+                    # control the reactive share of the training mix.
+                    "start_mode": ("reactive_recover" if bool(rx_flags[i]) else modes[i]),
                 }
                 shard_buf.append(episode)
                 total_saved += 1

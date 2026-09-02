@@ -15,5 +15,5 @@ env -u PYTHONPATH -u ROS_DISTRO MUJOCO_GL=egl uv run --project envs/sim_arrheniu
   grasp_synthesis/collect_demos_diverse_start_v2.py \
   --experiment single_lift_xcat_diverse --task-name single_lift_xcat_reactive_TEST \
   --n-episodes 8 --n-envs 4 --maxfevals 500 --scene-dr-every 1 --seed 1 \
-  --start-modes "sweep:0.8,above:0.2" --reactive --reactive-prob 0.9 --reactive-speed 0.15 0.45 \
+  --start-modes "sweep:0.8,above:0.2" --reactive --reactive-prob 0.9 --reactive-speed 0.12 0.36 \
   --record-video 8 --crush-frac 1.2 --out-dir "$REPO/dataset/demos"
