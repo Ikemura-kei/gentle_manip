@@ -111,20 +111,22 @@ cherry `26-08-30-tbm`, raspberry `26-08-30-jnd`, sphere_mush `26-08-31-ccd`, lam
 
 ### E1 AGGREGATE (primary layout) — methods × objects, 3 sub-columns per object
 
-Sub-columns per object: **succ** = success % (collection success at hold-end — for these
+Grouped header: each object spans 3 real columns (maps to LaTeX \multicolumn{3}). Sub-columns: **succ** = success % (collection success at hold-end — for these
 runs identical to ever-success within the episode horizon) | **sub-y** = sub-yield % of
 successful episodes | **med** = median peak stress ×yield. Right-most: per-method mean
 success and worst-case (min) sub-yield. naive/strawberry: 0 % success ⇒ no stress stats.
 
-| method | mushroom<br>succ · sub-y · med | strawberry<br>succ · sub-y · med | cherry<br>succ · sub-y · med | raspberry<br>succ · sub-y · med | sphere_mush<br>succ · sub-y · med | lamp_mush<br>succ · sub-y · med | mean succ | min sub-y |
-|---|---|---|---|---|---|---|---|---|
-| naive | 19.8 · 100 · 0.24 | 0.0 · — · — | 72.7 · 100 · 0.55 | 57.1 · 100 · 0.30 | 76.2 · 100 · 0.20 | 15.7 · 100 · 0.24 | 40.3 | 100* |
-| antipodal | 66.7 · 100 · 0.25 | 53.3 · 100 · 0.32 | 69.6 · **46** · **1.00** | 88.9 · 94 · 0.45 | 100 · 100 · 0.20 | 80.0 · 100 · 0.23 | 76.4 | 46 |
-| GPD | 16.0 · 100 · 0.25 | 1.5 · 100 · 0.22 | 17.8 · 100 · 0.49 | 18.2 · 69 · 0.83 | 25.0 · 100 · 0.17 | 11.7 · 100 · 0.23 | 15.0 | 69 |
-| GraspNet-baseline (gn1b) | 51.6 · 100 · 0.41 | 26.2 · 81 · 0.64 | 64.0 · **36** · **1.18** | 26.2 · **6** · **1.24** | 40.0 · 100 · 0.21 | 34.0 · 100 · 0.25 | 40.3 | **6** |
-| rigid (B2) | 76.2 · 100 · 0.22 | 34.8 · 100 · 0.33 | 69.6 · **38** · **1.06** | 100 · 100 · 0.57 | 76.2 · 100 · 0.21 | 100 · 100 · 0.32 | 76.1 | 38 |
-| rigid + v4.1 closure | 100 · 100 · 0.29 | 100 · 100 · 0.33 | 61.5 · **19** · **1.17** | 100 · 62 · 0.96 | 94.1 · 100 · 0.35 | 100 · 100 · 0.55 | 92.6 | 19 |
-| **v4.1 (ours)** | **88.9 · 100 · 0.32** | **45.7 · 94 · 0.32** | **76.2 · 81 · 0.74** | **100 · 88 · 0.72** | **100 · 100 · 0.37** | **57.1 · 100 · 0.61** | **78.0** | **81** |
+<table>
+<tr><th rowspan=2>method</th><th colspan=3 align=center>mushroom</th><th colspan=3 align=center>strawberry</th><th colspan=3 align=center>cherry</th><th colspan=3 align=center>raspberry</th><th colspan=3 align=center>sphere_mush</th><th colspan=3 align=center>lamp_mush</th><th rowspan=2>mean<br>succ</th><th rowspan=2>min<br>sub-y</th></tr>
+<tr><th>succ</th><th>sub-y</th><th>med</th><th>succ</th><th>sub-y</th><th>med</th><th>succ</th><th>sub-y</th><th>med</th><th>succ</th><th>sub-y</th><th>med</th><th>succ</th><th>sub-y</th><th>med</th><th>succ</th><th>sub-y</th><th>med</th></tr>
+<tr><td>naive</td><td>19.8</td><td>100</td><td>0.24</td><td>0.0</td><td>—</td><td>—</td><td>72.7</td><td>100</td><td>0.55</td><td>57.1</td><td>100</td><td>0.30</td><td>76.2</td><td>100</td><td>0.20</td><td>15.7</td><td>100</td><td>0.24</td><td>40.3</td><td>100*</td></tr>
+<tr><td>antipodal</td><td>66.7</td><td>100</td><td>0.25</td><td>53.3</td><td>100</td><td>0.32</td><td>69.6</td><td><b>46</b></td><td><b>1.00</b></td><td>88.9</td><td>94</td><td>0.45</td><td>100</td><td>100</td><td>0.20</td><td>80.0</td><td>100</td><td>0.23</td><td>76.4</td><td>46</td></tr>
+<tr><td>GPD</td><td>16.0</td><td>100</td><td>0.25</td><td>1.5</td><td>100</td><td>0.22</td><td>17.8</td><td>100</td><td>0.49</td><td>18.2</td><td>69</td><td>0.83</td><td>25.0</td><td>100</td><td>0.17</td><td>11.7</td><td>100</td><td>0.23</td><td>15.0</td><td>69</td></tr>
+<tr><td>GraspNet-baseline (gn1b)</td><td>51.6</td><td>100</td><td>0.41</td><td>26.2</td><td>81</td><td>0.64</td><td>64.0</td><td><b>36</b></td><td><b>1.18</b></td><td>26.2</td><td><b>6</b></td><td><b>1.24</b></td><td>40.0</td><td>100</td><td>0.21</td><td>34.0</td><td>100</td><td>0.25</td><td>40.3</td><td><b>6</b></td></tr>
+<tr><td>rigid (B2)</td><td>76.2</td><td>100</td><td>0.22</td><td>34.8</td><td>100</td><td>0.33</td><td>69.6</td><td><b>38</b></td><td><b>1.06</b></td><td>100</td><td>100</td><td>0.57</td><td>76.2</td><td>100</td><td>0.21</td><td>100</td><td>100</td><td>0.32</td><td>76.1</td><td>38</td></tr>
+<tr><td>rigid + v4.1 closure</td><td>100</td><td>100</td><td>0.29</td><td>100</td><td>100</td><td>0.33</td><td>61.5</td><td><b>19</b></td><td><b>1.17</b></td><td>100</td><td>62</td><td>0.96</td><td>94.1</td><td>100</td><td>0.35</td><td>100</td><td>100</td><td>0.55</td><td>92.6</td><td>19</td></tr>
+<tr><td><b>v4.1 (ours)</b></td><td>88.9</td><td>100</td><td>0.32</td><td>45.7</td><td>94</td><td>0.32</td><td>76.2</td><td>81</td><td>0.74</td><td>100</td><td>88</td><td>0.72</td><td>100</td><td>100</td><td>0.37</td><td>57.1</td><td>100</td><td>0.61</td><td><b>78.0</b></td><td><b>81</b></td></tr>
+</table>
 
 \* survivor bias — naive's sub-yield is 100 % only because its would-be-damaging grips fail
 as drops (success 0–76 %); read succ and sub-y as a pair.
