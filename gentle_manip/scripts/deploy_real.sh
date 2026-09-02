@@ -590,6 +590,42 @@
 #   --record dataset/real_deploy/cvzth80_generalist --shard-size 10 \
 #   --max-steps 5000
 
+# GENERALIST 12-object + ALL 7 REAL objects (cluster run zdwii, ckpt 91) — added 2026-09-02.
+# THE LATEST GENERALIST TRAINED WITH REAL-WORLD DATA. Dataset
+# single_lift_generalist_12obj_real7 = the 12 v4.1 sim collections + all 141 real teleop episodes
+# from dataset/transfer/real_paired_7obj_2026-09-01 (7 objects; grape and padron_pepper have no
+# sim counterpart, included deliberately). Normalization recomputed AFTER merging, so it is NOT
+# interchangeable with the sim-only cvzth stats above — using the wrong one decodes wrong commands.
+#
+# Same arch/action/obs as cvzth: [3072]x3, 7d euler absolute, armfocus point cloud.
+# ⚠ NOT the objraw/objemb variants: those need a first-frame object crop that deploy_real_dppo.py
+# does not build. This entry is the plain (base) generalist.
+#
+# SEED CHOICE (mushroom, 200 eps / 40 geometries, state_91):
+#   zdwii (321)  66.5% success  13.0% damage   <- best gentleness at near-top success: USE THIS
+#   rtgob (42)   68.0% success  16.0% damage      +1.5 pt success for +3 pt damage
+#   asavh (27)   59.0% success  14.0% damage
+# Differences are within seed noise (success SD 4.8, damage SD 1.5) -- zdwii is the better BET,
+# not a demonstrated optimum.
+#
+# ⚠ vs the SIM-ONLY generalist (cvzth): adding real data COST ~8 pts of mushroom success in sim
+# (64.5% vs 72.8% pooled) at unchanged damage. Real-robot transfer is what the real data is FOR
+# and a sim eval cannot measure it -- that is exactly what this deployment tests.
+#
+#   ./gentle_manip/scripts/pull_run.sh zdwii --ckpt 91
+#
+# ckpt=downloaded_runs/zdwii/checkpoint/state_91.pt
+# normalization=downloaded_runs/zdwii/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/zdwii91_generalist_real7 --shard-size 10 \
+#   --max-steps 5000
+# Keep point_cloud_shift [0.009,0,0] ACTIVE in real_lab.yaml (sim clouds are unbiased; the real
+# cloud must be corrected into the frame the policy trained in).
+
 # ── PRE-DEPLOY CHECK: live view of the EXACT point cloud the policy sees ─────
 # (post-perception: crop + outlier removal + ARM-FOCUS + FPS subsample, driven
 # through PerceptionPipeline with a live robot connection — the armfocus filter

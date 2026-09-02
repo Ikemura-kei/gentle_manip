@@ -53,18 +53,34 @@ import numpy as np
 # "pick up the mushroom" would teach the model that the instruction is NOISE — the opposite of what
 # a language-conditioned policy should learn, and it would silently destroy the only signal that
 # makes the task language-conditioned at all.
+# SIM phrasings (kept for the sim datasets already built with them).
 _PHRASINGS = [
     "pick up the {obj}",
     "pick the {obj} up",
     "lift the {obj}",
     "lift the {obj} up for 20 centimeters",   # ~19 cm rise: band 0.175-0.275 m from ~0.02 m rest
 ]
+
+# REAL phrasings (user, 2026-09-02) -- used with --phrasings real.
+# The last TWO say the literal word "object" instead of naming it. They are IN TRAINING on
+# purpose (~1/3 of episodes by round-robin): they teach the policy to act on an UNNAMED object,
+# which is what makes a generic-prompt evaluation possible -- ask for "the object" and see whether
+# it still grasps, including on an object whose name it was never given.
+_PHRASINGS_REAL = [
+    "lift the {obj} up gently",
+    "pick up the {obj} gently",
+    "pick the {obj} up from the table carefully",
+    "lift the {obj} up from the table carefully",
+    "lift the object up from table gently",
+    "pick up the object from table gently",
+]
+_ACTIVE_PHRASINGS = _PHRASINGS
 INSTRUCTIONS = [p.format(obj="mushroom") for p in _PHRASINGS]   # back-compat for single-object use
 
 
 def instructions_for(object_name: str) -> list:
     """The four phrasings, bound to this object's name."""
-    return [p.format(obj=object_name) for p in _PHRASINGS]
+    return [p.format(obj=object_name) for p in _ACTIVE_PHRASINGS]
 
 
 def _load_episodes(src: Path) -> list:
@@ -111,7 +127,13 @@ def main() -> None:
     ap.add_argument("--source-action-config", type=Path,
                     default=_REPO / "gentle_manip/configs/action/abs_pose_abs_gripper.yaml")
     ap.add_argument("--lookahead", type=int, default=1)
+    ap.add_argument("--phrasings", choices=["sim", "real"], default="sim",
+                    help="sim = the 4 original phrasings; real = the 6 gentleness phrasings, the "
+                         "last two of which say the literal word 'object' (generic-prompt training)")
     args = ap.parse_args()
+
+    global _ACTIVE_PHRASINGS
+    _ACTIVE_PHRASINGS = _PHRASINGS_REAL if args.phrasings == "real" else _PHRASINGS
 
     import yaml
     from lerobot.common.datasets.lerobot_dataset import HF_LEROBOT_HOME, LeRobotDataset
@@ -123,6 +145,8 @@ def main() -> None:
 
     tgt_cfg = ActionConfig.from_dict(yaml.safe_load(args.action_config.read_text()))
     src_cfg = ActionConfig.from_dict(yaml.safe_load(args.source_action_config.read_text()))
+    # target action width: 7 for abs_pose_euler_abs_gripper (3 pos + 3 euler + 1 gripper)
+    tgt_dim = 7 if getattr(tgt_cfg, "rot_repr", "euler") == "euler" else 10
     assert tgt_cfg.mode == "absolute" and tgt_cfg.rot_repr == "euler", "target must be 7d euler abs"
     assert tuple(tgt_cfg.euler_frame_offset_deg) == (180.0, 0.0, 0.0), (
         "euler_frame_offset_deg must be [180,0,0] -- without it a top-down grasp's roll sits on "
@@ -177,7 +201,14 @@ def main() -> None:
         obs = decode_images(ep["observations"])
         T = len(ep["actions"])
         # 7-dim euler absolute, derived from the RECORDED 10-dim commands (see module docstring)
-        act = derive_action_set(ep, tgt_cfg, lookahead=args.lookahead, source_config=src_cfg)
+        # REAL demos already record 7-dim euler-absolute actions; SIM demos record 10-dim rot6d
+        # and must be DERIVED. Deriving an already-7-dim episode indexes [:, 9] of a 7-wide array
+        # -> "IndexError: index 9 is out of bounds for axis 1 with size 7". Detect and pass through.
+        _raw = np.asarray(ep["actions"], np.float32)
+        if _raw.ndim == 2 and _raw.shape[1] == tgt_dim:
+            act = _raw                                   # already in the target space
+        else:
+            act = derive_action_set(ep, tgt_cfg, lookahead=args.lookahead, source_config=src_cfg)
         assert act.shape == (T, 7), f"expected (T,7) actions, got {act.shape}"
         state = np.concatenate([
             np.asarray(obs["ee_pos"], np.float32).reshape(T, 3),
