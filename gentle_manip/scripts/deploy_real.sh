@@ -717,7 +717,7 @@
 #   the run's .hydra/config.yaml automatically.
 # ⚠ normalization = cvzth's JOINT stats (the finetune data was renormalized into them).
 #
-ckpt=logs/dppo/dppo-pretrain/single_lift_real7_cvzthnorm/xdxvc/checkpoint/state_720.pt
+ckpt=logs/dppo/dppo-pretrain/single_lift_real7_cvzthnorm/xdxvc/checkpoint/state_800.pt
 normalization=downloaded_runs/cvzth/normalization.npz
 uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
@@ -725,5 +725,5 @@ uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.p
   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
   --act-steps 16 \
   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/xdxvc720_h16 --shard-size 10 \
+  --record dataset/real_deploy/xdxvc800_3_h16 --shard-size 10 \
   --max-steps 5000

@@ -1,0 +1,158 @@
+% ---------------------------------------------------------------------------
+% METHOD (grasp synthesis + demonstration generation) --- condensed to ~1 column-page.
+% Checked against the FROZEN v4.1 recipe actually used for the 12-object collection
+% (26 of 28 control fields byte-identical across objects) and against
+% docs/grasp_synthesis_model.md (verified-against-code, 2026-08-27).
+%
+% CORRECTIONS vs the previous draft (do not revert):
+%  1. Pad profile is NOT parabolic. Nodes are pushed to a common FLAT plane with a
+%     thin smoothstep edge fillet (width 0.12*min(h1,h2)). width_grasp.py:149-155
+%     records that the fixed-delta/domed profile was rejected: it "domes a flat face
+%     and never flattens a curved one".
+%  2. The contact-area floor is NOT a hard constraint in the frozen recipe
+%     (grasp_area_min_mm2: auto => area_min=0.0 during search). It is a
+%     POOL-RELATIVE POST-SELECTION: restrict to grasps under 0.8*yield, keep the
+%     upper half by BOTH worst-pad area and alignment, then take the best score.
+%     finger_grasp.py:939-946.
+%  3. The camera-azimuth term was missing entirely. It is ACTIVE
+%     (cam_azimuth_max_deg: 60) and is a SHAPED PENALTY, not a hard bound
+%     (finger_grasp.py:384-386, CAM_AZ_SLOPE=5000/deg of excess; it also bounds
+%     the CMA seed fan, :838-847). yaw_max_deg is the hard structural bound.
+%     TWO DISTINCT MECHANISMS, do not conflate:
+%       - w_occ  (ray-based occlusion FRACTION) = 0.0 in every run, inert in the
+%         score, computed for audit only (:436,:542). NOT in the paper.
+%       - cam_azimuth_max_deg (azimuth hinge penalty) = ACTIVE. This is the
+%         w_az term in Eq. (score). It is a geometric PROXY for occlusion, not
+%         a measurement of it --- the wording must not imply otherwise.
+%  4. Peak term carries an E factor: w_peak * E * hi_1.
+%  5. Added the auto-scaled parameters (the "no per-category constants" claim) and
+%     the second width-rescan round.
+%  6. Removed the dangling \ref{sec:method:supervision} --- the lead/dwell material
+%     was cut from the paper.
+%
+% MUST NOT CLAIM (model doc warnings): frictional or tangential FEM contact (it is
+% normal-only, one scalar constraint per node); force closure or dynamic stability
+% (holdability is a quasi-static scalar friction inequality); that occlusion enters
+% the objective (w_occ = 0 in every run).
+% ---------------------------------------------------------------------------
+\section{METHOD}
+
+\subsection{Problem setting}
+\label{sec:method:problem}
+A robot arm with a parallel-jaw gripper must lift a single fragile object from a table and hold
+it without damaging it. Object category, pose, size, shape and material vary between episodes.
+Perception is a single fixed external depth camera; there is no tactile or force sensing in the
+loop. At each control step the policy observes
+$o_t = (\mathbf{p}_t, \mathbf{q}_t, w_t, \mathcal{P}_t)$: end-effector position, orientation as
+a unit quaternion, measured gripper width, and an $N_p\!=\!1024$ point cloud in the robot base
+frame. It emits an \emph{absolute} target pose and width
+$a_t = (\mathbf{p}^{\mathrm{cmd}}_t, \boldsymbol{\theta}^{\mathrm{cmd}}_t, w^{\mathrm{cmd}}_t)
+\in \mathbb{R}^{7}$, with orientation as Euler angles. An episode succeeds if the object centre
+enters a height band and stays there for $T_{\mathrm{hold}}$ steps. We call a grasp
+\emph{gentle} when peak internal von~Mises stress stays below the material's yield threshold;
+success is measured on hardware, gentleness in simulation.
+
+\subsection{Stress-aware grasp synthesis}
+\label{sec:method:synth}
+For each object instance the demonstrator plans a $7$-DoF grasp
+$x=(\mathbf{t},\mathbf{r},\omega)$: tool-centre position, orientation, and \emph{commanded}
+gripper width. Planning runs on the mesh, outside the physics simulator.
+
+\noindent\textbf{Width-controlled contact model.}
+A real parallel jaw is position-controlled: one commands a width and the grip force is an
+outcome. We model this directly. The object is tetrahedralised and a linear-elastic stiffness
+matrix assembled; since it is free-floating the system is singular in the six rigid-body modes,
+so we solve a bordered inertia-relief system, factored once per geometry. Two rigid pads, whose
+rectangular footprints are taken from the real gripper's finger meshes, are closed to width
+$\omega$. Boundary nodes inside a footprint are pushed onto the pad's flat plane and constrained
+\emph{only} along the closing axis, leaving tangential motion free so the material bulges; a
+thin smoothstep fillet at the pad edge avoids a flat-punch stress singularity. Contact is
+normal-only, and friction enters solely through the holdability test below.
+
+\noindent\textbf{Material scaling.}
+Because the displacement is prescribed rather than the force, the deformation field is
+independent of Young's modulus, so below yield both stress and grip force are linear in it,
+\begin{equation}
+  \sigma(E) = E\,\sigma_1, \qquad F(E) = E\,F_1 .
+  \label{eq:E-linear}
+\end{equation}
+One solve at $E\!=\!1$ therefore yields every material by scalar multiplication, which makes
+randomising stiffness across the demonstration set essentially free. A grasp is
+\emph{holdable} when Coulomb friction at the two pads carries the object's weight with an
+acceleration margin, $2\mu F(E) \ge m\,(g+a)$; we use $\mu\!=\!0.7$ and $a\!=\!g$, a quasi-static
+$2g$ criterion rather than a wrench-closure analysis.
+
+\noindent\textbf{Objective.}
+Let $\sigma_{\mathrm{blk}}$ be the mean of the top decile of element stresses with
+contact-adjacent elements masked out, so that it reports \emph{bulk} deformation rather than the
+mesh-dependent contact singularity, and let $\sigma_{p98}$ be its unmasked $98$th-percentile
+counterpart. Among holdable candidates we maximise
+\begin{equation}
+  S(x) = -\,\sigma_{\mathrm{blk}}
+         - w_{\mathrm{al}}\bigl(1-\mathrm{al}\bigr)
+         - w_{\mathrm{pk}}\,E\,\sigma_{p98}
+         - w_{\mathrm{pr}}\,\frac{F}{A_{\min}},
+  \label{eq:score}
+\end{equation}
+where $\mathrm{al}$, the mean absolute cosine between the closing axis and the local surface
+normals, rejects grazing and edge contacts; the peak and pressure terms penalise \emph{local}
+damage that the masked bulk statistic hides, $A_{\min}$ being the area of the worse pad.
+
+Two soft constraints act on $S$ from outside. Candidates failing a feasibility
+ladder---table collision, mesh penetration, missing or excessive contact, invalid solve,
+unholdable---receive a \emph{shaped} penalty, so the search retains a gradient toward the
+feasible band rather than a flat infeasible floor. Separately, a grasp whose closing-axis
+azimuth about the camera direction exceeds $60^\circ$ is penalised linearly in the excess, a
+geometric proxy for the fingers occluding the object in the very observation the policy must
+act on; the same cone bounds the seed fan below.
+
+\noindent\textbf{Search and selection.}
+$S$ is optimised by multi-start CMA-ES over $(\mathbf{t},\mathbf{r},\omega)$, seeded from
+canonical closing axes and a yaw fan about the camera-perpendicular direction, since a single
+start reliably misses the gentle basin. A second pass rescans width over the best distinct
+poses, the widest holdable grasp being the gentlest. Because the factorisation is reused across
+all candidates sharing a geometry, each evaluation costs one back-substitution, which is what
+permits $\sim\!10^3$ evaluations per grasp. Rather than impose a hand-set contact-area floor, we
+select pool-relatively: among feasible grasps under $0.8\times$ yield we keep the upper half by
+\emph{both} worst-pad area and alignment, then take the best score. This is what separates
+enveloping grasps from stem-type ones, which score \emph{better} on bulk stress---squeezing a
+stiff, slender part deforms the body less---but differ sharply in contact area. Four remaining
+parameters are derived per object rather than tuned: the width cap from the median local
+cross-section, the yaw bound from the largest extent, the closure margin from the smallest
+extent, and the area criterion above. No per-category constant is set by hand.
+
+\subsection{Demonstration generation}
+\label{sec:method:demos}
+Planned grasps are executed in a deformable (MPM) simulator, producing
+(observation,\,action) trajectories in the same format a real teleoperation session yields.
+
+\noindent\textbf{Randomisation.}
+Each episode samples object pose, uniform scale, and a procedural shape deformation, together
+with the material parameters that Eq.~\eqref{eq:E-linear} makes free to vary. Each category
+additionally carries several meshes representing distinct variants within the type
+(Fig.~\ref{fig:meshes}).
+
+\noindent\textbf{Execution.}
+Each environment runs an independent phase machine---approach, settle, close, firm, lift,
+hold---so environments may progress at different rates while commands are still issued as one
+batched step. At the close--firm boundary the measured contact signal is read once, and a grasp
+that came out weak receives a small additional closure. Slip during the lift triggers a bounded
+regrasp, and the failed attempt is deliberately retained in the demonstration, so recovery
+behaviour is represented in the data.
+
+\noindent\textbf{Approach trajectory.}
+Rather than interpolating linearly from home to the grasp pose, the approach reproduces the
+structure we measured in human teleoperation: lateral alignment completes while the gripper is
+still well above the object, and descent continues afterwards. We implement this as per-axis
+progress within a single phase, with no waypoint and no stop,
+\begin{equation}
+  s_{xy}(\alpha) = \mathrm{smoothstep}\!\bigl(\min(\alpha/f,\,1)\bigr), \qquad
+  s_{z}(\alpha) = \alpha ,
+  \label{eq:approach}
+\end{equation}
+with $\alpha\in(0,1]$ and $f$ drawn per environment, setting how early the lateral motion
+finishes; orientation is slerped over the full $\alpha$. Lateral velocity reaches zero only at
+its own arrival, while $z$ is still moving, so the path never dwells. The phase duration is set
+from the profile's arc length and a reference speed rather than being fixed, so per-step speed
+is approximately constant across episodes; a fixed duration would instead make commanded speed
+depend on how far the object happened to spawn.

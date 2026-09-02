@@ -444,6 +444,41 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-09-02 (evening) — LONGER ACTION CHUNKS FIX THE HESITATION (confirmed on the robot).**
+xdxvc (cvzth sim-generalist -> real7 finetune, horizon 4 -> 16, deployed with --act-steps 16):
+across 6 checkpoints / 10 episodes there were **0 abort waves**, and the commanded width lands
+at 22-45 mm — inside the 13-63 mm object-contact band — versus the h4 policies which either
+never closed (sim->real finetune h4: min cmd 68-75 mm) or aborted (cotrained h4), and versus
+the sim-only policy which closes to 12.6-21 mm (crushing). Deploy comparison table + verdict
+figure: examples/sim2real_diagnose/figures/deploy_h16_verdict.png. User confirms ckpt 800 OK.
+This validates the close-INITIATION diagnosis: initiation was a minority diffusion mode under
+stochastic human close timing, and committing to a sampled chunk (16 steps ~0.5 s) carries the
+policy into the close, after which it tracks demos exactly.
+
+| deploy run | eps | mean min commanded width | aborts |
+|---|---|---|---|
+| cvzth80 (sim-only, h4) | 7 | 21.3 mm (crushes) | 2/7 |
+| zdwii91 (cotrained, h4) | 9 | 57.3 mm | 0/9 (but never grasps) |
+| xgwhc1000 (real-only, h4) | 39 | 57.2 mm | 2/39 |
+| zjdmn280/400 (sim->real ft, h4) | 14 | 67.8-74.5 mm | 0 (never closes) |
+| **xdxvc (sim->real ft, h16)** | **10** | **22-45 mm** | **0/10** |
+
+Also added: deploy `--warmup-steps` (default 16) — after each reset the policy still observes
+and infers normally but its output is masked to a HOLD-POSE command (absolute mode: the raw
+action that maps back to the CURRENT measured pose via invert_absolute_action, verified 0.0 mm
+round-trip), riding out the unstable first frames the user reported.
+
+**Real-world main-table baselines launched (user request):** (1) tiatg = PURE-REAL point-cloud
+DP, h16, from scratch, generalist arch, 1200 ep — the key baseline; (2) RGB DP, h16, same arch
+and schedule with DPPO's ViT image branch (96x96 cam_ext, img_cond_steps 2, from-scratch
+encoder for parity with the from-scratch PointNet), queued to start when (1) finishes.
+convert_demos gained `--images/--image-size` (additive) and the merged RGB dataset is
+dataset/dppo/single_lift_real7_rgb (29,648 train / 3,189 val frames). Deliberate choices
+flagged in the cfg header for review: full-frame RGB (the point-cloud branch has a crop +
+arm-focus prior, so this is "each modality with its conventional pipeline", not matched
+framing) and no ImageNet init.
+
+
 **2026-09-02 — Real-deploy hesitation ROOT-CAUSED: close-INITIATION is a minority diffusion
 mode under stochastic human close timing (not gripper speed, not actuation lag, not only the
 sim/real style conflict).** Diagnostic chain (figures in examples/sim2real_diagnose/figures/):

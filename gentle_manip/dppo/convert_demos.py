@@ -65,7 +65,8 @@ def _episode_state(ep: dict, obs_keys: Sequence[str]) -> np.ndarray:
 
 
 def convert(demo_paths: Sequence[Path], out_dir: Path, obs_keys: Sequence[str] = STATE_VIEW,
-            pointcloud_key: str = None, val_split: float = 0.1, seed: int = 0,
+            pointcloud_key: str = None, image_key: str = None, image_size: int = 96,
+            val_split: float = 0.1, seed: int = 0,
             derive_action_config=None, derive_lookahead: int = 1,
             derive_source_config=None) -> dict:
     episodes = _load_episodes(demo_paths)
@@ -78,6 +79,19 @@ def convert(demo_paths: Sequence[Path], out_dir: Path, obs_keys: Sequence[str] =
     else:
         actions = [np.asarray(ep["actions"], np.float32) for ep in episodes]
     rewards = [np.asarray(ep["rewards"], np.float32).reshape(-1) for ep in episodes]
+
+    # RGB modality (DPPO image DP): (T, C, S, S) uint8, resized from the recorded frames.
+    # DPPO's StitchedSequenceDataset expects `images` (total_steps, C, H, W) and exposes it as
+    # conditions["rgb"]. Kept uint8 (the model normalizes) so the whole set fits on GPU.
+    images = None
+    if image_key is not None:
+        from PIL import Image
+        images = []
+        for ep in episodes:
+            fr = np.asarray(ep["observations"][image_key])          # (T, H, W, 3) uint8
+            small = np.stack([np.asarray(Image.fromarray(f).resize((image_size, image_size),
+                                                                   Image.BILINEAR)) for f in fr])
+            images.append(np.transpose(small, (0, 3, 1, 2)).astype(np.uint8))   # (T, 3, S, S)
     obs_dim, act_dim = states[0].shape[1], actions[0].shape[1]
     # point-cloud modality (raw xyz, NOT normalized — the PointNet consumes metric coords)
     clouds = ([np.asarray(ep["observations"][pointcloud_key], np.float32) for ep in episodes]
@@ -134,6 +148,8 @@ def convert(demo_paths: Sequence[Path], out_dir: Path, obs_keys: Sequence[str] =
                       terminals=np.zeros(len(s), bool), traj_lengths=tl)
         if clouds is not None:                       # (T_total, N, 3) raw xyz
             arrays["point_cloud"] = np.concatenate([clouds[i] for i in idxs], axis=0)
+        if images is not None:                       # (T_total, C, S, S) uint8
+            arrays["images"] = np.concatenate([images[i] for i in idxs], axis=0)
         if aux_contact is not None:                  # (T_total, 1) binary 0/1
             arrays["aux_contact"] = np.concatenate([aux_contact[i] for i in idxs], axis=0)
         if aux_objpos is not None:                   # (T_total, 3) object COM, normalized [-1,1]
@@ -173,6 +189,11 @@ def main() -> None:
                     help="ordered state view (default: STATE_VIEW, or PROPRIO_VIEW with --point-cloud)")
     ap.add_argument("--point-cloud", dest="pc_key", nargs="?", const="point_cloud", default=None,
                     help="also store a raw point-cloud modality (student view); default key 'point_cloud'")
+    ap.add_argument("--images", dest="image_key", nargs="?", const="image_cam_ext", default=None,
+                    help="also store an RGB modality for image-based DP (default obs key "
+                         "'image_cam_ext'); resized to --image-size, stored (T,C,S,S) uint8")
+    ap.add_argument("--image-size", type=int, default=96,
+                    help="square resize for --images (DPPO/DP convention: 96)")
     ap.add_argument("--val-split", type=float, default=0.1)
     ap.add_argument("--experiment", default=None,
                     help="derive obs-key order from Experiment.load(name).view_obs(--view). "
@@ -236,6 +257,7 @@ def main() -> None:
     paths = _find_demo_pkls(args.demos)
     print(f"converting {len(paths)} demo file(s): {[str(p) for p in paths]}")
     meta = convert(paths, args.out, obs_keys=obs_keys, pointcloud_key=args.pc_key,
+                   image_key=args.image_key, image_size=args.image_size,
                    val_split=args.val_split, derive_action_config=derive_cfg,
                    derive_lookahead=args.derive_lookahead,
                    derive_source_config=source_cfg)

@@ -4,6 +4,16 @@ What to present about the grasp synthesis, what to compare against, and where we
 today on each. Companion to `../fem_surrogate_status.md` (validity study) and
 `../grasp_synthesis_model.md` (verified formulation).
 
+> **Terminology correction (2026-09-02).** Earlier revisions of this doc called
+> `cam_azimuth_max_deg` a *hard* bound. It is not. Verified in code
+> (`finger_grasp.py:384-386`): it is a **shaped penalty**, `CAM_AZ_SLOPE = 5000` per degree of
+> excess, applied outside the feasibility ladder, and it additionally bounds the CMA seed fan
+> (`:838-847`). It CAN be exceeded when no feasible grasp exists inside the cone.
+> `yaw_max_deg` is the hard structural bound. Two further distinct mechanisms, not to be
+> conflated: `w_occ` (ray-based occlusion *fraction*) is **0.0 in every run** — computed for
+> audit, inert in the score (`:436, :542`); the azimuth penalty above is a geometric *proxy*
+> for occlusion, not a measurement of it. Matches `../grasp_synthesis_model.md` §6-§7.
+
 ## 1. Positioning — what the community context actually is
 
 - **DefGraspSim** (NVIDIA, RA-L 2022) is the closest work: corotational FEM grasp evaluation for
@@ -274,7 +284,7 @@ pre-shape openings converted to width commands via local cross-section − 2 mm
   TF 2.5 / CUDA 11 container (post-deadline).
 
 **Occlusion-bound confound: RESOLVED — it changes nothing.** The full occ re-run
-(rigid_v41w_occ ×6, v4.1's hard 60° camera-azimuth bound forwarded into the pose search) is
+(rigid_v41w_occ ×6, v4.1's 60° camera-azimuth SHAPED PENALTY forwarded into the pose search) is
 IDENTICAL to the unbounded round on 5/6 objects (same success/sub-yield/median/max to the
 digit; runs `-ynq/-kre/-dco/-tlz/-odk`); cherry differs only within its pose-shuffle noise
 (84.2 % vs 61.5 % success at the same past-yield profile, 31 vs 19 % sub-yield). The
@@ -356,7 +366,7 @@ lib64` (libcudart mixing) — measured failure modes, see SETUP.md.
 - `--baseline {naive,antipodal,rigid,gpd,gn1b,cgn}` — synthesizer to swap in.
 - `--baseline-width {own,v41}` — own = the method's width column above (closure scan
   no-oped); v41 = keep the frozen v4.1 closure on the baseline's pose.
-- `--baseline-occ` — forward v4.1's HARD camera-azimuth bound (cam_pos + 60°) into the
+- `--baseline-occ` — forward v4.1's camera-azimuth penalty (cam_pos + 60°) into the
   method's search (implemented for `rigid`; occ round measured: no effect, §4).
 - env `GM_MAX_ATTEMPTS` (default 200) — attempts cap; the collector otherwise runs until
   `--n-episodes` SUCCESSES (a ~0 % method never terminates). Cap trip ends the run
