@@ -45,6 +45,21 @@ class Pi05EvalPolicy:
         import dataclasses
         from pathlib import Path as _Path
 
+        # WRIST MASK MUST MATCH TRAINING (2026-09-02), and it is NOT unconditional.
+        #   use_wrist=False (ext-only, e.g. the REAL 7-object model): trained with
+        #     gentle_manip.pi05.masked_wrist -> left_wrist_0_rgb zeroed AND image_mask=False.
+        #     Skipping the patch feeds a black frame as a VALID view (openpi hardcodes the left
+        #     mask True) -- a silent mismatch that degrades the policy without erroring.
+        #   use_wrist=True (ext_wrist, the SIM upper-bound runs): trained with a REAL wrist image
+        #     and mask True. Patching would make the model IGNORE a view it depends on -- the same
+        #     mismatch in the opposite direction. So DO NOT patch those.
+        # GM_MASK_WRIST=1 / GM_NO_MASK_WRIST=1 force it either way.
+        _mask = (not use_wrist) if not os.environ.get("GM_MASK_WRIST") else True
+        if os.environ.get("GM_NO_MASK_WRIST"):
+            _mask = False
+        if _mask:
+            from gentle_manip.pi05 import masked_wrist
+            masked_wrist.patch()
         from openpi.policies import policy_config as _policy_config
         from openpi.training import config as _config
 
