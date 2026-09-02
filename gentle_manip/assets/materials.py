@@ -78,7 +78,11 @@ MATERIALS: dict[str, Material] = {
     "pear": Material(youngs_modulus=3.6e5, poisson_ratio=0.35, density=1020.0, von_mises_yield_stress=5.4e4),
     # tomato: MESOCARP (flesh) E 0.73-0.85 MPa -- NOT the much stiffer exocarp/peel
     # (4.6-9.6 MPa), which isn't representative of the bulk homogeneous body.
-    "tomato": Material(youngs_modulus=8.0e5, poisson_ratio=0.35, density=970.0, von_mises_yield_stress=1.2e5),
+    # E lowered to the bottom of that band (0.73 -> 0.50 MPa) so the 2 cm MPM body is
+    # CFL-stable at grid 300: at 8.0e5 it exploded on contact ("flashes away"), NaN'd
+    # the sim worker mid-eval, and the blown-up centroid tripped a false lifted-clear
+    # success. 5.0e5 tracks cherry's 4.0e5 (identical mesh), which is stable.
+    "tomato": Material(youngs_modulus=5.0e5, poisson_ratio=0.35, density=970.0, von_mises_yield_stress=1.2e5),
     # peach: E=0.89 MPa (multi-fruit comparative study).
     "peach": Material(youngs_modulus=8.9e5, poisson_ratio=0.35, density=960.0, von_mises_yield_stress=1.3e5),
     # grape: no direct elastic-modulus citation found (only rupture FORCE at a

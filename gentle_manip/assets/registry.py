@@ -362,9 +362,9 @@ OBJECT_MAP: dict[str, ObjectDef] = {
         shape_dr_ranges={"bend_deg": (-5.0, 5.0), "twist_deg": (-5.0, 5.0),
                          "taper": (-0.05, 0.05), "rbf": (0.0, 0.02),
                          "axis_scale": (0.92, 1.08), "scale": (0.85, 1.2)},
-        material_dr_mult={"E": (0.6, 1.5), "nu": (0.95, 1.05), "rho": (0.85, 1.15),
-                          "yield": (0.6, 1.4)},
-        sim_substeps_override=380,   # E=8.0e5 is 2.67x mushroom's nominal -- see kiwi's note
+        material_dr_mult={"E": (0.6, 1.3), "nu": (0.95, 1.05), "rho": (0.85, 1.15),
+                          "yield": (0.6, 1.4)},   # E top capped 1.5->1.3 (max 6.5e5) for MPM stability at 2 cm
+        sim_substeps_override=480,   # E=5.0e5 (was 8.0e5, which exploded); 480 keeps margin at grid 300
     ),
     # chicken_breast: thick capsule lobe (deliberately chunkier than the real
     # flat fillet shape, per avoid-flat-profiles direction).
