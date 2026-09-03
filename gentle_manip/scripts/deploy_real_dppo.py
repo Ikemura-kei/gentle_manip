@@ -354,7 +354,14 @@ def main() -> None:
     action_config = ActionConfig.from_dict(_load_yaml(_resolve_config(args.action_config)))
 
     backend = RealBackend(setup)
-    env = PolicyEnv(backend, obs_config, action_config, task=None, max_episode_steps=10 ** 9)
+    # rgb_shape is REQUIRED once the obs config carries `images:` (RGB policies) — take it from
+    # the setup's camera entry, same as demos/record.py.
+    rgb_shape = None
+    if obs_config.images is not None:
+        _cam = setup["cameras"][obs_config.images.cameras[0]]
+        rgb_shape = (int(_cam.get("height", 480)), int(_cam.get("width", 640)))
+    env = PolicyEnv(backend, obs_config, action_config, task=None, rgb_shape=rgb_shape,
+                    max_episode_steps=10 ** 9)
     # Proprio view + obs_dim are DERIVED from the obs config (quat -> 8, rot6d -> 10), so the adapter
     # matches whatever the student trained on without hardcoding either representation.
     proprio_view = _proprio_view(obs_config)
