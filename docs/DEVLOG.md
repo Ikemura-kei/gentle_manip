@@ -475,6 +475,47 @@ measurable systematic error (calibration); use OBSERVATION-level augmentation fo
 so the policy learns to IGNORE absolute cloud z. This is the DR-vs-augmentation split in
 CLAUDE.md, and the board case is the clean worked example.
 
+**2026-09-03 (night) — PAIRED-REPLAY GAP MEASURED. The residual is a few-mm rigid offset, and
+NOISE AUGMENTATION IS NOT THE LEVER.** 4 real cube episodes replayed in the rebuilt sim.
+
+**Action-following is essentially exact** — ee error 1.3-1.9 mm, quaternion 0.7-1.2 deg, gripper
+**0.0 mm** on all four. So every remaining difference is PERCEPTION, not control.
+
+**Cloud gap, with the metric's own noise floor measured** (this is the part that matters):
+| comparison | chamfer |
+|---|---|
+| CONTROL real[t] vs real[t+1] | 1.88 mm |
+| CONTROL sim[t] vs sim[t+1] | 1.66 mm |
+| sim vs real, same frame | **4.36 mm** |
+The controls establish that ~1.8 mm is pure sampling/sensor floor, so the genuine excess is
+~2.5 mm — real, but small.
+
+**Augmentation does NOT close it, and chamfer must not be used to tune it.** Adding the measured
+d435i noise moved chamfer 4.39 -> 4.36 mm; sweeping `pc_axial_coeff` to 4x the measured value
+"improved" it further (4.27). That is a METRIC ARTIFACT: scattering points fills gaps and lowers
+mean nearest-neighbour distance without making the cloud more realistic. The coefficient stays at
+the MEASURED 2.0e-3. Sim-real cloud realism here is limited by geometry, not by noise.
+
+**Where the excess actually lives:** UNIFORM across every height band (2.0-2.8 mm excess at
+19-60, 60-100, 100-140, 140-190, 190-260 mm), i.e. NOT the cable, NOT the object — a global
+misalignment. Isolated with PROPRIO-ANCHORED gripper points (points within 6 cm of the TCP, whose
+position is known exactly in both domains, unlike the hand-placed object):
+    gripper: dx -1.36  dy +3.53  dz -0.53 mm   (n=118)
+    object : dx -1.15  dy -2.50  dz +1.33 mm
+The OPPOSITE y sign on the object says the object discrepancy is hand-placement, not extrinsics.
+So the extrinsic residual is ~(-1.4, +3.5, -0.5) mm — **exactly the in-plane DOF the board-plane
+correction could not constrain** (a plane fixes only 2 tilt + height).
+
+**NOT applied**, deliberately: that offset is measured by comparing the sim gripper MESH against
+the real gripper cloud, so any mesh imperfection would be absorbed as a false extrinsic
+correction — the same failure mode as fitting the FOV to minimise a distance. It is recorded as a
+`point_cloud_shift` candidate if real deployment shows the bias. 3.5 mm is also below the
+per-point sensor noise at this range.
+
+**Metric caveat found in my own tooling:** the first "7.3% x-extent mismatch" was an artifact of
+using per-frame max-min extent, which is outlier-driven. On percentiles the spans are IDENTICAL
+(real x p1-p99 = 222 mm, sim = 222 mm), and every x/z occupancy band matches within 2.5 points.
+
 **2026-09-03 (night) — SIM REBUILT for the D435i rig. Camera parity is now EXACT.**
 Overnight campaign (user asleep; robot untouched, all work sim-side + offline).
 
