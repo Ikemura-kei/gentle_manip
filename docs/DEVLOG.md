@@ -475,6 +475,60 @@ measurable systematic error (calibration); use OBSERVATION-level augmentation fo
 so the policy learns to IGNORE absolute cloud z. This is the DR-vs-augmentation split in
 CLAUDE.md, and the board case is the clean worked example.
 
+**2026-09-04 — BLOCKER: v4.1 grasp yield on the 3 cm SOFT cube is ~38%, not ~88%, and it is
+NOT fixable by the closure/yield/DR knobs. 200-demo collection NOT run. User decision needed.**
+
+Five 8-env smoke batches, each changing one thing. Yield: **25% -> 37% -> 38% -> 25% -> 38%**.
+Only the first change was a real bug; nothing after it moved the number.
+
+| # | change | yield |
+|---|---|---|
+| 1 | baseline (my new board scene) | 25% |
+| 2 | `--table-z 0.0138` (REAL BUG — see entry below) | 37% |
+| 3 | + cube rests flat (pitch/roll 45->5, no flip) | 38% |
+| 4 | + `--closure-gain 1.28 -> 1.8` | 25% |
+| 5 | + `--grasp-yield 40k -> 80k` | 38% |
+(n=8 per batch, so 25 vs 38% = 2 vs 3 successes — differences after #2 are NOISE.)
+
+**What it is NOT** (each tested, each refuted):
+- NOT closure depth. `--grasp-yield 80k` raised `c_y` from 0.5-1.6 mm to 1.0-7.0 mm and commanded
+  closures to 5.2-8.0 mm — a firm squeeze on a 30 mm cube — with NO change in yield.
+- NOT the gentleness constraint binding early. That was my leading hypothesis (sharp corners
+  concentrate stress -> yield at ~1 mm -> near-zero squeeze) and raising the yield disproved it.
+- NOT corner-vs-face grasps. I asserted this from one `width 41.3 mm` example; the data refutes
+  it: SUCCESS mean align 0.816 / w 35.9 mm vs FAIL 0.733 / 32.0 mm — successes are WIDER, and
+  env 5 (w=29.9 mm, exactly face-aligned, strongest grip 2.226 N) FAILS while env 6 (35.2 mm,
+  off-face) succeeds.
+- NOT object toppling during settle (change #3 moved nothing).
+
+**What the evidence DOES say:** outcome is fixed by the PLANNED POSE and is nearly invariant to
+every executor parameter — the same env index gives the same outcome across smokes 3/4/5 despite
+different gains and yields (env 6 succeeds in all three, env 7 fails in all three). So ~5 of 8
+planned grasps are simply bad for this geometry, deterministically. No discriminator among
+align / width / predicted grip separates the two groups in n=8.
+
+**Why the 200-demo run was NOT launched.** (a) Throughput: 38% x 8 envs ~ 3/batch x ~9 min = ~10 h,
+which does not fit before the user is up, let alone training after. (b) Coverage: v4.1 saves only
+successes, so every dataset is success-filtered — but at 88% that covers nearly the whole pose
+distribution, while at 38% it covers about a third. The policy would learn only the pose family
+that happens to work and fail on the rest at deployment, and tomorrow's real test would measure
+THAT bias rather than the sim2real gap.
+
+**Options for the user (an experimental-design call, not a config tweak):**
+1. Accept ~38% and collect anyway with more parallel envs (`--n-envs 24`) — fastest path to a
+   dataset, but with the coverage caveat above.
+2. Re-collect on a ROUNDED object (mushroom), where v4.1 is calibrated and yields ~88%, and treat
+   the cube purely as the real-side probe.
+3. Investigate why v4.1's pose selection suits organic shapes but not a flat-faced cube. This is
+   the interesting result — the FEM surrogate's grasp scoring was identified on the mushroom
+   (`--closure-gain` help says so explicitly), and its transfer to new geometry classes is a
+   genuine, reportable limitation.
+4. Use the RIGID `cube3` (the real object IS rigid) — untested here because the user asked for
+   MPM/soft for this campaign.
+
+**Everything upstream of collection is DONE and verified** (camera parity exact, board, obs/DR
+parity, measured noise model, paired replay). The blocker is isolated to grasp synthesis.
+
 **2026-09-04 — TRAP: adding a support fixture silently invalidates the grasp planner's
 `--table-z`.** Caught by a smoke batch before committing the night to a full collection.
 
