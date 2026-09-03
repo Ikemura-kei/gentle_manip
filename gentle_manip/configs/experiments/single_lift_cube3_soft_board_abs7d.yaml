@@ -1,0 +1,26 @@
+# [experiment] 3 cm SOFT cube on the 13.8 mm board — the D435i rig (2026-09-03).
+# Used by: grasp_synthesis/collect_demos_synth_v4.py (200-demo campaign), DPPO training, eval
+# Status: active
+#
+# The single source of truth for the post-rig-change campaign. Everything camera/geometry is
+# MEASURED (see docs/DEVLOG.md 2026-09-03 and dataset/camera_calibration/eye-to-hand/NOTES_*):
+#   task        board 13.8 mm + cube at (0.30, 0.00) + the exactly-reproduced D435i camera
+#   obs         crop z_min 0.019 to clear the board — matches point_cloud_1cam_armfocus on real
+#   augmentation d435i_noise: ray-aligned sigma = 2.0e-3 * d^2, measured on THIS camera
+#                (l515_noise's isotropic jitter is the wrong model for a stereo camera)
+task: single_lift_cube3_soft_board
+action: abs_pose_euler_abs_gripper
+dr: soft_orientation_realws     # real-workspace spawn box
+augmentation: d435i_noise
+
+obs: superset_soft_armfocus_board
+views:
+  teacher: [privileged]
+  student: [point_cloud]
+
+rl:
+  discount: 0.99
+  random_steps: 300
+  training_starts: 5000
+  batch_size: 256
+  max_episode_steps: 400
