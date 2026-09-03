@@ -8155,3 +8155,59 @@ needs a 1x tomato eval — exactly the run that crashes.** Top follow-up; do not
 settled, and do not quote it without this caveat.
 
 Still missing: cherry_tomato / banana_chunk / pasta_bundle (unresolved NaN), strawberry seed 42.
+
+### 2026-09-02 — REAL DEPLOYMENTS ANALYZED; red-cube pairing lands at 8.9mm; VLA trained + teased
+
+**1. zdwii91 (cotrained) real deploy: "hesitant closing" — the mode-switch diagnosis REFINED.**
+Closure dynamics from the deploy recordings vs both training sources:
+
+| source | 70->45mm closure | re-open events |
+|---|---|---|
+| sim-only deploy (cvzth80) | 9 steps, monotone | 0 |
+| REAL teleop demos | 11 steps, monotone | 0 |
+| cotrained deploy (zdwii91) | **126 steps (p90 347)** | **median 6, max 50** |
+
+Both demo sources close FAST and MONOTONE — there are no two closing styles to switch between.
+The hesitation is oscillation at the CLOSE/DON'T-CLOSE decision (re-opens at replan boundaries).
+Proposed mechanism: real observations select the real-demo mode (domain match as mode selector),
+but real is 2.5% of training -> weakly learned -> successive replans land on different sides of
+the commit boundary. Consistent: approach fine, sim eval fine, hesitation only at closure on real.
+**RECOLLECTING SIM DEMOS TO MATCH GRIPPER BEHAVIOUR WOULD NOT HELP — the closing behaviour already
+matches (9 vs 11 steps; width level 39.6 vs 35.0mm).** Cost if wanted anyway: ~1.5-2 days.
+Levers that target the mechanism: (a) OVERSAMPLE the real slice (retrain only, ~4.5h/seed);
+(b) stronger paired encoder reg (see item 3); (c) deploy-side width latch to break oscillation.
+
+**2. cvzth80 (sim-only) real deploy: oversqueeze IS sim2real, perception-side, with a stacked
+physics term.** It COMMANDS 20-28mm min width on real vs ~40mm in its own sim evals — the policy
+asks for ~12mm deeper closure under real observations (residual cloud bias + noisier mid-grasp
+occlusion shifts the closed-loop feedback). On top: sim MPM resistance stops fingers near the
+surface even when commands run past it, masking over-commanding a real position-controlled
+gripper executes faithfully.
+
+**3. RED-CUBE PAIRED REPLAY (3cm cube @ x=0.45,y=0):** `dataset/demos/single_lift_red_cube_simtwin/`
+— 388 steps, step-paired. **ee_err 1.4mm mean / 5.7 max, quat 0.82 deg, gripper 0.2mm; cloud_nn
+8.9mm mean / 12.2 p95.** Recorded WITH point_cloud_shift [0.009,0,0] active, so 8.9mm is the
+RESIDUAL gap after the standing correction — independently reproducing cube3's ~8.4mm residual on
+a fresh object/day. **The residual perception bias is SYSTEMATIC**, and is the right magnitude to
+account for finding 2. Usable as paired validation data for encoder feature-discrepancy probing.
+⚠ THREE bugs fixed in `replay_real_to_sim_paired.py` en route, worst first: it decoded actions
+with `rec_cfg["action"]` (teleop DELTA) while newer recorders store `record_action` (7d ABSOLUTE)
+— absolute targets integrated as deltas walked the arm 70mm/293mm off. **Decode with
+`record_action` when present.** Also: paired-RGB recordings need images dropped (or --with-rgb)
+for the sim twin, and the sim obs recorder must not index real-only obs keys.
+
+**4. pi0.5 REAL VLA: TRAINED (30k steps, 18h — node slowed to ~4s/it) + sim teaser done.**
+Checkpoints kept: 10000/20000/29999 (42 GB each; save_interval 2000 but keep_period 5000 means
+only multiples of 5000 SURVIVE — and 5000/15000 are never written since saves land on 2000s).
+**Teaser (15 eps, mushroom, generic prompt, mask active): success 0.000 — AS FRAMED, this is a
+real->sim transfer number, NOT a performance measure.** Plumbing all passed: no NaNs, commands in
+range, gripper actuates, and the CLIPS show a COHERENT approach — the arm descends and positions
+over the object, it just never commits to grasp on sim renders. Pipeline validated end-to-end;
+the real test is deployment (`deploy_real_pi05.py`).
+
+**5. mlupe (base @1.5x budget, 8dp val): TIMEOUT at epoch 103/136** (node ran at ~420s/epoch vs
+the seeds' 179 — walltime sized on the fast rate). The 8dp data still answers the question:
+**val genuinely falls past ep91 (-13.4% over ep92-103; min 0.00059666 @ep99)** — the 91-epoch
+budget IS undertrained by val — with a possible turn at ep102 (+3%). Whether that val gain buys
+ANY success/gentleness is testable from the existing `state_96` (one eval) — the ep80-vs-94
+evidence says no. PENDING user call: finish the run (~14h) vs evaluate state_96 (~2.5h).

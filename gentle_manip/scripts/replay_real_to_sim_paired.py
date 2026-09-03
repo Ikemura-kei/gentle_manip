@@ -68,6 +68,9 @@ def main():
                     help="output dataset dir; default dataset/demos/<task-name>/<real leaf>")
     ap.add_argument("--episodes", default="", help="comma-sep episode indices (default: all)")
     ap.add_argument("--video-stride", type=int, default=2)
+    ap.add_argument("--with-rgb", action="store_true",
+                    help="also render RGB in sim (paired RGB). Requires the scene spec's camera "
+                         "resolution; slower. Default drops images from the obs config.")
     ap.add_argument("--render-only", action="store_true",
                     help="skip the sim replay; re-render figures/videos from the existing "
                          "paired data.pkl in --out (e.g. after changing the video views)")
@@ -89,7 +92,25 @@ def main():
     # The recording's own config.yaml is the authority for obs/action processing (the
     # record-time pipeline is baked into the stored clouds) — NOT any training snapshot.
     obs_cfg = ObsConfig.from_dict(rec_cfg["obs"])
-    act_cfg = ActionConfig.from_dict(rec_cfg["action"])
+    # A PAIRED-RGB real recording carries `images:` in its obs config. The sim env then needs an
+    # rgb_shape, and the backend must actually render RGB -- neither is needed for the point-cloud
+    # discrepancy this tool exists for. Default: drop images and say so. --with-rgb keeps them and
+    # supplies the shape from the scene spec (also gives PAIRED RGB, useful for the VLA sim2real
+    # question, at the cost of rendering every frame).
+    if obs_cfg.images is not None and not args.with_rgb:
+        import dataclasses as _dc
+        obs_cfg = _dc.replace(obs_cfg, images=None)
+        print("[replay] real obs config has images:; DROPPED for the sim twin (point clouds are "
+              "what the pairing is for). Pass --with-rgb to keep them.", flush=True)
+    # The recorder stores actions in `record_action` space when that key exists (newer demos:
+    # teleop reads deltas via `action`, but RECORDS 7-dim absolute euler). Decoding absolute
+    # actions with the delta config integrates ~0.5-magnitude "increments" every step -- the sim
+    # arm walks off (seen: 70 mm mean / 293 mm max EE error on the red-cube demo). The cube3-era
+    # demos have no `record_action`; for them `action` is both the teleop and the storage space.
+    _act_src = "record_action" if rec_cfg.get("record_action") else "action"
+    act_cfg = ActionConfig.from_dict(rec_cfg[_act_src])
+    print(f"[replay] decoding actions with rec_cfg[{_act_src!r}] "
+          f"(mode={rec_cfg[_act_src].get('mode', 'delta')})", flush=True)
 
     task_dict = yaml.safe_load(args.task_config.read_text())
     task = SingleLiftTask(task_dict)
@@ -114,7 +135,14 @@ def main():
 
     backend = SimBackend(task.scene_spec, 1, config={"sim": {"settle_steps": 20}},
                          use_subprocess=False)
-    env = PolicyEnv(backend, obs_cfg, act_cfg, task=None, max_episode_steps=10 ** 9)
+    _rgb_shape = None
+    if obs_cfg.images is not None:
+        _cam = task.scene_spec.cameras[0]
+        _w, _h = _cam.resolution
+        _rgb_shape = (int(_h), int(_w))
+        print(f"[replay] rgb_shape={_rgb_shape} from scene_spec camera {_cam.name}", flush=True)
+    env = PolicyEnv(backend, obs_cfg, act_cfg, task=None, max_episode_steps=10 ** 9,
+                    rgb_shape=_rgb_shape)
 
     # Nominal sim home (no offset) — reference for the per-episode Cartesian home match.
     obs0 = env.reset(object_dxy=[[0.0, 0.0]], home_offset=[[0.0, 0.0, 0.0]],
@@ -147,7 +175,15 @@ def main():
             obs, _, _, _ = env.step(actions[t][None, :])
             sim_obs.append(obs)
 
-        rec = {k: np.stack([o[k][0] for o in sim_obs]) for k in real["meta"]["obs_keys"]}
+        # Use the real recording's key list ONLY where the sim obs actually has the key: with
+        # images dropped (no --with-rgb) the sim twin has no image_cam_ext, and indexing the real
+        # key list blindly raised KeyError. The pairing is per-key; missing keys are named once.
+        _keys = [k for k in real["meta"]["obs_keys"] if k in sim_obs[0]]
+        _missing = [k for k in real["meta"]["obs_keys"] if k not in sim_obs[0]]
+        if _missing and ep_idx == picks[0]:
+            print(f"[replay] real-only obs keys not in the sim twin (dropped/unavailable): "
+                  f"{_missing}", flush=True)
+        rec = {k: np.stack([o[k][0] for o in sim_obs]) for k in _keys}
         sim_episodes.append({"observations": rec,
                              "actions": actions.copy(),
                              "rewards": np.zeros(T, dtype=np.float32)})
@@ -191,7 +227,7 @@ def main():
         "generator": "gentle_manip/scripts/replay_real_to_sim_paired.py",
         "git_commit": commit,
         "task_config": str(args.task_config.relative_to(REPO)),
-        "obs": rec_cfg["obs"], "action": rec_cfg["action"],
+        "obs": rec_cfg["obs"], "action": rec_cfg[_act_src],
         "placements": placements,
     }, sort_keys=False))
     (out / "match_report.yaml").write_text(yaml.safe_dump(report, sort_keys=False))
