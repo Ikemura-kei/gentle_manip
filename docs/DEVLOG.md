@@ -475,6 +475,27 @@ measurable systematic error (calibration); use OBSERVATION-level augmentation fo
 so the policy learns to IGNORE absolute cloud z. This is the DR-vs-augmentation split in
 CLAUDE.md, and the board case is the clean worked example.
 
+**2026-09-03 (cable, correction) — it was `z_lo`, not `r_ee`, and my first verification was
+a TAUTOLOGY.** `object_focus` keeps a point if `z < z_lo` **OR** `dist < r_ee`, so the low-z clause
+admits points at ANY distance from the TCP. I had "verified" cable removal with the metric
+"fraction of points above 160 mm" — but with the EE at z=36 mm and r_ee=0.11, NOTHING above 146 mm
+can survive, so that 0.0% was guaranteed by construction and measured nothing. The user caught it:
+they could still see cable, and had ruler-measured that part as well beyond 0.11 m from the TCP.
+
+Measured properly: at `z_lo=0.15`, **349 of 1024 points sat 0.110-0.174 m from the TCP** (cable +
+upper gripper), all admitted by the low-z clause. Sweep of the parameter that actually controls it:
+0.15 -> 349 far points, 0.12 -> 181, 0.10 -> 57, 0.08 -> 23, **0.06 -> 0**. Adopted `z_lo: 0.06`
+across all `*armfocus*` configs; verified live, max dist-to-TCP now exactly r_ee with 0 beyond.
+
+`z_lo=0.15` was inherited from before the board and before the 19 mm crop. Its documented job was
+"table + resting object", but the crop now removes the table, so its only remaining job is the
+RESTING object (board 14 mm + object ~35 mm -> tops out ~50 mm); a LIFTED object is covered by
+`r_ee`. **STILL UNVERIFIED: object retention.** The rig had no object in view during the sweep, so
+0.06 needs a re-check with an object on the board before it is trusted.
+
+LESSON: a verification metric whose value is forced by the very parameters under test proves
+nothing — check that the metric CAN come out negative before believing a pass.
+
 **2026-09-03 (cable) — HARD object_focus is now the default on every `*armfocus*` config.**
 The gripper CABLE is real-only geometry with no sim counterpart. Two things measured on the rig:
 - **Raising `min_neighbors` is the WRONG tool and actively backfires.** `remove_outliers_voxel` is

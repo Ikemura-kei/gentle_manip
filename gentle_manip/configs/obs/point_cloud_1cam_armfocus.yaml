@@ -28,6 +28,11 @@ point_cloud:
   # Arm-focus: downweight arm-body points so the 1024-pt budget concentrates on the object.
   # SHARED sim+real — must match the training obs (superset_rigid_armfocus) exactly.
   object_focus:
-    z_lo: 0.15          # keep points below this at full weight (table + resting object)
+    z_lo: 0.06          # 0.15 -> 0.06 (2026-09-03). This clause — NOT r_ee — is what was keeping
+                        #   the gripper CABLE: it admits ANY point below z_lo at ANY distance from
+                        #   the TCP. Measured: at 0.15, 349 of 1024 points sat 0.110-0.174 m from the
+                        #   TCP (cable + upper gripper); at 0.06, zero. Its remaining job is only the
+                        #   RESTING OBJECT (board 14mm + object ~35mm -> tops out ~50mm), since crop
+                        #   z_min=19mm already removes the table. A LIFTED object is covered by r_ee.
     r_ee: 0.11          # finger-safe SPHERE around the EE (gripper + grasped object).
                         #   0.13 left 1.0% cable points under hard focus; 0.11 -> 0.0%.
