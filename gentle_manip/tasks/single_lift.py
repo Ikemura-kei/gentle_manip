@@ -39,7 +39,7 @@ class SingleLiftTask(BaseTask):
         # mpm_grid_density=250 at E=0.3 MPa.
         self.sim_substeps: int = int(task_cfg.get("sim_substeps", 80))
         self.mpm_grid_density: float = float(task_cfg.get("mpm_grid_density", 300.0))
-        self.cam_fov: float = float(task_cfg.get("cam_fov", 46.0))
+        self.cam_fov: float = float(task_cfg.get("cam_fov", 43.15))  # D435i VFOV (measured)
         # cam_ext (depth -> point cloud) extrinsic. Default = the calibrated L515 pose validated in
         # the dev prototype; override cam_pos/cam_lookat in the task cfg for camera-placement studies.
         self.cam_pos: tuple = tuple(task_cfg.get("cam_pos", (0.98910661, -0.00034108, 0.09825304)))
@@ -108,10 +108,14 @@ class SingleLiftTask(BaseTask):
                     # default = calibrated L515; task-cfg cam_pos/cam_lookat override (camera study)
                     pos=self.cam_pos,
                     lookat=self.cam_lookat,
-                    # Genesis fov is VERTICAL: fov=49 -> VFOV 49, HFOV ~63 at 640x480.
-                    # fov=60 was wider than the L515 (~55x70) and gave a larger cloud
-                    # offset; narrowing minimizes it (see examples/sim2real_diagnose).
-                    # TODO: set to the real L515's measured intrinsics for exactness.
+                    # Genesis fov is VERTICAL (camera.f = 0.5*res[1]/tan(fov/2), height-based).
+                    # MATCHED TO THE D435i 2026-09-03: measured live colour intrinsics at 640x480
+                    # are fx=607.01 fy=606.96 (HFOV 55.59, VFOV 43.15, DFOV 66.77). fov=43.15
+                    # reproduces f=606.94 — within 0.01% of the real focal length.
+                    # RESIDUAL, not expressible in Genesis: the real principal point is
+                    # (322.56, 246.58) while Genesis forces (res/2) = (320, 240). The 6.6 px
+                    # y-offset is ~0.6 deg of pointing — a known small sim/real backprojection
+                    # difference, not something fov can absorb.
                     fov=self.cam_fov,
                 ),
             ] + ([

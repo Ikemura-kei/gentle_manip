@@ -475,6 +475,26 @@ measurable systematic error (calibration); use OBSERVATION-level augmentation fo
 so the policy learns to IGNORE absolute cloud z. This is the DR-vs-augmentation split in
 CLAUDE.md, and the board case is the clean worked example.
 
+**2026-09-03 — TCP z-min raised to 13.9 mm; sim camera FOV matched to the D435i.**
+- **`EE_BOUNDS_MIN` z 0.003 -> 0.0139** (`xarm7_config.py`). ONE constant covers BOTH sides —
+  `SimBackend` and `RealBackend` each clip the accumulated target to it — so sim and real move
+  together. The 13.8 mm board now sits on the table and the fingertip TCP must not be commanded
+  below its surface. This also RESOLVES an earlier ambiguity: gripper-touch reads 13.9-14.1 mm,
+  which is 13.8 mm of board on a table at z~0, so the table IS at the robot origin — the camera's
+  earlier -9.8 mm table reading was extrinsic TILT error, not a raised mounting plate.
+  The absolute-mode action configs PIN their own `pos_min`, so the ACTION SPACE is unchanged and
+  existing datasets/checkpoints keep their normalization; commands below the bound are just clipped.
+  (`real_lab_tactile.yaml` keeps its own 0.0825 override for the thicker GelSight fingers.)
+- **Sim `cam_fov` 46.0 -> 43.15** (`tasks/single_lift.py`). Genesis's fov is VERTICAL
+  (`camera.f = 0.5*res[1]/tan(fov/2)`, height-based — note `focal_len` elsewhere in that file uses
+  res[0] and is NOT what `intrinsics` uses). Measured D435i colour intrinsics at 640x480:
+  **fx 607.01, fy 606.96, ppx 322.56, ppy 246.58 -> HFOV 55.59, VFOV 43.15, DFOV 66.77**. fov=43.15
+  gives f=606.94, within 0.01% of real. The old 46.0 gave f=565 — a ~7% focal mismatch, i.e. the sim
+  cloud was systematically wider than the real one.
+  **KNOWN RESIDUAL:** Genesis forces the principal point to res/2 = (320, 240) while the real one is
+  (322.56, 246.58). The 6.6 px y-offset is ~0.6 deg of pointing and CANNOT be absorbed by fov — a
+  small permanent sim/real backprojection difference to keep in mind when comparing paired clouds.
+
 **2026-09-03 (cable, correction) — it was `z_lo`, not `r_ee`, and my first verification was
 a TAUTOLOGY.** `object_focus` keeps a point if `z < z_lo` **OR** `dist < r_ee`, so the low-z clause
 admits points at ANY distance from the TCP. I had "verified" cable removal with the metric

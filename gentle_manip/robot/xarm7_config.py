@@ -25,8 +25,15 @@ JOINT_NAMES = [
 
 EE_LINK = 'xarm_gripper_base_link'
 
-# Cartesian workspace limits in world frame (meters)
-EE_BOUNDS_MIN = [0.26, -0.225, 0.003]
+# Cartesian workspace limits in world frame (meters). SHARED by sim and real: SimBackend and
+# RealBackend both clip the accumulated target to these (real_lab*.yaml may override per-rig).
+# z-min 0.0139 (2026-09-03): the 13.8 mm board now sits on the table, so the fingertip TCP must
+# not be commanded below its SURFACE. Gripper-touch on the board reads 13.9-14.1 mm, matching
+# 13.8 mm of board on a table at z=0 — which also confirms the table IS at z~0 (an earlier camera
+# reading of -9.8 mm was extrinsic tilt error, not a raised mounting).
+# NOTE the absolute-mode action configs PIN pos_min/pos_max themselves, so they are unaffected by
+# this and still map into z>=0.003; commands below the bound are simply clipped here.
+EE_BOUNDS_MIN = [0.26, -0.225, 0.0139]
 EE_BOUNDS_MAX = [0.59,  0.225, 0.50]
 
 # Home TCP (fingertip) pose, in "our TCP" convention — SHARED so sim and real reset
