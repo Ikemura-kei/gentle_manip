@@ -484,14 +484,20 @@ they could still see cable, and had ruler-measured that part as well beyond 0.11
 
 Measured properly: at `z_lo=0.15`, **349 of 1024 points sat 0.110-0.174 m from the TCP** (cable +
 upper gripper), all admitted by the low-z clause. Sweep of the parameter that actually controls it:
-0.15 -> 349 far points, 0.12 -> 181, 0.10 -> 57, 0.08 -> 23, **0.06 -> 0**. Adopted `z_lo: 0.06`
-across all `*armfocus*` configs; verified live, max dist-to-TCP now exactly r_ee with 0 beyond.
+0.15 -> 349 far points, 0.12 -> 181, 0.10 -> 57, 0.08 -> 23, 0.06 -> 0.
 
-`z_lo=0.15` was inherited from before the board and before the 19 mm crop. Its documented job was
-"table + resting object", but the crop now removes the table, so its only remaining job is the
-RESTING object (board 14 mm + object ~35 mm -> tops out ~50 mm); a LIFTED object is covered by
-`r_ee`. **STILL UNVERIFIED: object retention.** The rig had no object in view during the sweep, so
-0.06 needs a re-check with an object on the board before it is trusted.
+**ADOPTED `z_lo: 0.12`, NOT 0.06.** I first set 0.06 (which removes the cable entirely) sizing it
+from a ~35 mm mushroom — wrong: the **tallest object in the set is 0.10 m**, which on the 14 mm
+board tops out at ~114 mm, so 0.06 would have sliced the object nearly in half. 0.12 clears it with
+~6 mm margin. Measured live at 0.12: ~124/1024 points (12%) sit beyond `r_ee`, z 91-120 mm — i.e.
+**some cable remains, deliberately**.
+
+**Consequence worth recording: the cable is NOT separable by world height.** The cable spans
+91-150 mm and a resting tall object spans 19-114 mm — they OVERLAP, so no `z_lo` can keep the object
+and drop the cable. The only clean separator measured is the **TCP-FRAME AXIAL cut** (object
+-12..+17 mm along the tool axis vs cable -186..-124 mm, a 112 mm gap), because the cable is fixed
+relative to the TCP and sits behind it along the tool axis regardless of world height. That is the
+fix if the residual 12% turns out to matter; it needs validating across arm poses first.
 
 LESSON: a verification metric whose value is forced by the very parameters under test proves
 nothing — check that the metric CAN come out negative before believing a pass.
