@@ -90,6 +90,12 @@ Then: `bash gentle_manip/scripts/deploy_pi0.5.sh` (or the explicit command in it
    `Pi05RealPolicy.__init__` therefore imports `openpi.training.checkpoints` FIRST, before
    masked_wrist (which pulls libero_policy -> policy.py) and before policy_config.
 
+3. **Policy interface mismatch.** `Pi05RealPolicy` exposed only `act(obs)`, but the shared
+   `run_deploy_loop` drives policies as `reset(obs)` / `push(obs)` / `predict()` — it died with
+   `TypeError: reset() takes 1 positional argument but 2 were given` the moment the robot was
+   connected. Added those three methods as a thin wrapper over `act()` (pi0.5 is stateless per
+   inference, so they just track the latest obs).
+
 ### Verified offline before touching the robot
 
 Policy loads, and on a recorded mushroom frame it returns a (10, 7) chunk whose first action

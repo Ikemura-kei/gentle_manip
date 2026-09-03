@@ -77,9 +77,22 @@ class Pi05RealPolicy:
         self.n_action_steps = int(n_action_steps)
         print(f"[pi05-deploy] checkpoint={checkpoint_dir}")
         print(f"[pi05-deploy] prompt={self.prompt!r}  n_action_steps={self.n_action_steps}")
+        self._last_obs = None
 
-    def reset(self) -> None:
-        pass
+    # run_deploy_loop drives policies as reset(obs) / push(obs) / predict(); pi0.5 itself is
+    # stateless per inference (single frame + proprio, no history buffer), so these just track
+    # the latest observation and delegate to act(). Added 2026-09-03: the class previously
+    # exposed only act(obs), which the shared loop never calls -> TypeError on reset.
+    def reset(self, obs: dict | None = None) -> None:
+        self._last_obs = obs
+
+    def push(self, obs: dict) -> None:
+        self._last_obs = obs
+
+    def predict(self) -> np.ndarray:
+        if self._last_obs is None:
+            raise RuntimeError("predict() before reset()/push() — no observation available")
+        return self.act(self._last_obs)
 
     def act(self, obs: dict) -> np.ndarray:
         from openpi.shared import image_tools
