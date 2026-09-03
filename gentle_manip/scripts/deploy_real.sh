@@ -626,6 +626,28 @@
 # Keep point_cloud_shift [0.009,0,0] ACTIVE in real_lab.yaml (sim clouds are unbiased; the real
 # cloud must be corrected into the frame the policy trained in).
 
+# pi0.5 VLA on ALL 7 REAL objects (openpi run pi05_real7_ext, ckpt 29999) — added 2026-09-02.
+# THE REAL-DATA VLA (141 teleop eps, single external camera, wrist slot MASKED OFF). RGB policy,
+# NOT point cloud. Deploy path is scripts/deploy_real_pi05.py (openpi Policy.infer -> RealBackend);
+# only the policy adapter differs from the DPPO deploy, the loop/backend/safety are shared.
+# Full guide + which-part-is-pi05 table: docs/deploy_pi05_real_vla.md
+#
+# DOWNLOAD (local): openpi ckpt, self-contained (norm stats in assets/), NOT via pull_run.sh.
+#   CK=<remote>/third_party/openpi/checkpoints/pi05_libero/pi05_real7_ext/29999
+#   rsync -avzP --exclude 'train_state' "$REMOTE:$CK/" pi05_real7_ext/29999/   # 12 GB (skip 30GB optimizer)
+#
+# ⚠ --prompt is REQUIRED (no default). Named e.g. "pick up the mushroom gently"; or a GENERIC
+#   "pick up the object from table gently" to test acting without an object name (2 of the 6
+#   trained phrasings use the literal word "object").
+# ⚠ masked_wrist.patch() runs inside Pi05RealPolicy BEFORE the policy is built — matches training;
+#   do not remove. No point_cloud_shift, no --normalization (both DPPO-only concerns).
+#
+# uv run --project envs/dp3 python -m gentle_manip.scripts.deploy_real_pi05 \
+#   --checkpoint pi05_real7_ext/29999 \
+#   --prompt "pick up the mushroom gently" \
+#   --max-pos-step-m 0.01 \
+#   --record dataset/real_deploy/pi05_real7_e29999
+
 # ── PRE-DEPLOY CHECK: live view of the EXACT point cloud the policy sees ─────
 # (post-perception: crop + outlier removal + ARM-FOCUS + FPS subsample, driven
 # through PerceptionPipeline with a live robot connection — the armfocus filter
