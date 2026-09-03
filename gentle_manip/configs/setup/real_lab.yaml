@@ -14,15 +14,18 @@ robot:
   servo_mvacc: 50
 
 cameras:
-  cam_ext:                       # Intel RealSense L515, world-fixed
-    type: l515
-    serial: "f1120484"
+  cam_ext:                       # Intel RealSense D435i, world-fixed (lifted, ~38 deg down)
+    type: d435i                  # was l515 until 2026-09-03; the L515 is off the rig
+    serial: "335522071488"
     width: 640
     height: 480
     depth_min: 0.1
-    depth_max: 0.85
+    depth_max: 1.2               # raised from 0.85: the lifted D435i views the table further
+    # visual_preset: high_density  # D400-family preset; NOT yet supported by RealSenseCamera
+    #                              # (its lookup is L515-only and it sets the preset after
+    #                              #  pipeline.start, which errors on this D435i) — see DEVLOG
     # world_T_cam: [...]         # optional 4x4 override; else uses WORLD_T_CAM_EXT
-    #                            # TODO: recalibrate for the new rig
+    #                            # (recalibrated 2026-09-03 for this camera)
 
   # ── Future hardware (not on the current rig) ───────────────────────────────
   # cam_wrist:                   # Intel RealSense D405, wrist-mounted (dynamic extrinsic)

@@ -199,7 +199,12 @@ def search(data: Data, args) -> List[dict]:
 
 
 def table_check(X: np.ndarray, args) -> None:
-    """EXTERNAL validation: the table must lie at z=0 with a vertical normal."""
+    """EXTERNAL validation: the imaged surface must lie at a KNOWN height, normal up.
+
+    `--table-z` is the expected height of whatever surface the camera actually sees, in
+    robot-base metres. It is 0 for the bare table, but must be raised when something is
+    laid on top (e.g. a 14 mm board) — otherwise a correct extrinsic is reported as failing.
+    """
     import open3d as o3d
     import pyrealsense2 as rs
     from gentle_manip.perception.depth_to_pointcloud import depth_to_pointcloud
@@ -234,13 +239,15 @@ def table_check(X: np.ndarray, args) -> None:
         n = -n
     tilt = np.degrees(np.arccos(np.clip(n[2], -1, 1)))
     z = np.asarray(pc.points)[inl][:, 2]
-    print(f"  [table] normal {np.round(n,3)}  tilt {tilt:.2f} deg from horizontal")
-    print(f"  [table] height {z.mean()*1000:+.1f} mm  (should be ~0)   "
-          f"{len(inl)} inliers")
-    if abs(z.mean()) > 0.02 or tilt > 3.0:
-        print("  [table] *** FAILS the physical check — do not trust this X ***")
-    else:
-        print("  [table] passes")
+    dz_mm = (z.mean() - args.table_z) * 1000.0
+    print(f"  [table] normal {np.round(n,3)}  tilt {tilt:.2f} deg from horizontal "
+          f"(should be ~0)")
+    print(f"  [table] measured height {z.mean()*1000:+.1f} mm   expected "
+          f"{args.table_z*1000:+.1f} mm   -> off by {dz_mm:+.1f} mm")
+    print(f"  [table] plane std {z.std()*1000:.1f} mm over {len(inl)} inliers")
+    bad = abs(dz_mm) > args.table_tol_mm or tilt > args.table_tol_deg
+    print(f"  [table] {'*** FAILS the physical check — do not trust this X ***' if bad else 'PASSES'}"
+          f"  (tolerance {args.table_tol_mm:.0f} mm / {args.table_tol_deg:.1f} deg)")
 
 
 def main() -> None:
@@ -261,6 +268,12 @@ def main() -> None:
     p.add_argument("--table-check", action="store_true",
                    help="validate the winner against the real table plane (needs the camera)")
     p.add_argument("--cam-serial", default="335522071488")
+    p.add_argument("--table-z", type=float, default=0.0,
+                   help="expected height (m, robot base) of the surface the camera sees. "
+                        "0 = bare table; raise it if something is laid on top, e.g. 0.014 "
+                        "for a 14 mm board")
+    p.add_argument("--table-tol-mm", type=float, default=20.0)
+    p.add_argument("--table-tol-deg", type=float, default=3.0)
     p.add_argument("--table-min-depth", type=float, default=0.33,
                    help="ignore points nearer than this (excludes a board still in the gripper)")
     args = p.parse_args()
@@ -292,7 +305,7 @@ def main() -> None:
     # all of it. A subset that merely scores well is not the estimate — using every
     # consistent pose is strictly better conditioned than the minimal fit that found them.
     best = cands[0]
-    inl0 = list(np.flatnonzero(best["inliers"]))
+    inl0 = [int(i) for i in np.flatnonzero(best["inliers"])]
     if len(inl0) > len(best["fit_idx"]):
         Xr = data.solve(inl0, METHODS[best["method"]])
         if Xr is not None:
@@ -302,6 +315,7 @@ def main() -> None:
                   f"inliers {best['n_inliers']}->{n_r}, med {best['med_mm']:.2f}->{med_r:.2f} mm")
             if n_r >= best["n_inliers"]:
                 print("  -> refit ACCEPTED (uses more data, no consensus lost)")
+                inl0 = [int(i) for i in inl0]
                 best = {"X": Xr, "method": best["method"], "fit_idx": inl0,
                         "n_inliers": n_r, "med_mm": med_r, "inliers": ok_r}
             else:

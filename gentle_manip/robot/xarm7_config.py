@@ -148,13 +148,19 @@ SERVO_SPEED_MM_S = 60     # passed to set_servo_cartesian_aa(speed=)
 SERVO_MVACC      = 500    # passed to set_servo_cartesian_aa(mvacc=)
 
 # ── Camera extrinsics ─────────────────────────────────────────────────────────
-# L515 (external, world-fixed) — static, calibrated once via AprilTag.
-# TODO: recalibrate WORLD_T_CAM_EXT for the new single-camera rig (value below is
-#       carried over from the old reference repo). Overridable via real_lab.yaml.
+# D435i (external, world-fixed), lifted and angled ~38 deg down at the table.
+# Calibrated 2026-09-03 by ChAruco eye-to-hand (diagnostics/calibration.py, 14 poses) and
+# selected by diagnostics/calib_select.py: TSAI on the 13-pose consensus set (pose 7 rejected
+# as an outlier), median board-in-gripper residual 0.94 mm. Cross-checked three ways:
+#   * 4/5 independent solvers agree within 0.6-2.4 mm on the same pose set
+#   * an INDEPENDENT earlier capture session landed within 11 mm of this
+#   * external table-plane check: a 14 mm board measured +9.0 mm, tilt 1.67 deg
+# Camera sits at (0.698, -0.059, 0.314) m in the robot base frame.
+# Overridable per-rig via real_lab.yaml `cameras.cam_ext.world_T_cam`.
 WORLD_T_CAM_EXT = [
-    [     0.02100114,     -0.01457584,     -0.99967320,      0.98910661],
-    [     0.99974256,     -0.00828403,      0.02112338,     -0.00034108],
-    [    -0.00858922,     -0.99985945,      0.01439812,      0.09825304],
+    [    -0.05355549,      0.61002287,     -0.79057189,      0.69777350],
+    [     0.99837323,      0.04822094,     -0.03042417,     -0.05896004],
+    [     0.01956269,     -0.79091519,     -0.61161300,      0.31424461],
     [     0.00000000,      0.00000000,      0.00000000,      1.00000000],
 ]
 
