@@ -1410,3 +1410,17 @@ LARGE-4 mean: SR 0.86 -> 0.71 (-0.15). Gentleness ~held.
   (7-cat was 0.63 vs 0.50 / 0.77 vs 0.75). "tomato excluded" line removed.
 - Republished artifact 5682ac2f (8.64 MB). OOD montages now embedded (guard fix).
 - Still running: 1915481 v3-reactive (batch 3/12, slow), 1915094 v3-clean (batch 11/12).
+
+## 2026-09-03 11:40 — Reactive Phase E on the page (interim)
+- v3-reactive eval (gen_eval_20260902_112303, 0.90 drag, 4 large cats): mushroom SR0.23/g0.75,
+  banana 0.58/0.72, kiwi 0.62/0.82, egg 0.73/0.69 -> mean SR 0.54 / g 0.74. Job timed out
+  before the 3 small cats.
+- v3-clean (gen_eval_clean_1058): mean SR 0.78 / g 0.75. Reactive gentleness == clean
+  gentleness -> no panic-crush. SR -0.24 under the drag.
+- CONFOUND: eval drag 0.40-0.95 m/s is 2-3x the collection drag 0.12-0.38. OOD for v3.
+- Fair baseline 1938494 (lorap @ 0.90 drag) running; kiwi done SR 0.58 (~ v3's 0.62).
+- Added "Act 3 - Reactive policy" block to regrasp_demos.html (AFTER GEN8_EVAL_END so
+  gen8_refresh won't clobber it). $SP/build_reactive_section.py rebuilds it; re-run +
+  republish when 1938494 fills the fair column. Page 11.3 MB. Artifact republished.
+- Wrote pkoie/EXPERIMENT.md.
+- NEXT: v4 = re-collect reactive demos at 0.30-0.70 m/s drag + retrain (pending user OK).
