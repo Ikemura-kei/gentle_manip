@@ -731,8 +731,13 @@
 # ── REAL-WORLD MAIN-TABLE BASELINES (h16, 141 real eps, no sim) — 2026-09-02 ──
 # Both REQUIRE --act-steps 16. Each uses its OWN normalization (they are standalone policies).
 #
-# (1) PURE-REAL POINT-CLOUD DP  (tiatg, val low @520)
-ckpt=logs/dppo/dppo-pretrain/single_lift_generalist_real7/tiatg/checkpoint/state_500.pt
+# (1) PURE-REAL POINT-CLOUD DP  (tiatg)
+# ⚠ SELECT THE CHECKPOINT ON THE ROBOT, NOT BY VAL LOSS. Measured 2026-09-03 on the h4 seed-twin
+#   pair (same run, more epochs): ckpt1000 (val 0.0063, near the low) closed to only 57mm and
+#   lifted 16/44; ckpt2250 (val 0.0138, DEEP overfit) closed to 45mm, lifted 9/19, 0 aborts —
+#   the overfit checkpoint was BETTER. Val MSE rewards mode-averaging (hovering) under the demos'
+#   stochastic close timing. Sweep state_500 / state_900 / state_1200 and pick by behaviour.
+ckpt=logs/dppo/dppo-pretrain/single_lift_generalist_real7/tiatg/checkpoint/state_1200.pt
 normalization=dataset/dppo/single_lift_generalist_real7/normalization.npz
 uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
@@ -741,10 +746,10 @@ uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.p
   --act-steps 16 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
   --record dataset/real_deploy/tiatg500_purereal_pc --shard-size 10 --max-steps 5000
 #
-# (2) RGB DP (uirro, val low @320) — ⚠ NOT deployable with deploy_real_dppo.py as-is: that
+# (2) RGB DP (uirro) — same checkpoint caveat as (1): sweep on the robot. — ⚠ NOT deployable with deploy_real_dppo.py as-is: that
 #     adapter builds a PointNetDiffusionMLP and feeds `point_cloud`. An RGB deploy needs a
 #     VisionDiffusionMLP branch + 96x96 cam_ext frames in the obs (obs config
 #     point_cloud_1cam_armfocus_rgb.yaml already records image_cam_ext). TODO before the RGB
 #     row of the real table can be measured on-robot.
-# ckpt=logs/dppo/dppo-pretrain/single_lift_real7_rgb/uirro/checkpoint/state_300.pt
+# ckpt=logs/dppo/dppo-pretrain/single_lift_real7_rgb/uirro/checkpoint/state_1200.pt  # or 300 / 700
 # normalization=dataset/dppo/single_lift_real7_rgb/normalization.npz

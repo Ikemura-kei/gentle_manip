@@ -444,6 +444,26 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-09-03 — CHECKPOINT SELECTION BY VAL LOSS IS WRONG FOR THESE POLICIES (measured).**
+User challenge: "deployment results show overfitting on val doesn't mean much." Tested on the
+h4 seed-twin pair (xagzg IS xgwhc continued — identical seed/config, so this is one trajectory
+at two epochs):
+
+| checkpoint | val | mean min commanded width | lift-proxy | aborts |
+|---|---|---|---|---|
+| ckpt 1000 (near val low) | 0.0063 | 57.2 mm (barely closes) | 16/44 (36 %) | 2 |
+| ckpt 2250 (2.2x the low, deep overfit) | 0.0138 | **44.8 mm** | **9/19 (47 %)** | 0 |
+
+The MORE overfit checkpoint behaved BETTER. Mechanism: val is MSE on action prediction, and
+under multimodal targets (stochastic human close timing) the MSE-optimal prediction is the mode
+AVERAGE = hovering; longer training sharpens modes, raising val while producing the decisive
+commitment we want. Same root as the initiation finding — the offline metric rewards the
+failure mode. CONSEQUENCE: earlier "RECOMMENDED state_XXX (val low)" notes for tiatg/uirro are
+WITHDRAWN (corrected in their EXPERIMENT.md); deploy entries now say sweep early/mid/late on the
+robot. Caveats: 19 vs 44 episodes, lift-proxy is a heuristic (EE rise >40 mm after first close),
+sessions differ. Worth a proper checkpoint-vs-success curve if the paper claims anything here.
+
+
 **2026-09-03 — Per-episode reset bug: every deploy episode AFTER the first was ruined by a
 stale closed-gripper observation. Two causes, both fixed.**
 Symptom (user, tiatg500_purereal_pc): episode 1 normal, episodes 2-4 "weird in the first few
