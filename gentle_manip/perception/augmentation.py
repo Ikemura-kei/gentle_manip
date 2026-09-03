@@ -24,6 +24,20 @@ class AugmentationConfig:
     pc_jitter_std: float = 0.0     # per-point Gaussian (m)
     pc_dropout: float = 0.0        # fraction of points replaced by duplicates (mimic missing returns)
     pc_offset_std: float = 0.0     # per-cloud rigid offset (m)
+    # ── D435i depth-noise model (2026-09-03) ─────────────────────────────────────────────
+    # `pc_jitter_std` is ISOTROPIC, which no depth camera produces. A stereo camera's error is
+    # ALONG THE VIEWING RAY and grows with the SQUARE of range (disparity->depth inversion):
+    #     sigma_axial(d) = pc_axial_coeff * d^2
+    # MEASURED on our D435i (temporal std over 12 frames of a static board, by distance):
+    #     0.45 m -> 0.373 mm | 0.55 m -> 0.553 | 0.675 m -> 0.943 | 0.85 m -> 1.891
+    # which fits pc_axial_coeff ~= 2.0e-3 m/m^2 (effective subpixel ~0.06, i.e. this camera is
+    # BETTER than the usual 0.1 rule of thumb). Ray direction needs the camera origin, so
+    # pc_axial_cam_pos must be the world-fixed cam_ext position; zero disables the term.
+    # Lateral (in-image) error is the pixel footprint d/f quantised: sigma_lat = coeff_lat * d,
+    # ~0.24 mm at 0.5 m — an order below axial, so it defaults off.
+    pc_axial_coeff: float = 0.0            # m per m^2, along the camera ray
+    pc_lateral_coeff: float = 0.0          # m per m, perpendicular to the ray
+    pc_axial_cam_pos: tuple = (0.0, 0.0, 0.0)
     # low-dim state
     ee_pos_std: float = 0.0        # m
     ee_quat_std: float = 0.0       # additive quat noise (renormalized)
@@ -41,6 +55,7 @@ class AugmentationConfig:
 
     def is_noop(self) -> bool:
         return not (self.pc_jitter_std or self.pc_dropout or self.pc_offset_std
+                    or self.pc_axial_coeff or self.pc_lateral_coeff
                     or self.ee_pos_std or self.ee_quat_std or self.gripper_std
                     or self.joint_std or self.quat_sign_flip or self.quat_snap)
 
@@ -59,7 +74,8 @@ class ObsAugmentor:
 
     def __call__(self, obs: dict) -> dict:
         c = self.cfg
-        if "point_cloud" in obs and (c.pc_jitter_std or c.pc_dropout or c.pc_offset_std):
+        if "point_cloud" in obs and (c.pc_jitter_std or c.pc_dropout or c.pc_offset_std
+                                     or c.pc_axial_coeff or c.pc_lateral_coeff):
             obs["point_cloud"] = self._point_cloud(obs["point_cloud"])
         if "ee_pos" in obs and c.ee_pos_std:
             obs["ee_pos"] = (obs["ee_pos"] + self._n(obs["ee_pos"].shape, c.ee_pos_std)).astype(np.float32)
@@ -87,6 +103,19 @@ class ObsAugmentor:
                 for i in range(N):  # replace k points with duplicates of random kept points
                     drop = self.rng.choice(P, size=k, replace=False)
                     pc[i, drop] = pc[i, self.rng.integers(0, P, size=k)]
+        if c.pc_axial_coeff > 0 or c.pc_lateral_coeff > 0:
+            # Ray-aligned, range-dependent noise — the physical stereo model.
+            cam = np.asarray(c.pc_axial_cam_pos, np.float32).reshape(1, 1, 3)
+            v = pc - cam                                        # camera -> point
+            d = np.linalg.norm(v, axis=-1, keepdims=True)       # (N, P, 1) range
+            u = v / np.maximum(d, 1e-6)                         # unit ray
+            if c.pc_axial_coeff > 0:                            # sigma ~ coeff * d^2, along u
+                pc += u * (self.rng.normal(0.0, 1.0, d.shape).astype(np.float32)
+                           * (c.pc_axial_coeff * d * d))
+            if c.pc_lateral_coeff > 0:                          # sigma ~ coeff * d, perp to u
+                g = self.rng.normal(0.0, 1.0, pc.shape).astype(np.float32)
+                g -= u * np.sum(g * u, axis=-1, keepdims=True)  # project out the radial part
+                pc += g * (c.pc_lateral_coeff * d)
         if c.pc_jitter_std > 0:
             pc += self._n(pc.shape, c.pc_jitter_std)
         if c.pc_offset_std > 0:

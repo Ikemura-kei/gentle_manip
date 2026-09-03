@@ -1,0 +1,23 @@
+# [augmentation] SIM-ONLY point-cloud noise matching the measured D435i (2026-09-03).
+# Used by: PolicyEnv(augmentation=...) for sim training / sim demo collection
+# Status: active
+#
+# Replaces l515_noise.yaml's ISOTROPIC jitter with the physical stereo model: error along the
+# CAMERA RAY, growing as d^2. Coefficient is MEASURED on our own camera (temporal std over 12
+# frames of a static board), not taken from literature:
+#     0.45 m -> 0.373 mm | 0.55 -> 0.553 | 0.675 -> 0.943 | 0.85 -> 1.891
+# fits sigma = 2.0e-3 * d^2  (effective subpixel ~0.06; the usual 0.1 rule of thumb overestimates
+# this unit by ~1.6x). Applied sim-only: the real camera already HAS this noise.
+# cam pos = the plane-corrected WORLD_T_CAM_EXT translation (world-fixed cam_ext).
+pc_axial_coeff: 0.002
+pc_axial_cam_pos: [0.69895466, -0.06643963, 0.31680030]
+
+# Lateral (pixel-footprint) error, ~0.24 mm at 0.5 m — an order below axial. Kept small but ON:
+# it is what stops the sim cloud lying on a geometrically perfect surface.
+pc_lateral_coeff: 0.0005
+
+# Missing returns. The real frame is 9.8% invalid pixels; after crop + FPS the surviving cloud is
+# denser than that implies, so this is deliberately modest rather than 0.098.
+pc_dropout: 0.03
+
+seed: 0

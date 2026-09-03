@@ -90,6 +90,15 @@ OBJECT_MAP: dict[str, ObjectDef] = {
     "cube3": ObjectDef("cube3", MATERIALS["red_cube"], object_type="rigid",
                        size=(0.03, 0.03, 0.03), default_pos=(0.47, 0.0, 0.016),
                        mesh_path=str(_OBJ_DIR / "cube3.obj")),
+    # SOFT twin of cube3 (2026-09-03). ADDITIVE — cube3 stays rigid so every existing dataset and
+    # policy is untouched. Same 3 cm mesh, MPM instead of rigid, soft_shape material (E=300 kPa,
+    # the stiffest validated MPM preset — "Config C") because it stands in for a real SOLID cube:
+    # a softer preset (red_cube, E=30 kPa) would visibly squash under the grasp and diverge from
+    # the real object. Used for the 2026-09-03 D435i paired-replay + 200-demo campaign, where the
+    # research question is gentleness, so the sim object must be deformable.
+    "cube3_soft": ObjectDef("cube3_soft", MATERIALS["soft_shape"], object_type="soft",
+                            size=(0.03, 0.03, 0.03), default_pos=(0.47, 0.0, 0.016),
+                            mesh_path=str(_OBJ_DIR / "cube3.obj")),
     "cube4": ObjectDef("cube4", MATERIALS["soft_shape"], object_type="soft",
                        size=(0.04, 0.04, 0.04), default_pos=(0.47, 0.0, 0.021),
                        mesh_path=str(_OBJ_DIR / "cube4.obj")),

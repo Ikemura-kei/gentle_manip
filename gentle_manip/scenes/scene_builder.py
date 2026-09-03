@@ -243,14 +243,16 @@ def build_scene(
             # env's world offset at render time and calls the rasterizer once.
             cameras[cam.name] = [
                 scene.add_camera(res=(w, h), pos=tuple(cam.pos), lookat=tuple(cam.lookat),
-                                 fov=cam.fov, GUI=False)
+                                 fov=cam.fov, GUI=False,
+                                 **({} if cam.up is None else {"up": tuple(cam.up)}))
             ]
         else:
             # Per-env bound cameras: each is fixed in its env's local frame.
             # Required when any MPM/soft object is in the scene.
             cameras[cam.name] = [
                 scene.add_camera(res=(w, h), pos=tuple(cam.pos), lookat=tuple(cam.lookat),
-                                 fov=cam.fov, GUI=False, env_idx=j)
+                                 fov=cam.fov, GUI=False, env_idx=j,
+                                 **({} if cam.up is None else {"up": tuple(cam.up)}))
                 for j in range(num_envs)
             ]
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -67,8 +68,14 @@ class CameraEntry:
     name: str                                       # must match real_lab.yaml and ObsConfig
     pos: Tuple[float, float, float] = (0.5, -0.5, 0.5)
     lookat: Tuple[float, float, float] = (0.3, 0.0, 0.1)
-    fov: float = 40.0                               # degrees
+    fov: float = 40.0                               # degrees (Genesis fov is VERTICAL)
     resolution: Tuple[int, int] = (640, 480)        # (width, height)
+    # World "up" for the image, i.e. MINUS the camera's y (image-down) axis. pos+lookat alone
+    # leave the ROLL about the optical axis unconstrained, and Genesis's default (0,0,1) is ~3 deg
+    # off the real D435i mounting. Setting this reproduces a calibrated world_T_cam EXACTLY:
+    #   pos = T[:3,3]   lookat = pos + d*T[:3,2]   up = -T[:3,1]
+    # (verified: cross(forward, up) reproduces T[:3,0] to 1e-6). None = Genesis default (0,0,1).
+    up: Optional[Tuple[float, float, float]] = None
 
     def validate(self) -> None:
         if not self.name:
@@ -81,6 +88,11 @@ class CameraEntry:
             raise ValueError(f"CameraEntry.fov must be in (0, 180), got {self.fov}")
         if self.resolution[0] <= 0 or self.resolution[1] <= 0:
             raise ValueError(f"CameraEntry.resolution must be positive, got {self.resolution}")
+        if self.up is not None:
+            if len(self.up) != 3:
+                raise ValueError(f"CameraEntry.up must be (x, y, z), got {self.up}")
+            if float(np.linalg.norm(self.up)) < 1e-9:
+                raise ValueError("CameraEntry.up must not be a zero vector")
 
 
 @dataclass

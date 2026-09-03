@@ -44,6 +44,18 @@ class SingleLiftTask(BaseTask):
         # the dev prototype; override cam_pos/cam_lookat in the task cfg for camera-placement studies.
         self.cam_pos: tuple = tuple(task_cfg.get("cam_pos", (0.98910661, -0.00034108, 0.09825304)))
         self.cam_lookat: tuple = tuple(task_cfg.get("cam_lookat", (-0.01056659, 0.0207823, 0.11265116)))
+        # Camera ROLL. pos+lookat leave rotation about the optical axis free and Genesis defaults
+        # to up=(0,0,1), which is ~3 deg off the real D435i mounting. Set cam_up = -world_T_cam[:3,1]
+        # to reproduce a calibrated extrinsic exactly. None => Genesis default.
+        _up = task_cfg.get("cam_up")
+        self.cam_up: tuple | None = tuple(_up) if _up is not None else None
+        # BOARD (2026-09-03): the real rig has a 13.8 mm board covering the workspace, and the
+        # object rests on IT, not on the table. `board_thickness` > 0 adds it; the object's spawn z
+        # must be raised by the same amount. Size defaults to cover the whole point-cloud crop so
+        # no board EDGE falls inside it (the real board is ~0.45 x 0.60 m, wider than the crop).
+        self.board_thickness: float = float(task_cfg.get("board_thickness", 0.0))
+        self.board_size: tuple = tuple(task_cfg.get("board_size", (0.60, 0.70, 0.0138)))
+        self.board_center: tuple = tuple(task_cfg.get("board_center", (0.42, 0.0)))
         # optional spawn-height override (m); None => registry default_pos z. Used to clear the
         # MPM domain padding at coarse grid_density (see ObjectEntry.spawn_z).
         _sz = task_cfg.get("object_spawn_z")
@@ -77,6 +89,16 @@ class SingleLiftTask(BaseTask):
         # Walls sit OUTSIDE the point-cloud crop (x<=0.71, |y|<=0.215), so every point-cloud
         # experiment stays bit-identical. Opt-in: only RGB/VLA tasks should enable it.
         _fixtures = [FixtureEntry(fixture_type="table")]
+        if self.board_thickness > 0.0:
+            # A Box fixture is placed by its CENTRE, so z = thickness/2 puts its top face at
+            # exactly `board_thickness` above the table (= the real 13.8 mm surface the gripper
+            # touch measured at 13.9-14.1 mm).
+            _bt = float(self.board_thickness)
+            _fixtures.append(FixtureEntry(
+                fixture_type="chopping_board",
+                pose=(self.board_center[0], self.board_center[1], _bt / 2.0),
+                params={"height": _bt,
+                        "size": (self.board_size[0], self.board_size[1], _bt)}))
         if self.backdrop:
             # HEIGHT 0.9 m, NOT 1.5 (2026-08-31). Genesis' single default light is
             # DirectionalLight(dir=(-1,-1,-1)) — i.e. it comes from +x+y+z — and shadows are on,
@@ -108,6 +130,7 @@ class SingleLiftTask(BaseTask):
                     # default = calibrated L515; task-cfg cam_pos/cam_lookat override (camera study)
                     pos=self.cam_pos,
                     lookat=self.cam_lookat,
+                    up=self.cam_up,
                     # Genesis fov is VERTICAL (camera.f = 0.5*res[1]/tan(fov/2), height-based).
                     # MATCHED TO THE D435i 2026-09-03: measured live colour intrinsics at 640x480
                     # are fx=607.01 fy=606.96 (HFOV 55.59, VFOV 43.15, DFOV 66.77). fov=43.15

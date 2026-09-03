@@ -1,0 +1,36 @@
+# [task] 3 cm SOFT cube on the 13.8 mm board — the 2026-09-03 D435i rig, matched to real.
+# Used by: examples/sim2real_diagnose/replay_demo_in_sim.py, grasp_synthesis collection, training
+# Status: active
+#
+# Every camera/geometry number here is MEASURED, not tuned:
+#   * board 13.8 mm thick — gripper-touch on the real board reads 13.9-14.1 mm
+#   * cam_pos/lookat/up derived from the plane-corrected WORLD_T_CAM_EXT (reconstructs R to 1e-8)
+#   * cam_fov 43.15 = the D435i's measured VERTICAL fov (fx 607.01 fy 606.96 at 640x480)
+#   * object at x=0.30, y=0.00 resting ON the board -> centre z = 0.0138 + 0.015 = 0.0288
+object_name: "cube3_soft"
+object_type: "soft"
+object_spawn_xy: [0.30, 0.0]
+object_spawn_z: 0.0288          # board top (13.8mm) + half of the 3 cm cube
+
+lift_height: 0.15
+hold_steps: 30
+success_scale: 2.0
+
+board_thickness: 0.0138
+board_size: [0.60, 0.70, 0.0138]   # covers the whole point-cloud crop: no board EDGE inside it
+board_center: [0.42, 0.0]
+
+# MPM: "Config C" (E=300 kPa) — substeps/grid density validated for stability at this stiffness.
+sim_substeps: 210
+mpm_grid_density: 250
+
+# ── camera: the calibrated D435i, reproduced exactly ──────────────────────────
+cam_fov: 43.15
+cam_pos:    [0.69895466, -0.06643963, 0.31680030]
+cam_lookat: [0.30454208, -0.07412394, 0.01380000]
+cam_up:     [-0.60697255, -0.06794066, 0.79181336]
+
+rewards:
+  dist_to_obj: {scale: 1.0, decay: 20.0}
+  lift:        {scale: 1.0, grasp_gate_dist: 0.079}
+  stress:      {scale: 0.001, cap: 14000.0, divisor: 6000.0, mean_weight: 0.2, top10_weight: 0.8}
