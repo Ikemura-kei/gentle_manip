@@ -360,15 +360,26 @@ def execute_and_collect_diverse_v2(
         [_wxyz_to_rot(start_quat[i]), _wxyz_to_rot(quat_b[i])])) for i in range(num_envs)]
 
     # PHASES: (name, per-env duration array)
+    # A dedicated FIRM phase sits between grasp and lift: the gripper closes an extra
+    # FIRM_EXTRA at the grasp pose (stationary) BEFORE the lift starts, so every demo
+    # shows "close on the object -> firm the grip in place -> lift". Deployed rollouts
+    # were reopening + re-approaching on grasps that were a hair too loose; teaching an
+    # explicit firm-before-lift beat makes the learned grip secure enough to lift on the
+    # first try. Over-squeeze is caught by the crush gate (episode rejected), so this can
+    # be assertive. progressive firming continues through the lift on top of it.
+    FIRM_EXTRA  = 0.005 if object_type == "soft" else 0.002   # metres, closed over the firm phase
+    FIRM_PROG   = 0.0020 if object_type == "soft" else 0.0    # extra close accumulated over the lift
     dur_settle = np.full(num_envs, v1.N_SETTLE, np.int64)
     dur_grasp  = np.full(num_envs, v1.N_GRASP,  np.int64)
+    dur_firm   = np.full(num_envs, 14,          np.int64)
     dur_lift   = np.full(num_envs, v1.N_LIFT,   np.int64)
     dur_hold   = np.full(num_envs, v1.N_HOLD,   np.int64)
-    PHASE_DUR  = [dur_recover, n_appr, dur_settle, dur_grasp, dur_lift, dur_hold]
+    PHASE_DUR  = [dur_recover, n_appr, dur_settle, dur_grasp, dur_firm, dur_lift, dur_hold]
     N_PHASES   = len(PHASE_DUR)
 
     def _env_target(i, ph, st):
         dur = int(PHASE_DUR[ph][i])
+        w_firm = max(_floor, width_cls[i] - FIRM_EXTRA)       # grip after the firm phase
         if ph == 0:      # recover (failed-grasp only; dur=0 otherwise): OPEN gripper +
             a = min((st + 1) / max(dur, 1), 1.0)       # back away from the missed grasp
             pos = recover_from[i] + a * (start_pos[i] - recover_from[i])
@@ -385,15 +396,17 @@ def execute_and_collect_diverse_v2(
             a = (st + 1) / max(dur, 1)
             pos, quat = pos_b[i], quat_b[i]
             grip = width_open[i] + a * (width_cls[i] - width_open[i])
-        elif ph == 4:    # lift
+        elif ph == 4:    # firm: close FIRM_EXTRA more, staying at the grasp pose
+            a = (st + 1) / max(dur, 1)
+            pos, quat = pos_b[i], quat_b[i]
+            grip = max(_floor, width_cls[i] - FIRM_EXTRA * a)
+        elif ph == 5:    # lift
             a = (st + 1) / max(dur, 1)
             pos = pos_b[i] + a * (lift_b[i] - pos_b[i])
             quat = quat_b[i]
-            firm = 0.0015 if object_type == "soft" else 0.0   # progressive grip firming
-            grip = max(_floor, width_cls[i] - firm * a)
+            grip = max(_floor, w_firm - FIRM_PROG * a)
         else:            # hold
-            firm = 0.0015 if object_type == "soft" else 0.0
-            pos, quat, grip = lift_b[i], quat_b[i], max(_floor, width_cls[i] - firm)
+            pos, quat, grip = lift_b[i], quat_b[i], max(_floor, w_firm - FIRM_PROG)
         return pos, quat, grip
 
     phase_idx  = np.zeros(num_envs, np.int64)

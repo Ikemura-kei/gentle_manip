@@ -13,7 +13,11 @@ object_yaw_deg: 180             # full yaw
 object_pitch_roll_deg: 14       # per-env tilt
 robot_init_pos_xyz: 0.03        # per-env home jitter
 
-object_category_pool: ["mushroom", "kiwi", "egg_boiled"]
+# banana_lying added 2026-09-03: the reactive/recovery skill was previously only
+# demonstrated on mushroom/kiwi/egg, so it half-transferred to banana at eval. The
+# per-cat eval configs (eval_cat_<name>.yaml) pin their own single-category pool, so
+# this only widens COLLECTION coverage.
+object_category_pool: ["mushroom", "banana_lying", "kiwi", "egg_boiled"]
 
 object_scale:      [0.88, 1.15]
 object_axis_scale: [0.90, 1.10]
