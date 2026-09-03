@@ -177,15 +177,26 @@ class DPPOPolicyAdapter:
 
     # ── run_deploy_loop interface ──────────────────────────────────────────────────
     def _stay_put(self) -> "np.ndarray":
-        """Raw [-1,1] action chunk that commands the CURRENT pose (absolute) / no motion (delta)."""
+        """Raw [-1,1] action chunk: HOLD the current arm pose with the gripper WIDE OPEN.
+
+        The gripper is deliberately NOT frozen at its measured value. Measured 2026-09-02 on
+        tiatg500: RealBackend.reset() commands the gripper open with wait=False, so the obs at
+        t0 still reads the PREVIOUS episode's closed width (~30 mm); holding that value re-closed
+        the gripper the loop had just opened and the policy then read a mid-grasp state and
+        committed a 16-step closing chunk — every episode after the first was ruined. Holding
+        pose + open gripper matches the deploy loop's own start rule ("never begin already
+        grasping") and cannot re-close."""
         o = self._last_obs
         mode = getattr(self._action_config, "mode", "absolute") if self._action_config else "absolute"
         if mode != "absolute" or o is None:
-            return np.zeros((self.n_action_steps, 7), dtype=np.float32)
+            a = np.zeros(7, dtype=np.float32)
+            a[-1] = 1.0                                   # delta: no pose change, gripper opening
+            return np.repeat(a[None], self.n_action_steps, axis=0)
         from gentle_manip.actions.pipeline import invert_absolute_action
+        g_open = float(getattr(self._action_config, "gripper_max", 0.088))
         a = invert_absolute_action(np.asarray(o["ee_pos"]).reshape(-1, 3),
                                    np.asarray(o["ee_quat"]).reshape(-1, 4),
-                                   np.asarray(o["gripper_width"]).reshape(-1),
+                                   np.array([g_open]),
                                    self._action_config)[0]
         return np.repeat(a[None].astype(np.float32), self.n_action_steps, axis=0)
 

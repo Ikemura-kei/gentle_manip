@@ -717,29 +717,29 @@
 #   the run's .hydra/config.yaml automatically.
 # ⚠ normalization = cvzth's JOINT stats (the finetune data was renormalized into them).
 #
-ckpt=logs/dppo/dppo-pretrain/single_lift_real7_cvzthnorm/xdxvc/checkpoint/state_800.pt
-normalization=downloaded_runs/cvzth/normalization.npz
-uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-  --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
-  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
-  --act-steps 16 \
-  --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/xdxvc800_3_h16 --shard-size 10 \
-  --max-steps 5000
+# ckpt=logs/dppo/dppo-pretrain/single_lift_real7_cvzthnorm/xdxvc/checkpoint/state_800.pt
+# normalization=downloaded_runs/cvzth/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --act-steps 16 \
+#   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/xdxvc800_3_h16 --shard-size 10 \
+#   --max-steps 5000
 
 # ── REAL-WORLD MAIN-TABLE BASELINES (h16, 141 real eps, no sim) — 2026-09-02 ──
 # Both REQUIRE --act-steps 16. Each uses its OWN normalization (they are standalone policies).
 #
 # (1) PURE-REAL POINT-CLOUD DP  (tiatg, val low @520)
-# ckpt=logs/dppo/dppo-pretrain/single_lift_generalist_real7/tiatg/checkpoint/state_500.pt
-# normalization=dataset/dppo/single_lift_generalist_real7/normalization.npz
-# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
-#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
-#   --act-steps 16 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-#   --record dataset/real_deploy/tiatg500_purereal_pc --shard-size 10 --max-steps 5000
+ckpt=logs/dppo/dppo-pretrain/single_lift_generalist_real7/tiatg/checkpoint/state_500.pt
+normalization=dataset/dppo/single_lift_generalist_real7/normalization.npz
+uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+  --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+  --act-steps 16 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+  --record dataset/real_deploy/tiatg500_purereal_pc --shard-size 10 --max-steps 5000
 #
 # (2) RGB DP (uirro, val low @320) — ⚠ NOT deployable with deploy_real_dppo.py as-is: that
 #     adapter builds a PointNetDiffusionMLP and feeds `point_cloud`. An RGB deploy needs a

@@ -127,7 +127,21 @@ class RealBackend:
         for tac in self.tactiles.values():                # ensure the async buffers are primed
             tac.wait_for_frames()
 
+        # Open the gripper AND WAIT until it actually gets there. set_gripper_width issues a
+        # non-blocking command, so without this the first observation of a re-homed episode still
+        # reports the PREVIOUS episode's closed width — an out-of-distribution state (no demo
+        # starts mid-grasp) that made policies emit a closing chunk immediately. Measured
+        # 2026-09-02 (tiatg500 deploy: episodes 2+ all failed this way, episode 1 was fine only
+        # because the gripper was already open).
         self.robot.set_gripper_width(self._gripper_max)
+        _t0 = time.time()
+        while time.time() - _t0 < 3.0:                    # bounded: never hang a deploy
+            if abs(self.robot.get_gripper_width() - self._gripper_max) < 0.005:
+                break
+            time.sleep(0.05)
+        else:
+            print(f"[RealBackend] warning: gripper did not reach {self._gripper_max:.3f} m within "
+                  f"3 s (now {self.robot.get_gripper_width():.3f} m)", flush=True)
 
         # Seed the target from the actual current pose so the first step's deltas
         # are relative to where the robot really is.
