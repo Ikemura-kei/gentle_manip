@@ -475,6 +475,31 @@ measurable systematic error (calibration); use OBSERVATION-level augmentation fo
 so the policy learns to IGNORE absolute cloud z. This is the DR-vs-augmentation split in
 CLAUDE.md, and the board case is the clean worked example.
 
+**2026-09-04 — TRAP: adding a support fixture silently invalidates the grasp planner's
+`--table-z`.** Caught by a smoke batch before committing the night to a full collection.
+
+Symptom: v4.1 grasp success on the 3 cm cube collapsed to **~25%** (2 saved per 8-env batch)
+against its usual ~88%. Failure videos show the gripper closing and the cube SLIPPING OUT, left
+behind on the board.
+
+Cause: `collect_demos_synth_v4.py --table-z` defaults to **0.0**, but the cube now rests on the
+13.8 mm board. `smgrasp/finger_grasp.py` uses `table_z` three ways — the finger/table penetration
+filter, `floor = table_z - table_tol`, and the grasp-height SEED
+(`s0[2] += (table_z + ground_buf + 0.003) - finger_min_world_z(...)`). So every candidate was
+seeded and permitted **13.8 mm too low**, driving the fingers at a board the planner does not
+model. Fix is just `--table-z 0.0138`; v4.1 itself stays frozen.
+
+**The reusable lesson: `board_thickness` (task YAML) and `--table-z` (planner CLI) describe the
+SAME physical surface but are NOT linked.** Nothing errors when they disagree — the collection
+just quietly degrades, and at 25% yield a 200-demo run would have taken ~8 h instead of ~2 h and
+produced a dataset biased toward whatever grasps survive a wrong floor. ANY future scene change
+that raises the object's support surface (board, platform, tray) must update BOTH. Worth wiring
+`--table-z` to default from the experiment's task config rather than 0.0.
+
+General point this reinforces: a smoke batch with VIDEO is what caught it. The success COUNTER
+alone looked like "collection is working"; only the failure videos showed the cube being brushed
+rather than gripped.
+
 **2026-09-03 (night) — PAIRED-REPLAY GAP MEASURED. The residual is a few-mm rigid offset, and
 NOISE AUGMENTATION IS NOT THE LEVER.** 4 real cube episodes replayed in the rebuilt sim.
 
