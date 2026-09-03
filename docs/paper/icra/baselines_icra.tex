@@ -1,0 +1,62 @@
+% ---------------------------------------------------------------------------
+% Baseline descriptions for the grasp-synthesis comparison (E1).
+% Source of facts: docs/paper/synthesis_experiments.md §4-§5.
+% Each is deliberately 1-3 sentences; detail belongs in the methods appendix.
+% ---------------------------------------------------------------------------
+
+% --- shared protocol sentence: put this BEFORE the list. It is what makes the
+% --- comparison a controlled one, and reviewers will look for it.
+All baselines replace only the grasp-\emph{selection} step: each is executed by the same
+unmodified controller, receives the same privileged object information (mesh, settled pose,
+material parameters), and must pass the same geometric validity checks. Unless stated
+otherwise the commanded width is the local cross-section at the chosen slice minus a fixed
+margin, which reproduces close-until-contact execution. The comparison therefore isolates the
+selection objective rather than the executor.
+
+\paragraph{Naive top-down}
+Places the gripper at the object centre with uniformly random yaw and closes to the global
+cross-section along the closing axis. It encodes no contact geometry and establishes the floor
+of the comparison.
+
+\paragraph{Antipodal sampling}
+Samples surface point pairs, retains those whose contact normals lie within the friction cone,
+and ranks the survivors by cone margin, commanding the pair separation as the width. This is
+the standard classical baseline and the candidate generator used by DefGraspSim
+itself~\cite{defgraspsim}. We rank by cone margin rather than the Ferrari--Canny $\epsilon$
+metric because $\epsilon$ is identically zero for a two-contact parallel jaw on smooth objects
+of this class, and so cannot order candidates.
+
+\paragraph{Geometry-only objective (\method{} w/o stress)}
+Antipodal candidates are generated as above and re-ranked under the full geometric objective
+employed by our planner---surface alignment, pad contact area, centre-of-mass lever arm, and
+holdability---with the stress term removed. This baseline constitutes a leave-one-out ablation
+of the selection objective: since all remaining terms, the candidate generator, and the
+executor are held fixed, any difference in outcome is attributable to FEM-predicted stress
+alone.
+
+\paragraph{GPD}
+The established classical planner of ten Pas \emph{et al.}~\cite{gpd}, which sweeps hand
+candidates over the surface cloud and scores them with a CNN. We run the released
+implementation on a dense privileged cloud, map its highest-scoring valid hand into our tool
+frame, and command its own reported aperture as the width.
+
+\paragraph{GraspNet-1Billion}
+A modern learned 6-DoF planner~\cite{gn1b}, run as released with the authors' pretrained
+checkpoint and no algorithmic modification. It predicts grasps from a single-view point cloud,
+which we render from a steep virtual viewpoint; because the network regresses a rigid-object
+pre-shape opening rather than a contact width, we convert its proposal using the same
+close-until-contact rule applied to the other baselines.
+
+\paragraph{Geometry-only poses with our closure}
+Grasp poses are taken from the geometry-only objective and the commanded width from our FEM
+surrogate. Comparing this variant against both the geometry-only baseline and the full method
+decomposes the contribution of the stress model into the two decisions it informs, namely where
+to place the contacts and how far to close.
+
+% --- Optional, for the appendix or a footnote. Include only if you want to
+% --- pre-empt "why no Contact-GraspNet?"; it is an honest non-result.
+\paragraph{Contact-GraspNet}
+We also integrated Contact-GraspNet~\cite{cgn}, but its released implementation proved
+unstable on our hardware: identical seeded inputs produced varying numbers of proposals or
+aborted outright, a consequence of legacy custom kernels rather than of the planner itself. We
+therefore report no numbers for it.

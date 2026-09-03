@@ -1,0 +1,118 @@
+# [cfg] RGB (image) diffusion-policy BC pretrain — the MODALITY BASELINE for the real-world table
+# Used by: gentle_manip.dppo.train (baseline 2, user 2026-09-02: "RGB-based DP, same 16 action
+#          horizon cfg, same architecture and setups as the generalist, no simreal reg")
+# Status: active
+#
+# Fork of pre_diffusion_pointnet.yaml with the PointNet visual branch swapped for DPPO's ViT
+# image encoder (model/common/vit.py, the upstream image-DP pipeline). EVERYTHING ELSE IS
+# MATCHED to the point-cloud baseline so the comparison isolates the MODALITY:
+#   action_dim 7 (euler-absolute) | horizon_steps 16 | cond_steps 2 | denoising_steps 20
+#   mlp_dims [3072]^3 | residual_style True | batch 128 | lr 1e-4 | EMA 0.995
+# Deliberate choices (flagged for review):
+#   * img_cond_steps 2 — matches the proprio history (DPPO's default is 1); the ViT concatenates
+#     the history as channels (num_channel = 3 * img_cond_steps).
+#   * 96x96 RGB from the recorded 640x480 cam_ext frames (DPPO/DP convention; the whole set is
+#     820 MB uint8 so it fits on GPU). FULL FRAME, no workspace crop — note the point-cloud
+#     branch DOES get a crop + arm-focus prior, so this comparison is "each modality with its
+#     conventional pipeline", not a matched-framing ablation.
+#   * ViT trained FROM SCRATCH, like the PointNet encoder it replaces (no ImageNet init) — the
+#     encoder-parity choice. An ImageNet-pretrained ResNet18 (the Diffusion Policy paper's
+#     setup) would likely be stronger at 141 demos; worth a follow-up if RGB underperforms.
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${logdir}
+_target_: agent.pretrain.train_diffusion_agent.TrainDiffusionAgent
+
+name: ${env}_pre_diffusion_rgb_ta${horizon_steps}_td${denoising_steps}
+logdir: ${oc.env:DPPO_LOG_DIR}/dppo-pretrain/${env}/${exp_id:}
+train_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/train.npz
+val_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/val.npz
+seed: 42
+device: cuda:0
+env: single_lift_real7_rgb
+obs_dim: 8                    # ee_pos3 + ee_quat4 + gripper1 (same proprio as the pc baseline)
+action_dim: 7                 # abs pos3 + euler3 + gripper1
+denoising_steps: 20
+horizon_steps: 16             # long chunk (close-initiation fix, 2026-09-02)
+cond_steps: 2
+img_cond_steps: 2
+
+wandb: null
+
+shape_meta:
+  obs:
+    rgb:
+      shape: [3, 96, 96]
+    state:
+      shape: [8]
+  action:
+    shape: [7]
+
+train:
+  n_epochs: 1200
+  batch_size: 128
+  learning_rate: 1e-4
+  weight_decay: 1e-6
+  lr_scheduler:
+    first_cycle_steps: ${train.n_epochs}
+    warmup_steps: 60
+    min_lr: 1e-5
+  epoch_start_ema: 10
+  update_ema_freq: 5
+  val_freq: 20
+  save_model_freq: 100
+
+model:
+  _target_: model.diffusion.diffusion.DiffusionModel
+  predict_epsilon: True
+  denoised_clip_value: 1.0
+  network:
+    _target_: model.diffusion.mlp_diffusion.VisionDiffusionMLP
+    backbone:
+      _target_: model.common.vit.VitEncoder
+      obs_shape: ${shape_meta.obs.rgb.shape}
+      num_channel: ${eval:'3 * ${img_cond_steps}'}
+      cfg:
+        patch_size: 8
+        depth: 1
+        embed_dim: 128
+        num_heads: 4
+        embed_style: embed2
+        embed_norm: 0
+    img_cond_steps: ${img_cond_steps}
+    augment: True
+    spatial_emb: 128
+    time_dim: 16
+    mlp_dims: [3072, 3072, 3072]
+    residual_style: True
+    cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+    horizon_steps: ${horizon_steps}
+    action_dim: ${action_dim}
+  horizon_steps: ${horizon_steps}
+  obs_dim: ${obs_dim}
+  action_dim: ${action_dim}
+  denoising_steps: ${denoising_steps}
+  device: ${device}
+
+ema:
+  decay: 0.995
+
+train_dataset:
+  _target_: agent.dataset.sequence.StitchedSequenceDataset
+  use_img: True
+  dataset_path: ${train_dataset_path}
+  horizon_steps: ${horizon_steps}
+  cond_steps: ${cond_steps}
+  img_cond_steps: ${img_cond_steps}
+  device: ${device}
+
+val_dataset:
+  _target_: agent.dataset.sequence.StitchedSequenceDataset
+  use_img: True
+  dataset_path: ${val_dataset_path}
+  horizon_steps: ${horizon_steps}
+  cond_steps: ${cond_steps}
+  img_cond_steps: ${img_cond_steps}
+  device: ${device}

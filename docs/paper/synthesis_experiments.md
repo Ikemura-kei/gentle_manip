@@ -4,6 +4,16 @@ What to present about the grasp synthesis, what to compare against, and where we
 today on each. Companion to `../fem_surrogate_status.md` (validity study) and
 `../grasp_synthesis_model.md` (verified formulation).
 
+> **Terminology correction (2026-09-02).** Earlier revisions of this doc called
+> `cam_azimuth_max_deg` a *hard* bound. It is not. Verified in code
+> (`finger_grasp.py:384-386`): it is a **shaped penalty**, `CAM_AZ_SLOPE = 5000` per degree of
+> excess, applied outside the feasibility ladder, and it additionally bounds the CMA seed fan
+> (`:838-847`). It CAN be exceeded when no feasible grasp exists inside the cone.
+> `yaw_max_deg` is the hard structural bound. Two further distinct mechanisms, not to be
+> conflated: `w_occ` (ray-based occlusion *fraction*) is **0.0 in every run** — computed for
+> audit, inert in the score (`:436, :542`); the azimuth penalty above is a geometric *proxy*
+> for occlusion, not a measurement of it. Matches `../grasp_synthesis_model.md` §6-§7.
+
 ## 1. Positioning — what the community context actually is
 
 - **DefGraspSim** (NVIDIA, RA-L 2022) is the closest work: corotational FEM grasp evaluation for
@@ -109,7 +119,29 @@ v4.1 reference runs (same protocol): mushroom `26-08-30-wvz`, strawberry `26-08-
 cherry `26-08-30-tbm`, raspberry `26-08-30-jnd`, sphere_mush `26-08-31-ccd`, lamp_mush
 `26-08-31-fva` (under their respective task dirs).
 
-### E1 AGGREGATE — all methods × all objects (the paper's master table; 2026-09-01)
+### E1 AGGREGATE (primary layout) — methods × objects, 3 sub-columns per object
+
+Grouped header: each object spans 3 real columns (maps to LaTeX \multicolumn{3}). Sub-columns: **succ** = success % (collection success at hold-end — for these
+runs identical to ever-success within the episode horizon) | **sub-y** = sub-yield % of
+successful episodes | **med** = median peak stress ×yield. Right-most: per-method mean
+success and worst-case (min) sub-yield. naive/strawberry: 0 % success ⇒ no stress stats.
+
+<table>
+<tr><th rowspan=2>method</th><th colspan=3 align=center>mushroom</th><th colspan=3 align=center>strawberry</th><th colspan=3 align=center>cherry</th><th colspan=3 align=center>raspberry</th><th colspan=3 align=center>sphere_mush</th><th colspan=3 align=center>lamp_mush</th><th rowspan=2>mean<br>succ</th><th rowspan=2>min<br>sub-y</th></tr>
+<tr><th>succ</th><th>sub-y</th><th>med</th><th>succ</th><th>sub-y</th><th>med</th><th>succ</th><th>sub-y</th><th>med</th><th>succ</th><th>sub-y</th><th>med</th><th>succ</th><th>sub-y</th><th>med</th><th>succ</th><th>sub-y</th><th>med</th></tr>
+<tr><td>naive</td><td>19.8</td><td>100</td><td>0.24</td><td>0.0</td><td>—</td><td>—</td><td>72.7</td><td>100</td><td>0.55</td><td>57.1</td><td>100</td><td>0.30</td><td>76.2</td><td>100</td><td>0.20</td><td>15.7</td><td>100</td><td>0.24</td><td>40.3</td><td>100*</td></tr>
+<tr><td>antipodal</td><td>66.7</td><td>100</td><td>0.25</td><td>53.3</td><td>100</td><td>0.32</td><td>69.6</td><td><b>46</b></td><td><b>1.00</b></td><td>88.9</td><td>94</td><td>0.45</td><td>100</td><td>100</td><td>0.20</td><td>80.0</td><td>100</td><td>0.23</td><td>76.4</td><td>46</td></tr>
+<tr><td>GPD</td><td>16.0</td><td>100</td><td>0.25</td><td>1.5</td><td>100</td><td>0.22</td><td>17.8</td><td>100</td><td>0.49</td><td>18.2</td><td>69</td><td>0.83</td><td>25.0</td><td>100</td><td>0.17</td><td>11.7</td><td>100</td><td>0.23</td><td>15.0</td><td>69</td></tr>
+<tr><td>GraspNet-baseline (gn1b)</td><td>51.6</td><td>100</td><td>0.41</td><td>26.2</td><td>81</td><td>0.64</td><td>64.0</td><td><b>36</b></td><td><b>1.18</b></td><td>26.2</td><td><b>6</b></td><td><b>1.24</b></td><td>40.0</td><td>100</td><td>0.21</td><td>34.0</td><td>100</td><td>0.25</td><td>40.3</td><td><b>6</b></td></tr>
+<tr><td>rigid (B2)</td><td>76.2</td><td>100</td><td>0.22</td><td>34.8</td><td>100</td><td>0.33</td><td>69.6</td><td><b>38</b></td><td><b>1.06</b></td><td>100</td><td>100</td><td>0.57</td><td>76.2</td><td>100</td><td>0.21</td><td>100</td><td>100</td><td>0.32</td><td>76.1</td><td>38</td></tr>
+<tr><td>rigid + v4.1 closure</td><td>100</td><td>100</td><td>0.29</td><td>100</td><td>100</td><td>0.33</td><td>61.5</td><td><b>19</b></td><td><b>1.17</b></td><td>100</td><td>62</td><td>0.96</td><td>94.1</td><td>100</td><td>0.35</td><td>100</td><td>100</td><td>0.55</td><td>92.6</td><td>19</td></tr>
+<tr><td><b>v4.1 (ours)</b></td><td>88.9</td><td>100</td><td>0.32</td><td>45.7</td><td>94</td><td>0.32</td><td>76.2</td><td>81</td><td>0.74</td><td>100</td><td>88</td><td>0.72</td><td>100</td><td>100</td><td>0.37</td><td>57.1</td><td>100</td><td>0.61</td><td><b>78.0</b></td><td><b>81</b></td></tr>
+</table>
+
+\* survivor bias — naive's sub-yield is 100 % only because its would-be-damaging grips fail
+as drops (success 0–76 %); read succ and sub-y as a pair.
+
+### E1 AGGREGATE — all methods × all objects (method-major variant with max ×yield; 2026-09-01)
 
 Cell = success % | sub-yield % | median ×yield | max ×yield (stress over successful episodes,
 NaN-excluded). naive/antipodal/gpd/rigid/gn1b are gentleness-blind with their own width
@@ -252,7 +284,7 @@ pre-shape openings converted to width commands via local cross-section − 2 mm
   TF 2.5 / CUDA 11 container (post-deadline).
 
 **Occlusion-bound confound: RESOLVED — it changes nothing.** The full occ re-run
-(rigid_v41w_occ ×6, v4.1's hard 60° camera-azimuth bound forwarded into the pose search) is
+(rigid_v41w_occ ×6, v4.1's 60° camera-azimuth SHAPED PENALTY forwarded into the pose search) is
 IDENTICAL to the unbounded round on 5/6 objects (same success/sub-yield/median/max to the
 digit; runs `-ynq/-kre/-dco/-tlz/-odk`); cherry differs only within its pose-shuffle noise
 (84.2 % vs 61.5 % success at the same past-yield profile, 31 vs 19 % sub-yield). The
@@ -334,7 +366,7 @@ lib64` (libcudart mixing) — measured failure modes, see SETUP.md.
 - `--baseline {naive,antipodal,rigid,gpd,gn1b,cgn}` — synthesizer to swap in.
 - `--baseline-width {own,v41}` — own = the method's width column above (closure scan
   no-oped); v41 = keep the frozen v4.1 closure on the baseline's pose.
-- `--baseline-occ` — forward v4.1's HARD camera-azimuth bound (cam_pos + 60°) into the
+- `--baseline-occ` — forward v4.1's camera-azimuth penalty (cam_pos + 60°) into the
   method's search (implemented for `rigid`; occ round measured: no effect, §4).
 - env `GM_MAX_ATTEMPTS` (default 200) — attempts cap; the collector otherwise runs until
   `--n-episodes` SUCCESSES (a ~0 % method never terminates). Cap trip ends the run

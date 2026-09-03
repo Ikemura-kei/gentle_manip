@@ -444,6 +444,127 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-09-03 — CHECKPOINT SELECTION BY VAL LOSS IS WRONG FOR THESE POLICIES (measured).**
+User challenge: "deployment results show overfitting on val doesn't mean much." Tested on the
+h4 seed-twin pair (xagzg IS xgwhc continued — identical seed/config, so this is one trajectory
+at two epochs):
+
+| checkpoint | val | mean min commanded width | lift-proxy | aborts |
+|---|---|---|---|---|
+| ckpt 1000 (near val low) | 0.0063 | 57.2 mm (barely closes) | 16/44 (36 %) | 2 |
+| ckpt 2250 (2.2x the low, deep overfit) | 0.0138 | **44.8 mm** | **9/19 (47 %)** | 0 |
+
+The MORE overfit checkpoint behaved BETTER. Mechanism: val is MSE on action prediction, and
+under multimodal targets (stochastic human close timing) the MSE-optimal prediction is the mode
+AVERAGE = hovering; longer training sharpens modes, raising val while producing the decisive
+commitment we want. Same root as the initiation finding — the offline metric rewards the
+failure mode. CONSEQUENCE: earlier "RECOMMENDED state_XXX (val low)" notes for tiatg/uirro are
+WITHDRAWN (corrected in their EXPERIMENT.md); deploy entries now say sweep early/mid/late on the
+robot. Caveats: 19 vs 44 episodes, lift-proxy is a heuristic (EE rise >40 mm after first close),
+sessions differ. Worth a proper checkpoint-vs-success curve if the paper claims anything here.
+
+
+**2026-09-03 — Per-episode reset bug: every deploy episode AFTER the first was ruined by a
+stale closed-gripper observation. Two causes, both fixed.**
+Symptom (user, tiatg500_purereal_pc): episode 1 normal, episodes 2-4 "weird in the first few
+steps" then dead (40-47 steps each vs 188). Recorded traces show why:
+`ep1 observed grip: 30 80 80 80 80 80 74 69 ... 30` with `commanded: 88 88 88 88 30 30 30 ...`.
+1. **`RealBackend.reset()` opened the gripper with `set_gripper_width(..., wait=False)` and
+   immediately read the obs**, so t0 still reported the PREVIOUS episode's ~30 mm closed width —
+   a state no demo ever starts in. Episode 1 was fine only because the gripper was already open.
+   FIX: reset now polls until the gripper reaches the target (3 s bound, warns on timeout).
+2. **The `--warmup-steps` hold I added 2026-09-02 froze that stale width** (stay-put = current
+   pose INCLUDING gripper), so after the deploy loop's own 4-step "open" override the hold
+   commanded 30 mm for the rest of the 16-step chunk and re-closed the gripper; the policy then
+   read a mid-grasp state and committed a closing chunk. FIX: the hold now commands pose-hold
+   with the gripper WIDE OPEN (verified: pose err 0.0000 mm, gripper 88.0 mm).
+   Lesson: the deploy loop ALREADY had start-up overrides (4-step gripper-open, 2-step pose-hold);
+   the new adapter-level mask duplicated that mechanism and contradicted it. Check for existing
+   warm-up handling before adding another layer.
+Note the interaction with long chunks: with horizon/act 16 a single bad first inference is
+committed for 16 steps, so reset-state errors are far more damaging than they were at act 4 —
+worth stating in the paper's deployment notes.
+
+
+**2026-09-02 (night) — Real-world main-table baselines trained: MODALITY barely matters,
+SIM PRETRAINING matters a lot (offline metric).** Three runs, identical arch (PointNet or ViT
++ [3072]^3 MLP), proprio, horizon 16, batch/lr/schedule; the same 141 real teleop eps:
+
+| policy | best val (16-step chunk) | @epoch | behaviour after low |
+|---|---|---|---|
+| point cloud, pure real (tiatg) | 0.0113 | 520 | overfits -> 0.0160 @1200 |
+| RGB 96x96 ViT, pure real (uirro) | 0.0110 | 320 | overfits -> 0.0175 @1200 |
+| **point cloud, SIM-PRETRAINED (xdxvc)** | **0.0073** | 600 | **flat through 800** |
+
+RGB ~= point cloud on held-out loss (0.0110 vs 0.0113, indistinguishable), while sim
+pretraining is worth ~35% AND acts as a regularizer (no overfit where both pure-real runs turn
+by ep320-520). Figure: examples/sim2real_diagnose/figures/real_baselines_val.png.
+⚠ This is an OFFLINE proxy — the real-table numbers are on-robot success/safe rate, and the
+RGB run carries two flagged caveats (full-frame vs the cloud's crop+arm-focus prior;
+from-scratch ViT rather than ImageNet-pretrained ResNet18). Recommended ckpts: tiatg
+state_500, uirro state_300 (both keep 12 ckpts).
+⚠ RGB is NOT yet deployable: deploy_real_dppo.py hardcodes the PointNet branch; an RGB deploy
+adapter (VisionDiffusionMLP + image obs) is TODO before that row of the real table exists.
+Dataset/config additions: convert_demos --images/--image-size (additive), cfg
+pre_diffusion_rgb.yaml, dataset dataset/dppo/single_lift_real7_rgb.
+Process note (repeat offender): a chain script's `pgrep -f "dppo.train.*<env>"` wait-condition
+matched one of the agent's OWN shell wrappers, so the queued run never fired — always use
+bracketed patterns (`[d]ppo.train`) in wait/kill conditions.
+
+
+**2026-09-02 (evening) — LONGER ACTION CHUNKS FIX THE HESITATION (confirmed on the robot).**
+xdxvc (cvzth sim-generalist -> real7 finetune, horizon 4 -> 16, deployed with --act-steps 16):
+across 6 checkpoints / 10 episodes there were **0 abort waves**, and the commanded width lands
+at 22-45 mm — inside the 13-63 mm object-contact band — versus the h4 policies which either
+never closed (sim->real finetune h4: min cmd 68-75 mm) or aborted (cotrained h4), and versus
+the sim-only policy which closes to 12.6-21 mm (crushing). Deploy comparison table + verdict
+figure: examples/sim2real_diagnose/figures/deploy_h16_verdict.png. User confirms ckpt 800 OK.
+This validates the close-INITIATION diagnosis: initiation was a minority diffusion mode under
+stochastic human close timing, and committing to a sampled chunk (16 steps ~0.5 s) carries the
+policy into the close, after which it tracks demos exactly.
+
+| deploy run | eps | mean min commanded width | aborts |
+|---|---|---|---|
+| cvzth80 (sim-only, h4) | 7 | 21.3 mm (crushes) | 2/7 |
+| zdwii91 (cotrained, h4) | 9 | 57.3 mm | 0/9 (but never grasps) |
+| xgwhc1000 (real-only, h4) | 39 | 57.2 mm | 2/39 |
+| zjdmn280/400 (sim->real ft, h4) | 14 | 67.8-74.5 mm | 0 (never closes) |
+| **xdxvc (sim->real ft, h16)** | **10** | **22-45 mm** | **0/10** |
+
+Also added: deploy `--warmup-steps` (default 16) — after each reset the policy still observes
+and infers normally but its output is masked to a HOLD-POSE command (absolute mode: the raw
+action that maps back to the CURRENT measured pose via invert_absolute_action, verified 0.0 mm
+round-trip), riding out the unstable first frames the user reported.
+
+**Real-world main-table baselines launched (user request):** (1) tiatg = PURE-REAL point-cloud
+DP, h16, from scratch, generalist arch, 1200 ep — the key baseline; (2) RGB DP, h16, same arch
+and schedule with DPPO's ViT image branch (96x96 cam_ext, img_cond_steps 2, from-scratch
+encoder for parity with the from-scratch PointNet), queued to start when (1) finishes.
+convert_demos gained `--images/--image-size` (additive) and the merged RGB dataset is
+dataset/dppo/single_lift_real7_rgb (29,648 train / 3,189 val frames). Deliberate choices
+flagged in the cfg header for review: full-frame RGB (the point-cloud branch has a crop +
+arm-focus prior, so this is "each modality with its conventional pipeline", not matched
+framing) and no ImageNet init.
+
+
+**2026-09-02 — Real-deploy hesitation ROOT-CAUSED: close-INITIATION is a minority diffusion
+mode under stochastic human close timing (not gripper speed, not actuation lag, not only the
+sim/real style conflict).** Diagnostic chain (figures in examples/sim2real_diagnose/figures/):
+(1) deploy gripper traces (3 policies): cotrained = command-level close/abort waves; sim-only
+= decisive deep close (crushes); real-only = smooth but timid. Obs tracks commands -> lag
+refuted. (2) cvzth->real finetune (zjdmn, lr 1e-5, 400ep, val 0.0026 flat, NO overfit; ckpt
+state_280) still never closes (min cmd 71-88mm). (3) teacher-forced probes: policy matches
+demo actions EXACTLY on mid-close states; reaches demo close-onset height at deploy; but at
+PRE-onset states only ~1/3-1/5 samples initiate closing (demo: firm 1.0->0.81 chunk). Human
+timing stochasticity dilutes per-state initiation probability; receding-horizon re-sampling
+(act 4) keeps drawing hover -> hesitation. Sim's scripted deterministic timing masks this.
+RECOMMENDED (standard, no data change): longer action chunks (act/horizon 4 -> ~16), the
+canonical fix for exactly this; complements (does not replace) the close-style question the
+v5 discussion covers. Encoder probe (paired red-cube): PairedReg encoders align sim/real
+features well (cos .95-.99 vs .69 unreg) but cotrained alignment dips exactly in the grasp
+window. Runs: zjdmn (finetune), paired replay + probes under sim2real_diagnose/figures/.
+
+
 **2026-09-01 — REAL paired-RGB demo campaign COMPLETE: 7 objects x 20(-21) eps, 141 episodes,
 all runs VERIFIED PASS.** Teleop (SpaceMouse pose + Z/X gripper), obs =
 `point_cloud_1cam_armfocus_rgb.yaml` (generalist student cloud view + PAIRED in-obs
