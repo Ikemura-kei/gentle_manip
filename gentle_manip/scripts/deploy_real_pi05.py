@@ -120,7 +120,12 @@ def main() -> None:
     # RGB only: no point cloud is needed or used by a pi0.5 policy.
     obs_cfg = ObsConfig.from_dict({"images": {"cameras": ["cam_ext"]}})
     backend = RealBackend(setup)
-    env = PolicyEnv(backend=backend, obs_config=obs_cfg, action_config=act_cfg, task=None)
+    # PolicyEnv REQUIRES rgb_shape once the obs config carries `images:` — take it from the
+    # setup's camera entry (same as demos/record.py and deploy_real_dppo.py).
+    _cam = setup["cameras"][obs_cfg.images.cameras[0]]
+    rgb_shape = (int(_cam.get("height", 480)), int(_cam.get("width", 640)))
+    env = PolicyEnv(backend=backend, obs_config=obs_cfg, action_config=act_cfg, task=None,
+                    rgb_shape=rgb_shape)
     policy = Pi05RealPolicy(args.checkpoint, prompt=args.prompt, config_name=args.config_name,
                             repo_id=args.repo_id, n_action_steps=args.n_action_steps)
     run_deploy_loop(env, policy, max_steps=args.max_steps, rate=args.rate,
