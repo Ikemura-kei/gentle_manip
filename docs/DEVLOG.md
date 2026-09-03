@@ -444,6 +444,48 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-09-03 (later) — ADOPTED: plane-corrected D435i extrinsic + z_min 18 mm crop. A hand-eye
+fit that is self-consistent can still be TILTED against the world.** After the re-collect
+(0.94 mm hand-eye residual, 4/5 solvers agreeing within 2.4 mm) the extrinsic still read the
+board at **4.1-13.5 mm across the workspace** against a true 12.3-15.2 mm — a ~9 mm
+POSITION-DEPENDENT error from ~1 deg of residual tilt, invisible to every internal metric.
+
+- **Ground truth came from the robot, not the camera:** touching the board with the gripper at
+  6 poses fits a plane to **0.31 mm rms** (tilt 0.438 deg, 12.3-15.2 mm). That is what proved the
+  board flat and the camera tilted.
+- **Correction** = the rigid transform mapping the camera plane onto the touch plane (1.436 deg
+  + 5.45 mm at centre). Error vs touch truth: median **-4.20 -> +0.06 mm**, p5/p95 -8.87/-0.03
+  -> **-1.43/+1.36 mm**. Cost: hand-eye self-consistency 0.94 -> 1.76 mm — accepted, because the
+  touch plane is INDEPENDENT truth from the robot's kinematics while the hand-eye residual only
+  measures agreement among the calibration poses. A plane fixes 3 DOF (2 tilt + height); in-plane
+  x/y and yaw are unchanged and STILL UNVALIDATED (needs a 3D probe).
+- **Crop z_min 18 mm** (real-deploy armfocus configs). Board survival over 10 frames: adopted
+  extrinsic @16 mm 0.03%, corrected @16 mm 0.82%, corrected **@18 mm 0.00%**. The old 16 mm only
+  worked because the uncorrected cloud read ~4 mm low.
+- **`point_cloud_shift` ZEROED** — the +9 mm x was an L515-era correction; the D435i correction
+  now lives in `WORLD_T_CAM_EXT`, so leaving it on would double-correct.
+
+**LESSON (reusable): do not compensate a sensor/extrinsic error with geometric domain
+randomization.** The proposal on the table was to randomize the sim board thickness 9-14 mm to
+"cover" the mismatch. That is the wrong instrument: randomizing sim GEOMETRY moves the object's
+true position and its observed position together, so the policy learns to FOLLOW cloud z — which
+is correct in sim and wrong in real, where only the observation is displaced. With a
+position-dependent error it would grasp correct at near-right and ~10 mm low at far-left. Fix a
+measurable systematic error (calibration); use OBSERVATION-level augmentation for the residual
+so the policy learns to IGNORE absolute cloud z. This is the DR-vs-augmentation split in
+CLAUDE.md, and the board case is the clean worked example.
+
+**PENDING (must land together):** the sim board is not built yet. The crop is SHARED geometry,
+so `superset_*_armfocus.yaml` still carry `crop_min z = 0.004` ON PURPOSE — they must move to
+0.018 in the SAME change that adds the ~14 mm board to the sim scene, or sim and real will crop
+different amounts. Existing checkpoints were trained at 0.004 and are NOT compatible with the
+new deploy configs.
+
+**New viewer:** `gentle_manip/visualization/live_obs_cloud.py` shows the FINAL policy cloud live
+through the real deployment path (RealBackend -> RawObs -> PerceptionPipeline), so extrinsic +
+crop + outlier filter + object_focus + FPS are all applied. `--no-home` reads the arm read-only
+(XArm7Real.connect() otherwise HOMES the arm).
+
 **2026-09-03 — Rig change to D435i + hand-eye calibration: ONE OUTLIER POSE MOVED THE ANSWER
 126 mm. New robust selection tool.** Camera swapped L515 -> **D435i** (serial `335522071488`),
 lifted and angled ~38 deg down at the table. Re-ran eye-to-hand ChAruco calibration

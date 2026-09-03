@@ -157,10 +157,22 @@ SERVO_MVACC      = 500    # passed to set_servo_cartesian_aa(mvacc=)
 #   * external table-plane check: a 14 mm board measured +9.0 mm, tilt 1.67 deg
 # Camera sits at (0.698, -0.059, 0.314) m in the robot base frame.
 # Overridable per-rig via real_lab.yaml `cameras.cam_ext.world_T_cam`.
+# PLANE-CORRECTED 2026-09-03 (adopted). The raw hand-eye solution was tilted ~1.0 deg vs
+# ground truth, which made the board read 4.1-13.5 mm across the workspace against a true
+# 12.3-15.2 mm — a ~9 mm POSITION-DEPENDENT error, not a constant offset. Corrected by the
+# rigid transform that maps the camera-measured board plane onto the plane measured by
+# TOUCHING the board with the gripper at 6 poses (fits to 0.31 mm rms):
+#     rotation 1.436 deg + 5.45 mm z at the workspace centre.
+# Verified against that same touch truth: median error -4.20 -> +0.06 mm, p5/p95 -8.87/-0.03
+# -> -1.43/+1.36 mm. Cost: hand-eye self-consistency 0.94 -> 1.76 mm median (accepted — the
+# touch plane is INDEPENDENT ground truth from the robot's own kinematics, while the hand-eye
+# residual only measures internal agreement among the calibration poses).
+# NOTE: a plane constrains 3 DOF only (2 tilt + height). In-plane x/y and yaw are UNCHANGED
+# from the hand-eye fit and remain unvalidated — a 3D probe would be needed for those.
 WORLD_T_CAM_EXT = [
-    [    -0.05355549,      0.61002287,     -0.79057189,      0.69777350],
-    [     0.99837323,      0.04822094,     -0.03042417,     -0.05896004],
-    [     0.01956269,     -0.79091519,     -0.61161300,      0.31424461],
+    [    -0.05361751,      0.60697255,     -0.79291203,      0.69895466],
+    [     0.99756975,      0.06794066,     -0.01544824,     -0.06643963],
+    [     0.04449432,     -0.79181336,     -0.60914027,      0.31680030],
     [     0.00000000,      0.00000000,      0.00000000,      1.00000000],
 ]
 

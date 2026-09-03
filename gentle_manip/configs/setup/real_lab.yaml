@@ -50,4 +50,7 @@ cameras:
 # recalibration can replace this; until then this IS the calibrated value.
 # point_cloud_shift: [0.009, 0.0, 0.0]
 # point_cloud_shift: [0.00, 0.0, 0.0]
-point_cloud_shift: [0.009, 0.0, -0.0]
+# ZEROED 2026-09-03: the +9 mm x was an L515-era correction for the OLD camera at its
+# OLD pose. The D435i extrinsic is now plane-corrected against gripper-touch truth, so
+# the correction lives in WORLD_T_CAM_EXT itself; leaving this on would double-correct.
+point_cloud_shift: [0.0, 0.0, 0.0]
