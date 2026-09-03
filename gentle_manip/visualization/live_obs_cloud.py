@@ -12,9 +12,10 @@ ee_pos, hence the robot connection), and the FPS/subsample down to `max_points`.
 confirm what the policy actually sees before a deploy, and to sanity-check a new calibration
 or crop.
 
-    uv run --project envs/dp3 python -m gentle_manip.visualization.live_obs_cloud
-    uv run --project envs/dp3 python -m gentle_manip.visualization.live_obs_cloud \
-        --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml --no-home
+    uv run --project envs/deploy python -m gentle_manip.visualization.live_obs_cloud --no-home
+
+ENV: run this in **envs/deploy** (3.11) — it needs open3d AND the hardware SDKs together.
+envs/dp3 (3.8) carries the policy stack and the SDKs but NOT open3d, so it cannot render.
 
 MOTION WARNING: `XArm7Real.connect()` HOMES the arm (position mode -> home pose -> servo
 mode). That is what a real deploy does, so it is the default here. `--no-home` reads the arm
@@ -96,8 +97,15 @@ def main() -> None:
     print(f"[live-obs] obs config {args.obs_config}")
     print(f"[live-obs] cameras {pc.cameras}  max_points {pc.max_points}")
     print(f"[live-obs] crop  min {pc.crop_min}  max {pc.crop_max}")
-    print(f"[live-obs] outlier_removal {getattr(pc, 'outlier_removal', None)}")
-    print(f"[live-obs] object_focus    {getattr(pc, 'object_focus', None)}")
+    # NOTE the YAML's `outlier_removal:` / `object_focus:` blocks are FLATTENED onto
+    # PointCloudConfig — read the real field names, or this reports "None" for filters
+    # that are in fact active.
+    print(f"[live-obs] outlier_removal voxel={pc.outlier_voxel_size} "
+          f"min_neighbors={pc.outlier_min_neighbors}"
+          + ("" if pc.outlier_voxel_size else "   (DISABLED)"))
+    print(f"[live-obs] object_focus    z_lo={pc.focus_z_lo} r_ee={pc.focus_r_ee} "
+          f"arm_weight={pc.focus_arm_weight}"
+          + ("" if pc.focus_z_lo else "   (DISABLED)"))
     shift = setup.get("point_cloud_shift", [0, 0, 0])
     if np.any(np.asarray(shift, float)):
         print(f"[live-obs] NOTE point_cloud_shift is ACTIVE: {shift}")
