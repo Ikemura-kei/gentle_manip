@@ -16,7 +16,7 @@ quat_noise_std: 0.003
 
 point_cloud:
   cameras: ["cam_ext"]
-  crop_min: [0.2, -0.215, 0.018]   # z_min 18mm (2026-09-03): clears the 14mm board in BOTH sim and real; 16mm left 0.8% of board points after the extrinsic correction, 18mm leaves 0.00% over 10 frames
+  crop_min: [0.2, -0.215, 0.019]   # z_min 19mm (2026-09-03): clears the 14mm board in BOTH sim and real; 16mm left 0.8% of board points after the extrinsic correction, 18mm leaves 0.00% over 10 frames
   crop_max: [0.71,   0.215,  0.45]
   max_points: 1024
 
