@@ -444,6 +444,28 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-09-03 — Per-episode reset bug: every deploy episode AFTER the first was ruined by a
+stale closed-gripper observation. Two causes, both fixed.**
+Symptom (user, tiatg500_purereal_pc): episode 1 normal, episodes 2-4 "weird in the first few
+steps" then dead (40-47 steps each vs 188). Recorded traces show why:
+`ep1 observed grip: 30 80 80 80 80 80 74 69 ... 30` with `commanded: 88 88 88 88 30 30 30 ...`.
+1. **`RealBackend.reset()` opened the gripper with `set_gripper_width(..., wait=False)` and
+   immediately read the obs**, so t0 still reported the PREVIOUS episode's ~30 mm closed width —
+   a state no demo ever starts in. Episode 1 was fine only because the gripper was already open.
+   FIX: reset now polls until the gripper reaches the target (3 s bound, warns on timeout).
+2. **The `--warmup-steps` hold I added 2026-09-02 froze that stale width** (stay-put = current
+   pose INCLUDING gripper), so after the deploy loop's own 4-step "open" override the hold
+   commanded 30 mm for the rest of the 16-step chunk and re-closed the gripper; the policy then
+   read a mid-grasp state and committed a closing chunk. FIX: the hold now commands pose-hold
+   with the gripper WIDE OPEN (verified: pose err 0.0000 mm, gripper 88.0 mm).
+   Lesson: the deploy loop ALREADY had start-up overrides (4-step gripper-open, 2-step pose-hold);
+   the new adapter-level mask duplicated that mechanism and contradicted it. Check for existing
+   warm-up handling before adding another layer.
+Note the interaction with long chunks: with horizon/act 16 a single bad first inference is
+committed for 16 steps, so reset-state errors are far more damaging than they were at act 4 —
+worth stating in the paper's deployment notes.
+
+
 **2026-09-02 (night) — Real-world main-table baselines trained: MODALITY barely matters,
 SIM PRETRAINING matters a lot (offline metric).** Three runs, identical arch (PointNet or ViT
 + [3072]^3 MLP), proprio, horizon 16, batch/lr/schedule; the same 141 real teleop eps:
