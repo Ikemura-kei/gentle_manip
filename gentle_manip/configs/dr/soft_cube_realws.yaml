@@ -1,0 +1,31 @@
+# [dr] Real-workspace DR for a KNOWN-GEOMETRY object (the 3 cm cube), 2026-09-03.
+# Used by: experiments/single_lift_cube3_soft_board_abs7d.yaml
+# Status: active
+#
+# Forked from soft_orientation_realws. Same POSE and MATERIAL randomization; SHAPE deformation
+# REMOVED and scale tightened. Rationale: soft_orientation_realws was built for the mushroom
+# generalist, where real food genuinely varies in shape, so bend/twist/taper/axis_scale model
+# true object variation. The deployment object here is a MANUFACTURED 3 cm cube of known size:
+# bending or tapering it produces objects that do not exist and will never be seen at test time,
+# and scale up to 1.5 turns a 3 cm cube into a 4.5 cm one — a different object, not a variation.
+# Pose and material DR are KEPT: placement, orientation and stiffness genuinely vary run to run.
+# NOTE: if the cube is later swapped for a deformable/irregular object, go back to the shape-DR
+# preset — this narrowing is justified ONLY by the object's geometry being known and fixed.
+object_pos_x: [0.29, 0.48]
+object_pos_y: [-0.11, 0.11]
+object_nominal_xy: [0.47, 0.0]
+robot_init_pos_xyz: 0.02      # per-env arm-home jitter
+
+object_yaw_deg: 180           # full yaw — a cube on a board can sit at any yaw
+object_pitch_roll_deg: 45     # +-45 deg tilt; settling resolves it onto a face
+object_flip_prob: 0.25
+object_flip_deg: [160, 180]
+
+object_scale:      [0.95, 1.05]  # +-5%: measurement/manufacturing tolerance, NOT a size change
+# object_bend_deg / object_twist_deg / object_taper / object_axis_scale: DELIBERATELY ABSENT
+#   (a manufactured cube does not bend, twist or taper)
+
+object_E: [2.0e5, 3.0e5]     # Young's modulus (Pa)
+object_nu: [0.32, 0.38]
+object_rho: [900, 1100]
+coup_friction: [3.5, 4.5]

@@ -10,7 +10,7 @@
 #                (l515_noise's isotropic jitter is the wrong model for a stereo camera)
 task: single_lift_cube3_soft_board
 action: abs_pose_euler_abs_gripper
-dr: soft_orientation_realws     # real-workspace spawn box
+dr: soft_cube_realws           # pose+material DR; shape DR removed (known-geometry cube)
 augmentation: d435i_noise
 
 obs: superset_soft_armfocus_board
