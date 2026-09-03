@@ -444,6 +444,43 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-09-03 — Rig change to D435i + hand-eye calibration: ONE OUTLIER POSE MOVED THE ANSWER
+126 mm. New robust selection tool.** Camera swapped L515 -> **D435i** (serial `335522071488`),
+lifted and angled ~38 deg down at the table. Re-ran eye-to-hand ChAruco calibration
+(`diagnostics/calibration.py`, 11 poses) — and the script's printed result was WRONG.
+
+- The board is clamped in the gripper, so `inv(T_gripper2base_i) @ X @ T_board2cam_i` (the board
+  pose in the GRIPPER frame) is a physical constant. Spread across poses = residual; one pose
+  far from consensus = outlier. Pose #2 sat at 12.7 mm vs a 5.5 mm median.
+- Dropping it: median residual **5.54 -> 1.69 mm**, and the solution MOVED **126 mm / 7.5 deg**.
+- **Decisive external check — the table plane.** The table is at z=0 in base coordinates by
+  definition, so fit the dominant plane of a live cloud and read its height. All-11 result put
+  the table at **+97 mm**; drop-#2 put it at **-1.7 mm**. This is independent of the calibration
+  data and is the check to trust. Caveat learned the hard way: the ChAruco board was still in the
+  gripper filling the near field, so the FIRST plane fit locked onto the board (80 deg tilt) and
+  looked like both candidates failed — restrict to points beyond ~0.33 m, or clear the scene.
+- Root cause is conditioning, not bad luck: median pairwise relative rotation only **14.3 deg**
+  (22/55 pairs under 10 deg), rotation axes clustered (anisotropy 4.8), EE height spread just
+  **5 cm**. OpenCV itself logs "Not enough informative motions--include larger rotations" on
+  subsets of this set. Tsai degrades sharply with small rotations, which is exactly why a single
+  bad pose could dominate.
+
+**New: `gentle_manip/diagnostics/calib_select.py`** — searches POSE SUBSETS x all five OpenCV
+solvers (TSAI/PARK/HORAUD/ANDREFF/DANIILIDIS) and picks by RANSAC consensus: fit X on a subset,
+then count how many of ALL N poses agree with it (`--inlier-mm/--inlier-deg`), tie-break on
+median residual. Scoring on held-out poses is what stops it collapsing onto the smallest subset.
+Exhaustive when the subset count is small (11 poses = 1024 subsets x 5 methods = 266 distinct
+fits in 1.8 s), RANSAC sampling above `--max-solves`. `--table-check` runs the external
+table-plane validation on the winner. Validated: it independently rediscovers pose #2 as the sole
+outlier without being told.
+
+Re-collect ordered (larger rotations, 45-60 deg board tilt, wider EE height range). The
+2026-09-03 numbers + best-estimate matrix are archived in
+`dataset/camera_calibration/eye-to-hand/NOTES_2026-09-03_d435i.md` as a fallback. NOT written
+into `xarm7_config.py` yet — that still holds the old L515 value, and `real_lab.yaml` still
+declares `type: l515`, the old serial, and a +9 mm x bias correction that is INVALID for this
+camera.
+
 **2026-09-03 — Camera-only raw point-cloud viewer + L515 `short_range` preset (tooling).**
 User wanted to inspect the raw cloud "without doing anything about the robot arm", with the
 sensor's short-range mode on. Two pieces:
