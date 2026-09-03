@@ -444,6 +444,30 @@ running" — replacing any whose experiments have since finished.**
 
 ## Log
 
+**2026-09-03 — Camera-only raw point-cloud viewer + L515 `short_range` preset (tooling).**
+User wanted to inspect the raw cloud "without doing anything about the robot arm", with the
+sensor's short-range mode on. Two pieces:
+- `RealSenseCamera(visual_preset=...)` — applied in `start()` via `rs.option.visual_preset` /
+  `rs.l500_visual_preset`. Devices without the option (D405) print a note and continue; an
+  unknown name raises listing what the device offers. Confirmed available on our L515:
+  `automatic / custom / default / low_ambient_light / max_range / no_ambient_light / short_range`.
+  `short_range` is the right profile for our <1 m tabletop (fewer flying pixels on close edges).
+- `gentle_manip/visualization/raw_cloud_viewer.py` (new) — camera-only live Open3D cloud: no arm
+  connection, no `PolicyEnv`, no obs config, no cropping/filtering. Uses the SHARED
+  `depth_to_pointcloud`, colours each point with its own pixel, and offers `--frame camera`
+  (default, raw sensor frame) or `--frame world` (applies the setup extrinsic — a way to eyeball
+  the extrinsic without touching the robot). `point_cloud_viewer.py` (the crop-tuning viewer) got
+  the same `--short-range` / `--visual-preset` flags.
+
+  ```bash
+  uv run --project envs/deploy python -m gentle_manip.visualization.raw_cloud_viewer --short-range
+  ```
+
+  Hardware-verified: preset applies (`rs2_l500_visual_preset=5`), 10-frame grabs at both default
+  and `short_range` give ~74 % valid pixels, median depth 0.546 m. Coverage is essentially
+  unchanged by the preset on a static scene — the expected benefit is edge/flying-pixel noise,
+  not point count, so judge it visually rather than by valid-pixel percentage.
+
 **2026-09-03 — CHECKPOINT SELECTION BY VAL LOSS IS WRONG FOR THESE POLICIES (measured).**
 User challenge: "deployment results show overfitting on val doesn't mean much." Tested on the
 h4 seed-twin pair (xagzg IS xgwhc continued — identical seed/config, so this is one trajectory
