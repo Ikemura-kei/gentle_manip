@@ -24,6 +24,7 @@ tests the specific case. There is no default -- state it explicitly.
 from __future__ import annotations
 
 import argparse
+import pathlib
 import sys
 from pathlib import Path
 
@@ -46,14 +47,31 @@ class Pi05RealPolicy:
 
     def __init__(self, checkpoint_dir: Path, prompt: str, config_name: str = "pi05_libero",
                  repo_id: str | None = None, image_size: int = 224, n_action_steps: int = 10):
+        # IMPORT ORDER IS LOAD-BEARING — this must be the FIRST openpi import in the process.
+        # openpi.training.checkpoints (orbax) MUST precede openpi.policies.policy (torch);
+        # the reverse SEGFAULTS this box's torch + jax-CUDA combination (measured 2026-09-03:
+        # `import openpi.policies.policy` then `import openpi.training.checkpoints` -> SIGSEGV,
+        # swapped -> fine). Both masked_wrist (via openpi.policies.libero_policy) and
+        # policy_config pull policy.py, so this import comes before BOTH.
+        import openpi.training.checkpoints as _ckpts
         from gentle_manip.pi05 import masked_wrist
         masked_wrist.patch()                      # BEFORE the policy is built -- see module docstring
         from openpi.policies import policy_config as _policy_config
         from openpi.training import config as _config
 
         cfg = _config.get_config(config_name)
-        self._policy = _policy_config.create_trained_policy(cfg, str(checkpoint_dir),
-                                                            repo_id=repo_id)
+        # Norm stats live in the checkpoint's assets under the TRAINING repo id (e.g.
+        # gm/real7_ext), not the config's default (physical-intelligence/libero). Newer openpi
+        # takes repo_id=; the pinned 215abfb checkout takes norm_stats= — support both.
+        try:
+            self._policy = _policy_config.create_trained_policy(cfg, str(checkpoint_dir),
+                                                                repo_id=repo_id)
+        except TypeError:
+            ns = None
+            if repo_id:
+                ns = _ckpts.load_norm_stats(pathlib.Path(checkpoint_dir) / "assets", repo_id)
+            self._policy = _policy_config.create_trained_policy(cfg, str(checkpoint_dir),
+                                                                norm_stats=ns)
         self.prompt = str(prompt)
         self.image_size = int(image_size)
         self.n_action_steps = int(n_action_steps)

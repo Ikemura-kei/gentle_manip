@@ -60,3 +60,37 @@ There is NO default — state it explicitly. `--prompt` is required.
   is the actual test; treat the first deployment as validation, not a finished policy.
 * If it approaches but does not close (the DPPO generalist's hesitation), that is worth recording —
   the closing-commitment question is exactly what the horizon-16 generalist arms are probing.
+
+## LOCAL setup on the robot box (added 2026-09-03, verified end-to-end)
+
+`envs/dp3` is Python 3.8 and CANNOT host openpi (needs >=3.11). Run in openpi's own venv with the
+repo on PYTHONPATH. `third_party/openpi` is gitignored, so it must be cloned locally first:
+
+    git clone https://github.com/Physical-Intelligence/openpi.git third_party/openpi
+    cd third_party/openpi && git checkout 215abfb
+    uv sync --no-install-package evdev        # evdev (lerobot->pynput) fails to build against
+                                              # this box's kernel headers; teleop-only, unused
+    uv pip install --python .venv/bin/python \
+        pyrealsense2==2.54.2.5684 xArm-Python-SDK "opencv-python>=4.8" scipy
+
+Then: `bash gentle_manip/scripts/deploy_pi0.5.sh` (or the explicit command in it).
+
+### Two gotchas that cost an evening
+
+1. **`--repo-id gm/real7_ext` is REQUIRED.** Norm stats live at
+   `<ckpt>/assets/gm/real7_ext/norm_stats.json` (the TRAINING repo id); without it openpi looks
+   under the config default `physical-intelligence/libero` and raises FileNotFoundError. Also
+   note the pinned 215abfb `create_trained_policy()` takes `norm_stats=`, NOT `repo_id=` — the
+   deploy script now tries `repo_id=` and falls back to loading the stats itself, so it works
+   against both openpi versions.
+2. **Import order is load-bearing (SEGFAULT).** On this torch + jax-CUDA build,
+   `import openpi.policies.policy` (torch) followed by `import openpi.training.checkpoints`
+   (orbax) segfaults the process; the reverse order is fine. Minimal repro:
+   `python -c "import openpi.policies.policy, openpi.training.checkpoints"` -> SIGSEGV.
+   `Pi05RealPolicy.__init__` therefore imports `openpi.training.checkpoints` FIRST, before
+   masked_wrist (which pulls libero_policy -> policy.py) and before policy_config.
+
+### Verified offline before touching the robot
+
+Policy loads, and on a recorded mushroom frame it returns a (10, 7) chunk whose first action
+tracks the demo (gripper 0.814 vs 0.814, z -0.982 vs -0.980).
