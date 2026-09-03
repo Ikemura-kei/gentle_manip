@@ -29,5 +29,7 @@ point_cloud:
   # SHARED sim+real — must match the training obs (superset_rigid_armfocus) exactly.
   object_focus:
     z_lo: 0.15          # keep points below this at full weight (table + resting object)
-    r_ee: 0.13          # finger-safe SPHERE radius around the EE (gripper + grasped/lifted object)
+    r_ee: 0.11          # 0.13 -> 0.11 (2026-09-03): drops the gripper CABLE (real-only geometry,
+                        #   not in sim) from 1.6% to 0.0% of high points while the object stays
+                        #   100% kept — measured. finger-safe SPHERE radius around the EE (gripper + grasped/lifted object)
     arm_weight: 0.15    # arm-body points sampled at 0.15x (budget goes to the object)

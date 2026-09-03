@@ -137,10 +137,15 @@ GRIPPER_WIDTH_TO_POS = 10000.0   # units per meter
 GRIPPER_POS_MAX = 850.0          # SDK units at full open
 
 # ── TCP offset ────────────────────────────────────────────────────────────────
-# The XArm SDK reports/accepts a different TCP than "our" TCP definition.
-# The API TCP is 0.13 m below "our" TCP along the tool Z-axis.
-# Convert targets "our" TCP → API TCP before every set_servo_cartesian_aa call:
-#   T_api = T_ours @ inv(offset)    (offset is a pure translation in the tool frame)
+# CURRENTLY ZERO — "our" TCP IS the API TCP. Verified 2026-09-03: get_ee_pose() returns
+# exactly what get_position_aa() reports, and a gripper-touch on the board reads the board's
+# own height, so the reported frame already sits at the fingers.
+# Historical note: this was once 0.13 m (the tool-Z separation between the SDK TCP and an
+# earlier "our TCP" definition) and that was ABANDONED. The machinery is still wired up
+# (apply_tool_offset in xarm7_real.py, both directions), so setting a non-zero value here
+# still works if the TCP definition ever changes again — but with [0,0,0] every conversion
+# is an identity and anything measured against the reported EE pose (e.g. object_focus's
+# r_ee) is relative to the API-native TCP.
 TCP_API_TO_TCP_OURS_OFFSET = [0.0, 0.0, 0.0]   # meters, tool frame
 
 # ── Servo motion params (set_servo_cartesian_aa) ──────────────────────────────

@@ -492,9 +492,11 @@ DEFAULT_EE_POSE = [0.4, 0.0, 0.21, 3.1416, 0.0, 0.0]  # xyz (m) + rotvec (rad); 
 DEFAULT_GRIPPER_WIDTH = 0.08                             # meters open; TODO: confirm on hardware
 
 # TCP offset: XArm SDK reports a different TCP than "our" TCP definition.
-# The API TCP is 0.13 m below "our" TCP in the tool Z-axis.
-# In xarm7_real.py: convert targets from "our" TCP → API TCP before every set_servo_cartesian_aa call.
-TCP_API_TO_TCP_OURS_OFFSET = [0.0, 0.0, 0.13]  # meters, applied as T_api = T_ours @ inv(offset)
+# CURRENTLY ZERO — "our" TCP IS the API TCP (verified 2026-09-03: get_ee_pose() == get_position_aa(),
+# and a gripper-touch on the board reads the board's own height). The 0.13 m separation was
+# ABANDONED; the conversion machinery in xarm7_real.py remains wired up for both directions, so a
+# non-zero value still works if the TCP definition changes again.
+TCP_API_TO_TCP_OURS_OFFSET = [0.0, 0.0, 0.0]   # meters, applied as T_api = T_ours @ inv(offset)
 
 SERVO_SPEED_MM_S = 60     # passed to set_servo_cartesian_aa(speed=)
 SERVO_MVACC      = 500    # passed to set_servo_cartesian_aa(mvacc=)
