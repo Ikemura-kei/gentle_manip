@@ -33,5 +33,5 @@ point_cloud:
     min_neighbors: 23
   object_focus:
     z_lo: 0.15          # keep points below this at full weight (table + resting object)
-    r_ee: 0.13          # finger-safe SPHERE radius around the EE (gripper + grasped/lifted object)
-    arm_weight: 0.15    # arm-body points sampled at 0.15x (budget -> object, helps aux predictors)
+    r_ee: 0.11          # finger-safe SPHERE around the EE (gripper + grasped object).
+                        #   0.13 left 1.0% cable points under hard focus; 0.11 -> 0.0%.

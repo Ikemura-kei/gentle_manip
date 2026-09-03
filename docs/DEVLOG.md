@@ -475,6 +475,29 @@ measurable systematic error (calibration); use OBSERVATION-level augmentation fo
 so the policy learns to IGNORE absolute cloud z. This is the DR-vs-augmentation split in
 CLAUDE.md, and the board case is the clean worked example.
 
+**2026-09-03 (cable) — HARD object_focus is now the default on every `*armfocus*` config.**
+The gripper CABLE is real-only geometry with no sim counterpart. Two things measured on the rig:
+- **Raising `min_neighbors` is the WRONG tool and actively backfires.** `remove_outliers_voxel` is
+  a DENSITY filter; the cable is a solid connected object CLOSE to the camera, so it is DENSER than
+  a small object seen obliquely at range. Cable survives more than the object at every setting —
+  at min_nb=200 the test cube was 0% kept while 58% of cable survived. Smaller voxels don't flip it.
+- **`r_ee` alone did nothing under SOFT focus.** With `arm_weight` set, the pipeline runs
+  `focus_weights` (down-SAMPLES the arm), not `focus_object` (drops it). ~12% of the 1024-point
+  budget went to arm/cable at BOTH r_ee 0.13 and 0.11 — the weight, not the radius, is what admits
+  them. Removing `arm_weight` -> hard focus -> **0.0% cable, z max 150 mm**, and the object gains
+  points (127 -> 144 on the test cube). r_ee 0.11 vs 0.13 then matters (0.13 still leaks 1.0%).
+
+Chosen deliberately over a cable-specific hack: the arm exists in BOTH domains, so dropping the
+whole arm is sim2real-clean and removes the cable as a side effect, with no real-only special case.
+The fallback if the cable ever reappears is a TCP-FRAME AXIAL cut — measured separation is wide
+(object -12..+17 mm along the tool axis, cable -186..-124 mm), but that needs validating across arm
+poses, and everything here is ONE pose.
+
+Also corrected: `TCP_API_TO_TCP_OURS_OFFSET` has been `[0,0,0]` for a long time, but its comment
+(and CLAUDE.md) still described the abandoned 0.13 m separation as current. Verified on hardware —
+`get_ee_pose() == get_position_aa()`, and a gripper-touch reads the board's own height — so the
+reported EE frame already sits at the fingers and `r_ee` is measured from the API-native TCP.
+
 **PENDING (must land together):** the sim board is not built yet. The crop is SHARED geometry,
 so `superset_*_armfocus.yaml` still carry `crop_min z = 0.004` ON PURPOSE — they must move to
 0.018 in the SAME change that adds the ~14 mm board to the sim scene, or sim and real will crop
