@@ -475,6 +475,47 @@ measurable systematic error (calibration); use OBSERVATION-level augmentation fo
 so the policy learns to IGNORE absolute cloud z. This is the DR-vs-augmentation split in
 CLAUDE.md, and the board case is the clean worked example.
 
+**2026-09-03 (night) — SIM REBUILT for the D435i rig. Camera parity is now EXACT.**
+Overnight campaign (user asleep; robot untouched, all work sim-side + offline).
+
+- **Camera reproduced exactly.** Verified against a live Genesis build: intrinsics dfx -0.07 px,
+  dfy -0.02 px; extrinsics position error **0.0000 mm**, rotation **0.00000 deg**. Two things were
+  needed. (1) `CameraEntry.up` — pos+lookat leave ROLL free and Genesis defaults to (0,0,1), ~3 deg
+  off the real mounting; `up = -world_T_cam[:3,1]` reproduces R to 1e-8. (2) Knowing that Genesis's
+  `camera.extrinsics` is **cam_T_world** (the VIEW matrix), not world_T_cam — `genesis_worker`
+  already inverts it, but my first comparison did not and reported a bogus 752 mm / 74 deg error.
+  Residual that fov CANNOT absorb: Genesis forces the principal point to res/2 = (320,240) vs the
+  real (322.56, 246.58) — 6.6 px / ~0.6 deg. Expect a small constant offset in paired clouds.
+- **Board + object.** `chopping_board` fixture, 13.8 mm thick, 0.60x0.70 so no board EDGE falls
+  inside the crop; object spawn z = 0.0138 + 0.015 = 0.0288. New `cube3_soft` registry entry
+  (ADDITIVE — cube3 stays rigid) using soft_shape E=300 kPa, the stiffest validated MPM preset,
+  since it stands in for a real SOLID cube.
+- **Obs parity.** `superset_soft_armfocus_board` = the shared superset with crop z_min
+  0.004 -> 0.019. The shared one is NOT edited: board-less tasks rest the object at z~0 where a
+  19 mm floor would cut its base. `parity_audit.py` now diffs every shared setting
+  programmatically: **0 genuine mismatches**, with real-only (outlier removal) and sim-only
+  (privileged labels) differences justified inline.
+- **D435i noise model, MEASURED not assumed.** `pc_jitter_std` is ISOTROPIC, which no depth camera
+  produces; a stereo camera's error is along the RAY and grows as d^2. Measured on our own camera
+  (temporal std over 12 frames of a static board): 0.45 m -> 0.373 mm, 0.55 -> 0.553,
+  0.675 -> 0.943, 0.85 -> 1.891, fitting **sigma = 2.0e-3 * d^2** (effective subpixel ~0.06; the
+  usual 0.1 rule of thumb overestimates THIS unit by ~1.6x). Added `pc_axial_coeff` /
+  `pc_lateral_coeff` (+ `configs/augmentation/d435i_noise.yaml`); verified the applied sigma
+  matches at every distance with zero mean and a truly perpendicular lateral term.
+- **Paired replay.** `replay_demo_in_sim.py` gained `--task-config` (single source of truth) and
+  `--object-xy`: it had been INFERRING the object position from the fingertip's lowest point,
+  which was ~40 mm off in x for these episodes. Pinning the known (0.30, 0.00) cut the paired
+  cloud z-offset 4.8 -> 3.1 mm on ep 0 — i.e. a third of that "gap" was a wrong object placement,
+  not perception.
+- **Gripper-speed reference** for the coming 200-demo collection, measured over the 141 real
+  episodes in `dataset/transfer/real_paired_7obj_2026-09-01`: closing rate **1.60 mm/step** pooled
+  (median 1.66, p10/p90 0.98/2.15) = 48 mm/s at 30 Hz. v4.1 stays FROZEN — `--n-grasp` is already
+  a CLI flag, so matching the speed needs no synthesis change.
+- **Training budget** for parity with the horizon-16 reference (`single_lift_generalist_real7/tiatg`,
+  127 eps / 29,648 transitions / batch 128 / 1200 epochs) = **278,400 gradient steps**. Sim episodes
+  are far shorter than the 449-step real teleop ones, so the epoch count will be scaled from the
+  ACTUAL transition count after conversion, not copied from 1200.
+
 **2026-09-03 — TCP z-min raised to 13.9 mm; sim camera FOV matched to the D435i.**
 - **`EE_BOUNDS_MIN` z 0.003 -> 0.0139** (`xarm7_config.py`). ONE constant covers BOTH sides —
   `SimBackend` and `RealBackend` each clip the accumulated target to it — so sim and real move
