@@ -16,10 +16,16 @@ object_pos_y: [-0.11, 0.11]
 object_nominal_xy: [0.47, 0.0]
 robot_init_pos_xyz: 0.02      # per-env arm-home jitter
 
-object_yaw_deg: 180           # full yaw — a cube on a board can sit at any yaw
-object_pitch_roll_deg: 45     # +-45 deg tilt; settling resolves it onto a face
-object_flip_prob: 0.25
-object_flip_deg: [160, 180]
+object_yaw_deg: 180           # full yaw — a cube on a board CAN sit at any yaw
+# PITCH/ROLL ~0 and NO FLIP (2026-09-04). The mushroom preset uses +-45 deg tilt + a 25% flip
+# because a rounded object tilted 45 deg settles roughly IN PLACE. A CUBE tilted 45 deg is
+# balanced on an EDGE: it topples and TRANSLATES several cm while settling, so the grasp planned
+# for its spawn pose no longer matches where it ends up — the gripper then closes BESIDE the cube
+# (observed directly in the failure videos; grasp yield 25-37% instead of ~88%).
+# It is also the unphysical choice: a real cube resting on a board sits FLAT on a face. 5 deg
+# stands in for placement imperfection, nothing more.
+object_pitch_roll_deg: 5
+object_flip_prob: 0.0
 
 object_scale:      [0.95, 1.05]  # +-5%: measurement/manufacturing tolerance, NOT a size change
 # object_bend_deg / object_twist_deg / object_taper / object_axis_scale: DELIBERATELY ABSENT
