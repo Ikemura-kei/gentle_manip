@@ -1424,3 +1424,16 @@ LARGE-4 mean: SR 0.86 -> 0.71 (-0.15). Gentleness ~held.
   republish when 1938494 fills the fair column. Page 11.3 MB. Artifact republished.
 - Wrote pkoie/EXPERIMENT.md.
 - NEXT: v4 = re-collect reactive demos at 0.30-0.70 m/s drag + retrain (pending user OK).
+
+## 2026-09-03 12:16 — fair baseline in; v4 campaign launched
+- 1938494 lorap non-reactive @ 0.90 drag (4 large): mushroom 0.33/0.70, banana 0.65/0.66,
+  kiwi 0.58/0.77, egg 0.70/0.62 -> mean SR 0.57 / g 0.69.
+- 3-way verdict (matched 0.90 drag): v3-reactive SR 0.54 vs lorap 0.57 = EVEN (-0.03);
+  v3-reactive g 0.74 vs lorap 0.69 = GENTLER (+0.05). The -0.24 vs v3-clean was the drag
+  being hard for both (lorap 0.85 clean -> 0.57 drag). Reactive data = SR-neutral + gentler.
+- Page reactive section updated w/ the 4-column table; artifact 5682ac2f republished.
+- v4 code: FIRM grasp phase (collect_demos_diverse_start_v2 _env_target, phases now
+  recover0/appr1/settle2/grasp3/FIRM4/lift5/hold6, FIRM_EXTRA 5mm soft / 2mm rigid).
+  banana_lying added to xcat_diverse_regrasp pool. yd_reactive_pack_v4.sbatch (4 slots,
+  2 large + 2 small, --reactive-speed 0.30 0.90 MATCHED to eval, failed:0.28 for recovery,
+  self-resubmit to 1800 reactive_recover). Smoke 1949650 running.
