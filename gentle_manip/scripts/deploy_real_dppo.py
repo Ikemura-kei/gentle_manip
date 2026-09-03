@@ -73,6 +73,18 @@ def _load_net_arch(ckpt: Path) -> dict:
         "time_dim":           net.get("time_dim"),
         "pointnet":           net.get("pointnet"),
     }
+    # Visual branch, from the checkpoint's own network target: RGB (DPPO VisionDiffusionMLP +
+    # ViT) or the point-cloud student (PointNetDiffusionMLP). Everything the RGB branch needs
+    # comes from the same config, so an RGB ckpt deploys with no extra flags.
+    if "VisionDiffusionMLP" in str(net.get("_target_", "")):
+        shape = (((cfg.get("shape_meta") or {}).get("obs") or {}).get("rgb") or {}).get("shape")
+        arch.update({
+            "visual": "rgb",
+            "img_cond_steps": cfg.get("img_cond_steps", net.get("img_cond_steps")),
+            "image_size": (shape[-1] if shape else 96),
+            "vit_cfg": ((net.get("backbone") or {}).get("cfg")),
+            "spatial_emb": net.get("spatial_emb"),
+        })
     return {k: v for k, v in arch.items() if v is not None}
 
 
@@ -94,10 +106,21 @@ class DPPOPolicyAdapter:
                  visual_feature_dim: int = 256, mlp_dims: "list | None" = None,
                  time_dim: int = 16, pc_cond_steps: int = 1, pointnet: "dict | None" = None,
                  action_config=None, warmup_steps: int = 0,
+                 visual: str = "pointcloud", img_cond_steps: int = 1, image_size: int = 96,
+                 image_key: str = "image_cam_ext", vit_cfg: "dict | None" = None,
+                 spatial_emb: int = 128,
                  device: str = "cuda:0") -> None:
         import torch  # noqa: F401
         from model.diffusion.diffusion_eval import DiffusionEval
         from gentle_manip.dppo.pointnet_diffusion import PointNetDiffusionMLP
+
+        # Visual branch: the point-cloud student (PointNet) or the RGB baseline (DPPO's ViT).
+        # Selected from the checkpoint's own hydra config by main(), so a ckpt always deploys
+        # with the branch it was trained with.
+        self._visual = str(visual)
+        self._img_cond_steps = int(img_cond_steps)
+        self._image_size = int(image_size)
+        self._image_key = str(image_key)
 
         self.device = device
         self.n_action_steps = int(act_steps)
@@ -116,12 +139,30 @@ class DPPOPolicyAdapter:
         # Network arch (visual_feature_dim / mlp_dims / time_dim / pointnet) MUST match the trained
         # checkpoint — read from its hydra config by main() so any net size loads; these defaults are
         # the original small net.
-        net = PointNetDiffusionMLP(
-            action_dim=action_dim, horizon_steps=horizon_steps, cond_dim=obs_dim * cond_steps,
-            pc_cond_steps=pc_cond_steps, visual_feature_dim=visual_feature_dim, time_dim=time_dim,
-            mlp_dims=list(mlp_dims) if mlp_dims else [512, 512, 512],
-            activation_type="ReLU", residual_style=True,
-            pointnet=pointnet or {"in_channels": 3, "use_layernorm": True, "final_norm": "layernorm"})
+        if self._visual == "rgb":
+            from model.common.vit import VitEncoder
+            from model.diffusion.mlp_diffusion import VisionDiffusionMLP
+            from types import SimpleNamespace
+            _vc = dict(vit_cfg or {"patch_size": 8, "depth": 1, "embed_dim": 128,
+                                   "num_heads": 4, "embed_style": "embed2", "embed_norm": 0})
+            backbone = VitEncoder(obs_shape=[3, self._image_size, self._image_size],
+                                  num_channel=3 * self._img_cond_steps,
+                                  cfg=SimpleNamespace(**_vc))   # VitEncoder wants attr access
+            net = VisionDiffusionMLP(
+                backbone=backbone, action_dim=action_dim, horizon_steps=horizon_steps,
+                cond_dim=obs_dim * cond_steps, img_cond_steps=self._img_cond_steps,
+                time_dim=time_dim, mlp_dims=list(mlp_dims) if mlp_dims else [512, 512, 512],
+                residual_style=True, spatial_emb=int(spatial_emb),
+                augment=False)          # augmentation is TRAIN-ONLY: DPPO applies RandomShiftsAug
+                                        # unconditionally in forward(), which would jitter every
+                                        # deploy inference. Weights are unaffected by the flag.
+        else:
+            net = PointNetDiffusionMLP(
+                action_dim=action_dim, horizon_steps=horizon_steps, cond_dim=obs_dim * cond_steps,
+                pc_cond_steps=pc_cond_steps, visual_feature_dim=visual_feature_dim, time_dim=time_dim,
+                mlp_dims=list(mlp_dims) if mlp_dims else [512, 512, 512],
+                activation_type="ReLU", residual_style=True,
+                pointnet=pointnet or {"in_channels": 3, "use_layernorm": True, "final_norm": "layernorm"})
         # Same construction as cfg/.../eval_diffusion_pointnet.yaml (network_path loads weights).
         self.model = DiffusionEval(
             network_path=str(ckpt), ft_denoising_steps=int(ft_denoising_steps), use_ddim=False,
@@ -165,6 +206,17 @@ class DPPOPolicyAdapter:
         raw = np.concatenate(
             [np.asarray(obs[k], np.float32).reshape(1, -1) for k in self._view], axis=1)
         state = (2.0 * (raw - self.obs_min) / self._obs_range - 1.0).astype(np.float32)
+        if self._visual == "rgb":
+            # Same preprocessing as convert_demos --images: PIL BILINEAR resize to SxS, (C,H,W),
+            # kept on the 0-255 scale (VisionDiffusionMLP.forward only calls .float(), it does NOT
+            # divide by 255 — training consumed uint8, so deploy must feed the same range).
+            from PIL import Image
+            fr = np.asarray(obs[self._image_key], np.uint8).reshape(-1, *np.asarray(
+                obs[self._image_key]).shape[-3:])[0]                       # (H, W, 3)
+            small = np.asarray(Image.fromarray(fr).resize(
+                (self._image_size, self._image_size), Image.BILINEAR))
+            rgb = np.transpose(small, (2, 0, 1)).astype(np.float32)[None]  # (1, 3, S, S)
+            return {"state": state, "rgb": rgb}
         pc = np.asarray(obs["point_cloud"], np.float32).reshape(1, -1, 3)   # raw xyz (meters)
         return {"state": state, "point_cloud": pc}
 
@@ -255,6 +307,9 @@ def main() -> None:
                         "encoding, so the deploy config must be the one it trained with)")
     p.add_argument("--cond-steps", type=int, default=2)
     p.add_argument("--act-steps", type=int, default=4)
+    p.add_argument("--image-key", default="image_cam_ext",
+                   help="obs key holding the RGB frame for an RGB checkpoint (the obs config must "
+                        "include it, e.g. configs/obs/point_cloud_1cam_armfocus_rgb.yaml)")
     p.add_argument("--warmup-steps", type=int, default=16,
                    help="env steps after each reset during which the policy still observes "
                         "and infers normally, but its output is masked to a HOLD-POSE "
@@ -331,6 +386,10 @@ def main() -> None:
         proprio_view=proprio_view,
         cond_steps=arch.get("cond_steps", args.cond_steps), act_steps=args.act_steps,
         action_config=action_config, warmup_steps=args.warmup_steps,
+        visual=arch.get("visual", "pointcloud"),
+        img_cond_steps=arch.get("img_cond_steps", 1), image_size=arch.get("image_size", 96),
+        image_key=args.image_key, vit_cfg=arch.get("vit_cfg"),
+        spatial_emb=arch.get("spatial_emb", 128),
         horizon_steps=arch.get("horizon_steps", 4),
         denoising_steps=arch.get("denoising_steps", 20),
         ft_denoising_steps=args.ft_denoising_steps,

@@ -580,15 +580,15 @@
 # all DPPO deploys run in dppo_deploy) and the standard safety knobs added
 # (--smooth-alpha / --max-pos-step-m, conservative motion).
 #
-# ckpt=downloaded_runs/cvzth/checkpoint/state_80.pt
-# normalization=downloaded_runs/cvzth/normalization.npz
-# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
-#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
-#   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-#   --record dataset/real_deploy/cvzth80_generalist --shard-size 10 \
-#   --max-steps 5000
+ckpt=downloaded_runs/cvzth/checkpoint/state_80.pt
+normalization=downloaded_runs/cvzth/normalization.npz
+uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+  --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+  --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+  --record dataset/real_deploy/cvzth80_generalist_ --shard-size 10 \
+  --max-steps 5000
 
 # GENERALIST 12-object + ALL 7 REAL objects (cluster run zdwii, ckpt 91) — added 2026-09-02.
 # THE LATEST GENERALIST TRAINED WITH REAL-WORLD DATA. Dataset
@@ -621,7 +621,7 @@
 #   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
 #   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
 #   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-#   --record dataset/real_deploy/zdwii91_generalist_real7 --shard-size 10 \
+#   --record dataset/real_deploy/zdwii91_generalist_real7_ --shard-size 10 \
 #   --max-steps 5000
 # Keep point_cloud_shift [0.009,0,0] ACTIVE in real_lab.yaml (sim clouds are unbiased; the real
 # cloud must be corrected into the frame the policy trained in).
@@ -724,7 +724,7 @@
 #   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
 #   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
 #   --act-steps 16 \
-#   --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --smooth-alpha 0.8 --max-pos-step-m 0.0065 \
 #   --record dataset/real_deploy/xdxvc800_3_h16 --shard-size 10 \
 #   --max-steps 5000
 
@@ -737,19 +737,28 @@
 #   lifted 16/44; ckpt2250 (val 0.0138, DEEP overfit) closed to 45mm, lifted 9/19, 0 aborts —
 #   the overfit checkpoint was BETTER. Val MSE rewards mode-averaging (hovering) under the demos'
 #   stochastic close timing. Sweep state_500 / state_900 / state_1200 and pick by behaviour.
-ckpt=logs/dppo/dppo-pretrain/single_lift_generalist_real7/tiatg/checkpoint/state_1200.pt
-normalization=dataset/dppo/single_lift_generalist_real7/normalization.npz
-uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-  --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
-  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
-  --act-steps 16 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/tiatg500_purereal_pc --shard-size 10 --max-steps 5000
+# ckpt=logs/dppo/dppo-pretrain/single_lift_generalist_real7/tiatg/checkpoint/state_1200.pt
+# normalization=dataset/dppo/single_lift_generalist_real7/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --act-steps 16 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/tiatg500_purereal_pc --shard-size 10 --max-steps 5000
 #
-# (2) RGB DP (uirro) — same checkpoint caveat as (1): sweep on the robot. — ⚠ NOT deployable with deploy_real_dppo.py as-is: that
-#     adapter builds a PointNetDiffusionMLP and feeds `point_cloud`. An RGB deploy needs a
-#     VisionDiffusionMLP branch + 96x96 cam_ext frames in the obs (obs config
-#     point_cloud_1cam_armfocus_rgb.yaml already records image_cam_ext). TODO before the RGB
-#     row of the real table can be measured on-robot.
+# (2) RGB DP (uirro) — DEPLOYABLE as of 2026-09-03. deploy_real_dppo.py now auto-detects the
+#     visual branch from the ckpt's hydra config (VisionDiffusionMLP+ViT vs PointNet) and feeds
+#     96x96 cam_ext frames; ViT augmentation is forced OFF at deploy (DPPO applies RandomShiftsAug
+#     unconditionally in forward, which would jitter inference). Verified offline: predictions
+#     match the training demos (mean|diff| 0.009-0.035 normalized) and live preprocessing is
+#     BIT-IDENTICAL to convert_demos (max pixel diff 0).
+#     ⚠ MUST use the RGB obs config so obs carries image_cam_ext, and the RGB dataset's own
+#     normalization. Same checkpoint caveat as (1): sweep on the robot, not by val.
 # ckpt=logs/dppo/dppo-pretrain/single_lift_real7_rgb/uirro/checkpoint/state_1200.pt  # or 300 / 700
 # normalization=dataset/dppo/single_lift_real7_rgb/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus_rgb.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper.yaml \
+#   --act-steps 16 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/uirro1200_rgb --shard-size 10 --max-steps 5000
