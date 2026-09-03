@@ -96,6 +96,13 @@ Then: `bash gentle_manip/scripts/deploy_pi0.5.sh` (or the explicit command in it
    connected. Added those three methods as a thin wrapper over `act()` (pi0.5 is stateless per
    inference, so they just track the latest obs).
 
+4. **Silent mid-episode re-homes (`max_episode_steps`).** `PolicyEnv` auto-resets at a fixed
+   horizon (default **200 steps**), which re-homes the arm and re-opens the gripper. The deploy
+   loop is not told, so the recording continues as ONE episode and it looks like a spontaneous
+   reset. Seen in `pi05_real7_e29999` ep3: instantaneous snaps to home at steps ~195 and ~390
+   while the policy was still commanding a pose ~200 mm away, gripper 30 -> 80 mm each time.
+   Fixed by passing `max_episode_steps=10**9` (the DPPO deploy already did).
+
 ### Verified offline before touching the robot
 
 Policy loads, and on a recorded mushroom frame it returns a (10, 7) chunk whose first action

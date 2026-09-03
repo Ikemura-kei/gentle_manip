@@ -155,8 +155,13 @@ def main() -> None:
     # setup's camera entry (same as demos/record.py and deploy_real_dppo.py).
     _cam = setup["cameras"][obs_cfg.images.cameras[0]]
     rgb_shape = (int(_cam.get("height", 480)), int(_cam.get("width", 640)))
+    # max_episode_steps=1e9 DISABLES PolicyEnv's fixed-horizon auto-reset. Without it the env
+    # silently re-homes the arm and re-opens the gripper every 200 steps MID-EPISODE (the deploy
+    # loop never learns, so the recording stays one long episode) — observed 2026-09-03 in
+    # pi05_real7_e29999 ep3: instantaneous jumps to home at steps ~195 and ~390 while the policy
+    # was still commanding a pose 200 mm away. The DPPO deploy already passes this.
     env = PolicyEnv(backend=backend, obs_config=obs_cfg, action_config=act_cfg, task=None,
-                    rgb_shape=rgb_shape)
+                    rgb_shape=rgb_shape, max_episode_steps=10 ** 9)
     policy = Pi05RealPolicy(args.checkpoint, prompt=args.prompt, config_name=args.config_name,
                             repo_id=args.repo_id, n_action_steps=args.n_action_steps)
     run_deploy_loop(env, policy, max_steps=args.max_steps, rate=args.rate,
