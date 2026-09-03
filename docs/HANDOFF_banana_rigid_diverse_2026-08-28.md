@@ -1437,3 +1437,16 @@ LARGE-4 mean: SR 0.86 -> 0.71 (-0.15). Gentleness ~held.
   banana_lying added to xcat_diverse_regrasp pool. yd_reactive_pack_v4.sbatch (4 slots,
   2 large + 2 small, --reactive-speed 0.30 0.90 MATCHED to eval, failed:0.28 for recovery,
   self-resubmit to 1800 reactive_recover). Smoke 1949650 running.
+
+## 2026-09-03 20:23 — v4 collection ended (FS I/O error), pipeline launched
+- v4 collectors (1952667/1953321) hit a /nobackup filesystem I/O error (OSError Errno 5
+  writing shards) around 15:33 and thrashed rebuild-worker for ~5h without producing.
+  FS recovered by ~20:20. Killed both jobs.
+- Final v4 reactive demos: ~425 reactive_recover + ~217 failed_grasp across ALL 8
+  in-domain cats (banana24 cherry14 egg27 grape14 kiwi28 mushroom23 rasp22 tomato26).
+  Collected with the FIRM grasp phase + matched 0.30-0.90 m/s drag.
+- Launched yd_reactive_pipeline_v4.sbatch (1971669, PENDING): _reactive_stage_v4.py
+  merges v2 regrasp + v3 reactive (309, 3-cat) + v4 reactive (425, 8-cat) -> ~734
+  reactive_recover, frac 0.30 -> convert (obs_dim 12) -> BC pretrain (new id) ->
+  auto 12-cat reactive eval (8 in-domain + 4 OOD).
+- 108 commits ahead.
