@@ -41,10 +41,15 @@ class RealSenseCamera:
         depth_min: float = 0.1,
         depth_max: float = 0.85,
         fps: int = 30,
+        visual_preset: Optional[str] = None,
         _pipeline: Optional[object] = None,
     ) -> None:
         self.name = name
         self.serial = str(serial)
+        # L515 depth "visual preset" (rs2_l500_visual_preset), e.g. "short_range" for close-up
+        # tabletop work — lower noise/flying pixels at <1 m, at the cost of long range. None
+        # leaves the device default untouched. Ignored by cameras without the option (D405).
+        self.visual_preset = visual_preset
         self.width = int(width)
         self.height = int(height)
         self.depth_min = float(depth_min)
@@ -72,7 +77,23 @@ class RealSenseCamera:
         config.enable_stream(rs.stream.color, self.width, self.height, rs.format.bgr8, self.fps)
 
         profile = pipeline.start(config)
-        self._depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
+        dev_sensor = profile.get_device().first_depth_sensor()
+        if self.visual_preset is not None:
+            if not dev_sensor.supports(rs.option.visual_preset):
+                print(f"[{self.name}] visual_preset requested but this device has no such option "
+                      f"— ignoring", flush=True)
+            else:
+                key = str(self.visual_preset).upper().replace("-", "_")
+                try:
+                    val = float(getattr(rs.l500_visual_preset, key.lower()))
+                except AttributeError:
+                    opts = [o for o in dir(rs.l500_visual_preset) if not o.startswith("_")]
+                    raise ValueError(f"unknown visual_preset {self.visual_preset!r}; "
+                                     f"available: {opts}")
+                dev_sensor.set_option(rs.option.visual_preset, val)
+                print(f"[{self.name}] visual preset -> {key} "
+                      f"(rs2_l500_visual_preset={val:.0f})", flush=True)
+        self._depth_scale = dev_sensor.get_depth_scale()
         self._align = rs.align(rs.stream.color)
         self._pipeline = pipeline
         self._started = True

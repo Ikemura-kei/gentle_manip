@@ -58,6 +58,10 @@ def main() -> None:
     p.add_argument("--obs-config", type=Path,
                    default=_PKG / "configs" / "obs" / "point_cloud_1cam.yaml")
     p.add_argument("--camera", default="cam_ext", help="camera name in the setup config")
+    p.add_argument("--short-range", action="store_true",
+                   help="L515: set the SHORT_RANGE depth preset (best for <1 m tabletop work)")
+    p.add_argument("--visual-preset", default=None,
+                   help="explicit rs2_l500_visual_preset name (overrides --short-range)")
     p.add_argument("--show-crop", action="store_true",
                    help="also print how many points fall inside the crop box each second")
     p.add_argument("--show-processed", action="store_true",
@@ -91,6 +95,7 @@ def main() -> None:
         name=args.camera, serial=cam_cfg["serial"],
         width=cam_cfg.get("width", 640), height=cam_cfg.get("height", 480),
         depth_min=cam_cfg.get("depth_min", 0.1), depth_max=cam_cfg.get("depth_max", 0.85),
+        visual_preset=args.visual_preset or ("short_range" if args.short_range else None),
     )
     cam.start()
 
