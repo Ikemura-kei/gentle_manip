@@ -28,6 +28,9 @@ REPO = Path(__file__).resolve().parents[2]
 TRIPOSG = REPO / "third_party" / "TripoSG"
 sys.path.insert(0, str(TRIPOSG))
 sys.path.insert(0, str(TRIPOSG / "scripts"))
+# APPEND (not insert) the diso stub: a real diso in site-packages must win. See
+# scripts/mesh_from_photos/shims/diso/__init__.py for why the stub exists at all.
+sys.path.append(str(Path(__file__).resolve().parent / "shims"))
 
 from huggingface_hub import snapshot_download  # noqa: E402
 from image_process import prepare_image  # noqa: E402  (upstream preprocessing)

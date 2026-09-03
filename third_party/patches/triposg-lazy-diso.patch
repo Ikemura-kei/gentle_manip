@@ -1,0 +1,30 @@
+diff --git a/triposg/inference_utils.py b/triposg/inference_utils.py
+index 6ce292b..a3e56b0 100755
+--- a/triposg/inference_utils.py
++++ b/triposg/inference_utils.py
+@@ -4,7 +4,15 @@ import torch.nn as nn
+ import scipy.ndimage
+ from skimage import measure
+ from einops import repeat
+-from diso import DiffDMC
++# --- gentle_manip local patch ---------------------------------------------
++# `diso` is an sdist-only CUDA extension with no aarch64 wheel, and the only
++# CUDA module on Arrhenius is 13.0, so we do not build it. It is used ONLY by
++# flash_extract_geometry(); the default hierarchical_extract_geometry() path
++# uses skimage marching cubes. Import lazily so the module loads without it.
++def _load_diff_dmc():
++    from diso import DiffDMC  # noqa: PLC0415
++    return DiffDMC
++# --- end gentle_manip local patch ------------------------------------------
+ import torch.nn.functional as F
+ 
+ from triposg.utils.typing import *
+@@ -463,7 +471,7 @@ def flash_extract_geometry(
+     grid_logits = grid_logits[0]
+     try:
+         print("final grids shape = ", grid_logits.shape)
+-        dmc = DiffDMC(dtype=torch.float32).to(grid_logits.device)
++        dmc = _load_diff_dmc()(dtype=torch.float32).to(grid_logits.device)
+         sdf = -grid_logits / octree_resolution
+         sdf = sdf.to(torch.float32).contiguous()
+         vertices, faces = dmc(sdf, deform=None, return_quads=False, normalize=False)
