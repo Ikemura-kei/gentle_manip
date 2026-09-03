@@ -27,8 +27,8 @@ source "$REPO/gentle_manip/scripts/arrhenius/yd_env_common.sh"
 
 PER_CAT_TARGET=${PER_CAT_TARGET:-250}
 SEED0=${SEED0:-400}
-MAXFEVALS=${MAXFEVALS:-400}
-STOP_AT=${STOP_AT:-1800}
+MAXFEVALS=${MAXFEVALS:-320}
+STOP_AT=${STOP_AT:-1100}
 OUT_TASK=single_lift_xcat_reactive_v4
 START_MODES=${START_MODES:-sweep:0.50,failed:0.28,above:0.10,ground:0.07,air:0.05}
 
