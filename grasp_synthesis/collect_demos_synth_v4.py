@@ -312,6 +312,13 @@ GRASP_W_ALIGN = 2000.0            # flush-alignment weight (frozen v4.1; was --g
 GRASP_VOXEL_DIV = 14              # FEM remesh resolution (frozen v4.1; was --grasp-voxel-div, never passed)
 GRASP_TARGET_TETS = 1500          # FEM target tet count (ndof stays <~5k) (frozen v4.1; was --grasp-target-tets, never passed)
 GRASP_MU = 0.7                    # pad-object friction coefficient (frozen v4.1; was --grasp-mu, never passed)
+GRASP_FEM_NU = 0.33                # FEM Poisson ratio. NOT the material's: this is
+# MetricConfig's historical default ("copper, as in the paper") and is what every v4.1
+# result was collected with (their config.yaml records grasp_nu: null, which resolved to
+# exactly this — verified bit-identical stiffness). The registry materials declare nu
+# 0.30-0.42, so 0.33 is physically wrong for most objects; switching to the material value
+# is arguably the right fix but CHANGES the FEM solution (nu sets the Lame constants and
+# cannot be rescaled after the E=1 solve), so it is a deliberate separate decision.
 GRASP_ACCEL = 9.81                 # lift-accel safety margin m/s^2: holdability needs 2*mu*grip >= m*(g+accel) (frozen v4.1; was --grasp-accel, never passed)
 GRASP_ESCALATE = 2                # maxfevals multiplier on a failed synth retry (frozen v4.1; was --grasp-escalate, never passed)
 N_FIRM = 8   # "firm" phase duration (steps) — gradual extra close IF triggered, else a no-op hold
@@ -909,8 +916,6 @@ def main() -> None:
     # AND the grip force were wrong per object. On the raspberry (true E 1e5) the planner believed
     # it had 3x the grip it actually had, and reported 24.8 kPa where the true figure is ~8.3 kPa.
     # Pass a value explicitly to override.
-    p.add_argument("--grasp-E",           type=float, default=None,  help="object Young's modulus (Pa); default = the object's material")
-    p.add_argument("--grasp-density",     type=float, default=None, help="object density (kg/m^3); default = the object's material")
     p.add_argument("--scan-metric", choices=("masked", "p98"), default="p98",
                    help="stress metric for the closure scan's yield crossing. 'p98' (DEFAULT -- "
                         "the collection recipe): unmasked 98th percentile; errs GENTLE, so its "
@@ -938,18 +943,6 @@ def main() -> None:
                         "NOT recorded, so the demo's first frame is the hover state. Episodes are "
                         "labelled re-grasp-demo vs standard in dr_params.csv. 0 = off; ~0.2 for a "
                         "real collection; 1.0 to smoke-test the path.")
-    p.add_argument("--grasp-nu", default=None,
-                   help="Poisson ratio for the grasp FEM. Default None keeps the HISTORICAL 0.33 "
-                        "(MetricConfig's 'copper' default), which every collection before "
-                        "2026-08-27 used regardless of the object. Pass 'auto' for the object's own "
-                        "material nu (0.30-0.42 across our objects). Unlike E, nu CANNOT be "
-                        "rescaled post-hoc, so switching it changes results and invalidates "
-                        "comparisons against runs made with 0.33.")
-    p.add_argument("--grasp-yield",       type=float, default=None,
-                   help="object von Mises yield stress (Pa); default = the object's material. Used by "
-                        "--grasp-area-min-mm2 auto to keep the selected grasp UNDER yield: maximising "
-                        "contact area alone over-squeezes small soft objects (measured on the "
-                        "raspberry, whose yield is 15 kPa).")
     p.add_argument("--table-z",           type=float, default=0.0,  help="table surface height (world z, m)")
     p.add_argument("--grasp-n-starts",    type=int,   default=6,    help="CMA multi-start count")
     p.add_argument("--keep-synth-failures", action="store_true",
@@ -1057,16 +1050,16 @@ def main() -> None:
     # ── Load everything from the experiment config (same as training / eval) ──
     exp        = Experiment.load(args.experiment)
     task       = SingleLiftTask(exp.task_cfg)
-    # Resolve the grasp material from the OBJECT (see --grasp-E) unless explicitly overridden.
+    # Grasp material comes from the OBJECT's registry entry — the experiment is the single source
+    # of truth, so there are no CLI overrides for it.
     from gentle_manip.assets.registry import get_object_def as _god
     _mat = _god(exp.task_cfg["object_name"]).material
-    if args.grasp_E is None:       args.grasp_E = float(_mat.youngs_modulus)
-    if args.grasp_density is None: args.grasp_density = float(_mat.density)
-    if args.grasp_yield is None:   args.grasp_yield = float(_mat.von_mises_yield_stress)
-    _fem_nu = float(_mat.poisson_ratio) if str(args.grasp_nu).lower() == "auto" else (
-        None if args.grasp_nu is None else float(args.grasp_nu))
-    print(f"  grasp material ({exp.task_cfg['object_name']}): E={args.grasp_E:.3g} Pa  "
-          f"rho={args.grasp_density:.0f}  yield={args.grasp_yield:.3g} Pa")
+    _mat_E     = float(_mat.youngs_modulus)
+    _mat_rho   = float(_mat.density)
+    _mat_yield = float(_mat.von_mises_yield_stress)
+    _fem_nu = GRASP_FEM_NU
+    print(f"  grasp material ({exp.task_cfg['object_name']}): E={_mat_E:.3g} Pa  "
+          f"rho={_mat_rho:.0f}  yield={_mat_yield:.3g} Pa  (FEM nu=0.33 historical)")
     _yaw = _yaw_max_arg(args, _god(exp.task_cfg["object_name"]))
     if _yaw is not None:
         print(f"  grasp yaw bound: {_yaw:.1f} deg (largest extent "
@@ -1111,7 +1104,7 @@ def main() -> None:
                         "closure_gain": args.closure_gain,
                         "grasp_yaw_max_deg": args.grasp_yaw_max_deg,
                         "grasp_yaw_max_deg_resolved": _yaw,
-                        "grasp_nu": _fem_nu,
+                        "grasp_nu": _fem_nu, "mat_E": _mat_E, "mat_rho": _mat_rho, "mat_yield": _mat_yield,
                         },
         "dr": exp.dr,
     }
@@ -1284,7 +1277,7 @@ def main() -> None:
         if priv_cfg is not None:
             init_obs_batch.update(_privileged_obs_batch(
                 obj_pos_all, obj_quat_all, dr_vec, priv_cfg,
-                von_mises=init_state.get("von_mises_stress"), yield_stress=args.grasp_yield,
+                von_mises=init_state.get("von_mises_stress"), yield_stress=_mat_yield,
                 contact_force=init_state.get("contact_force")))
 
         # ── Per-env FEM gentleness grasp synthesis (v3) ──
@@ -1304,25 +1297,25 @@ def main() -> None:
         for i in range(n):
             cma_seed = int(cma_seed_rng.integers(1, 2**31 - 1))
             r = fg.synthesize_grasp(fem_obj, fem_pad_geo, obj_pos_all[i], obj_quat_all[i],
-                                    E=args.grasp_E, density=args.grasp_density, mu=GRASP_MU,
+                                    E=_mat_E, density=_mat_rho, mu=GRASP_MU,
                                     table_z=args.table_z, maxfevals=args.maxfevals,
                                     n_starts=args.grasp_n_starts, seed=cma_seed, accel=GRASP_ACCEL,
                                     diversity_tol=args.grasp_diversity_tol,
                                     w_align=GRASP_W_ALIGN,
                                     cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg,
                                     area_min=_area_min_arg(args, scene_dr),
-                                    yield_stress=args.grasp_yield,
+                                    yield_stress=_mat_yield,
                                     antipodal_seeds=bool(args.grasp_antipodal_seeds),
                                     **({"yaw_max_deg": _yaw} if _yaw is not None else {}))
             if r.get("x") is None or r.get("stress_top10") is None:   # diversity found no feasible grasp;
                 print(f"  Env {i}: no feasible diverse grasp -> retry WITHOUT diversity")  # retry reliably
                 r = fg.synthesize_grasp(fem_obj, fem_pad_geo, obj_pos_all[i], obj_quat_all[i],
-                                        E=args.grasp_E, density=args.grasp_density, mu=GRASP_MU,
+                                        E=_mat_E, density=_mat_rho, mu=GRASP_MU,
                                         table_z=args.table_z, maxfevals=args.maxfevals,
                                         n_starts=args.grasp_n_starts, seed=cma_seed + 7, accel=GRASP_ACCEL,
                                         cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg,
                                         area_min=_area_min_arg(args, scene_dr),
-                                        yield_stress=args.grasp_yield,
+                                        yield_stress=_mat_yield,
                                     antipodal_seeds=bool(args.grasp_antipodal_seeds),
                                     **({"yaw_max_deg": _yaw} if _yaw is not None else {}))
             # BUDGET ESCALATION: the retry above only drops diversity; if synthesis is still empty
@@ -1336,13 +1329,13 @@ def main() -> None:
                 print(f"  Env {i}: still no feasible grasp -> escalating budget x{mult} "
                       f"({args.grasp_n_starts * mult} starts, {args.maxfevals * mult} fevals)")
                 r = fg.synthesize_grasp(fem_obj, fem_pad_geo, obj_pos_all[i], obj_quat_all[i],
-                                        E=args.grasp_E, density=args.grasp_density, mu=GRASP_MU,
+                                        E=_mat_E, density=_mat_rho, mu=GRASP_MU,
                                         table_z=args.table_z, maxfevals=args.maxfevals * mult,
                                         n_starts=args.grasp_n_starts * mult,
                                         seed=cma_seed + 13 * _esc, accel=GRASP_ACCEL,
                                         cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg,
                                         area_min=_area_min_arg(args, scene_dr),
-                                        yield_stress=args.grasp_yield,
+                                        yield_stress=_mat_yield,
                                     antipodal_seeds=bool(args.grasp_antipodal_seeds),
                                         **({"yaw_max_deg": _yaw} if _yaw is not None else {}))
             best_x = r["x"]
@@ -1359,11 +1352,11 @@ def main() -> None:
             # predicted yield-crossing c_y, command gain * c_y. Uses the DR-drawn E when the scene
             # sampled one (the scan must match the simulated material; yield is not DR'd).
             if r.get("stress_top10") is not None:
-                _E_scan = float(scene_dr.get("mat_E") or 0.0) or float(args.grasp_E)
+                _E_scan = float(scene_dr.get("mat_E") or 0.0) or float(_mat_E)
                 _cy = surrogate_closure(fem_obj, fem_pad_geo, best_x,
                                         obj_pos_all[i], obj_quat_all[i],
-                                        _E_scan, float(args.grasp_yield),
-                                        args.grasp_density, GRASP_MU, args.table_z,
+                                        _E_scan, float(_mat_yield),
+                                        _mat_rho, GRASP_MU, args.table_z,
                                         metric=args.scan_metric)
                 _cc = float(np.clip(args.closure_gain * _cy, CLOSURE_CMD_MIN_M, CLOSURE_CMD_MAX_M))
                 print(f"  Env {i}: c_y={_cy*1000:.1f}mm -> commanded closure {_cc*1000:.1f}mm")
@@ -1382,7 +1375,7 @@ def main() -> None:
                 g = all_grasp[i]
                 finger_viz.render_grasp_pose(
                     fem_obj, fem_pad_geo, all_best_x[i], obj_pos_all[i], obj_quat_all[i], args.table_z,
-                    str(Path(vid_dir) / f"{stem}_grasp.png"), E=args.grasp_E,
+                    str(Path(vid_dir) / f"{stem}_grasp.png"), E=_mat_E,
                     stress=g.get("stress_top10"), grip=g.get("grip"), align=g.get("align"),
                     width_face=g.get("width_face"), label=stem)
             except Exception as e:  # viz must never break a collection run
@@ -1400,7 +1393,7 @@ def main() -> None:
                 record_video=rec_this_batch, priv_cfg=priv_cfg, dr_vec=dr_vec,
                 approach_xy_finish=args.approach_xy_finish, approach_rng=approach_rng,
                 trim_max_run=args.held_run_max, trim_keep=args.held_run_keep,
-                yield_stress=args.grasp_yield,
+                yield_stress=_mat_yield,
                 closure_cmd=closure_cmd,
                 regrasp_mask=_rg_mask, regrasp_rng=_regrasp_rng)
             consec_batch_aborts = 0

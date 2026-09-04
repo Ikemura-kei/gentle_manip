@@ -1004,6 +1004,9 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                 sel_x, sel_res = near[int(drng.integers(len(near)))]
                 sel_x = sel_x.copy()
 
+    # Fallback guard: if the selected grasp is somehow invalid (no stress readout), keep the argmax
+    # best (always a holdable "ok" grasp) so downstream never sees a None stress/grip.
+    if sel_res is None or sel_res.get("stress_top10") is None:
         sel_x, sel_res = best["x"], best["res"]
     r = sel_res or {}
     out = {"x": sel_x if sel_x is not None else best["x"],
