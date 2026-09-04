@@ -27,6 +27,8 @@ board_center: [0.42, 0.0]
 # Real board colour, median-sampled from the cam_ext RGB (#a59b83). Visualisation only —
 # the point cloud is colour-blind; this is for paper figures / RGB baselines.
 board_color: [0.647, 0.608, 0.514, 1.0]
+# Gripper finger + knuckle links black, matching the real hardware. Visualisation only.
+finger_color: [0.05, 0.05, 0.05, 1.0]
 
 # MPM: "Config C" (E=300 kPa) — substeps/grid density validated for stability at this stiffness.
 sim_substeps: 210

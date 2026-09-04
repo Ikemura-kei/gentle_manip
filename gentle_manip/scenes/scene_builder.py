@@ -189,6 +189,21 @@ def build_scene(
             coup_friction=coup_friction, friction=rigid_friction if has_rigid else None
         ),
     )
+    # OPTIONAL: recolour the gripper's finger/knuckle links (visualisation only — the point
+    # cloud is geometry, not colour). Must run BEFORE scene.build(): visual meshes are baked
+    # there, so a later set_color has no effect. Matches the real gripper, whose fingers and
+    # knuckles are black, so RGB renders and paper figures line up with the hardware.
+    if spec.finger_color is not None:
+        col = tuple(spec.finger_color)
+        n_done = 0
+        for link in robot.links:
+            nm = (link.name or "").lower()
+            if any(k in nm for k in ("finger", "knuckle")):
+                for vg in link.vgeoms:
+                    vg.vmesh.set_color(col)
+                    n_done += 1
+        print(f"[scene_builder] finger/knuckle recolour: {n_done} vgeom(s) -> {col}", flush=True)
+
     add_fixtures(scene, spec.fixtures)
 
     objects: List[Any] = []

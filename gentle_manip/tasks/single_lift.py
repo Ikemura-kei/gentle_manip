@@ -60,6 +60,8 @@ class SingleLiftTask(BaseTask):
         # (median #a59b83) so renders match the hardware for paper figures.
         _bc = task_cfg.get("board_color")
         self.board_color = tuple(_bc) if _bc is not None else None
+        _fc = task_cfg.get("finger_color")
+        self.finger_color = tuple(_fc) if _fc is not None else None
         # optional spawn-height override (m); None => registry default_pos z. Used to clear the
         # MPM domain padding at coarse grid_density (see ObjectEntry.spawn_z).
         _sz = task_cfg.get("object_spawn_z")
@@ -155,6 +157,7 @@ class SingleLiftTask(BaseTask):
                 CameraEntry(name="cam_wrist", pos=(0.4, 0.0, 0.4),
                             lookat=(0.4, 0.0, 0.0), fov=58.0),
             ] if self.wrist_camera else []),
+            finger_color=self.finger_color,
             sim_dt=1.0 / 30.0,
             sim_substeps=self.sim_substeps,
             # z-floor -0.02 (was -0.012): genesis pads the MPM domain inward by ~0.012, so

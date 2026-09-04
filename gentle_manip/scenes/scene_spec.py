@@ -116,6 +116,10 @@ class SceneSpec:
                           (0.60,  0.26,  0.35),
                       )
     mpm_grid_density: float = 200.0
+    # RGBA 0-1 for the gripper's finger + knuckle links, or None (URDF default, unchanged).
+    # Visualisation only: the point cloud carries no colour. The real gripper's fingers are
+    # black, so this is what makes sim RGB renders match the hardware in figures.
+    finger_color: Optional[Tuple[float, float, float, float]] = None
 
     def validate(self) -> None:
         for obj in self.objects:
