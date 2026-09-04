@@ -479,11 +479,9 @@ def execute_and_collect(
     priv_cfg=None,                 # PrivilegedConfig or None — sim-only state-teacher fields
     dr_vec=None,                   # (2,) [scale, bend_deg] for priv_object_dr_params
     yield_stress=None,             # Pa — normalizer for priv_stress (None = stress not emitted)
-    firm_close_m=None,             # m — material-aware BASE firm close; None = FIRM_EXTRA_CLOSE_M
     closure_cmd=None,              # (N,) m — v4 surrogate-selected closure (replaces all constants)
     regrasp_mask=None,             # (N,) bool — envs collected as RE-GRASP demos (hover start)
     regrasp_rng=None,              # Generator for the hover-start randomization
-    extra_close: float = 0.0,      # squeeze this many meters TIGHTER than the synthesized width (all grasps)
     approach_xy_finish=None,       # v3.2: (lo, hi) per-env xy-progress finish fraction; None = straight line
     approach_speed=None,           # v3.3: m/step — per-env approach DURATION = dist/speed (constant
                                    # speed like real teleop; None = fixed shared duration)
@@ -528,25 +526,17 @@ def execute_and_collect(
     lift_b   = grasp_pos.copy(); lift_b[:, 2] += LIFT_HEIGHT
 
     width_open = np.full(num_envs, 0.08, np.float32)
-    # Base close = synthesized width - 2.5mm; extra_close squeezes TIGHTER still (firmer grip, all grasps).
-    # v4: the commanded width is plan − surrogate-selected closure. No 2.5 mm baseline, no
-    # extra_close, no firm base — the surrogate's own sigma(width) curve decides (docstring).
+    # Commanded width = planned width − the surrogate-selected closure. No 2.5 mm baseline and
+    # no unconditional firm in v4: the surrogate's sigma(width) curve sets the squeeze.
     _cc = (np.full(num_envs, 0.002, np.float32) if closure_cmd is None
            else np.asarray(closure_cmd, np.float32).reshape(num_envs))
     width_cls  = np.array([max(0.004, p[2] - _cc[k]) for k, p in enumerate(poses)], np.float32)
     # Mutable — "firm" phase tightens this once per env (idea #1); "lift"/"hold"/
     # a frozen (DONE) env all read the FINAL width, which is width_cls unless firmed.
     grip_target = width_cls.copy()
-    # Per-env firm close distance (m). SOFT firms EVERY grasp by the base amount (the grip
-    # margin the old path gave all grasps); a weak grasp (low stress rise) gets set to a LARGER
-    # value at the grasp->firm boundary. RIGID leaves this at base and skips firm when already firm.
-    # FIRM CLOSE — material-aware, same scale as the base squeeze. The constants below are
-    # 2.0 mm base + 2.5 mm weak applied to EVERY soft grasp regardless of object. Measured
-    # 2026-08-29: on the cherry tomato that is 4.5 mm of extra closure on a 24.7 mm object (18 %),
-    # dwarfing the 0.84 mm base squeeze — which is why reducing the squeeze alone barely moved its
-    # sub-yield rate (5.8 % -> 6 %). Scaling firm by the same (yield/E)*L indentation budget keeps
-    # the mushroom at 1.94/2.43 mm (vs 2.0/2.5, i.e. unchanged in practice, so its collected set
-    # stays valid) while the cherry tomato drops to 0.84/1.05 mm.
+    # Per-env firm close distance (m). v4 firms NOTHING unconditionally (base 0): a grasp is
+    # firmed only if it comes out weak at the grasp->firm boundary. (v3's material-aware
+    # base+weak scaling is retired — the surrogate already targets the stress level.)
     _firm_base = 0.0            # v4: no unconditional firm — width already targets the stress level
     # "weak" is judged by a stress RISE, and 2000 Pa is 5 % of the mushroom's 40 kPa yield but
     # 6.7 % of the cherry tomato's 30 kPa — so the same absolute bar means different things.
@@ -889,32 +879,6 @@ def execute_and_collect(
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-def _extra_close_arg(args, obj_def):
-    """'auto' -> squeeze scaled by the object's MATERIAL and size (see --grasp-extra-close).
-
-    SIZE ALONE IS NOT ENOUGH. For an indentation d over a characteristic length L the induced
-    stress goes as sigma ~ E * d / L, so keeping sigma under yield requires
-
-        d  <=  K * (yield / E) * L
-
-    i.e. the squeeze must scale with the material's yield/E ratio, not just the object size.
-    That ratio varies 2.7x across our objects (tofu 2.5, mushroom 7.5, cherry tomato 13.3), so a
-    size-only rule that is gentle on one is damaging on another. Measured 2026-08-29 mid-
-    collection: with the size-only rule the mushroom came out at median 0.58x yield / 99.6%
-    sub-yield, while the cherry tomato -- stiffer E AND lower yield -- ran at median 1.18x yield
-    with only 5.8% sub-yield, i.e. essentially the whole category past yield.
-
-    K = 0.455 is calibrated on the mushroom so its squeeze is UNCHANGED at 1.94 mm, which keeps
-    the already-collected (and validated) mushroom set exactly reproducible. Everything else is
-    then derived from that object's own E and yield -- no per-category constants.
-    """
-    if str(args.grasp_extra_close).lower() != "auto":
-        return float(args.grasp_extra_close)
-    m = obj_def.material
-    ratio = float(m.von_mises_yield_stress) / float(m.youngs_modulus)
-    return float(np.clip(0.455 * ratio * float(min(obj_def.size)), 0.0005, 0.003))
-
-
 def _yaw_max_arg(args, obj_def):
     """'auto' -> size-scaled hard yaw bound (see --grasp-yaw-max-deg); a number passes through."""
     if args.grasp_yaw_max_deg is None:
@@ -1197,16 +1161,6 @@ def main() -> None:
                    help="whole-grasp contact-area REWARD (score += w_area * area) — continuous "
                         "flush-contact promotion beyond the --grasp-area-min-mm2 floor. None "
                         "(default) = legacy off.")
-    p.add_argument("--grasp-extra-close", type=str, default="0.0",
-                   help="squeeze FURTHER IN than the synthesized width by this many meters (tighter grip) "
-                        "for EVERY grasp — e.g. 0.005 = close 5mm tighter. 0 (default) = no change. Use to "
-                        "make grasps firmer (a too-gentle grip -> premature lift / slip before secured). "
-                        "Pass 'auto' to scale it with the object: a FIXED squeeze is 15%% of the 33 mm "
-                        "mushroom it was tuned on but 24%% of a 21 mm cherry tomato and 34%% of a 15 mm "
-                        "raspberry, i.e. the same knob over-squeezes small objects. auto = "
-                        "5 mm * (smallest extent / 33 mm), clipped to [2, 6] mm, so the mushroom is "
-                        "unchanged (4.8 mm) and small objects get proportionally less. NOTE the "
-                        "separate FIRM_EXTRA_CLOSE_M (2.5 mm) is still a constant and is NOT scaled.")
     args = p.parse_args()
     if getattr(args, "dev_viewer", False) and args.n_envs != 1:
         print(f"[dev-viewer] forcing --n-envs {args.n_envs} -> 1 (one viewer window, one env)")
@@ -1243,8 +1197,6 @@ def main() -> None:
         None if args.grasp_nu is None else float(args.grasp_nu))
     print(f"  grasp material ({exp.task_cfg['object_name']}): E={args.grasp_E:.3g} Pa  "
           f"rho={args.grasp_density:.0f}  yield={args.grasp_yield:.3g} Pa")
-    args.grasp_extra_close = _extra_close_arg(args, _god(exp.task_cfg["object_name"]))
-    print(f"  grasp extra-close: {1000*args.grasp_extra_close:.1f} mm")
     _yaw = _yaw_max_arg(args, _god(exp.task_cfg["object_name"]))
     if _yaw is not None:
         print(f"  grasp yaw bound: {_yaw:.1f} deg (largest extent "
@@ -1295,7 +1247,7 @@ def main() -> None:
                         "grasp_yaw_max_deg_resolved": _yaw,
                         "grasp_nu": _fem_nu,
                         "grasp_w_press": args.grasp_w_press,
-                        "grasp_extra_close": args.grasp_extra_close},
+                        },
         "dr": exp.dr,
     }
 
@@ -1591,11 +1543,10 @@ def main() -> None:
             obs_bufs, act_bufs, rew_bufs, success, frame_bufs = execute_and_collect(
                 worker, all_best_x, init_obs_batch, perception, action_config,
                 record_video=rec_this_batch, priv_cfg=priv_cfg, dr_vec=dr_vec,
-                extra_close=args.grasp_extra_close,
                 approach_xy_finish=args.approach_xy_finish, approach_rng=approach_rng,
             approach_speed=args.approach_speed,
                 trim_max_run=args.held_run_max, trim_keep=args.held_run_keep,
-                yield_stress=args.grasp_yield, firm_close_m=args.grasp_extra_close,
+                yield_stress=args.grasp_yield,
                 closure_cmd=closure_cmd,
                 regrasp_mask=_rg_mask, regrasp_rng=_regrasp_rng)
             consec_batch_aborts = 0
