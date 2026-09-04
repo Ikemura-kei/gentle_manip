@@ -56,6 +56,10 @@ class SingleLiftTask(BaseTask):
         self.board_thickness: float = float(task_cfg.get("board_thickness", 0.0))
         self.board_size: tuple = tuple(task_cfg.get("board_size", (0.60, 0.70, 0.0138)))
         self.board_center: tuple = tuple(task_cfg.get("board_center", (0.42, 0.0)))
+        # RGBA 0-1; None = Genesis default. Sampled from the real board in the cam_ext RGB
+        # (median #a59b83) so renders match the hardware for paper figures.
+        _bc = task_cfg.get("board_color")
+        self.board_color = tuple(_bc) if _bc is not None else None
         # optional spawn-height override (m); None => registry default_pos z. Used to clear the
         # MPM domain padding at coarse grid_density (see ObjectEntry.spawn_z).
         _sz = task_cfg.get("object_spawn_z")
@@ -98,7 +102,8 @@ class SingleLiftTask(BaseTask):
                 fixture_type="chopping_board",
                 pose=(self.board_center[0], self.board_center[1], _bt / 2.0),
                 params={"height": _bt,
-                        "size": (self.board_size[0], self.board_size[1], _bt)}))
+                        "size": (self.board_size[0], self.board_size[1], _bt),
+                        **({} if self.board_color is None else {"color": self.board_color})}))
         if self.backdrop:
             # HEIGHT 0.9 m, NOT 1.5 (2026-08-31). Genesis' single default light is
             # DirectionalLight(dir=(-1,-1,-1)) — i.e. it comes from +x+y+z — and shadows are on,

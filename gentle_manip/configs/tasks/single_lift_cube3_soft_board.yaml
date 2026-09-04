@@ -10,7 +10,12 @@
 object_name: "cube3_soft"
 object_type: "soft"
 object_spawn_xy: [0.30, 0.0]
-object_spawn_z: 0.0288          # board top (13.8mm) + half of the 3 cm cube
+# = registry default_pos.z (0.016 = half-height 0.015 + 1 mm CLEARANCE) + board 0.0138.
+# The 1 mm clearance is NOT optional: the registry notes a soft body must SPAWN RESTING, and at
+# 0.0288 (my first value, board + bare half-height) the cube's base sat 1 mm INSIDE the board.
+# MPM particles initialised inside a rigid fixture get violent contact resolution, which kicks
+# and tilts the object at spawn — the grasp is then planned for a pose the object has left.
+object_spawn_z: 0.0298
 
 lift_height: 0.15
 hold_steps: 30
@@ -19,6 +24,9 @@ success_scale: 2.0
 board_thickness: 0.0138
 board_size: [0.60, 0.70, 0.0138]   # covers the whole point-cloud crop: no board EDGE inside it
 board_center: [0.42, 0.0]
+# Real board colour, median-sampled from the cam_ext RGB (#a59b83). Visualisation only —
+# the point cloud is colour-blind; this is for paper figures / RGB baselines.
+board_color: [0.647, 0.608, 0.514, 1.0]
 
 # MPM: "Config C" (E=300 kPa) — substeps/grid density validated for stability at this stiffness.
 sim_substeps: 210

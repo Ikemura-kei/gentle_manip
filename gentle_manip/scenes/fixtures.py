@@ -21,10 +21,14 @@ def add_fixtures(scene, fixtures: Iterable) -> List:
         elif f.fixture_type in ("platform", "chopping_board"):
             h = float(f.params.get("height", 0.05))
             size = tuple(f.params.get("size", (0.15, 0.15, h)))
+            # Optional colour (params["color"], RGBA 0-1). None => Genesis default, so every
+            # existing scene renders exactly as before. Used to match the real board in figures.
+            _col = f.params.get("color")
+            _kw = {} if _col is None else {"surface": gs.surfaces.Default(color=tuple(_col))}
             built.append(
                 scene.add_entity(
                     gs.morphs.Box(size=size, pos=tuple(f.pose), fixed=True),
-                    material=gs.materials.Rigid(),
+                    material=gs.materials.Rigid(), **_kw,
                 )
             )
         elif f.fixture_type == "backdrop":

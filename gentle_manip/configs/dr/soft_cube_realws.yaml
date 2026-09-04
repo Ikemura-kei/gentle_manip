@@ -13,7 +13,13 @@
 # preset — this narrowing is justified ONLY by the object's geometry being known and fixed.
 object_pos_x: [0.29, 0.48]
 object_pos_y: [-0.11, 0.11]
-object_nominal_xy: [0.47, 0.0]
+# MUST EQUAL the task's object_spawn_xy. The DR samples an ABSOLUTE x in object_pos_x and
+# converts it to an OFFSET relative to this nominal; the offset is then applied to whatever the
+# task spawns at. With nominal 0.47 (inherited from the mushroom preset) and the cube task
+# spawning at 0.30, offsets reached -0.18 and put objects at x~0.12-0.31 — outside the MPM
+# domain (x_min 0.248), which SLICED them into thin sheets at spawn.
+# Measured 2026-09-04: clipped episodes 5% grasp success (2/41), un-clipped 83% (19/23).
+object_nominal_xy: [0.30, 0.0]
 robot_init_pos_xyz: 0.02      # per-env arm-home jitter
 
 object_yaw_deg: 180           # full yaw — a cube on a board CAN sit at any yaw
