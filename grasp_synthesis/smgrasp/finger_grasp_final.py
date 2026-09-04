@@ -871,7 +871,28 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
     anti = None
     if antipodal_seeds and med is None:
         _amu = float(antipodal_mu) if antipodal_mu is not None else float(mu)
-        anti = antipodal_seed_pairs(obj, n_starts, mu=_amu, rng_seed=seed) or None
+        # Ask for MORE pairs than starts, then keep a spread subset: with n_starts=3 the plain
+        # top-3 can cluster on one face. Medial seeding is folded in here rather than kept as a
+        # separate mode — a medial point gives a DEEP anchor with a body-perpendicular axis, which
+        # is a different failure mode from an antipodal pair (surface-derived), so mixing them
+        # widens the basin coverage a small budget can reach.
+        anti = antipodal_seed_pairs(obj, max(2 * n_starts, 6), mu=_amu, rng_seed=seed) or None
+        if anti is not None and len(anti) > n_starts:
+            _keep = max(1, n_starts - 1)                     # leave one slot for a medial seed
+            anti = anti[:_keep]
+            _m = medial_seed_points(obj, 1)
+            if _m:
+                _c, _t = _m[0]
+                _ax = np.asarray(_t, float)
+                _ax = _ax / (np.linalg.norm(_ax) + 1e-12)
+                # medial gives a TANGENT; the grasp closes perpendicular to it
+                _perp = np.cross(_ax, [0.0, 0.0, 1.0])
+                if np.linalg.norm(_perp) < 1e-6:
+                    _perp = np.cross(_ax, [1.0, 0.0, 0.0])
+                _perp = _perp / (np.linalg.norm(_perp) + 1e-12)
+                anti = list(anti) + [(np.asarray(_c, float), _perp,
+                                      float(_local_width(_c, Robj_inv.inv().apply(_perp))))]
+            anti = anti[:n_starts]
         if anti is not None:
             yaws = []
             for _mid, _ax, _w in anti:

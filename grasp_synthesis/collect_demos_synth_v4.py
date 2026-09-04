@@ -489,8 +489,6 @@ def execute_and_collect(
     regrasp_mask=None,             # (N,) bool — envs collected as RE-GRASP demos (hover start)
     regrasp_rng=None,              # Generator for the hover-start randomization
     approach_xy_finish=None,       # v3.2: (lo, hi) per-env xy-progress finish fraction; None = straight line
-    approach_speed=None,           # v3.3: m/step — per-env approach DURATION = dist/speed (constant
-                                   # speed like real teleop; None = fixed shared duration)
     approach_rng=None,             # rng for the per-env f_i draw (reproducibility)
     trim_max_run: int = HELD_RUN_MAX,   # v3.2: held-run trim knobs (end-of-episode stop supervision)
     trim_keep: int = HELD_RUN_KEEP,
@@ -573,15 +571,6 @@ def execute_and_collect(
     # (the BC action magnitude) a near-deterministic function of the current state.
     _APPR_IDX = 0    # "approach" is always the first phase
 
-    def _profile_path_len(xy_len, z_len, f):
-        """Arc length of the per-axis approach profile (xy smoothstep to f, z linear).
-        The path is LONGER than the straight 3D distance (xy finishes early -> curved);
-        duration must be path/speed, not dist/speed, for truly constant per-step speed."""
-        al = np.linspace(0.0, 1.0, 201)
-        x = np.minimum(al / f, 1.0)
-        s = x * x * (3.0 - 2.0 * x)
-        dsxy = np.gradient(s, al)
-        return float(np.trapezoid(np.sqrt((xy_len * dsxy) ** 2 + z_len ** 2), al))
 
     if approach_xy_finish is not None:
         _rng = approach_rng if approach_rng is not None else np.random.default_rng(0)
@@ -591,15 +580,7 @@ def execute_and_collect(
 
     xy_len = np.linalg.norm(pos_b[:, :2] - home_pos[:, :2], axis=1)
     z_len = np.abs(pos_b[:, 2] - home_pos[:, 2])
-    if approach_speed is not None:
-        if xy_finish is not None:
-            path = np.array([_profile_path_len(xy_len[i], z_len[i], xy_finish[i])
-                             for i in range(num_envs)])
-        else:
-            path = np.linalg.norm(pos_b - home_pos, axis=1)
-        appr_dur = np.clip(np.round(path / float(approach_speed)), 40, 130).astype(np.int64)
-    else:
-        appr_dur = np.full(num_envs, int(dict(PHASES)["approach"]), np.int64)
+    appr_dur = np.full(num_envs, int(dict(PHASES)["approach"]), np.int64)
 
     if xy_finish is not None:
         # Speed guard: smoothstep peak xy speed = 1.5 * xy_len / (f * dur). Floor f so the
@@ -638,12 +619,6 @@ def execute_and_collect(
                                                          _wxyz_to_rot(quat_b[i])]))
             if xy_finish is not None:
                 xy_finish[i] = 1.0          # straight line: no two-phase approach for a re-grasp
-        # constant-velocity duration recomputed from the (shorter) hover -> grasp distance
-        if approach_speed is not None:
-            d = np.linalg.norm(pos_b - home_pos, axis=1)
-            appr_dur[is_rg] = (REGRASP_REOPEN_STEPS
-                               + np.clip(np.round(d[is_rg] / float(approach_speed)),
-                                         20, 130)).astype(np.int64)
 
     def _env_target(i: int, phase_idx: int, phase_step: int):
         """(pos, quat_wxyz, grip) for env i at its OWN (phase_idx, phase_step)."""
@@ -909,13 +884,6 @@ def _area_min_arg(args, scene_dr):
     return float(args.grasp_area_min_mm2) * 1e-6 * float(scene_dr["scale"]) ** 2
 
 
-def _width_max_arg(args, scene_dr):
-    """'auto' passes straight through (the planner derives it from the mesh, which is already the
-    DR-deformed one); a numeric value is mm and gets the scene-DR scale applied, like area_min."""
-    if str(args.grasp_width_max_mm).lower() == "auto":
-        return "auto"
-    return float(args.grasp_width_max_mm) * 1e-3 * float(scene_dr["scale"])
-
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__,
@@ -990,23 +958,6 @@ def main() -> None:
                         "raspberry, whose yield is 15 kPa).")
     p.add_argument("--table-z",           type=float, default=0.0,  help="table surface height (world z, m)")
     p.add_argument("--grasp-n-starts",    type=int,   default=6,    help="CMA multi-start count")
-    p.add_argument("--grasp-width-max-mm", type=str, default=None,
-                   help="Cap the synthesized grasp WIDTH (mm, scaled by the scene DR scale like "
-                        "--grasp-area-min-mm2). Default None = the gripper max, 79 mm. Set this for "
-                        "ELONGATED objects: with the full range available CMA grasps along the LONG "
-                        "axis, pressing the two ends together rather than closing across the body, "
-                        "because an end-to-end grasp presents MORE pad contact and both the area "
-                        "floor and w_press reward that. Measured on the banana (run 26-08-26-tfi, "
-                        "local cross-section ~17 mm): widths 42-79 mm, median 76.6, 4 of 5 spanning "
-                        "the crescent, none lifting. With --grasp-width-max-mm 40 --grasp-area-min-mm2 "
-                        "10 the same 6 poses gave widths 25-40 mm, align 0.69 -> 0.87 and peak stress "
-                        "16.1 kPa (under the banana's 25 kPa yield). Pass 'auto' to derive the cap "
-                        "from the object itself: 2.3 x the median LOCAL cross-section perpendicular "
-                        "to the long axis. That descriptor is INERT for compact objects (mushroom "
-                        "65.6, strawberry 70.2, raspberry 30.4 mm -- all ~2x above any width they "
-                        "plan) and BINDS only on elongated ones (banana 41.2 mm, matching the 40 mm "
-                        "hand-tuned here). Note the bbox would rank the banana LARGEST/easiest, the "
-                        "opposite of the truth.")
     p.add_argument("--keep-synth-failures", action="store_true",
                    help="SAVE episodes whose grasp synthesis failed and fell back to the default "
                         "top-down grasp. Off by default because those demos are actively HARMFUL: "
@@ -1066,16 +1017,6 @@ def main() -> None:
                         "than this many mm^2 of object surface (v4 anti-pinch floor in the FEM "
                         "planner; auto-scaled by scene scale^2). Measured: stem grasp 8 mm^2 vs "
                         "cap grasp 49 mm^2; suggest 15. 0 (default) = off.")
-    p.add_argument("--grasp-w-press", type=float, default=0.0,
-                   help="v3.3 soft worst-pad PRESSURE penalty (score -= w_press * grip/min_pad_area) "
-                        "— the smooth gradient companion of the area floor (stem grasp pressure "
-                        "114 kPa vs cap 37 kPa). Suggest ~0.05 (score is in Pa; pressure ~1e5). "
-                        "0 (default) = off.")
-    p.add_argument("--approach-speed", type=float, default=None,
-                   help="v3.3 speed compensation: approach duration per env = distance/speed "
-                        "(m/step; real teleop ~0.0024), clipped [40,130] steps. Fixes the fixed-"
-                        "duration artifact where speed is proportional to spawn distance (sim "
-                        "corr 0.91 vs real 0.29). Default None = fixed --n-home-to-pre steps.")
     p.add_argument("--held-run-max", type=int, default=HELD_RUN_MAX,
                    help=f"trim held-command runs LONGER than this (default {HELD_RUN_MAX}); "
                         "v3.2 recipe 12 (with --held-run-keep 10) preserves ~10 stop frames at "
@@ -1099,32 +1040,12 @@ def main() -> None:
                    help="seed CMA-ES from ANTIPODAL surface pairs (force-closure geometry) instead "
                         "of the COM-anchored yaw fan. Opt-in: default OFF reproduces frozen v4.1 "
                         "exactly. Falls back to the yaw fan when no pair qualifies.")
-    p.add_argument("--grasp-medial-seeds", action="store_true",
-                   help="seed the CMA search along the object's MEDIAL AXIS (deep-interior points, "
-                        "spread by farthest-point, each closing perpendicular to the local tangent "
-                        "and sized by the LOCAL cross-section) instead of putting every start at the "
-                        "COM with a global-extent width. Required for elongated/non-convex objects "
-                        "(a banana's COM sits in a thin band: pads there bury or miss, and since all "
-                        "starts share that xy, more starts/evals cannot help). Off by default -> "
-                        "convex objects keep bit-identical behaviour.")
     p.add_argument("--grasp-yaw-max-deg", type=str, default=None,
                    help="bound the TOOL yaw about the gripper's HOME orientation (yaw 0), in deg, "
                         "at CMA time — box + seed clip, folded for the parallel-jaw 180-deg "
                         "symmetry. cam_azimuth_max_deg bounds the fan about the CAMERA, which still "
                         "permitted ~90 deg home-frame yaw and real-rig occlusion. Suggest 55. "
                         "None (default) = unchanged.")
-    p.add_argument("--grasp-w-peak", type=float, default=None,
-                   help="peak-aware stress weight: score -= w_peak * E * UNMASKED p98 stress. The "
-                        "masked top10 objective HIDES contact spikes (corner/edge grasps score low "
-                        "bulk stress while spiking locally, sect 11.7); metric default 0.3, but the "
-                        "legacy collector path forwards 0 — pass 0.3 to opt in. None (default) = "
-                        "legacy off.")
-    p.add_argument("--grasp-w-tilt", type=float, default=None,
-                   help="approach-TILT penalty: score -= w_tilt * (1 - cos(approach axis, straight down)). "
-                        "Targets tilted-gripper edge contact that align CANNOT see (align measures the "
-                        "closing axis vs surface normal; the approach pitch is orthogonal to it) and the "
-                        "rounded-pad FEM underprices. ~1.5e5 makes a 15 deg tilt cost ~5 kPa-equivalents. "
-                        "None (default) = legacy off.")
     args = p.parse_args()
     if getattr(args, "dev_viewer", False) and args.n_envs != 1:
         print(f"[dev-viewer] forcing --n-envs {args.n_envs} -> 1 (one viewer window, one env)")
@@ -1197,20 +1118,16 @@ def main() -> None:
                         "n_settle": args.n_settle,
                         "cam_azimuth_max_deg": args.cam_azimuth_max_deg,
                         "approach_xy_finish": list(args.approach_xy_finish) if args.approach_xy_finish else None,
-                        "approach_speed": args.approach_speed,
                         "held_run_max": args.held_run_max, "held_run_keep": args.held_run_keep,
                         "grasp_jitter_deg": args.grasp_jitter_deg,
                         "grasp_area_min_mm2": args.grasp_area_min_mm2,
-                        "grasp_medial_seeds": bool(args.grasp_medial_seeds),
                         "grasp_escalate": int(GRASP_ESCALATE),
-                        "grasp_width_max_mm": args.grasp_width_max_mm,
                         "regrasp_prob": args.regrasp_prob,
                         "scan_metric": args.scan_metric,
                         "closure_gain": args.closure_gain,
                         "grasp_yaw_max_deg": args.grasp_yaw_max_deg,
                         "grasp_yaw_max_deg_resolved": _yaw,
                         "grasp_nu": _fem_nu,
-                        "grasp_w_press": args.grasp_w_press,
                         },
         "dr": exp.dr,
     }
@@ -1403,12 +1320,7 @@ def main() -> None:
                                     cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg,
                                     area_min=_area_min_arg(args, scene_dr),
                                     yield_stress=args.grasp_yield,
-                                    w_press=(args.grasp_w_press or None),
-                                    medial_seeds=int(args.grasp_medial_seeds),
                                     antipodal_seeds=bool(args.grasp_antipodal_seeds),
-                                    **({"width_max": _width_max_arg(args, scene_dr)} if args.grasp_width_max_mm else {}),
-                                    **({"w_peak": args.grasp_w_peak} if args.grasp_w_peak is not None else {}),
-                                    **({"w_tilt": args.grasp_w_tilt} if args.grasp_w_tilt is not None else {}),
                                     **({"yaw_max_deg": _yaw} if _yaw is not None else {}))
             if r.get("x") is None or r.get("stress_top10") is None:   # diversity found no feasible grasp;
                 print(f"  Env {i}: no feasible diverse grasp -> retry WITHOUT diversity")  # retry reliably
@@ -1419,12 +1331,7 @@ def main() -> None:
                                         cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg,
                                         area_min=_area_min_arg(args, scene_dr),
                                         yield_stress=args.grasp_yield,
-                                        w_press=(args.grasp_w_press or None),
-                                        medial_seeds=int(args.grasp_medial_seeds),
                                     antipodal_seeds=bool(args.grasp_antipodal_seeds),
-                                        **({"width_max": _width_max_arg(args, scene_dr)} if args.grasp_width_max_mm else {}),
-                                        **({"w_peak": args.grasp_w_peak} if args.grasp_w_peak is not None else {}),
-                                    **({"w_tilt": args.grasp_w_tilt} if args.grasp_w_tilt is not None else {}),
                                     **({"yaw_max_deg": _yaw} if _yaw is not None else {}))
             # BUDGET ESCALATION: the retry above only drops diversity; if synthesis is still empty
             # the feasible set is simply too small for this budget to land in. Double it and look
@@ -1444,12 +1351,7 @@ def main() -> None:
                                         cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg,
                                         area_min=_area_min_arg(args, scene_dr),
                                         yield_stress=args.grasp_yield,
-                                        w_press=(args.grasp_w_press or None),
-                                        medial_seeds=int(args.grasp_medial_seeds),
                                     antipodal_seeds=bool(args.grasp_antipodal_seeds),
-                                        **({"width_max": _width_max_arg(args, scene_dr)} if args.grasp_width_max_mm else {}),
-                                        **({"w_peak": args.grasp_w_peak} if args.grasp_w_peak is not None else {}),
-                                        **({"w_tilt": args.grasp_w_tilt} if args.grasp_w_tilt is not None else {}),
                                         **({"yaw_max_deg": _yaw} if _yaw is not None else {}))
             best_x = r["x"]
             if best_x is None or r.get("stress_top10") is None:       # extremely rare: still nothing ->
@@ -1505,7 +1407,6 @@ def main() -> None:
                 worker, all_best_x, init_obs_batch, perception, action_config,
                 record_video=rec_this_batch, priv_cfg=priv_cfg, dr_vec=dr_vec,
                 approach_xy_finish=args.approach_xy_finish, approach_rng=approach_rng,
-            approach_speed=args.approach_speed,
                 trim_max_run=args.held_run_max, trim_keep=args.held_run_keep,
                 yield_stress=args.grasp_yield,
                 closure_cmd=closure_cmd,
