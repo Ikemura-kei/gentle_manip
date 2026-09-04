@@ -1266,6 +1266,9 @@ def main() -> None:
                    help=f"'firm' phase steps (post-grasp extra squeeze idea #1); default {N_FIRM}. "
                         "0 = NO firm phase at all — the grasp goes straight to lift at width_cls "
                         "(matches the pre-firm v1 collector, e.g. the cho dataset).")
+    p.add_argument("--dev-viewer", action="store_true",
+                   help="DEV: force --n-envs 1 and open the Genesis viewer window so the scripted "
+                        "grasp can be watched live. Slow and interactive — never use for collection.")
     p.add_argument("--grasp-antipodal-seeds", action="store_true",
                    help="seed CMA-ES from ANTIPODAL surface pairs (force-closure geometry) instead "
                         "of the COM-anchored yaw fan. Opt-in: default OFF reproduces frozen v4.1 "
@@ -1311,6 +1314,9 @@ def main() -> None:
                         "unchanged (4.8 mm) and small objects get proportionally less. NOTE the "
                         "separate FIRM_EXTRA_CLOSE_M (2.5 mm) is still a constant and is NOT scaled.")
     args = p.parse_args()
+    if getattr(args, "dev_viewer", False) and args.n_envs != 1:
+        print(f"[dev-viewer] forcing --n-envs {args.n_envs} -> 1 (one viewer window, one env)")
+        args.n_envs = 1
 
     # Approach-phase length is configurable so a dataset can be collected with a shorter/longer
     # home->pre-grasp interpolation to study its effect on downstream policy learning; PHASES is
@@ -1436,7 +1442,7 @@ def main() -> None:
         else:
             spec_dr, sdr = nominal_spec, {"scale": float(nominal_spec.objects[0].scale or 1.0),
                                           "bend_deg": 0.0}
-        w = GenesisWorker(spec_dr, num_envs=args.n_envs, show_viewer=False,
+        w = GenesisWorker(spec_dr, num_envs=args.n_envs, show_viewer=bool(args.dev_viewer),
                           settle_steps=settle_steps, settle_max_steps=settle_max_steps,
                           settle_vel_thresh=settle_vel_thresh, render_obs_cameras=True,
                           coup_friction=float(sdr.get("coup_friction", 4.0)))
