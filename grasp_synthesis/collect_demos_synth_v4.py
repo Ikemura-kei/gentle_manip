@@ -27,7 +27,7 @@ import sys
 import time
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import imageio
 import numpy as np
@@ -47,7 +47,9 @@ from synth_utils import (  # noqa: E402
     sample_finger_surface,
     FINGER_TO_TCP_Z,
 )
-from smgrasp import finger_grasp as fg  # noqa: E402  (v3: FEM gentleness synthesis replaces the SDF cost)
+from smgrasp import finger_grasp_final as fg  # noqa: E402  (TRIMMED module, 2026-09-04: the
+# provably-inert w_occ occlusion term and its ray machinery removed. finger_grasp.py is kept
+# UNCHANGED for v2/v3/v5, eval_grasp_synth and test_grasp_v4, which still audit `occ`.)
 from smgrasp import finger_viz          # noqa: E402  (grasp-pose viz paired with each execution video)
 from gentle_manip.actions.action_config import ActionConfig
 from gentle_manip.experiment import Experiment
@@ -92,16 +94,6 @@ def _git_commit() -> str:
 
 
 # ── Synthesis ─────────────────────────────────────────────────────────────────
-
-def _synth_bounds(obj_pos: np.ndarray):
-    """Compute CMA-ES search bounds from object position."""
-    t_lb_xy = (obj_pos[:2] - 1.5 * OBJ_SIZE[:2]).tolist()
-    t_ub_xy = (obj_pos[:2] + 1.5 * OBJ_SIZE[:2]).tolist()
-    tcp_z_min = float(obj_pos[2]) + FINGER_TO_TCP_Z - 0.04
-    tcp_z_max = float(obj_pos[2]) + 0.25
-    lb = t_lb_xy + [tcp_z_min, -1.0 * np.pi, -0.12 * np.pi, -0.49 * np.pi, 0.01]
-    ub = t_ub_xy + [tcp_z_max,  1.0 * np.pi,  0.12 * np.pi,  0.49 * np.pi, 0.08]
-    return lb, ub
 
 
 def _synth_worker(payload: tuple) -> tuple:
@@ -460,7 +452,6 @@ FIRM_STRESS_THRESH_PA = 2000.0 # soft: below this top10 von-Mises rise (Pa) -> g
 FIRM_EXTRA_CLOSE_M   = 0.002   # BASE firm close (m, 2.0mm) — applied to EVERY soft grasp. This is the
                                # unconditional grip margin the old soft path gave all grasps; dropping
                                # it (skip-firm) cost ~15% success (skip-firm fails 39% vs firm 24%).
-FIRM_WEAK_EXTRA_CLOSE_M = 0.0025  # soft: ADDITIONAL close (m, 2.5mm) on top of the base when the grasp
                                # came out weak (stress rise < FIRM_STRESS_THRESH_PA, or rigid force <
                                # FIRM_FORCE_THRESH_N) — the "squeeze more only when NOT grasped"
                                # robustness. Soft NEVER skips firm; weak firms base+extra = 4.5mm.
