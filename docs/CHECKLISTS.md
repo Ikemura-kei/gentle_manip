@@ -226,6 +226,120 @@ loss, ~0% eval success, run `oppsu`); every `+train_dataset` override has its `+
 `--mem=0` on the sbatch (checkpoint save, not training, is what OOM'd before).
 
 
+## 1b. SIM DEMO COLLECTION (grasp synthesis v4.1) — commands, and how to profile it
+
+### 1b.1 The command
+
+```bash
+uv run --project envs/sim python grasp_synthesis/collect_demos_synth_v4.py \
+  --experiment <experiment name under configs/experiments/> \
+  --task-name  <output dataset name, {single,multi}_{task}_{object}_{soft,rigid}> \
+  --table-z    <SUPPORT SURFACE height in m>   \
+  --n-grasp    <close steps>                   \
+  --grasp-gpu                                  \
+  --n-episodes 200 --n-envs 8 --seed 0 --scene-dr-every 1 \
+  --record-video 20
+```
+
+Concrete, for the 2026-09-04 board rig:
+
+```bash
+OMP_NUM_THREADS=8 uv run --project envs/sim python grasp_synthesis/collect_demos_synth_v4.py \
+  --experiment single_lift_cube3_soft_board_abs7d \
+  --task-name  single_lift_cube3_soft_board \
+  --table-z 0.0138 --n-grasp 28 --grasp-gpu \
+  --n-episodes 200 --n-envs 8 --seed 0 --scene-dr-every 1 --record-video 20
+```
+
+### 1b.2 The four flags that MUST be set deliberately (each has bitten us)
+
+- **`--table-z`** — the height of the surface the object RESTS ON, not the table. Default is
+  `0.0`. It feeds three things in `smgrasp/finger_grasp.py`: the finger/table penetration filter,
+  `floor = table_z - table_tol`, and the grasp-height SEED. Leaving it at 0 with a 13.8 mm board
+  seeded every grasp 13.8 mm too low and cut grasp yield from ~88% to ~25% (2026-09-04).
+  **It must equal the task's `board_thickness`.**
+- **The DR's `object_nominal_xy` must equal the task's `object_spawn_xy`.** The DR samples an
+  ABSOLUTE position and converts it to an OFFSET relative to its nominal; that offset is applied
+  to whatever the task spawns at. A mismatch (nominal 0.47 vs spawn 0.30) pushed objects outside
+  the MPM domain, which SLICED them into thin sheets AT SPAWN. Measured: clipped -> 5% grasp
+  success, un-clipped -> 83%.
+- **`--n-grasp`** — close-phase length; sets the closing SPEED. Match it to the real demos or the
+  policy sees two grasp modes. Measure both sides the same way (mean per-step width decrease over
+  closing steps): real 2026-09-01 set = **1.601 mm/step**; sim at the default `--n-grasp 37` =
+  1.232 mm/step, i.e. sim is SLOWER, so the step count comes DOWN (28), not up.
+- **`--grasp-gpu`** — see 1b.4. Free speed, GPU otherwise idle.
+
+**Recorded action caveat:** `_invert_actions_absolute` always emits **10-dim rot6d**; the
+collector dispatches only on `action_config.mode == "absolute"`, which BOTH absolute configs
+share, so an experiment declaring `abs_pose_euler_abs_gripper` (7-dim) is silently ignored at
+collection time. Convert afterwards, do NOT edit frozen v4.1:
+
+```bash
+uv run --project envs/sim python -m gentle_manip.dppo.convert_demos <demo dir> \
+  --out dataset/dppo/<env> --experiment <exp> --view student --point-cloud point_cloud \
+  --derive-action abs_pose_euler_abs_gripper --derive-source-action abs_pose_abs_gripper
+```
+
+### 1b.3 Smoke FIRST, always
+
+Run **8 episodes with video** before committing hours to a full collection, and WATCH the failure
+videos — the success counter alone looks healthy while the object is being brushed past, sliced by
+a domain boundary, or gripped beside. Every collection bug in the 2026-09-04 round was invisible
+in the counter and obvious in one frame of video.
+
+```bash
+... --task-name <name>_smoke --n-episodes 8 --n-envs 8 --record-video 100000
+```
+
+Expected healthy yield is **~85-100%**. Below ~60% means a config bug, not a hard object — stop
+and diagnose. Useful artifacts: `videos_failed/*_grasp.png` shows the planner's INTENDED pose
+(stress / grip / align / width in the title), and `dr_params.csv` records the applied DR per
+episode so failures can be correlated with placement.
+
+### 1b.4 Profiling — where the time actually goes
+
+`grasp_synthesis/profile_synth.py` times the three planning stages and counts
+FEM scorer calls:
+
+```bash
+cd grasp_synthesis && OMP_NUM_THREADS=8 uv run --project ../envs/sim python \
+  ../grasp_synthesis/profile_synth.py <object> [--gpu] [--maxfevals N] [--n-starts N]
+```
+
+**Measured 2026-09-04** (frozen v4.1: maxfevals 1145, n_starts 6, voxel_div 14, target_tets 1500),
+seconds per env, planning only — no MPM rollout or rendering:
+
+| object | ndof | CPU plan | CPU scan | CPU total | GPU plan | GPU scan | GPU total | speedup |
+|---|---|---|---|---|---|---|---|---|
+| mushroom | 4590 | 23.83 | 3.54 | 28.09 | 14.32 | 1.21 | **16.28** | 1.73x |
+| strawberry | 4752 | 21.53 | 3.93 | 26.40 | 14.30 | 1.13 | **16.35** | 1.61x |
+| tofu | 5712 | 49.61 | 43.59 | 94.53 | 17.38 | 2.28 | **20.97** | **4.51x** |
+
+Reading:
+- **The CMA-ES pose search is 82-88% of planning**, and 97-99% of that is inside the FEM scorer.
+  Cost is `n_starts x maxfevals x per-call`, so both knobs scale it linearly.
+- **GPU makes cost nearly object-INDEPENDENT** (16.3 / 16.4 / 21.0 s) where CPU does not
+  (28.1 / 26.4 / 94.5 s). Per-call: CPU 18-37 ms varying with ndof; GPU a flat ~12-13 ms.
+- **The GPU win grows with CONTACT SET SIZE.** The CPU constrained solve costs one back-substitution
+  per contact node, so a deep closure explodes it; the GPU dense factor is flat. Tofu is the softest
+  object (E=50 kPa, yield 20 kPa) so its `c_y` reaches 9.4 mm — and its closure scan goes
+  **43.59 s -> 2.28 s (19x)**. Soft objects with deep closures benefit most.
+- **Do NOT expect the ~30x in `width_grasp.py`'s comment end-to-end.** That 30x is the raw
+  back-substitution; a scorer call also does contact detection, `indent_from_width`, element stress,
+  von Mises and contact area, none of which the GPU touches. Measured end-to-end: **1.6-4.5x**.
+
+Budgeting a run: `n_envs x per-env-planning` per batch, plus MPM rollout and video. Mushroom at
+8 envs on GPU is ~2.2 min of planning per batch; tofu on CPU would be ~12.6 min for the same batch.
+
+### 1b.5 If planning cost matters, cut the SEARCH, not the solver
+
+The GPU buys 1.6-4.5x. `n_starts x maxfevals` is the dominant term and cutting it is worth more —
+but it trades against grasp quality, so it must be MEASURED (yield + final stress on a fixed seed
+set) before being baked into a dataset, not assumed. Antipodal seeding is the natural companion:
+the scorer already scores `align` and rejects non-antipodal candidates through the holdability
+ladder, so seeding inside the feasible basin is what makes a smaller budget viable. Keep the width
+stage regardless — it is only 9-20 FEM calls and it is what sets `c_y`.
+
 ## 2. Evaluation
 
 ### 2.1 TEASER EVAL — screen a mid-training checkpoint for degeneracy (standing practice)
