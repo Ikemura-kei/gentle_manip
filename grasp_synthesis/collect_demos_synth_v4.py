@@ -15,17 +15,12 @@ from __future__ import annotations
 
 import argparse
 import csv
-import datetime
 import os
-import pickle
 import dataclasses
 import random
-import string
-import subprocess
 import tempfile
 import sys
 import time
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -43,9 +38,9 @@ for _p in (str(ROOT), str(GRASP_DIR)):
 # headless by default; MUJOCO_GL=glfw in the shell to get the viewer
 os.environ.setdefault("MUJOCO_GL", "egl")
 
-from synth_utils import (  # noqa: E402
-    sample_finger_surface,
-    FINGER_TO_TCP_Z,
+from synth_utils import FINGER_TO_TCP_Z  # noqa: E402
+from util import (  # noqa: E402  general helpers, nothing synthesis/execution-specific
+    _np, _git_commit, _make_run_dir, _write_shard, _merge_shards,
 )
 from smgrasp import finger_grasp_final as fg  # noqa: E402  (TRIMMED module, 2026-09-04: the
 # provably-inert w_occ occlusion term and its ray machinery removed. finger_grasp.py is kept
@@ -72,52 +67,15 @@ LIFT_HEIGHT   = 0.2         # metres above grasp position
 OBJ_SIZE      = np.array([0.05, 0.05, 0.04])   # rough mushroom AABB half-size
 
 MUSHROOM_MESH = str(ROOT / "gentle_manip/assets/objects/mushroom.obj")
-LEFT_FINGER   = str(ROOT / "gentle_manip/assets/xarm/xarm_gripper/meshes/left_finger.STL")
-RIGHT_FINGER  = str(ROOT / "gentle_manip/assets/xarm/xarm_gripper/meshes/right_finger.STL")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _np(tensor) -> np.ndarray:
-    """CUDA tensor or array → numpy (safe for both)."""
-    return tensor.detach().cpu().numpy() if hasattr(tensor, "detach") else np.asarray(tensor)
-
-
-def _git_commit() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=str(ROOT), stderr=subprocess.DEVNULL,
-        ).decode().strip()
-    except Exception:
-        return ""
 
 
 # ── Synthesis ─────────────────────────────────────────────────────────────────
 
 
-def _synth_worker(payload: tuple) -> tuple:
-    """Module-level CMA-ES worker — runs in a subprocess, builds its own SDF.
-
-    Defined at module level so ProcessPoolExecutor can pickle it.  Each worker
-    process (forked before CUDA init) is CPU-only; trimesh BVH is safe because
-    no two workers share memory.
-
-    payload: (mesh_path, obj_pos, obj_quat_wxyz, left_pts, right_pts, maxfevals, lb, ub,
-              log_dir, seed)
-    returns: (best_x (7,), score float)
-    """
-    (mesh_path, obj_pos, obj_quat_wxyz, left_pts, right_pts, maxfevals, lb, ub,
-     log_dir, seed) = payload
-    from synth_utils import build_object_sdf, grasp_cost, run_cmaes  # local import: safe in subprocess
-    sdf_fn = build_object_sdf(mesh_path)
-    x0 = [(lo + hi) / 2 for lo, hi in zip(lb, ub)]
-
-    def objective(x):
-        return grasp_cost(x, left_pts, right_pts, sdf_fn, obj_pos, obj_quat_wxyz)
-
-    best_x, score = run_cmaes(objective, x0, 1.0, lb, ub, maxfevals, seed=seed, log_dir=log_dir)
-    return best_x, score
 
 
 # ── Action inversion ──────────────────────────────────────────────────────────
@@ -926,62 +884,7 @@ def execute_and_collect(
 
 # ── Output helpers ────────────────────────────────────────────────────────────
 
-def _make_run_dir(out_dir: Path, task_name: str) -> Path:
-    """Create dated run dir matching demos/record.py naming convention."""
-    base = out_dir / task_name
-    base.mkdir(parents=True, exist_ok=True)
-    date = datetime.datetime.now().strftime("%y-%m-%d")
-    for _ in range(10000):
-        sfx = "".join(random.choices(string.ascii_lowercase, k=3))
-        cand = base / f"{date}-{sfx}"
-        if not cand.exists():
-            cand.mkdir()
-            return cand
-    raise RuntimeError(f"could not create run dir under {base}")
 
-
-def _write_shard(run_dir: Path, episodes: List[dict],
-                 task: str, idx: int, rate_hz: float) -> Path:
-    first = episodes[0]
-    payload = {
-        "meta": {
-            "task": task,
-            "obs_keys": sorted(first["observations"].keys()),
-            "action_dim": int(first["actions"].shape[1]),
-            "rate_hz": rate_hz,
-        },
-        "episodes": episodes,
-    }
-    path = run_dir / f"shard_{idx:04d}.pkl"
-    tmp  = path.with_suffix(".tmp")
-    with open(tmp, "wb") as f:
-        pickle.dump(payload, f)
-    os.replace(tmp, path)
-    return path
-
-
-def _merge_shards(run_dir: Path) -> Optional[Path]:
-    shards = sorted(run_dir.glob("shard_*.pkl"))
-    if not shards:
-        return None
-    all_eps: List[dict] = []
-    meta: Optional[dict] = None
-    for p in shards:
-        with open(p, "rb") as f:
-            d = pickle.load(f)
-        if meta is None:
-            meta = dict(d["meta"])
-        all_eps.extend(d["episodes"])
-    meta["n_episodes"] = len(all_eps)
-    meta["created"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    out = run_dir / "data.pkl"
-    tmp = out.with_suffix(".tmp")
-    with open(tmp, "wb") as f:
-        pickle.dump({"meta": meta, "episodes": all_eps}, f)
-    os.replace(tmp, out)
-    for p in shards:
-        p.unlink()
-    return out
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -1443,11 +1346,7 @@ def main() -> None:
     if do_scene_dr:
         print(f"  scene DR ON (every {args.scene_dr_every} batch(es)) — deformed meshes → {deform_dir}")
 
-    # ── Everything below is CPU-only (trimesh BVH + scipy CMA-ES) ──
-    # Mesh path and finger geometry are gathered from Genesis, then handed off to
-    # subprocess workers that each build their own SDF — no CUDA involved.
-    left_pts  = sample_finger_surface(LEFT_FINGER,  n=300)
-    right_pts = sample_finger_surface(RIGHT_FINGER, n=300)
+    # ── Everything below is CPU-only (FEM metric + CMA-ES; the GPU solve is opt-in) ──
 
     # Process pool reused across all batches (N workers, one per env).
     print(f"  Mesh: {Path(actual_mesh).name}")   # v3 synthesizes in-process (no worker pool)
