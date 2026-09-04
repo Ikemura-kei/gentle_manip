@@ -1266,6 +1266,10 @@ def main() -> None:
                    help=f"'firm' phase steps (post-grasp extra squeeze idea #1); default {N_FIRM}. "
                         "0 = NO firm phase at all — the grasp goes straight to lift at width_cls "
                         "(matches the pre-firm v1 collector, e.g. the cho dataset).")
+    p.add_argument("--grasp-antipodal-seeds", action="store_true",
+                   help="seed CMA-ES from ANTIPODAL surface pairs (force-closure geometry) instead "
+                        "of the COM-anchored yaw fan. Opt-in: default OFF reproduces frozen v4.1 "
+                        "exactly. Falls back to the yaw fan when no pair qualifies.")
     p.add_argument("--grasp-medial-seeds", action="store_true",
                    help="seed the CMA search along the object's MEDIAL AXIS (deep-interior points, "
                         "spread by farthest-point, each closing perpendicular to the local tangent "
@@ -1589,6 +1593,7 @@ def main() -> None:
                                     yield_stress=args.grasp_yield,
                                     w_press=(args.grasp_w_press or None),
                                     medial_seeds=int(args.grasp_medial_seeds),
+                                    antipodal_seeds=bool(args.grasp_antipodal_seeds),
                                     **({"width_max": _width_max_arg(args, scene_dr)} if args.grasp_width_max_mm else {}),
                                     **({"w_peak": args.grasp_w_peak} if args.grasp_w_peak is not None else {}),
                                     **({"w_area": args.grasp_w_area} if args.grasp_w_area is not None else {}),
@@ -1605,6 +1610,7 @@ def main() -> None:
                                         yield_stress=args.grasp_yield,
                                         w_press=(args.grasp_w_press or None),
                                         medial_seeds=int(args.grasp_medial_seeds),
+                                    antipodal_seeds=bool(args.grasp_antipodal_seeds),
                                         **({"width_max": _width_max_arg(args, scene_dr)} if args.grasp_width_max_mm else {}),
                                         **({"w_peak": args.grasp_w_peak} if args.grasp_w_peak is not None else {}),
                                         **({"w_area": args.grasp_w_area} if args.grasp_w_area is not None else {}),
@@ -1630,6 +1636,7 @@ def main() -> None:
                                         yield_stress=args.grasp_yield,
                                         w_press=(args.grasp_w_press or None),
                                         medial_seeds=int(args.grasp_medial_seeds),
+                                    antipodal_seeds=bool(args.grasp_antipodal_seeds),
                                         **({"width_max": _width_max_arg(args, scene_dr)} if args.grasp_width_max_mm else {}),
                                         **({"w_peak": args.grasp_w_peak} if args.grasp_w_peak is not None else {}),
                                         **({"w_area": args.grasp_w_area} if args.grasp_w_area is not None else {}),

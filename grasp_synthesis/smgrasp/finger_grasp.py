@@ -557,6 +557,75 @@ def _score_finger_grasp_impl(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, 
 
 
 
+def antipodal_seed_pairs(obj, n: int, mu: float = 0.7, rng_seed: int = 0, n_samples: int = 4000):
+    """`n` ANTIPODAL surface point-pairs -> (midpoint, closing_axis, width), object-LOCAL frame.
+
+    The default seeding fans YAW over a top-down pose anchored at the COM: the closing axis is a
+    free parameter CMA has to discover. Antipodal seeding instead derives the axis from the
+    GEOMETRY — a pair of surface points whose outward normals both oppose the line joining them,
+    i.e. exactly the force-closure condition the scorer's holdability ladder tests. Seeds therefore
+    start INSIDE the feasible basin rather than paying the shaped penalty until CMA finds it.
+    Classic antipodal sampling (Nguyen force closure; the same construction GPD/Dex-Net sample).
+
+    Condition: with a = (p2-p1)/|p2-p1| and outward normals n1, n2,
+        angle(a, -n1) <= atan(mu)   and   angle(-a, -n2) <= atan(mu)
+    so both contact normals lie in the friction cone about the grasp line.
+
+    Returns [] when no pair qualifies (very smooth/round bodies at small mu); the caller then
+    falls back to the yaw fan, so this can never make seeding WORSE than the default.
+    """
+    from .viz import boundary_faces
+    verts, tets = np.asarray(obj.verts, float), np.asarray(obj.tets)
+    faces, _ = boundary_faces(tets)
+    # area-weighted vertex normals over the boundary triangles (outward: boundary_faces is wound
+    # consistently, and we re-orient against the centroid to be safe on odd meshes)
+    v0, v1, v2 = verts[faces[:, 0]], verts[faces[:, 1]], verts[faces[:, 2]]
+    fn = np.cross(v1 - v0, v2 - v0)
+    fc = (v0 + v1 + v2) / 3.0
+    ctr = verts.mean(0)
+    flip = np.sign(np.einsum("ij,ij->i", fn, fc - ctr))
+    flip[flip == 0] = 1.0
+    fn = fn * flip[:, None]
+    nrm = np.linalg.norm(fn, axis=1, keepdims=True)
+    fn = fn / np.maximum(nrm, 1e-12)
+
+    rng = np.random.default_rng(rng_seed)
+    m = len(faces)
+    if m < 2:
+        return []
+    i = rng.integers(0, m, n_samples)
+    j = rng.integers(0, m, n_samples)
+    ok = i != j
+    i, j = i[ok], j[ok]
+    p1, p2, n1, n2 = fc[i], fc[j], fn[i], fn[j]
+    d = p2 - p1
+    L = np.linalg.norm(d, axis=1)
+    good = L > 1e-6
+    i, j, p1, p2, n1, n2, d, L = i[good], j[good], p1[good], p2[good], n1[good], n2[good], d[good], L[good]
+    a = d / L[:, None]
+    cone = np.cos(np.arctan(float(mu)))
+    # -n1 . a  and  -n2 . (-a) both >= cos(atan(mu))  => both normals oppose the grasp line
+    c1 = np.einsum("ij,ij->i", -n1, a)
+    c2 = np.einsum("ij,ij->i", -n2, -a)
+    sel = (c1 >= cone) & (c2 >= cone)
+    if not sel.any():
+        return []
+    p1, p2, a, L = p1[sel], p2[sel], a[sel], L[sel]
+    c = 0.5 * (c1[sel] + c2[sel])                     # antipodal quality: 1 = perfectly opposed
+    # prefer well-opposed pairs, then spread by farthest-point over midpoints so the seeds are
+    # DISTINCT grasps rather than n copies of the same best pair
+    order = np.argsort(-c)
+    p1, p2, a, L, c = p1[order], p2[order], a[order], L[order], c[order]
+    mid = 0.5 * (p1 + p2)
+    keep = [0]
+    for k in range(1, len(mid)):
+        if len(keep) >= n:
+            break
+        if np.min(np.linalg.norm(mid[keep] - mid[k], axis=1)) > 0.004:   # 4 mm apart
+            keep.append(k)
+    return [(mid[k], a[k], float(L[k])) for k in keep]
+
+
 def medial_seed_points(obj, n: int):
     """`n` deep-interior seed points with their local tangent, for seeding the CMA search.
 
@@ -659,6 +728,7 @@ def _down_quat_euler(yaw: float) -> np.ndarray:
 
 def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                       table_z: float = 0.0, ground_buf: float = 0.0035, obj_size: float = 0.03,
+                      antipodal_seeds: bool = False, antipodal_mu: float = None,
                       width_max: Optional[float] = None,
                       yield_stress: Optional[float] = None,
                       bbox_margin: float = 1.2, z_lift=(0.02, 0.12), sigma: float = 0.15, maxfevals: int = 400,
@@ -869,6 +939,25 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
     # MEDIAL SEEDING (opt-in): replace the all-starts-at-COM placement with points spread along
     # the body, each closing PERPENDICULAR to the local tangent and sized by the LOCAL section.
     med = medial_seed_points(obj, n_starts) if medial_seeds else None
+    # ANTIPODAL SEEDING (opt-in, 2026-09-04). Derives each start's closing axis + width from a
+    # force-closure surface pair instead of fanning yaw over a COM-anchored top-down pose. Falls
+    # back to the yaw fan when no pair qualifies, so it can never seed WORSE than the default.
+    anti = None
+    if antipodal_seeds and med is None:
+        _amu = float(antipodal_mu) if antipodal_mu is not None else float(mu)
+        anti = antipodal_seed_pairs(obj, n_starts, mu=_amu, rng_seed=seed) or None
+        if anti is not None:
+            yaws = []
+            for _mid, _ax, _w in anti:
+                th = Robj_inv.inv().apply(np.asarray(_ax, float))[:2]   # local axis -> world
+                if np.linalg.norm(th) < 1e-9:
+                    th = np.array([1.0, 0.0])
+                th = th / np.linalg.norm(th)
+                # top-down closing axis(yaw) = [sin y, -cos y, 0]; align it WITH the antipodal axis
+                yaws.append(float(np.arctan2(th[0], -th[1])))
+            yaws = (np.asarray(yaws) + np.pi / 2) % np.pi - np.pi / 2       # fold (jaw symmetry)
+            if yaw_max_deg is not None:
+                yaws = np.clip(yaws, -_yaw_hi, _yaw_hi)
     if med is not None:
         yaws = []
         for _c, _t in med:
@@ -892,8 +981,16 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
         _axis_w = Ri.apply([0.0, 1.0, 0.0])
         # med points live in the object-LOCAL recentered frame; lift to world through the object's
         # orientation before using them as a TCP anchor (obj.verts are recentered, NOT rotated).
-        _anchor = com if med is None else (com + Robj_inv.inv().apply(med[i][0]))
-        wi = _seed_width(_axis_w) if med is None else _local_width(med[i][0], _axis_w)
+        if med is not None:
+            _anchor = com + Robj_inv.inv().apply(med[i][0])
+            wi = _local_width(med[i][0], _axis_w)
+        elif anti is not None:
+            # midpoint of the antipodal pair; width = the pair's separation minus a light indent
+            _anchor = com + Robj_inv.inv().apply(anti[i][0])
+            wi = float(np.clip(anti[i][2] - 3.0e-3, 0.01, _w_hi))
+        else:
+            _anchor = com
+            wi = _seed_width(_axis_w)
         tcp0 = _anchor - Ri.apply([0.0, 0.0, _z_off(wi) + pad_geo["z_center"]])
         s0 = np.array([tcp0[0], tcp0[1], tcp0[2], r, p, y, wi])
         s0[2] += (table_z + ground_buf + 0.003) - finger_min_world_z(s0, pad_geo)
