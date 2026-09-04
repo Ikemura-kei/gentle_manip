@@ -66,17 +66,11 @@ N_HOLD        = 12           # hold at lift height (success eval window)
 LIFT_HEIGHT   = 0.2         # metres above grasp position
 OBJ_SIZE      = np.array([0.05, 0.05, 0.04])   # rough mushroom AABB half-size
 
+# Kept ONLY because occ_sweep.py / retry_window_probe.py / shelf_ik_probe.py import it as
+# c4.MUSHROOM_MESH. The collector itself no longer falls back to it — a missing mesh_path
+# now raises (see _mesh_for_batch). Those probes still carry the old `or c4.MUSHROOM_MESH`
+# fallback; harmless for a debug probe, but it is the same silent-wrong-object trap.
 MUSHROOM_MESH = str(ROOT / "gentle_manip/assets/objects/mushroom.obj")
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-
-
-# ── Synthesis ─────────────────────────────────────────────────────────────────
-
-
-
 
 # ── Action inversion ──────────────────────────────────────────────────────────
 
@@ -975,15 +969,6 @@ def main() -> None:
     p.add_argument("--grasp-diversity-tol", type=float, default=0.3,
                    help="sample among feasible grasps within this FRACTION of the best gentleness score "
                         "(0=off/argmax; 0.3 default = accept up to 30%% worse score -> diverse but still gentle)")
-    p.add_argument("--grasp-jitter-deg",  type=float, default=20.0,
-                   help="max +/- random perturbation (deg) on the selected grasp's roll/pitch/yaw, re-verified "
-                        "to still hold within the diversity tolerance (needs --grasp-diversity-tol>0 for headroom)")
-    p.add_argument("--grasp-jitter-pos",  type=float, default=0.003,
-                   help="max +/- random position perturbation (m) applied with --grasp-jitter-deg")
-    p.add_argument("--grasp-pitch-seed-deg", type=float, default=25.0,
-                   help="jitter the CMA multi-start PITCH seed by +/- this (deg). Every start otherwise "
-                        "seeds pitch 0, so even with a low --grasp-align CMA rarely explores tilt; seeding "
-                        "tilted starts broadens the demo pitch toward v2 (complement of the yaw seed-smear)")
     p.add_argument("--scene-dr-every", type=int, default=1,
                    help="re-randomize object SIZE+SHAPE every N batches by rebuilding the worker "
                         "(needs shape/scale fields in the experiment DR config; 0 = off, nominal "
@@ -1119,7 +1104,6 @@ def main() -> None:
                         "cam_azimuth_max_deg": args.cam_azimuth_max_deg,
                         "approach_xy_finish": list(args.approach_xy_finish) if args.approach_xy_finish else None,
                         "held_run_max": args.held_run_max, "held_run_keep": args.held_run_keep,
-                        "grasp_jitter_deg": args.grasp_jitter_deg,
                         "grasp_area_min_mm2": args.grasp_area_min_mm2,
                         "grasp_escalate": int(GRASP_ESCALATE),
                         "regrasp_prob": args.regrasp_prob,
@@ -1173,7 +1157,16 @@ def main() -> None:
                           settle_steps=settle_steps, settle_max_steps=settle_max_steps,
                           settle_vel_thresh=settle_vel_thresh, render_obs_cameras=True,
                           coup_friction=float(sdr.get("coup_friction", 4.0)))
-        return w, sdr, (w.handle.spec.objects[0].mesh_path or MUSHROOM_MESH)
+        _mp = w.handle.spec.objects[0].mesh_path
+        if not _mp:
+            # Silently falling back to the mushroom mesh would synthesize grasps for the WRONG
+            # object and look like a bad recipe rather than a bad config. Every object in the
+            # registry carries mesh_path; a missing one is a config error, so say so.
+            raise RuntimeError(
+                f"object {w.handle.spec.objects[0].name!r} has no mesh_path — the scene spec is "
+                f"incomplete. Fix the object's registry entry / task config; the collector will "
+                f"NOT fall back to a default mesh.")
+        return w, sdr, _mp
 
     worker, scene_dr, actual_mesh = _make_worker()
     if do_scene_dr:
@@ -1314,9 +1307,8 @@ def main() -> None:
                                     E=args.grasp_E, density=args.grasp_density, mu=GRASP_MU,
                                     table_z=args.table_z, maxfevals=args.maxfevals,
                                     n_starts=args.grasp_n_starts, seed=cma_seed, accel=GRASP_ACCEL,
-                                    diversity_tol=args.grasp_diversity_tol, jitter_deg=args.grasp_jitter_deg,
-                                    jitter_pos=args.grasp_jitter_pos, w_align=GRASP_W_ALIGN,
-                                    pitch_seed_deg=args.grasp_pitch_seed_deg,
+                                    diversity_tol=args.grasp_diversity_tol,
+                                    w_align=GRASP_W_ALIGN,
                                     cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg,
                                     area_min=_area_min_arg(args, scene_dr),
                                     yield_stress=args.grasp_yield,

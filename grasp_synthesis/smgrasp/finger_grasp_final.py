@@ -674,8 +674,7 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                       roll_max: float = np.pi / 2, yaw_max_deg=None,
                       refine: bool = True, refine_scan: int = 25, seed: int = 0, verbose: bool = False,
                       record_history: bool = False,
-                      diversity_tol: float = 0.0, jitter_deg: float = 0.0, jitter_pos: float = 0.0,
-                      jitter_tries: int = 8, pitch_seed_deg: float = 0.0) -> dict:
+                      diversity_tol: float = 0.0) -> dict:
     """CMA-ES over the 7-DOF TCP grasp maximizing the FEM gentleness score, with real finger geometry +
     table constraint. Multi-start over top-down approaches at diverse yaw (a good starting basin for a
     tabletop grasp); the search may tilt/translate from there. `obj_com` is the object world COM,
@@ -730,7 +729,7 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
     if obj_sdf is None:                                          # build the penetration SDF once (reused)
         obj_sdf = build_object_sdf(obj)
     # Occlusion rays are fixed for the whole search (only the fingers move), so build them once.
-    _div_on = (diversity_tol > 0.0 or jitter_deg > 0.0 or jitter_pos > 0.0 or pitch_seed_deg > 0.0)
+    _div_on = diversity_tol > 0.0
     _drng = np.random.default_rng(seed) if _div_on else None    # one stream: seed smear + sampling/jitter
 
     best = {"score": -np.inf, "x": None, "res": None}
@@ -850,15 +849,6 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
             # gap per synthesis so, over the dataset, the bands smear into a CONTINUOUS yaw distribution.
             gap = np.pi / max(n_starts - 1, 1)
             yaws = yaws + _drng.uniform(-gap / 2, gap / 2, n_starts)
-        if pitch_seed_deg > 0.0:
-            # Every start seeds pitch 0, so even with w_align relaxed CMA rarely wanders far into tilt.
-            # Launch the starts from a jittered pitch so the search EXPLORES tilted grasps (v2-like pitch
-            # spread). Kept within the CMA pitch bound (±0.2π) below. KEEP every other start straight
-            # top-down (pitch 0): a reliable feasible seed always exists, so an unlucky deformed mesh where
-            # every tilted start misses/hits-ground still yields a valid grasp (never returns None).
-            pj = np.radians(_drng.uniform(-pitch_seed_deg, pitch_seed_deg, n_starts))
-            pj[::2] = 0.0
-            pitch_seeds = pj
     if yaw_max_deg is not None:                       # fold to the equivalent grasp, then clip
         yaws = (np.asarray(yaws, float) + np.pi / 2) % np.pi - np.pi / 2
         yaws = np.clip(yaws, -_yaw_hi, _yaw_hi)
@@ -1013,23 +1003,7 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
             if near:
                 sel_x, sel_res = near[int(drng.integers(len(near)))]
                 sel_x = sel_x.copy()
-        if jitter_deg > 0.0 or jitter_pos > 0.0:                       # (3) jitter within tolerance
-            base_x = sel_x.copy()
-            for _ in range(max(1, jitter_tries)):
-                xj = base_x.copy()
-                xj[3:6] = xj[3:6] + np.radians(drng.uniform(-jitter_deg, jitter_deg, 3))
-                if jitter_pos > 0.0:
-                    xj[:3] = xj[:3] + drng.uniform(-jitter_pos, jitter_pos, 3)
-                xj[6] = float(np.clip(xj[6], 0.008, 0.079))
-                rj = _score(xj)
-                if (is_real_grasp(rj["score"]) and rj.get("holdable") and rj["score"] >= thr
-                        and rj.get("stress_top10") is not None):
-                    sel_x, sel_res = xj, rj                            # accepted: still gentle + holdable
-                    break
 
-    # Fallback guard: if the selected grasp is somehow invalid (no stress readout), keep the argmax best
-    # (which is always a holdable "ok" grasp) so downstream never sees a None stress/grip.
-    if sel_res is None or sel_res.get("stress_top10") is None:
         sel_x, sel_res = best["x"], best["res"]
     r = sel_res or {}
     out = {"x": sel_x if sel_x is not None else best["x"],
