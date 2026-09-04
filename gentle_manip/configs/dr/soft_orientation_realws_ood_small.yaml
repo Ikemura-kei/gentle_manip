@@ -11,7 +11,7 @@
 # ABSOLUTE spawn region matching the REAL workspace (2026-08-22, user-specified):
 # x in [0.29, 0.48], y in [-0.11, 0.11] (robot-base frame). Overrides the old ±4.5cm
 # box around the registry pose (0.47, 0). nominal_xy converts to the internal offset.
-object_pos_x: [0.29, 0.48]
+object_pos_x: [0.30, 0.46]
 object_pos_y: [-0.11, 0.11]
 object_nominal_xy: [0.47, 0.0]
 robot_init_pos_xyz: 0.02      # per-env arm-home jitter (unchanged from sim_demo)

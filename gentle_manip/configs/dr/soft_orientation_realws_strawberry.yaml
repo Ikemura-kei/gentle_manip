@@ -1,23 +1,24 @@
-# [dr] njhbz realws recipe for the STRAWBERRY (single mesh).
-# Used by: experiments/single_lift_strawberry_soft_abs_action_armfocus.yaml
-# Status: experimental
-#
-# scale [0.8, 1.2] -> 3.2-4.8 cm across: the realistic berry range, and well inside the
-# 8.8 cm gripper opening. Everything else matches soft_orientation_realws_mm4_s08.
-object_pos_x: [0.29, 0.48]
-object_pos_y: [-0.11, 0.11]
+# [dr] strawberry: realws pose DR (SHARED with every object) + this object's shape/size/material ranges.
+# Used by: experiments/single_lift_strawberry_soft_abs_action_armfocus_7d_realws.yaml
+# Status: active (2026-09-04 per-object cleanup: shared block = soft_orientation_realws_tofu.yaml)
+
+# ── SHARED (identical for all objects; edit the tofu file and regenerate) ──
+object_pos_x: [0.30, 0.46]
+object_pos_y: [-0.12, 0.12]
 object_nominal_xy: [0.47, 0.0]
 robot_init_pos_xyz: 0.02
 object_yaw_deg: 180
 object_pitch_roll_deg: 45
 object_flip_prob: 0.25
 object_flip_deg: [160, 180]
-object_bend_deg:   [-25, 25]
-object_twist_deg:  [-20, 20]
-object_taper:      [-0.15, 0.15]
+coup_friction: [3.5, 4.5]
+
+# ── OBJECT-SPECIFIC ──
+object_scale: [0.8, 1.2]
 object_axis_scale: [0.95, 1.15]
-object_scale:      [0.80, 1.20]
+object_bend_deg: [-25, 25]
+object_twist_deg: [-20, 20]
+object_taper: [-0.15, 0.15]
 object_E: [1.2e5, 2.0e5]
 object_nu: [0.36, 0.42]
 object_rho: [900, 1000]
-coup_friction: [3.5, 4.5]

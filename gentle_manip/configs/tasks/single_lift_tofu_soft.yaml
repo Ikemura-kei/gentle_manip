@@ -1,43 +1,30 @@
-# [task] Soft-MPM 3cm TOFU BLOCK single-lift: second object category (generalist push).
-# Used by: experiments (task:) -> demo collection (v3 synth) + DPPO training/eval
-# Status: experimental (item 9 groundwork: multi-category)
-#
-# The item-1 3cm cube geometry as a genuinely SOFT body: tofu material preset
-# (E=4 kPa, yield 20 kPa — validated in the dev prototype; far softer than the
-# mushroom's 300 kPa, so CFL headroom at the shared substeps is large). Success
-# band / hold / rewards mirror single_lift_mushroom_soft exactly — only the object
-# differs — so results are comparable across categories. Stress-reward yield is
-# auto-injected from the material (20 kPa), cap stays a fraction of yield.
+# [task] tofu on the 2026-09-04 D435i board rig. SHARED block = single_lift_tofu_soft.yaml.
+# Used by: experiments/single_lift_tofu_soft_abs_action_armfocus_7d_realws.yaml
+# Status: active
+
+# ── OBJECT-SPECIFIC ──
+object_name: "tofu"
+object_type: "soft"
+sim_substeps: 235
+mpm_grid_density: 250
+object_spawn_z: 0.062   # max(flat-floor + 20 mm, board + half-diagonal x max scale + 5 mm) = flat-floor 0.042 + 20 mm
+
+# ── SHARED (identical for all objects) ──
 success_z_min: 0.175
 success_z_max: 0.275
 hold_steps: 30
-object_name: "tofu"
-object_type: "soft"
-
-# Spawn HIGH enough that a tilted spawn's lowest CORNER clears the floor (user, 2026-08-25:
-# corners were burying). Worst case: half-diagonal sqrt(3)*15mm * scale 1.4 = 36.4mm below
-# center -> 42mm gives ~5mm clearance; the object drops a little and settles before the
-# pose is read (v3 collector settle phase). Registry default (0.016) assumed a FLAT cube.
-object_spawn_z: 0.042
-
-# Same sim resolution as the mushroom (shared Config C): 3cm at 4mm cells = 7.5 cells,
-# same regime as the 3.3cm mushroom. substeps 235 is tuned for E=3e5; tofu's E=4e3
-# needs ~8.7x less, so stability margin is large.
-sim_substeps: 235
-mpm_grid_density: 250
-
 success_scale: 0.2
+board_thickness: 0.0138
+board_size: [0.6, 0.7, 0.0138]
+board_center: [0.41, 0.0]
+board_color: [0.647, 0.608, 0.514, 1.0]
+finger_color: [0.1, 0.1, 0.1, 1.0]
+cam_fov: 43.15
+cam_pos: [0.69895466, -0.06643963, 0.3168003]
+cam_lookat: [0.30454208, -0.07412394, 0.0138]
+cam_up: [-0.60697255, -0.06794066, 0.79181336]
 
 rewards:
-  stress:
-    scale: 0.2
-    cap: 1.5
-    mean_weight: 0.2
-    top10_weight: 0.8
-  dist_to_obj:
-    scale: 0.1
-    decay: 8.0
-  lift:
-    scale: 0.1
-    grasp_gate_dist: 0.079
-    lift_target: 0.16
+  stress: {cap: 1.5, mean_weight: 0.2, scale: 0.2, top10_weight: 0.8}
+  dist_to_obj: {decay: 8.0, scale: 0.1}
+  lift: {grasp_gate_dist: 0.079, lift_target: 0.16, scale: 0.1}   # grasp_gate_dist per object (size-dependent); lift_target shared

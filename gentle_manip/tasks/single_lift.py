@@ -75,9 +75,16 @@ class SingleLiftTask(BaseTask):
         # 4 mm cells; shrinking the domain lets its density rise without a runaway cost.
         # Genesis insets the usable region by 3 cells on every face (boundary_padding = 3*dx), so a
         # coarser grid raises the effective floor — pair any change with object_spawn_z.
+        # ONE shared MPM box for every object (2026-09-04, D435i board rig). Sized as the UNION of every
+        # realws DR spawn box (x [0.29,0.48], y +-0.11/0.12, all scales/orientations, lifted to
+        # success_z_max) + Genesis's 3*dx boundary padding + 5 mm, verified by sampling 3000 spawns per
+        # object: 0 % clipped for all 20 objects. The per-task boxes it replaces clipped 93-100 % of
+        # spawns for banana/banana_chunk/cherry_tomato/pasta_bundle/tomato at the new x=0.29 spawn
+        # (a clipped particle is silently killed -> the "5 % grasp yield" failure). 1.36 M cells at
+        # grid 300, same cost as the previous default. A task may still override, but should not need to.
         _mb = task_cfg.get("mpm_bounds")
         self.mpm_bounds: tuple = (tuple(tuple(float(v) for v in side) for side in _mb) if _mb
-                                  else ((0.248, -0.152, -0.022), (0.752, 0.152, 0.322)))
+                                  else ((0.21, -0.19, -0.03), (0.56, 0.19, 0.35)))
 
         self._initial_z: np.ndarray | None = None
         self._success_counter: np.ndarray | None = None

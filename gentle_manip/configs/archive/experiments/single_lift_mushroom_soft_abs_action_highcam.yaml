@@ -1,12 +1,11 @@
-# [experiment] Camera-placement STUDY fork of single_lift_mushroom_soft_abs_action.yaml.
+# [experiment] Camera-placement fork of single_lift_mushroom_soft_abs_action.yaml.
 # Used by: collect_demos_synth_v3 (FEM-gentleness grasp collection on the SOFT sim, point-cloud viz)
-# Status: experimental (investigation: higher/top-down depth camera -> point-cloud profile)
+# Status: experimental (higher, top-down depth camera)
 #
-# IDENTICAL to single_lift_mushroom_soft_abs_action EXCEPT the task points to the highcam fork
-# (single_lift_mushroom_soft_highcam), which raises cam_ext +15cm and re-aims it at the object-pose
-# randomization center (0.47, 0, 0). ONLY the depth-camera extrinsic differs — obs/action/dr/reward
-# are the same, so any point-cloud difference is purely from the viewpoint.
-task: single_lift_mushroom_soft_highcam   # camera-study fork (only cam_ext extrinsic changed)
+# IDENTICAL to single_lift_mushroom_soft_abs_action EXCEPT task -> single_lift_mushroom_soft_highcam,
+# which raises cam_ext +30cm (z=0.398) with the same lookat (0.47, 0, 0). Only the depth-camera
+# extrinsic differs.
+task: single_lift_mushroom_soft_highcam   # camera fork (cam_ext +30cm, top-down)
 action: abs_pose_abs_gripper
 dr: soft_orientation
 augmentation: l515_noise

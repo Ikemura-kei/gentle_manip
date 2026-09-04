@@ -8666,3 +8666,347 @@ the seeds' 179 — walltime sized on the fast rate). The 8dp data still answers 
 budget IS undertrained by val — with a possible turn at ep102 (+3%). Whether that val gain buys
 ANY success/gentleness is testable from the existing `state_96` (one eval) — the ep80-vs-94
 evidence says no. PENDING user call: finish the run (~14h) vs evaluate state_96 (~2.5h).
+
+### 2026-09-04 — finger_grasp_final TRIMMED to v4.1 + antipodal only (bit-identical); antipodal's mushroom loss is WIDTH PROJECTION; standalone seed/search viz
+
+**Trim (user: "a grasp synth shouldn't be so complicated").** `smgrasp/finger_grasp_final.py`
+1088 -> 624 lines; `collect_demos_synth_v4.py` 1564 -> 1501. Rule: keep ONLY what the frozen v4.1
+recipe and the `--grasp-antipodal-seeds` variant actually exercise; every argument those never vary
+became a module constant. Removed from the planner: `_UNSET`/`_resolve_w` sentinels, `w_peak`/`w_area`
+(resolved to 0 in every run), `w_com`/`w_tilt` (0), `execute_offset` (0), `area_min` + the `"auto"`
+pool re-selection + `yield_stress`/`YIELD_SAFETY`, `cam_pos`/`cam_azimuth_max_deg`/`CAM_AZ_SLOPE`
+(None), `yaw_max_deg` (None), `width_max`/`local_cross_section` (None -> 0.079), `medial_seeds` mode
+(the one folded-in medial seed inside the antipodal pool STAYS), `pitch_seeds` (zeros), the
+`path_clearance`/`descend_clearance`/`standoff_pose`/`_com_lever` helpers, `refine`/`verbose` flags.
+Now constants: `W_ALIGN=2000` (**NOT** `width_grasp.W_ALIGN=3e4` — the collector always passed 2000;
+importing the module default would have silently changed the objective), `W_PRESS=0.1`, `G`,
+`LIFT_ACCEL=9.81`, `MAX_INDENT`, `PEN_TOL`, `TABLE_TOL`, `GROUND_BUF`, `BBOX_MARGIN`, `Z_LIFT_HI`,
+`CMA_SIGMA`, `WIDTH_MIN/MAX`, `REFINE_POSES/SCAN`. Planner signature is now
+`(obj, obj_com, obj_quat_wxyz, pad_geo, E, density, mu, table_z, maxfevals, n_starts, seed,
+antipodal_seeds, diversity_tol, record_history, progress_cb, progress_every)`. Collector lost
+`--cam-azimuth-max-deg --grasp-area-min-mm2 --grasp-yaw-max-deg`, `_area_min_arg`, `_yaw_max_arg`,
+`GRASP_ACCEL`, `GRASP_W_ALIGN`.
+**Proof:** pre-trim snapshot vs trimmed on ONE shared FEM tofu (tetrahedralisation is
+nondeterministic, so sharing the object is mandatory), `diversity_tol=0.3` (the frozen default —
+diversity IS on in v4.1), frozen budgets: v4.1 yawfan 1222/1222 evals, antipodal 863/863, identical
+score and grasp vector in both — **bit-identical**. 434 tests pass; 1-episode collection runs in both
+modes. NOTE (smell, not fixed): the collector's closure scan imports the OLD `smgrasp.finger_grasp`
+scorer (`pen_tol=0.05, w_press=0.05, w_peak=0.3`), so two scorer versions coexist in one pipeline.
+
+**Antipodal seeding — mechanism of the mushroom loss, measured.** The 2x2 smoke (24 eps/arm, seed 0,
+800x3) on identical scenarios: tofu 71.9% -> 84.4% (Fisher p=0.37, n.s.) but tofu peak stress
++52% (MWU p=0.004, **significant**); mushroom 78.1% -> 56.2% (p=0.11, n.s.), 0.65x slower. Cause
+(`inspect_seeds.py`): pairs are found in 3D, then the axis is flattened to a top-down yaw while the
+3D width is KEPT. tofu: 27% of pairs mostly-vertical, 3D width 32.8 vs horizontal span 32.2 mm (2%
+loss). mushroom: **63% mostly-vertical, 28.7 vs 19.9 mm (31% loss)** — it seeds a top-down grasp
+~9 mm too wide for the direction the gripper closes along. Fix candidates (few lines in
+`antipodal_seed_pairs`): reject pairs beyond a tilt from horizontal, or seed the HORIZONTAL span as
+the width. Not adopted: no significant success gain anywhere, a significant gentleness cost on tofu.
+CAUTION recorded: a first diagnostic measured verticality of the seed POSES and read 0% for every
+object in both modes — tautological, since seeds are built from `_down_quat_euler(yaw)`; the raw
+PAIR is the quantity that varies (same trap as the `r_ee` metric on 09-03).
+
+**Tooling.** `grasp_synthesis/inspect_seeds.py` (standalone, no Genesis, ~7 s): seed grasps,
+running-best pose evolution, final grasp with real finger geometry, score trace, `--anim` GIF; draws
+via the planner's own `tcp_to_local_grasp` (a hand-rolled version drew finger BODY origins: 31 mm
+high, 35 mm wide). Data from `record_history=True` -> `out["seeds"]`, `out["history"]` (default-
+inert). **Step-through viewer (user: build it one stage at a time):** the planner takes an optional
+`stage_cb(stage, data)`; the seed poses are now ALL built before any CMA runs (re-proved bit-identical)
+and `stage_cb("seeds", …)` fires there. `live_seed_viz.StageViewer` draws the stage in a standalone
+TkAgg window and BLOCKS until `q` (`keymap.quit` cleared so `q` advances instead of closing;
+`GM_DEV_VIZ_AUTOADVANCE=<s>` auto-plays). Wired as `collect_demos_synth_v4.py --dev-viz` (forces
+`--n-envs 1`) and `inspect_seeds.py --step`. VERIFIED: block/release on the real backend, and a full
+collector episode through the window. Only the "seeds" stage exists so far; CMA / width-refine / final
+stages are next, each added the same way. The earlier `progress_cb` redraw-every-N hook was removed —
+one hook, not two. A Genesis-viewer version was built and REMOVED (user wants standalone). `grasp_synthesis/util.py` had four import
+regressions from the helper extraction; the bad one was an undefined `ROOT` swallowed by a bare
+`except` -> **empty `git_commit` in every dataset config.yaml**, never a crash. Fixed.
+
+### 2026-09-04 — ONE shared MPM box for all objects; the per-task boxes were clipping 93–100 % of spawns on the new rig
+
+The board rig moved every object's spawn to x ∈ [0.29, 0.48] (realws DR), but eight task configs
+still carried `mpm_bounds` sized for the old x≈0.47 nominal (e.g. banana_chunk x ∈ [0.31, 0.63]).
+Genesis insets the usable region by 3·dx (10 mm at grid 300) and a particle outside it is killed
+SILENTLY — the same failure that gave the cube "5 % grasp yield" on 09-04. Sampling 3000 DR spawns
+per object (position, orientation, scale; mesh vertices transformed; lifted to `success_z_max`)
+against each task's box: **banana 98 %, banana_chunk 93 %, cherry_tomato / pasta_bundle / tomato
+100 % clipped**; the previous *default* box (what tofu used) clipped **4.8 % of tofu** at the
+y-extremes (42 mm cube on the diagonal at y = ±0.12 reaches ±0.150 vs ±0.140 usable).
+**Fix:** `SingleLiftTask` default `mpm_bounds = ((0.21, -0.19, -0.03), (0.56, 0.19, 0.35))` = union
+of every realws DR extent + padding + 5 mm; the eight per-task overrides deleted. Re-verified through
+the task's own resolution: **0 % clipped for all 20 objects.** 1.36 M cells at grid 300 (old default
+1.42 M) — no cost change. Rule going forward: one box, sized from the DR; a task overrides only with
+a measured reason. (Shape DR — bend/taper — was not applied in the check; the 5 mm margin covers it.)
+
+### 2026-09-04 — Per-object configs regenerated from ONE template (tofu); spawn heights board-corrected
+
+All 13 `single_lift_<obj>_soft_abs_action_armfocus_7d_realws` trios (experiment / task / DR) are now
+generated from the tofu files with an explicit SHARED vs OBJECT-SPECIFIC split (marked in each file):
+- **experiment**: identical except `task:`/`dr:` names (all now `d435i_noise`; 11 of 13 still said `l515_noise`).
+- **DR shared**: spawn box `x [0.29, 0.44], y ±0.12`, nominal `[0.47, 0]`, arm-home jitter, yaw/flip,
+  `coup_friction`. **Object-specific**: `object_scale`, `object_axis_scale`, bend/twist/taper,
+  `object_E/nu/rho`, `object_mesh_pool`. Kept per object (user to decide): `object_pitch_roll_deg`
+  (banana_chunk 10 vs 45).
+- **task shared**: board (13.8 mm, colour), finger colour, D435i camera, `hold_steps`, `success_scale`,
+  stress + dist rewards. **Object-specific**: `sim_substeps`, `mpm_grid_density`, `object_spawn_z`.
+  Kept per object (user to decide): `success_z_min/max`, `lift_target`, `grasp_gate_dist`.
+- **`object_spawn_z` = 0.0138 + half-diagonal × max(scale·axis_scale) + 5 mm**, per object. 11 tasks had
+  NO spawn_z (registry default_pos z, 8–37 mm = inside the board on the rig) and tofu's own 0.042 was
+  set before the board (worst-case tilted corner at 6 mm, inside it). Verified by sampling 2000 DR
+  spawns per object: lowest corner ≥ 15.5 mm (prim_lamp) — every object clears the board.
+- Generator gotcha recorded: `yaml.safe_dump` of a SCALAR appends a `...` document-end line; the first
+  pass wrote 39 unparsable files. Strip it (or write scalars with `str`).
+Superseded and unreferenced by live configs: `tasks/single_lift_raspberry_soft.yaml` (experiment uses
+`_soft_stable`) and `obs/superset_soft_armfocus_stress.yaml` (identical to the base) — left for the user
+to delete. `dr/soft_orientation_realws.yaml` (unsuffixed mushroom DR) is superseded by
+`soft_orientation_realws_mushroom.yaml` but STILL referenced by two live experiments; repoint before deleting.
+
+**Addendum (same day, user decisions):** `success_z_min/max` and `lift_target` are now SHARED across
+all 13 objects (tofu's 0.175/0.275/0.16 — the lift is the task, not the object); `grasp_gate_dist`
+stays per object (size-dependent). `object_spawn_z` = each object's flat-floor value (registry
+`default_pos` z, confirmed working; tofu's explicit 0.042) **+ 20 mm** for the board, replacing the
+half-diagonal rule. Tilted-spawn check under this rule (2000 DR samples/object): a corner starts
+INSIDE the board for pasta_bundle 65 %, prim_cuboid 67 %, prim_cylinder 37 %, mushroom 25 %,
+prim_ellipsoid 5 %, tomato 3 %, strawberry 3 % (0 % for the rest). The registry values were tuned for
+the RESTING pose; on the flat floor those corners were equally buried (20 mm deeper), so "confirmed
+working" means the MPM settle tolerated it — OPEN whether it costs yield (the 09-04 cube3 note:
+particles inside a fixture get kicked at spawn). One-line alternative if it does:
+`spawn_z = max(flat + 0.020, 0.0138 + half_diagonal·max_scale + 0.005)`.
+**Resolved (same day):** ±25° pitch/roll instead of ±45° does NOT fix the burying — measured: the three
+elongated primitives are pure TILT (0 % at 0°, still 35–48 % at 25°), the mushroom is SCALE + FLIP
+(5 % buried even flat/unflipped because its DR scale reaches 1.5× while a flat-floor height does not
+scale; the flip adds ~18 %). Applied `object_spawn_z = max(flat + 0.020, 0.0138 + half_diagonal ·
+max(scale·axis_scale) + 0.005)`: the diagonal branch wins for 12/13 objects (only tofu keeps
+flat + 20 mm — a cube's diagonal is the exception, not the rule). Verified 0.0 % corner-inside for
+all 13 at ±45° + flip 0.25; 435 tests pass. The pitch/roll angle is therefore a POLICY-DR choice
+(orientation coverage), not a spawn-safety one — left at 45 pending the user's call.
+
+### 2026-09-04 — Seed pool: pool→filter→score→top-K stages; seeds REPAIRED to physical placements (height + width); banana_chunk went from 0 to 123 holdable seeds
+
+**Pipeline (WIP, `finger_grasp_final.plan_finger_grasp`, exits after top-K):** pool = N_ANTIPODAL
+antipodal pairs (farthest-point over midpoint+axis, 40k samples) + N_MEDIAL_AXIS medial points ×
+MULT_FACTOR widths (w0 + random tighter) → filter (table, rotation box roll π±30 / pitch ±20 / yaw ±60
+folded, per-finger penetration ≤ 1 cm; cheap rungs first, ONE batched SDF query: 10.7 s → 1.4 s,
+kept set identical) → score with the full ladder (align term REMOVED: ≤ 0.6 kPa vs 8-41 kPa stress,
+ranking identical) → top-K. `StageViewer` (standalone TkAgg, AnyGrasp-style fork glyphs, `q` advances).
+
+**Why banana_chunk had ZERO usable seeds — not penetration.** 4600 seeds: 12 passed the table rule, 4
+passed table+rotation. A 45 mm pad centred on a pair midpoint inside a 23 mm-tall chunk puts the
+fingertip (23 mm below the pad centre) through the board for 99.7 % of seeds; the 4 survivors clipped
+the curved body by 8.7-9.5 mm because seed width = pair separation − 3 mm ignores the bulge inside the
+finger footprint (span there was 9 mm wider). A "more generous" penetration filter would not have
+helped: 0 % would pass the scorer's own 3 mm rung.
+
+**Fix = build seeds where a finger can physically be (xy + closing axis of the primitive KEPT exactly,
+verified 1e-14):** (1) fingertip height ~ U[table − TABLE_TOL + 1 mm, object top − 5 mm] per seed —
+the user's rule ("finger bottom anywhere within the object height is a valid grasp"); a lift-only
+repair had collapsed 76-100 % of seeds onto the table clamp; (2) width = object span along the closing
+axis INSIDE the finger footprint at that height − 2·SEED_INDENT, re-anchored on the primitive after
+the width change (else `_z_off` drifts the pad centre ~2.7 mm sideways on tilted axes).
+Result (4600 seeds): banana_chunk kept 1650 / holdable 123 (was 4 / 0), mushroom 2020 / 339,
+tofu 1545 / 204; gentlest seeds banana 4.1 kPa, mushroom 2.7 kPa, tofu 2.3 kPa (all far below yield).
+Tip heights now span the object (std 5.6-8.8 mm).
+
+**OPEN (now urgent because the height range generates them):** the gentlest seeds are top-sliver
+PINCHES — banana_chunk's 4.1 kPa best has a 4 mm² contact patch. The pressure term (0.1·grip/area) is
+not demoting them at these low grips, and torsional holdability (gravity torque about the closing
+axis vs (2/3)·μ·grip·√(area/π) per pad) is not modelled at all. Decide: pressure/area as a GATE, and a
+yield gate, before trusting the top-K.
+
+**Speed (same day):** with physically valid seeds the pipeline slowed to ~49 s on banana_chunk (4600
+seeds). Profile: **40 s was the SDF** — 902k points at 44 µs/pt through trimesh `closest_point`, one
+batched filter query + one per scored seed in the scorer's rung 2 — and **5 s was `boundary_faces`
+recomputed 729×** inside `indent_from_width`; the FEM solve did not make the top of the profile.
+Fixes: `build_object_sdf` is now a **2 mm voxel grid + trilinear lookup** sampled once from the exact
+BVH distance (1.7 s per FEM build, ~µs/pt after; `.exact` kept for validation), and the boundary
+vertex index is cached on the object. Result: filter 22.2 → **0.2 s**, score 26.7 → **4.9 s**;
+holdable set identical (123). Accuracy near the surface: median 0.03 mm, p99 ≤ 0.6 mm; far field
+(> grid margin) is clamped and harmless. Caveat measured, not assumed: the generous 10 mm filter
+threshold has 252 seeds within 1 mm of it, and interpolation error flips **52/1722 (3 %)** of those —
+mostly the wrong way (ray-cast ground truth: exact right 43/52, grid 9/52). The scorer's 3 mm rung is
+unaffected (0.01 % point flips). A finer grid (1.5 mm ≈ 4 s build) halves that if it ever matters;
+note the BVH "exact" sign itself is wrong at mesh edges (17 % vs the grid's 86 % on outlier points).
+
+### 2026-09-04 — Scorer gains a TORSION holdability gate and a YIELD gate; pinches leave the top-K
+
+**Why:** with fingertip heights spanning the object, the gentlest seeds by the proxy were top-sliver
+PINCHES (2-4 mm² patch) — low bulk stress because nothing is squeezed, but they twist out on lift and
+the pressure term was not demoting them at 18-35 g. An absolute area floor was NOT used: the DEVLOG
+already records it being satisfied by squeezing harder (area grows with indentation).
+**Torsion (physics, no weight):** gravity torque about the CLOSING axis, `|((−centre) × m(g+a)·ĝ)·â|`
+(COM = frame origin), vs soft-finger capacity `2·(2/3)·μ·N·√(A_min/π)`. Measured before gating: it is
+selective — rejects 45-69 % of sub-10 mm² pinches and 1-10 % of the rest; the in-plane moment
+components never bind (≤ 0.09 of capacity) so only the twist is checked. Failing grasps were the
+proxy's "gentlest" (banana_chunk 9 vs 15 kPa) — i.e. without the gate the argmax picked pinches.
+**Yield gate:** `stress_top10 > yield` → infeasible, shaped by yield/stress (the FEM is blind past
+yield, ρ = 0; it cannot rank those). `yield_stress` re-plumbed scorer ← planner ← collector/inspect.
+**Effect (4600-seed pools):** holdable banana_chunk 123→76 (twist 40, yield 7), mushroom 337→242
+(91, 4), tofu 141→69 (72, 0). Top-10 pinches: banana 2/10 (both near the COM, twist ≤ 0.04 — torsion
+is genuinely not their failure mode), mushroom 0, tofu 0; top-10 median patch 27 / 36 / 157 mm². Every
+#1 is sub-yield (0.16-0.18×). `twist` (demand/capacity) and `min_pad_area` are audit fields and show
+in the top-K table. CALIBRATION STILL OWED: the soft-finger model and the FEM's patch area (1-2 faces
+for a tiny patch, so conservative) are models — validate the twist threshold against MPM lift
+outcomes (banana / banana_chunk) once the pipeline executes grasps again.
+
+### 2026-09-04 — CMA stage from the top-K seeds: step size decides everything; PEN_TOL stays 3 mm
+
+**Stage:** CMA-ES from each of the TOP_K=10 seeds, `CMA_BUDGET_PER_SEED=400`, per-coordinate steps via
+`CMA_stds` (the 7-vector mixes metres and radians, so one scalar sigma cannot work), the seed evaluated
+first as the incumbent (CMA never evaluates its own start; without this every run's "best" was a
+neighbour and improvement came out NEGATIVE), then the TOP_K_CMA=15 best DISTINCT grasps (5 mm / 10°)
+shown in the viewer ("cma" stage). Same seeds, same budget, banana_chunk:
+
+| step (pos / rot / width) | seeds improved | median gain | #1 after CMA | time |
+|---|---|---|---|---|
+| 2 mm / 5° / 2 mm | **10/10** | +7960 Pa | **2.4 kPa** (area 18 mm²) | 131 s |
+| 5 mm / 10° / 5 mm | 5/10 | +672 | 5.7 kPa | 28 s |
+| 1 cm / 0.5 rad / 12.5 mm | 0/10 | 0 | 4.5 kPa (= seed) | 4 s |
+
+Large steps sample off the feasible basin of a 37 mm object: 99 % of candidates infeasible (penetrate
+46 %, no_contact 27 %, table 20 %, ok 1 %). Fine steps keep candidates on the object, so nearly all
+reach the FEM — that IS the 131 s (~30 ms/call), not overhead. `CMA_STEP` = 2 mm / 5° / 2 mm.
+**PEN_TOL stays 3 mm.** Relaxing the scorer's finger-body penetration to the seed filter's 10 mm was
+considered (98 % of the 'penetrate' candidates were ≤ 10 mm): declined — those are 5-9 mm of finger
+BODY inside the object, which the FEM does not model (it models pad indentation only), so the scorer
+would go blind to real intrusion; the infeasibility was caused by the step size, and the fine steps
+resolve it without touching the tolerance. Next: width refine + selection, then reconnect execution.
+
+**Speed of the CMA stage (same day): 131 → 34 s, at the scorer floor; parallelism NOT recommended.**
+User asked whether the 10 CMA runs could run in parallel or whether to cut to 6 seeds. Measured:
+- **Threads:** 10 threads gave 1.42× (GIL-bound numpy) and **non-identical results** — the scorer is not
+  thread-safe (shared state in the GPU solve path). Out, as is. Processes would need a per-worker FEM
+  rebuild (~3 s each) and still share the one GPU; not worth the complexity at these sizes.
+- **Budget must NOT be cut:** per-run gain curves reach 95 % of their final gain at median eval **360**
+  (max 404); at 200 evals runs keep ~half (one keeps nothing). Cutting seeds is the linear lever.
+- **The real losses were in the code:** (1) `boundary_faces(obj.tets)` (an `np.unique` over ~29k faces,
+  6 ms of argsort) was recomputed on EVERY scorer call from `indent_contacts` and `boundary_normals` —
+  cached once per object (`width_grasp._bfaces_pair`): holdable-path call 17.0 → **9.7 ms**, bit-identical.
+  (2) My CMA-stage code called `_distinct_tcp_poses` (O(n²) over ~2500 feasible) inside a comprehension,
+  once per candidate: ~70 s of the 105 s stage. Computed once → **34 s**, identical top-15.
+  pycma itself is 0.05 ms/eval (bounds handling included) — exonerated.
+Pipeline to the CMA exit on banana_chunk (4600 seeds, 10 × 400 evals): **42 s** (seeds 3.7, filter
+0.2, score 3.9, CMA 34). Remaining floor = FEM solve, 9.1 ms/call; batching a CMA generation's 9
+candidates into one multi-RHS GPU solve is the next lever if ever needed.
+
+### 2026-09-05 — Width-refine stage: the v4.1 wide scan is dead after joint CMA; a tight local scan still pays
+
+**Stage:** after the CMA top-15, a 1-D width scan at each pose (`REFINE_SCAN=25`), best width per pose,
+shown as forks + a score-vs-width panel per pose ("refine" stage, `q` to continue).
+**Finding:** with the v4.1 range [0.7w, 1.6w], **0/15 improved, 0 mm width change** — the scan's
+maximum sits exactly at the CMA width, and only 2-4 of 25 widths are even feasible (the contact band is
+~±2 mm). v4.1 needed the wide scan because its yaw-fan CMA from poor seeds rarely nailed width; the new
+CMA optimizes width jointly from good seeds and converges. A **fine local scan (±3 mm, 0.25 mm steps)**
+does add value: 6/15 poses improve, max +3162 Pa on scores of −6…−12 kPa (~30 % on that pose), with
+width moves ≤ 0.75 mm — sub-step gains CMA's 2 mm width step leaves behind. `REFINE_HALF = 0.003`;
+3 s for 15 poses; ranking reshuffles (11 of 15 change rank). Next: selection stage.
+
+**Selection (same day): `diversity_tol` removed; the returned grasp is the best refined candidate.**
+The frozen v4.1 default (0.3 = a RANDOM feasible grasp within 30 % of the best) existed to smear a single
+peaked optimum across a dataset; with 15 refined, gated, distinct candidates it had no job. Removed from
+the planner (param, RNG, draw), the collector (`--grasp-diversity-tol`, and the "retry WITHOUT diversity"
+second synthesis call, which only existed because the draw could return nothing — 2 call sites remain:
+main + budget escalation). New "final" stage shows the chosen grasp with real finger geometry and its
+numbers. The pipeline now runs seeds → filter → score → topk → cma → refine → final and `sys.exit`s;
+reconnecting execution (removing that exit) is the next deliberate step.
+
+### 2026-09-05 — FEM remesh DILATES every object (fixed by direct tetgen for CAD meshes); letters A–Z added; execution reconnected; batching benchmark
+
+**Remesh dilation (found while adding the letters):** `prepare_mesh(voxel_div=14)` voxel-remeshes every
+mesh and dilates it by ~one voxel: tofu **+22 % volume** (32.4 vs 30 mm), mushroom +38 %, banana_chunk
++42 % (22.8 vs 20.4 mm), a 6 mm letter → 11.3 mm (+170 %). The FEM has been scoring — and the seed widths
+were measured on — a fatter body than the MPM's. **Policy now:** watertight meshes with ≤ 2500 faces
+(`DIRECT_TET_MAX_FACES`) are tetrahedralized DIRECTLY (exact volume/thickness, faster: tofu 0.1 s,
+2.6k tets vs 7.3k) — letters, cubes, primitives, **tofu (its FEM changed vs today's earlier numbers)**;
+denser/open meshes keep the remesh (direct tetgen on banana_chunk gives 60k tets / 42k DOF, prim_lamp
+hangs). Follow-up (user's idea): DECIMATE the dense scans to ~1k faces, then direct tet — removes the
+dilation for all objects.
+**Letters A–Z:** `obj_meshes/letters/*.obj` (metres, ~50 mm, 6 mm thick, flat, watertight) copied
+recentred to `assets/objects/letter_[a-z].obj`; registry entries (additive `OBJECT_MAP.update`, tofu
+material, size = extents, flat resting height); 26 config trios from the tofu template with
+`mpm_grid_density 500 / sim_substeps 470` (2 mm cells: 3 across the thickness), the FLAT spawn rule
+(board + half-thickness·max-scale + 2 mm = 0.020, no tilt/flip DR), yaw free. All 26 load; 0 % buried;
+0 % outside the shared MPM box (6.3 M cells at grid 500 — the cost driver, untested in Genesis).
+**OPEN — low-poly contact:** on the letters the score stage yields **0 holdable seeds** (letter_a:
+`no_contact` 737/810) and the CMA finals clamp the WHOLE letter (36–54 mm), not a stroke: the FEM
+contact model needs surface NODES under a pad, and an extruded 22-vertex "A" has none on its flat
+faces. Fix to test: surface subdivision (~2 mm edges) before direct tet (likely also right for tofu/cubes).
+**Execution reconnected:** the `final` exit is gone; the planner returns the best refined grasp;
+`--dev-viz` now attaches the step-through window to env 0 only (multi-env runs otherwise silent).
+**Speed for collection (user: ~1 min/synthesis × 500 eps ≈ 10 h):** measured on the mushroom, the
+FEM's `solve_constrained_gpu` costs 10.5 ms/candidate of which the `lu_solve` is 0.2 ms — the rest is a
+dense host-side Cᵀ build + two host↔device copies + CPU Schur per candidate. Stacking a whole CMA
+generation's constraint columns into ONE `lu_solve` (prototype): **2.35 ms/candidate (4.5×), |Δu| ≤ 1e-15**,
+with more available by batching across envs and keeping the Schur/stress on the GPU. That is the lever;
+a "GPU CMA-ES" is not (the CMA update itself is microseconds). Seeds 10 → 6 is a linear −40 % on the CMA
+stage; the 400-eval budget must stay (convergence at ~eval 360).
+**Multi-env smoke (same day):** banana_chunk, 4 envs × 4 episodes through the reconnected pipeline
+(seeds → … → final → Genesis execution), step-through window on env 0 only: **4/4 saved, 100 % success,
+4.1 min** (four ~40 s syntheses + build + lifts). Default `--n-envs` raised 5 → **10** (user; checklist
+recipes 8 → 10). Caution: the MPM grid is per env, so 10 envs × the shared box = 13.6 M cells at grid
+300 (fine so far) but **63 M at the letters' grid 500** — check `nvidia-smi` before a letter run at 10.
+
+### 2026-09-05 — BATCHED scorer: synthesis 42 s → 10 s per env (banana_chunk), ~60 → 13 s (mushroom), final grasp identical
+
+**Design.** The FEM cost was per-call overhead, not the solve (10.5 ms/candidate vs 0.2 ms of `lu_solve`).
+`score_finger_grasp` is now split into `_pre_fem` (gates 1-3 + `indent_contacts`, per candidate, ~0.3 ms)
+and `_post_fem` (holdability, torsion, yield, score), shared by the single and the batched scorer so they
+cannot diverge. `score_finger_grasp_batch` stacks every FEM-bound candidate's contact columns into ONE
+dense `lu_solve` (`fem.solve_constrained_gpu_batch`), does each Schur solve, the element stress
+(`fem.element_stress_gpu`, cached dof/B/C tensors), von Mises and the masked top-decile ON the GPU,
+and returns scalars only; chunked so W = ndof × columns stays < 1 GB. The planner uses it for the
+score stage (one call), the CMA stage (all runs in LOCKSTEP via `ask`/`tell`, one batched call per
+generation, seeds scored first as incumbents, feasible candidates attributed back to their run by
+position) and the width refine (all poses × widths in one call).
+**Verified:** batch vs single on 600 mixed candidates — 600/600 identical statuses, rel |Δscore| 4.5e-14
+(stress 5e-14, grip 7e-13, twist 4.5e-14); 6.5× on FEM-path candidates (14.4 → 2.2 ms), 3.0× on a
+mixed set; end-to-end (6 seeds): banana_chunk seeds 3.6 / filter 0.2 / score 1.6 / CMA 4.1 / refine
+0.6 = **10 s** (was 42), mushroom **13 s**; final grasp IDENTICAL to the per-candidate path (same x,
+|Δscore| 1e-10, same 2811 evals). 461 tests pass. Next floors: the seed stage (3.6 s: 4600
+`_grasp_from_primitive` builds) and per-candidate `_pre_fem` geometry (~0.3 ms).
+**DR x-range (user):** `object_pos_x: [0.30, 0.46]` in every `soft_orientation_realws_*.yaml` (53 files,
+incl. the mushroom variants). Shared MPM box still covers all 39 live objects (spawn union x [0.245,
+0.518] vs usable [0.22, 0.55]). Caveat: the LEGACY tasks `single_lift_{banana,prim_cuboid,prim_cylinder,
+prim_ellipsoid,prim_lamp,prim_sphere,prim_torus,prim_torus_mush}_soft.yaml` have no `object_spawn_z`
+(spawn at the registry height, i.e. inside the board on this rig) and the full banana clips the box
+29 % — all outside the migrated set, used only by archived experiments; migrate before using.
+
+### 2026-09-05 — Collector + planner trim: every never-varied knob is a constant; `--grasp-n-starts` and the dead features are gone
+
+**Ask:** `--grasp-n-starts` was meaningless after the seed-pool redesign (the planner runs CMA on
+the top-K seeds, so "starts" is `TOP_K`), and the collector still carried abandoned features and
+flags that no recipe ever set. Trimmed both `grasp_synthesis/collect_demos_synth_v4.py`
+(1474 → 1232 lines) and `smgrasp/finger_grasp_final.py`.
+
+**Removed from the planner** (`plan_finger_grasp` / `synthesize_grasp`): `maxfevals`, `n_starts`,
+`antipodal_seeds` — all three were unused in the body already (budget = `CMA_BUDGET_PER_SEED` ×
+`TOP_K`, seeding is always antipodal+medial).
+
+**Removed from the collector:**
+- flags → deleted: `--maxfevals`, `--grasp-n-starts`, `--grasp-antipodal-seeds`, `--grasp-gpu`
+  (GPU FEM always on), `--keep-failures`, `--keep-synth-failures` (failed / fallback-grasp episodes
+  are never saved), `--regrasp-prob` + the whole hover-start re-grasp demo feature (`REGRASP_*`,
+  `regrasp_mask`, the unrecorded home→hover drive), `--approach-xy-finish` + the two-phase
+  smoothstep approach and the `appr_dur`/`_APPR_IDX` per-env duration machinery (approach is a
+  plain lerp over `N_HOME_TO_PRE`), the budget-escalation retry (`GRASP_ESCALATE`, second
+  `synthesize_grasp` call), `OBJ_SIZE`, `MUSHROOM_MESH`.
+- flags → module constants: `--n-home-to-pre/--n-settle/--n-firm` (`N_HOME_TO_PRE=98`,
+  `N_SETTLE=1`, `N_FIRM=8`; PHASES is fixed, firm always present, `_has_firm` gone),
+  `--held-run-max/--held-run-keep` (`HELD_RUN_MAX=8/KEEP=4`), `--scan-metric/--closure-gain`
+  (`SCAN_METRIC="p98"`, `CLOSURE_GAIN=4.92` — the values every recipe resolved to).
+- `episode_type` column dropped from the DR CSV (was always "standard"); `config.yaml` `control`
+  block records the constants.
+- Still CLI: `--experiment/--task-name/--out-dir/--shard-size/--description`, `--n-episodes`,
+  `--n-envs` (10), `--table-z`, `--n-grasp`, `--scene-dr-every`, `--seed`, `--record-video`,
+  `--dev-viz`, `--dev-viewer`, mesh-cycle/material overrides.
+
+**Callers updated:** `gentle_manip/scripts/dev_synth.sh`, `docs/CHECKLISTS.md` 1b recipes
+(no `--grasp-gpu`), `grasp_synthesis/inspect_seeds.py` (no `--n-starts/--maxfevals/--antipodal`,
+stale yaw-flattening diagnostic removed). The old probes (`occ_sweep.py`, `retry_window_probe.py`,
+`shelf_ik_probe.py`, `profile_synth.py`, `fem_audit.py`) still pass the removed kwargs — they
+target the tier-3 `finger_grasp.py` API or are already stale; left untouched.
+
+**Proof:** planner A/B on one shared banana_chunk FEM, same seed: pre-trim vs trimmed → identical
+`x` and score (−5006.98, stress 3575 Pa; 10.5 → 9.2 s). Collector smoke (tofu realws 7d, 2 envs ×
+2 episodes, video): 2/2 saved, 100 %, 1.5 min. Tests 461 passed / 1 skipped (run with
+`env -u PYTHONPATH -u ROS_DISTRO`, the ROS `launch` package otherwise breaks collection).
+Earlier the same day: 10-env batched-planner smoke on mushroom → 10/10, 100 %, 5.8 min.

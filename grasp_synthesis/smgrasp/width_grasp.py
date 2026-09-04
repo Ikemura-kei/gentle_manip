@@ -31,6 +31,19 @@ USE_GPU_SOLVE = False
 GPU_MAX_NDOF = 16000
 
 
+
+def _bfaces_pair(obj):
+    """(boundary triangles, parent tets) of the tet mesh, cached on the object — a pure function of the
+    mesh that was being recomputed on every scorer call (7 ms each)."""
+    pair = getattr(obj, "_bfaces_pair", None)
+    if pair is None:
+        pair = obj._bfaces_pair = boundary_faces(obj.tets)
+    return pair
+
+
+def _bfaces(obj):
+    return _bfaces_pair(obj)[0]
+
 def use_gpu_solve(on: bool = True):
     """Enable/disable the GPU FEM solver globally (see USE_GPU_SOLVE)."""
     global USE_GPU_SOLVE
@@ -65,7 +78,7 @@ def boundary_normals(obj):
     vn = getattr(obj, "_bnormals", None)
     if vn is not None:
         return vn
-    tri, parent = boundary_faces(obj.tets)
+    tri, parent = _bfaces_pair(obj)
     v = obj.verts
     fn = np.cross(v[tri[:, 1]] - v[tri[:, 0]], v[tri[:, 2]] - v[tri[:, 0]])
     fn /= (np.linalg.norm(fn, axis=1, keepdims=True) + 1e-12)
@@ -98,7 +111,10 @@ def indent_from_width(obj, center, axis, *, pad_half: float, width: float,
     Cheap (nominal mesh only, no FEM) — the pre-filter before an FEM evaluation."""
     a, u1, u2 = _pad_basis(axis, u1, u2)
     h1, h2 = half_uv if half_uv is not None else (pad_half, pad_half)
-    d = obj.verts[np.unique(boundary_faces(obj.tets)[0])] - np.asarray(center, float)
+    bnd = getattr(obj, "_bnd_vert_idx", None)                          # boundary vertices: cache on the object
+    if bnd is None:                                                   # (recomputing cost 5 s / 700 calls)
+        bnd = obj._bnd_vert_idx = np.unique(_bfaces(obj))
+    d = obj.verts[bnd] - np.asarray(center, float)
     proj = d @ a
     foot = (np.abs(d @ u1) < h1) & (np.abs(d @ u2) < h2)              # rectangular pad footprint
     left, right = foot & (proj < 0), foot & (proj > 0)
@@ -133,7 +149,7 @@ def indent_contacts(obj, center, axis, *, pad_half: float, delta: float = None,
     h1, h2 = half_uv if half_uv is not None else (pad_half, pad_half)
     fillet = 0.12 * min(h1, h2)                                    # THIN rounded-edge width (real pad fillet)
     v = obj.verts
-    bidx = np.unique(boundary_faces(obj.tets)[0])                  # boundary node indices
+    bidx = np.unique(_bfaces(obj))                  # boundary node indices
     d = v[bidx] - np.asarray(center, float)
     proj = d @ a
     p1, p2 = d @ u1, d @ u2                                       # rectangular pad footprint (finger-oriented)
@@ -164,13 +180,15 @@ def indent_contacts(obj, center, axis, *, pad_half: float, delta: float = None,
 
 def width_grasp_stress(obj, center, axis, *, pad_half: float, delta: float = None,
                        delta_left: float = None, delta_right: float = None,
-                       mask_contact: bool = True, u1=None, u2=None, half_uv=None) -> dict:
+                       mask_contact: bool = True, u1=None, u2=None, half_uv=None, bc=None) -> dict:
     """Solve the width-controlled indentation grasp at E=1 (normal-only rounded-pad contact). Returns
     the E-independent primitives (deformation `u`, per-jaw normal grip `F1`, stress field `sigma1`,
-    `top10_1`) — scale by E for a real stiffness (see module docstring). dict(valid, ...)."""
-    bc = indent_contacts(obj, center, axis, pad_half=pad_half, delta=delta,
-                         delta_left=delta_left, delta_right=delta_right,
-                         u1=u1, u2=u2, half_uv=half_uv)
+    `top10_1`) — scale by E for a real stiffness (see module docstring). dict(valid, ...).
+    `bc`: a precomputed `indent_contacts` result (skips recomputing it)."""
+    if bc is None:
+        bc = indent_contacts(obj, center, axis, pad_half=pad_half, delta=delta,
+                             delta_left=delta_left, delta_right=delta_right,
+                             u1=u1, u2=u2, half_uv=half_uv)
     if bc is None:
         return {"valid": False}
     nodes, a = bc["nodes"], bc["axis"]
@@ -196,6 +214,32 @@ def width_grasp_stress(obj, center, axis, *, pad_half: float, delta: float = Non
             "top10_1": float(np.sort(vmk)[-k:].mean()), "peak_1": float(vmk.max()),
             "mean_1": float(vmk.mean()), "hi_1": float(np.percentile(vm, 98)),   # UNMASKED p98 (contact-aware)
             "n_contacts": nc, "nodes": nodes, "left_mask": bc["left_mask"], "axis": a}   # left_mask: per-pad split
+
+
+def width_grasp_stress_batch(obj, bcs, mask_contact: bool = True):
+    """Batched `width_grasp_stress` for a list of `indent_contacts` results (one solve for all). Returns
+    one prim dict per candidate with the SAME scalar fields (F1, top10_1, peak_1, hi_1, n_contacts,
+    nodes, left_mask, axis, valid); `sigma1`/`u` are not materialised (they never leave the device).
+    GPU only (callers check USE_GPU_SOLVE)."""
+    import torch
+    U, lams = obj.fem.solve_constrained_gpu_batch([b["nodes"] for b in bcs], [b["axis"] for b in bcs], [b["g"] for b in bcs])
+    sig = obj.fem.element_stress_gpu(U)                                                 # (M, 6, K)
+    xx, yy, zz, xy, yz, zx = (sig[:, i, :] for i in range(6))
+    vm = torch.sqrt(0.5 * ((xx - yy) ** 2 + (yy - zz) ** 2 + (zz - xx) ** 2) + 3.0 * (xy ** 2 + yz ** 2 + zx ** 2))   # (M, K)
+    tets = obj.tets; out = []
+    for k, (bc, lam) in enumerate(zip(bcs, lams)):
+        v = vm[:, k]
+        if mask_contact:
+            keep = ~np.isin(tets, bc["nodes"]).any(axis=1)
+            vk = v[torch.as_tensor(keep, device=v.device)] if keep.any() else v
+        else:
+            vk = v
+        kk = max(1, int(0.1 * vk.numel()))
+        top10 = float(torch.topk(vk, kk).values.mean()); peak = float(vk.max()); hi = float(torch.quantile(v, 0.98))
+        out.append({"valid": True, "sigma1": None, "u": None, "F1": float(abs(lam[bc["left_mask"]].sum())),
+                    "top10_1": top10, "peak_1": peak, "mean_1": float(vk.mean()), "hi_1": hi,
+                    "n_contacts": len(bc["nodes"]), "nodes": bc["nodes"], "left_mask": bc["left_mask"], "axis": bc["axis"]})
+    return out
 
 
 def evaluate_grasp(obj, center, axis, *, pad_half: float, delta: float, E: float, density: float,

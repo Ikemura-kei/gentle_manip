@@ -38,7 +38,6 @@ sim_substeps: 350
 # Tight domain around the workspace + the (shorter) lift. Genesis insets the usable region by
 # 3 cells per face (3 x 1.7mm = 5mm here, vs 12mm at the mushroom's density), so the effective
 # floor is much closer to the requested bound — one of the few ways the fine grid helps.
-mpm_bounds: [[0.40, -0.06, -0.02], [0.56, 0.06, 0.15]]
 
 # Shorter lift than the other objects: the domain above has to contain it, and lifting a 1.5cm
 # berry 20cm is not a more meaningful test than lifting it 8cm. The berry rests with its centroid

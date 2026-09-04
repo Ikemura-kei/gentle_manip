@@ -1,0 +1,30 @@
+# [task] letter_r: extruded letter, ~50 mm tall, 5.9 mm thick, flat on the 2026-09-04 D435i board rig.
+# Used by: experiments/single_lift_letter_r_soft_abs_action_armfocus_7d_realws.yaml
+# Status: active
+
+# ── OBJECT-SPECIFIC ──
+object_name: "letter_r"
+object_type: "soft"
+sim_substeps: 470
+mpm_grid_density: 500   # 2 mm cells: 3 across the 6 mm thickness (tofu: 250 for a 30 mm cube)
+object_spawn_z: 0.0201   # board 0.0138 + half-THICKNESS x max scale 1.47 + 2 mm (lies flat: no tilt DR)
+
+# ── SHARED (identical for all objects) ──
+success_z_min: 0.175
+success_z_max: 0.275
+hold_steps: 30
+success_scale: 0.2
+board_thickness: 0.0138
+board_size: [0.6, 0.7, 0.0138]
+board_center: [0.41, 0.0]
+board_color: [0.647, 0.608, 0.514, 1.0]
+finger_color: [0.1, 0.1, 0.1, 1.0]
+cam_fov: 43.15
+cam_pos: [0.69895466, -0.06643963, 0.3168003]
+cam_lookat: [0.30454208, -0.07412394, 0.0138]
+cam_up: [-0.60697255, -0.06794066, 0.79181336]
+
+rewards:
+  stress: {cap: 1.5, mean_weight: 0.2, scale: 0.2, top10_weight: 0.8}
+  dist_to_obj: {decay: 8.0, scale: 0.1}
+  lift: {grasp_gate_dist: 0.079, lift_target: 0.16, scale: 0.1}

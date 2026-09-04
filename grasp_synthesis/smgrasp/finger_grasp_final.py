@@ -21,14 +21,15 @@ the oriented rectangular pad is opt-in (`u1,u2,half_uv`).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+
+import time
 
 import numpy as np
 import trimesh
 from scipy.spatial.transform import Rotation as Rot
 
 from .width_grasp import (width_grasp_stress, evaluate_grasp, grasp_alignment, indent_from_width,
-                          _shaped_penalty, is_real_grasp, W_ALIGN, W_PEAK, PEN_BASE, PEN_SLOPE)
+                          indent_contacts, _shaped_penalty, is_real_grasp, PEN_BASE, PEN_SLOPE)
 
 _ROOT = Path(__file__).resolve().parents[2]                     # repo root (for the finger STL assets)
 
@@ -38,26 +39,6 @@ _ROOT = Path(__file__).resolve().parents[2]                     # repo root (for
 # but deceptively low bulk stress. Calibrated so a distributed cap grasp (~19 kPa/pad) beats a concentrated
 # one (~100 kPa/pad) despite the latter's slightly LOWER masked stress. See width_grasp.width_grasp_stress.
 W_PRESS = 0.1
-
-# Three-way sentinel for the optional score weights forwarded by `plan_finger_grasp`.
-#   _UNSET  -> forward the LEGACY value the caller has always effectively used (v3 bit-identity)
-#   None    -> don't forward at all, so `score_finger_grasp`'s own module default applies
-#   numeric -> forward as given
-# Needed because `w_peak`/`w_area` defaulted to 0.0 and were forwarded under `if x is not None`,
-# which is always True for 0.0 -> W_PEAK (0.3) was silently overridden to 0 in EVERY run. Fixing
-# that by flipping the default would change every existing collector/demo caller, so the legacy
-# 0.0 stays the _UNSET behaviour and opting in is explicit.
-_UNSET = object()
-
-
-def _resolve_w(value, legacy):
-    """(forward?, value) for a three-way sentinel weight — see `_UNSET`."""
-    if value is _UNSET:
-        return True, legacy
-    if value is None:
-        return False, None
-    return True, float(value)
-
 
 # ── Gripper geometry (verbatim from synth_utils; meters) ──────────────────────
 FINGER_TO_TCP_Z = -0.069863       # finger-local origin z below TCP origin, along tool z
@@ -165,103 +146,11 @@ def tilt_deg(x_tcp) -> float:
     return float(np.degrees(np.arccos(np.clip(_tilt_cos(x_tcp), -1.0, 1.0))))
 
 
-def pad_center_world(x_tcp, pad_geo) -> np.ndarray:
-    """World position of the pad midplane centre (the point the two pads close around). Same
-    placement convention as `tcp_to_local_grasp`, which computes this in its own frame."""
-    tcp_pos = np.asarray(x_tcp[:3], float)
-    R = Rot.from_euler("xyz", np.asarray(x_tcp[3:6], float))
-    return tcp_pos + R.apply([0.0, 0.0, _z_off(float(x_tcp[6])) + pad_geo["z_center"]])
-
-
-def _com_lever(x_tcp, pad_geo, obj_com) -> float:
-    """HORIZONTAL (gravity-perpendicular) distance from the pad centre to the object COM, metres.
-    This is the lever arm the object's weight acts on: a stem or edge grasp holds far from the mass,
-    so the body hangs off-axis and tends to rotate out of the fingers during the lift. Measured in
-    world (not object-local) because gravity — not the mesh — defines which plane matters."""
-    return float(np.linalg.norm((pad_center_world(x_tcp, pad_geo) - np.asarray(obj_com, float))[:2]))
-
-
-# ── Camera occlusion ──────────────────────────────────────────────────────────
-# Does the finger geometry block the external camera's view of the object? The policy's point cloud
-# loses the very surface whose grip width it must judge. Nothing else in the objective knows a
-# camera exists, so without this term the search has no reason to prefer an unoccluding grasp.
-#
-# MEASURED (mushroom, cam_ext at (0.989, 0, 0.098) — i.e. ~9 deg above horizontal, looking down -x):
-# occlusion is driven mainly by the YAW of the closing axis, NOT by tilt. Sweeping yaw of an
-# otherwise identical top-down grasp gives occ = 0.06 (finger pair across y, clear of the sightline)
-# -> 0.94 (pair across x, straddling it). So `w_occ` and `w_tilt` are COMPLEMENTARY, not redundant:
-# a perfectly vertical grasp can still occlude badly, and tightening roll_max alone will not fix it.
-#
-# The AABB approximation was validated against exact finger-STL ray casts over that sweep: it
-# overestimates by at most +0.094 and preserves the ORDERING exactly, at 0.053 ms/call vs ~1.4 ms
-# for the exact test. A ranking prior does not need more fidelity than that.
-
-
-
-
-def standoff_pose(x_tcp, d: float) -> np.ndarray:
-    """The pre-grasp pose `d` metres back along the approach axis — same orientation and width, so
-    the standoff -> grasp motion is a pure translation along the fingers' own approach direction."""
-    x = np.asarray(x_tcp, float).copy()
-    x[:3] = x[:3] - approach_dir(x) * float(d)
-    return x
-
-
-def path_clearance(poses, pad_geo, obj_sdf, obj_com, obj_quat_wxyz, *, pen_tol: float = 0.003,
-                   stride: int = 3) -> tuple:
-    """Is an ARBITRARY commanded finger path free of gross object penetration?
-
-    `poses` is an iterable of 7-DOF `[tx,ty,tz,roll,pitch,yaw,width]` — i.e. exactly what the
-    trajectory will command, orientation and gripper width included. Returns `(ok, max_pen_m)`.
-
-    Prefer this over `descend_clearance` whenever the executed approach is not the straight
-    standoff->grasp chord. Measured on a blended (Bezier) reach: the chord bottoms out at 0.8mm of
-    finger/object overlap while the path actually executed reaches 2.0mm — so checking the chord
-    UNDER-reports the real clearance rather than bounding it. Checking the executed path removes
-    that gap entirely.
-    """
-    q = np.asarray(obj_quat_wxyz, float)
-    Rinv = Rot.from_quat([q[1], q[2], q[3], q[0]]).inv()
-    com = np.asarray(obj_com, float)
-    worst = 0.0
-    for x in poses:
-        Lw, Rw = finger_world_pts(np.asarray(x, float), pad_geo)
-        sd = obj_sdf(Rinv.apply(np.vstack([Lw, Rw])[::stride] - com))
-        worst = max(worst, float(np.maximum(-sd - pen_tol, 0.0).max()))
-    return worst <= 0.0, worst
-
-
-def descend_clearance(x_tcp, pad_geo, obj_sdf, obj_com, obj_quat_wxyz, *, d: float,
-                      n: int = 8, pen_tol: float = 0.003) -> tuple:
-    """Is the straight standoff->grasp descent free of gross finger/object penetration?
-
-    Samples `n` poses along the segment and reuses the SAME finger-body penetration test the
-    per-candidate filter uses (`finger_world_pts` + the object SDF in COM-local frame). Returns
-    `(ok, max_penetration_m)`. Called ONCE per planned grasp, not per CMA eval, so the
-    `trimesh.proximity` cost is irrelevant here.
-
-    The final pose is the grasp itself, whose pads intentionally indent the object by ~1 mm — that
-    is under `pen_tol`, so intended contact is not flagged; only a finger sweeping THROUGH geometry
-    (e.g. clipping a mushroom cap on the way down to a stem grasp) trips it.
-    """
-    q = np.asarray(obj_quat_wxyz, float)
-    Rinv = Rot.from_quat([q[1], q[2], q[3], q[0]]).inv()
-    com = np.asarray(obj_com, float)
-    start = standoff_pose(x_tcp, d)
-    worst = 0.0
-    for t in np.linspace(0.0, 1.0, max(int(n), 2)):
-        x = np.asarray(x_tcp, float).copy()
-        x[:3] = start[:3] + t * (np.asarray(x_tcp[:3], float) - start[:3])
-        Lw, Rw = finger_world_pts(x, pad_geo)
-        sd = obj_sdf(Rinv.apply(np.vstack([Lw, Rw])[::3] - com))
-        worst = max(worst, float(np.maximum(-sd - pen_tol, 0.0).max()))
-    return worst <= 0.0, worst
-
-
-def build_object_sdf(obj, *, simplify_faces: int = 500):
-    """Signed-distance function on the FEM object's OWN recentered surface (negative = inside), for the
-    finger-body penetration filter. Built once per object from the tet-mesh boundary (already in the COM
-    frame the finger points map into), simplified for fast BVH queries. sdf(pts_local) → (N,) meters."""
+def build_object_sdf(obj, *, simplify_faces: int = 500, voxel: float = 0.002, margin: float = 0.02):
+    """Signed distance to the object surface in its COM-local frame (negative = inside): a voxel grid
+    sampled once from the exact nearest-point distance, then trilinear lookup. sdf(pts) -> (N,) metres.
+    Points beyond `margin` from the bbox return the edge value (far outside; never a penetration)."""
+    from scipy.ndimage import map_coordinates
     from .viz import boundary_faces
     tri, _ = boundary_faces(obj.tets)
     m = trimesh.Trimesh(np.asarray(obj.verts, float), np.asarray(tri, np.int64), process=False)
@@ -272,12 +161,25 @@ def build_object_sdf(obj, *, simplify_faces: int = 500):
         pass
     trimesh.repair.fix_normals(m)
 
-    def _sdf(pts):
+    def _exact(pts):
         pts = np.asarray(pts, float).reshape(-1, 3)
         cp, d, fid = trimesh.proximity.closest_point(m, pts)
         nrm = m.face_normals[fid]
         return d * np.sign(((pts - cp) * nrm).sum(-1))
 
+    lo = np.asarray(obj.verts, float).min(0) - margin
+    hi = np.asarray(obj.verts, float).max(0) + margin
+    n = np.maximum(np.ceil((hi - lo) / voxel).astype(int) + 1, 2)
+    axes = [np.linspace(lo[i], lo[i] + (n[i] - 1) * voxel, n[i]) for i in range(3)]
+    G = np.stack(np.meshgrid(*axes, indexing="ij"), axis=-1).reshape(-1, 3)
+    grid = _exact(G).reshape(tuple(n))
+
+    def _sdf(pts):
+        pts = np.asarray(pts, float).reshape(-1, 3)
+        idx = ((pts - lo) / voxel).T                                # fractional grid coordinates
+        return map_coordinates(grid, idx, order=1, mode="nearest")
+
+    _sdf.exact = _exact                                             # kept for validation
     return _sdf
 
 
@@ -299,212 +201,152 @@ def _contact_area(obj, nodes) -> float:
     return float(obj._bface_area[full].sum())
 
 
-def score_finger_grasp(obj, x_tcp, *, cam_pos=None, cam_azimuth_max_deg=None, **kw) -> dict:
-    """Public scoring entry: the full feasibility/gentleness ladder (below), plus the camera-
-    azimuth bound applied UNIFORMLY to every rung's score.
-
-    The azimuth penalty is added outside the ladder on purpose: `w_occ` failed precisely because
-    occlusion-reducing candidates returned at a flat infeasibility floor where a weight has no
-    gradient. A uniform shaped penalty preserves the ladder's ordering (feasibility still
-    dominates) while giving CMA an azimuth gradient at EVERY rung — and when no feasible grasp
-    exists inside the cone, the search degrades gracefully to the least-occluding feasible one
-    instead of failing.
-    """
-    r = _score_finger_grasp_impl(obj, x_tcp, **kw)
-    if cam_pos is not None:
-        az = cam_azimuth_deg(x_tcp, kw["obj_com"], cam_pos)
-        r["cam_azimuth_deg"] = az                              # audit, even with the bound off
-        if cam_azimuth_max_deg is not None and az > float(cam_azimuth_max_deg):
-            r = dict(r)
-            r["score"] = float(r["score"]) - CAM_AZ_SLOPE * (az - float(cam_azimuth_max_deg))
-    return r
+# ── Scoring constants ─────────────────────────────────────────────────────────
+W_PRESS      = 0.1       # weight of the contact-pressure term (grip / smaller pad area, Pa)
+G            = 9.81      # gravity
+LIFT_ACCEL   = 9.81      # lift margin: holdability is checked at m*(G + LIFT_ACCEL)
+MAX_INDENT   = 0.01      # jaw buried deeper than this -> `degenerate` (outside the linear FEM regime)
+PEN_TOL      = 0.005     # finger-body penetration allowed before `penetrate`
+TABLE_TOL    = 0.002     # table scratch allowed before `table`
 
 
-YIELD_SAFETY = 0.8            # auto area floor keeps the grasp under this fraction of yield
-LOCAL_XSEC_TO_WIDTH = 2.3     # width cap = this x the local cross-section (see local_cross_section)
-
-
-def local_cross_section(obj, *, n_slabs: int = 10, lo_f: float = 0.2, hi_f: float = 0.8) -> float:
-    """Median LOCAL cross-section perpendicular to the object's long axis (metres) — the width a
-    proper across-the-body grasp actually has to close on.
-
-    This is the shape descriptor that `width_max="auto"` uses, and it is deliberately NOT the bbox:
-    the bbox ranks the banana as the LARGEST, easiest object (95 mm longest extent) when its
-    graspable width is 17.9 mm — a bbox-derived bound would be wrong in exactly the wrong
-    direction. Measured 2026-08-26: mushroom 28.5, strawberry 30.5, raspberry 13.2, banana 17.9 mm.
-    At the 2.3x coefficient the resulting cap is INERT for every compact object (65.6 / 70.2 /
-    30.4 mm, all ~2x above any width they plan) and BINDS only on the banana (41.2 mm, vs the
-    40 mm that was hand-tuned to fix it).
-
-    TWO CAVEATS, both measured:
-    1. The 2.3 coefficient is calibrated on ONE elongated object. It is inert-by-construction for
-       compact shapes, so it is safe to leave on, but it is not validated across a range of
-       elongated ones.
-    2. This runs on the FEM object, whose mesh has been voxel-remeshed (`prepare_mesh`,
-       voxel_div=14) and so is THICKER than the source for a thin body: the banana reads 20.9 mm
-       here vs 17.9 mm on the raw mesh (~17% inflation). The derived cap is therefore 48.1 mm
-       rather than the 41.2 mm the raw mesh implies. 48 mm still binds hard on the banana (it
-       excludes 4 of the 5 uncapped grasps, which ran 42-79 mm, median 76.6) but it is LOOSER
-       than the 40 mm that was hand-tuned and end-to-end verified. Prefer an explicit
-       --grasp-width-max-mm where a value has been validated; use "auto" for a new object."""
-    v = np.asarray(obj.verts, float)
-    ax = int(np.argmax(v.max(0) - v.min(0)))
-    lo, hi = v[:, ax].min(), v[:, ax].max()
-    oth = [a for a in range(3) if a != ax]
-    ws = []
-    for f in np.linspace(lo_f, hi_f, n_slabs):
-        c = lo + f * (hi - lo)
-        sel = np.abs(v[:, ax] - c) < 0.03 * (hi - lo)
-        if sel.sum() > 3:
-            ws.append(min(float(v[sel, a].max() - v[sel, a].min()) for a in oth))
-    return float(np.median(ws)) if ws else float((v.max(0) - v.min(0)).min())
-
-
-def _score_finger_grasp_impl(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
-                       table_z: float = 0.0, ground_buf: float = 0.0035, g: float = 9.81,
-                       accel: float = 0.0, max_indent: float = 0.01, obj_sdf=None,
-                       pen_tol: float = 0.003, table_tol: float = 0.002,
-                       w_align: float = W_ALIGN, w_peak: float = W_PEAK, w_area: float = 0.0,
-                       w_press: float = W_PRESS,
-                       w_com: float = 0.0, w_tilt: float = 0.0,
-                       area_min: float = 0.0,
-                       execute_offset: float = 0.0) -> dict:
-    """Score one 7-DOF TCP grasp candidate (higher = gentler; MAXIMIZED). Ladder mirrors
-    `width_grasp.score_candidate` but in TCP space with the real finger pad, plus two TOLERANCE-based
-    geometric pre-filters (cheap, no FEM): gross table scratch >> gross finger-body penetration >>
-    jaw miss/buried >> not-holdable >> (holdable) −stress score. `table_tol`/`pen_tol` allow a small
-    (~1-3 mm) table scratch / finger-into-object penetration — the object deforms and the controller has
-    error at that scale, so only GROSS violations are rejected (the pad's own ~1 mm indent is under
-    pen_tol, so intended contact is never flagged). Returns dict(score, status, holdable, ...)."""
-    # OPERATING POINT. The executor does not command the synthesized width: it closes an extra
-    # `execute_offset` (the collector's base squeeze + firm pass). Stress is steeply nonlinear in
-    # indentation, so scoring the un-squeezed width evaluates a grasp the robot never performs —
-    # measured 5.4 kPa at the scored width vs 54.8 kPa at the executed one, a 10x gap that made the
-    # metric uncorrelated with the stress the simulator actually produces. Scoring at the executed
-    # width closes that gap. Default 0.0 reproduces the historical behaviour exactly.
-    #
-    # KNOWN APPROXIMATION: the offset is not a single constant in the collector. A soft grasp closes
-    # base 2.5mm + firm 2.0mm = 4.5mm normally, but a grasp the firm check judges WEAK closes a
-    # further 2.5mm, i.e. 7.0mm total. 0.0045 therefore describes the normal path only, and a weak
-    # grasp still executes 2.5mm tighter than it was scored. Two mitigations, neither complete:
-    # scoring at the executed width makes the chosen grasp firmer at the point the check reads, so
-    # the weak branch should fire less often; and the residual 2.5mm is much smaller than the 4.5mm
-    # this fixes. The exact fix would feed the per-env firm decision back into synthesis, which is
-    # not possible — the check runs on measured contact AFTER the grasp closes.
-    if execute_offset:
-        x_tcp = np.asarray(x_tcp, float).copy()
-        x_tcp[6] = max(0.0, float(x_tcp[6]) - float(execute_offset))
+def _pre_fem(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, table_z, obj_sdf):
+    """Gates 1-3 of the scorer (no FEM). Returns ("done", res) for a rejected candidate, or
+    ("fem", ctx) with everything the FEM stage and `_post_fem` need."""
     half_uv = (pad_geo["half_u1"], pad_geo["half_u2"])
-    ph = max(half_uv)                                             # nominal pad_half (overridden by half_uv)
+    ph = max(half_uv)
     q = np.asarray(obj_quat_wxyz, float)
-    Rinv = Rot.from_quat([q[1], q[2], q[3], q[0]]).inv()          # world → object-local
+    Rinv = Rot.from_quat([q[1], q[2], q[3], q[0]]).inv()          # world -> object-local
     Lw, Rw = finger_world_pts(x_tcp, pad_geo)
 
-    # 1. TABLE — allow up to table_tol penetration; penalize (shaped) only a GROSS scratch below that.
+    # 1. table
     zmin = float(min(Lw[:, 2].min(), Rw[:, 2].min()))
-    floor = table_z - table_tol
+    floor = table_z - TABLE_TOL
     if zmin < floor:
-        return {"score": -(PEN_BASE + (floor - zmin) * PEN_SLOPE), "status": "table",
-                "holdable": False, "stress_top10": np.inf}
-
-    # 2. FINGER-BODY penetration — the finger (pads AND body) must not clip THROUGH the object (e.g. the
-    # stem) beyond pen_tol. The pad's intended indent (~1 mm) is under pen_tol, so this only fires on
-    # gross overlap, not on the contact itself.
-    if obj_sdf is not None:
-        pts = np.vstack([Lw, Rw])[::3]                           # subsample: gross clipping hits many pts
-        sd = obj_sdf(Rinv.apply(pts - np.asarray(obj_com, float)))
-        deep = float(np.maximum(-sd - pen_tol, 0.0).max())
-        if deep > 0.0:
-            return {"score": -(PEN_BASE + deep * PEN_SLOPE), "status": "penetrate",
-                    "holdable": False, "stress_top10": np.inf}
-
-    # 3. map to object-local oriented pad; cheap indent feasibility filter (no FEM yet)
+        return "done", {"score": -(PEN_BASE + (floor - zmin) * PEN_SLOPE), "status": "table",
+                        "holdable": False, "stress_top10": np.inf}
+    # 2. finger-body penetration
+    pts = np.vstack([Lw, Rw])[::3]
+    sd = obj_sdf(Rinv.apply(pts - np.asarray(obj_com, float)))
+    deep = float(np.maximum(-sd - PEN_TOL, 0.0).max())
+    if deep > 0.0:
+        return "done", {"score": -(PEN_BASE + deep * PEN_SLOPE), "status": "penetrate",
+                        "holdable": False, "stress_top10": np.inf}
+    # 3. map the pose to the object-local pad; per-jaw indentation at this width (geometry only)
     center, axis, u1, u2, wface = tcp_to_local_grasp(x_tcp, obj_com, obj_quat_wxyz, pad_geo)
     dl, dr, status, dist = indent_from_width(obj, center, axis, pad_half=ph, width=wface,
-                                             max_indent=max_indent, u1=u1, u2=u2, half_uv=half_uv)
+                                             max_indent=MAX_INDENT, u1=u1, u2=u2, half_uv=half_uv)
     if status != "ok":
-        return {"score": _shaped_penalty(status, dist), "status": status, "holdable": False,
-                "stress_top10": np.inf}
+        return "done", {"score": _shaped_penalty(status, dist), "status": status, "holdable": False,
+                        "stress_top10": np.inf}
+    bc = indent_contacts(obj, center, axis, pad_half=ph, delta_left=dl, delta_right=dr,
+                         u1=u1, u2=u2, half_uv=half_uv)
+    if bc is None:
+        return "done", {"score": _shaped_penalty("no_contact", 0.02), "status": "no_contact",
+                        "holdable": False, "stress_top10": np.inf}
+    return "fem", {"bc": bc, "center": center, "axis": axis, "wface": wface, "ph": ph, "Rinv": Rinv, "x": x_tcp}
 
-    # 4. FEM indentation solve (oriented rectangular pad), then physical (E, mass, μ) evaluation
-    prim = width_grasp_stress(obj, center, axis, pad_half=ph, delta_left=dl, delta_right=dr,
-                              u1=u1, u2=u2, half_uv=half_uv)
-    if not prim["valid"]:
-        return {"score": _shaped_penalty("no_contact", 0.02), "status": "no_contact",
-                "holdable": False, "stress_top10": np.inf}
-    r = evaluate_grasp(obj, center, axis, pad_half=ph, delta=None, E=E, density=density, mu=mu,
-                       g=g, accel=accel, prim=prim)
+
+def _post_fem(obj, ctx, prim, *, E, density, mu, yield_stress):
+    """Gates 4-6 and the score, from a FEM primitive (single or batched — identical code)."""
+    center, axis, x_tcp = ctx["center"], ctx["axis"], ctx["x"]
+    r = evaluate_grasp(obj, center, axis, pad_half=ctx["ph"], delta=None, E=E, density=density, mu=mu,
+                       g=G, accel=LIFT_ACCEL, prim=prim)
     if not r["holdable"]:
-        # contacting but grip too low → shape by how CLOSE it is to holding (frac = 2μ·grip / m·g ∈ [0,1)),
-        # so the penalty eases as grip rises: a gradient telling CMA to narrow the width. Stays in
-        # [−2·PEN_BASE, −PEN_BASE) — always worse than any real grasp, better the closer it is to holding.
-        frac = min(2.0 * mu * r["grip"] / (r["mass"] * (g + accel) + 1e-12), 0.999)
+        frac = min(2.0 * mu * r["grip"] / (r["mass"] * (G + LIFT_ACCEL) + 1e-12), 0.999)
         return {"score": -PEN_BASE * (2.0 - frac), "status": "ok", "holdable": False,
                 "stress_top10": r["stress_top10"], "grip": r["grip"]}
     align = grasp_alignment(obj, axis, prim["nodes"])
-    # PER-PAD contact PRESSURE = grip / (smaller pad's contact area). This is the gentleness signal the
-    # masked internal von Mises stress MISSES: a pinch / one-pad-on-a-thin-part has a tiny contact area →
-    # high LOCAL pressure (what bruises) even at low grip, yet low bulk stress. Penalize the WORST pad
-    # (min area) so a good big pad can't dilute one bad pad (e.g. one finger on the mushroom stem).
     nd, lm = prim["nodes"], prim["left_mask"]
-    aL = _contact_area(obj, nd[lm]); aR = _contact_area(obj, nd[~lm])
-    min_pad = min(aL, aR)
-    # v4 ANTI-PINCH hard floor: a grasp gripping less than `area_min` of surface on its WORST pad is
-    # a pinch, not a grasp. Rejected into the same (-2*PEN_BASE, -PEN_BASE] band the not-holdable
-    # branch uses, shaped by how close it is to the floor so CMA still gets a gradient toward fatter
-    # pads. `is_real_grasp` treats it as infeasible. Default 0.0 -> never fires (v3 unchanged).
-    if area_min > 0.0 and min_pad < area_min:
-        return {"score": -PEN_BASE * (2.0 - min_pad / area_min), "status": "thin_pad",
-                "holdable": False, "stress_top10": r["stress_top10"], "grip": r["grip"],
-                "min_pad_area": float(min_pad)}
-    pressure = r["grip"] / max(min_pad, 1e-6)                     # Pa (worst pad); grip is per-pad (= both)
-    carea = _contact_area(obj, nd) if w_area else 0.0            # optional whole-grasp area reward
-    # v4 geometry-prior terms (all default 0.0 -> the expression below is float-exact v3):
-    #   lever    — HORIZONTAL distance from the pad centre to the object COM. A stem/edge grasp sits
-    #              far from the mass, so the body dangles on a lever arm and rotates out on lift.
-    #   1-cos_t  — deviation of the approach axis from straight down (0 top-down, 1 horizontal,
-    #              2 upward). Smooth and bounded, unlike raw angle which kinks at 0.
-    # lever/cos_t are ~free (one rotation apply each) and are ALWAYS computed so the grasp-quality
-    # AUDIT columns are meaningful even with the terms disabled.
-    # Multiplying by a 0.0 weight below is float-exact, so v3 bit-identity is preserved either way.
-    # (The `occ` camera-occlusion term is REMOVED in this trimmed module — it was provably inert:
-    #  identical output for w_occ 0..20000, see grasp_profiles.py. The STRUCTURAL replacement,
-    #  cam_azimuth_max_deg, is untouched and still active in the v5/v5c profiles.)
-    lever = _com_lever(x_tcp, pad_geo, obj_com)
-    cos_t = _tilt_cos(x_tcp)
-    score = (-r["stress_top10"] - w_align * (1.0 - align) - w_peak * E * prim["hi_1"]
-             - w_press * pressure + w_area * carea
-             - w_com * lever - w_tilt * (1.0 - cos_t))
+    min_pad = min(_contact_area(obj, nd[lm]), _contact_area(obj, nd[~lm]))   # worst pad
+    pressure = r["grip"] / max(min_pad, 1e-6)                                 # Pa
+    # 5. torsion: gravity torque about the closing axis (COM is the frame origin -> lever = -center)
+    #    vs soft-finger friction capacity (2/3)*mu*N*R per pad, R from the smaller pad's contact area
+    g_local = ctx["Rinv"].apply([0.0, 0.0, -1.0])
+    tau = np.cross(-np.asarray(center, float), r["mass"] * (G + LIFT_ACCEL) * g_local)
+    twist = float(abs(tau @ axis))
+    cap = 2.0 * (2.0 / 3.0) * mu * r["grip"] * np.sqrt(max(min_pad, 0.0) / np.pi)
+    if twist > cap:
+        frac = min(cap / (twist + 1e-12), 0.999)
+        return {"score": -PEN_BASE * (2.0 - frac), "status": "twist", "holdable": False,
+                "stress_top10": r["stress_top10"], "grip": r["grip"], "min_pad_area": float(min_pad),
+                "twist": float(twist / (cap + 1e-12))}
+    # 6. yield
+    if yield_stress is not None and r["stress_top10"] > float(yield_stress):
+        frac = min(float(yield_stress) / r["stress_top10"], 0.999)
+        return {"score": -PEN_BASE * (2.0 - frac), "status": "over_yield", "holdable": False,
+                "stress_top10": r["stress_top10"], "grip": r["grip"], "min_pad_area": float(min_pad),
+                "twist": float(twist / (cap + 1e-12))}
+    # score = bulk gentleness (masked top-decile von Mises) + local contact pressure
+    score = -r["stress_top10"] - W_PRESS * pressure
     return {"score": float(score), "status": "ok", "holdable": True,
             "stress_top10": float(r["stress_top10"]), "grip": float(r["grip"]), "align": float(align),
-            # UNMASKED 98th-pct stress (E-scaled). The masked top10 deliberately excludes the
-            # contact region for POSE RANKING; for "when does any region reach yield" (the v4
-            # width scan) the contact region counts — bruising at contact is damage.
-            "stress_p98": float(E * prim["hi_1"]),
-            "pressure": float(pressure), "min_pad_area": float(min_pad), "contact_area": float(carea),
-            "width_face": wface, "center": center, "axis": axis, "delta_left": dl, "delta_right": dr,
-            "com_lever": float(lever), "tilt_deg": float(np.degrees(np.arccos(np.clip(cos_t, -1.0, 1.0)))),
-}
+            "pressure": float(pressure), "min_pad_area": float(min_pad), "width_face": ctx["wface"],
+            "tilt_deg": tilt_deg(x_tcp), "twist": float(twist / (cap + 1e-12))}
 
 
+def score_finger_grasp(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
+                       table_z: float, obj_sdf, yield_stress=None) -> dict:
+    """Score one 7-DOF TCP grasp `[tx,ty,tz,roll,pitch,yaw,width]` (higher = gentler; MAXIMIZED).
 
-def antipodal_seed_pairs(obj, n: int, mu: float = 0.7, rng_seed: int = 0, n_samples: int = 4000):
-    """`n` ANTIPODAL surface point-pairs -> (midpoint, closing_axis, width), object-LOCAL frame.
+    Feasibility gates, cheapest first, each returning a shaped penalty below -PEN_BASE:
+      1. table       lowest finger point below table - TABLE_TOL
+      2. penetrate   finger body inside the object by more than PEN_TOL
+      3. no_contact / degenerate   a jaw misses, or is buried past MAX_INDENT (no FEM)
+      4. not holdable   2*mu*grip < m*(G + LIFT_ACCEL)                      (FEM solve)
+      5. twist       gravity torque about the closing axis > torsional friction of the pads
+      6. over_yield  stress_top10 > yield (the FEM cannot rank grasps past yield)
+    Score of a feasible grasp:  -stress_top10  -  W_PRESS * (grip / smaller pad contact area).
+    `score_finger_grasp_batch` evaluates many candidates with ONE GPU solve; same gates, same score."""
+    kind, ctx = _pre_fem(obj, x_tcp, obj_com=obj_com, obj_quat_wxyz=obj_quat_wxyz, pad_geo=pad_geo,
+                         table_z=table_z, obj_sdf=obj_sdf)
+    if kind == "done":
+        return ctx
+    bc = ctx["bc"]
+    prim = width_grasp_stress(obj, ctx["center"], ctx["axis"], pad_half=ctx["ph"],
+                              delta_left=None, delta_right=None, bc=bc)
+    if not prim["valid"]:
+        return {"score": _shaped_penalty("no_contact", 0.02), "status": "no_contact",
+                "holdable": False, "stress_top10": np.inf}
+    return _post_fem(obj, ctx, prim, E=E, density=density, mu=mu, yield_stress=yield_stress)
 
-    The default seeding fans YAW over a top-down pose anchored at the COM: the closing axis is a
-    free parameter CMA has to discover. Antipodal seeding instead derives the axis from the
-    GEOMETRY — a pair of surface points whose outward normals both oppose the line joining them,
-    i.e. exactly the force-closure condition the scorer's holdability ladder tests. Seeds therefore
-    start INSIDE the feasible basin rather than paying the shaped penalty until CMA finds it.
-    Classic antipodal sampling (Nguyen force closure; the same construction GPD/Dex-Net sample).
 
-    Condition: with a = (p2-p1)/|p2-p1| and outward normals n1, n2,
-        angle(a, -n1) <= atan(mu)   and   angle(-a, -n2) <= atan(mu)
-    so both contact normals lie in the friction cone about the grasp line.
+def score_finger_grasp_batch(obj, X, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
+                             table_z: float, obj_sdf, yield_stress=None, max_cols: int = None) -> list:
+    """`score_finger_grasp` for a list of candidates with ONE batched GPU solve per chunk. Same gates,
+    same score (verified to machine precision). Chunks are sized so W = ndof x columns stays < ~1 GB."""
+    from .width_grasp import USE_GPU_SOLVE, width_grasp_stress_batch
+    pre = [_pre_fem(obj, x, obj_com=obj_com, obj_quat_wxyz=obj_quat_wxyz, pad_geo=pad_geo,
+                    table_z=table_z, obj_sdf=obj_sdf) for x in X]
+    out = [ctx if kind == "done" else None for kind, ctx in pre]
+    fem_idx = [i for i, (kind, _) in enumerate(pre) if kind == "fem"]
+    if not fem_idx:
+        return out
+    if not USE_GPU_SOLVE:                                        # CPU fallback: the single path
+        for i in fem_idx:
+            out[i] = score_finger_grasp(obj, X[i], obj_com=obj_com, obj_quat_wxyz=obj_quat_wxyz, pad_geo=pad_geo,
+                                        E=E, density=density, mu=mu, table_z=table_z, obj_sdf=obj_sdf,
+                                        yield_stress=yield_stress)
+        return out
+    cap = max_cols or max(64, int(1.0e9 / (8 * obj.fem.ndof)))
+    start = 0
+    while start < len(fem_idx):
+        chunk, cols = [], 0
+        while start < len(fem_idx) and (not chunk or cols + len(pre[fem_idx[start]][1]["bc"]["nodes"]) <= cap):
+            chunk.append(fem_idx[start]); cols += len(pre[fem_idx[start]][1]["bc"]["nodes"]); start += 1
+        prims = width_grasp_stress_batch(obj, [pre[i][1]["bc"] for i in chunk])
+        for i, prim in zip(chunk, prims):
+            out[i] = _post_fem(obj, pre[i][1], prim, E=E, density=density, mu=mu, yield_stress=yield_stress)
+    return out
 
-    Returns [] when no pair qualifies (very smooth/round bodies at small mu); the caller then
-    falls back to the yaw fan, so this can never make seeding WORSE than the default.
-    """
+
+def antipodal_seed_pairs(obj, n: int, mu: float = 0.7, rng_seed: int = 0, n_samples: int = 40000):
+    """`n` antipodal surface point-pairs -> [(midpoint, closing_axis, separation)], object-local frame.
+
+    A pair (p1, p2) with outward normals (n1, n2) qualifies when both normals lie in the friction
+    cone about the line joining them:  angle(a, -n1) <= atan(mu) and angle(-a, -n2) <= atan(mu),
+    a = (p2 - p1) / |p2 - p1|.  Pairs are drawn from `n_samples` random boundary-face pairs and the
+    `n` returned are farthest-point-selected over (midpoint, axis) for diversity. [] if none qualify."""
     from .viz import boundary_faces
     verts, tets = np.asarray(obj.verts, float), np.asarray(obj.tets)
     faces, _ = boundary_faces(tets)
@@ -543,39 +385,26 @@ def antipodal_seed_pairs(obj, n: int, mu: float = 0.7, rng_seed: int = 0, n_samp
         return []
     p1, p2, a, L = p1[sel], p2[sel], a[sel], L[sel]
     c = 0.5 * (c1[sel] + c2[sel])                     # antipodal quality: 1 = perfectly opposed
-    # prefer well-opposed pairs, then spread by farthest-point over midpoints so the seeds are
-    # DISTINCT grasps rather than n copies of the same best pair
-    order = np.argsort(-c)
-    p1, p2, a, L, c = p1[order], p2[order], a[order], L[order], c[order]
     mid = 0.5 * (p1 + p2)
-    keep = [0]
-    for k in range(1, len(mid)):
-        if len(keep) >= n:
-            break
-        if np.min(np.linalg.norm(mid[keep] - mid[k], axis=1)) > 0.004:   # 4 mm apart
-            keep.append(k)
+    # farthest-point selection over (midpoint, sign-folded axis * AX_W), seeded from the best-opposed pair
+    AX_W = 0.02
+    af = a * np.where((a[:, 2] < -1e-9) | ((np.abs(a[:, 2]) <= 1e-9) & (a[:, 0] < 0)), -1.0, 1.0)[:, None]
+    feat = np.hstack([mid, AX_W * af])
+    keep = [int(np.argmax(c))]
+    dmin = np.linalg.norm(feat - feat[keep[0]], axis=1)
+    while len(keep) < min(int(n), len(feat)):
+        k = int(np.argmax(dmin))
+        keep.append(k)
+        dmin = np.minimum(dmin, np.linalg.norm(feat - feat[k], axis=1))
     return [(mid[k], a[k], float(L[k])) for k in keep]
 
 
 def medial_seed_points(obj, n: int):
-    """`n` deep-interior seed points with their local tangent, for seeding the CMA search.
+    """`n` medial-axis points -> [(point, local_tangent)], object-local frame.
 
-    The default seeding puts EVERY start's pad centre over the object's COM and sizes the seed
-    width from the object's GLOBAL extent along the closing axis. Both assume a convex, roughly
-    isotropic body. On a crescent (banana) the COM sits where the material is a thin curved band
-    -- pads there either bury (`degenerate`) or straddle the concavity (`no_contact`) -- and the
-    global extent along the long axis (95 mm) is far wider than anything graspable, so no start
-    is ever feasible and extra starts/evals cannot help (they only vary orientation).
-
-    Depth is the distance from each tet centroid to the nearest boundary node, i.e. roughly the
-    local half-thickness; keeping the deepest quantile traces the medial axis. Sampling is
-    farthest-point so the seeds spread ALONG the body, and the local tangent is the principal
-    direction of nearby deep points, so each seed can close PERPENDICULAR to the body.
-
-    Convex objects are handled by the same code: their deep set collapses toward the centre, so
-    the seeds land near the COM as before -- but concentrated in the THICKEST region, which on a
-    mushroom is the cap rather than the stem.
-    """
+    Depth = distance from each tet centroid to the nearest boundary node; the deepest quantile traces
+    the medial axis. Points are farthest-point sampled along it, and each tangent is the principal
+    direction of the nearby deep points (a grasp closes perpendicular to it)."""
     from scipy.spatial import cKDTree
     verts, tets = np.asarray(obj.verts), np.asarray(obj.tets)
     faces = np.concatenate([tets[:, [0, 1, 2]], tets[:, [0, 1, 3]],
@@ -610,32 +439,6 @@ def _closing_axis_world(x_tcp) -> np.ndarray:
     return Rot.from_euler("xyz", np.asarray(x_tcp[3:6], float)).apply([0.0, 1.0, 0.0])
 
 
-# Shaped-penalty slope for the camera-azimuth bound, per DEGREE of excess. Sized against the score
-# scale: stress terms span ~20-60 kPa, so ~6 deg of excess (30000) outweighs any stress difference
-# between basins — the search leaves the cone only when NO feasible grasp exists inside it.
-CAM_AZ_SLOPE = 5000.0
-
-
-def cam_azimuth_deg(x_tcp, obj_com, cam_pos) -> float:
-    """Angle (deg) between the closing axis and the vertical plane PERPENDICULAR to the camera
-    ray: 0 = axis perpendicular to the ray (fingers stand BESIDE the line of sight — no
-    occlusion), 90 = axis along the ray (one finger sits between camera and object).
-
-    Measured on the rendered cloud: axis ⊥ ray -> occ 0.000, axis ∥ ray -> occ 0.698 for an
-    otherwise identical top-down grasp. This is the geometric quantity `w_occ` could not steer
-    (occlusion-reducing candidates sat at the flat infeasibility floor where a weight has no
-    gradient), so it is bounded structurally instead — the `roll_max` pattern, not a soft weight.
-    Horizontal projections only: a near-vertical closing axis occludes nothing from a
-    near-horizontal camera, and the degenerate case returns 0 accordingly.
-    """
-    a_h = _closing_axis_world(x_tcp)[:2]
-    d_h = (np.asarray(obj_com, float) - np.asarray(cam_pos, float))[:2]
-    na, nd_ = float(np.linalg.norm(a_h)), float(np.linalg.norm(d_h))
-    if na < 1e-8 or nd_ < 1e-8:
-        return 0.0
-    return float(np.degrees(np.arcsin(np.clip(abs(a_h @ d_h) / (na * nd_), 0.0, 1.0))))
-
-
 def _distinct_tcp_poses(feasible, n, *, pos_thr, ang_thr):
     """Top-scoring but spatially DISTINCT 7-DOF poses from the feasible pool — two poses are the same if
     their TCP positions are within `pos_thr` AND their closing axes within `ang_thr`. Returns up to `n`
@@ -657,98 +460,70 @@ def _down_quat_euler(yaw: float) -> np.ndarray:
     return np.array([np.pi, 0.0, yaw])
 
 
-def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
-                      table_z: float = 0.0, ground_buf: float = 0.0035, obj_size: float = 0.03,
-                      antipodal_seeds: bool = False, antipodal_mu: float = None,
-                      width_max: Optional[float] = None,
-                      yield_stress: Optional[float] = None,
-                      bbox_margin: float = 1.2, z_lift=(0.02, 0.12), sigma: float = 0.15, maxfevals: int = 400,
-                      n_starts: int = 6, g: float = 9.81, accel: float = 0.0, max_indent: float = 0.01,
-                      obj_sdf=None, pen_tol: float = 0.003, table_tol: float = 0.002,
-                      w_align=None, w_peak=_UNSET, w_area=_UNSET, w_press=None,
-                      w_com: float = 0.0, w_tilt: float = 0.0,
-                      area_min: float = 0.0, cam_pos=None,
-                      cam_azimuth_max_deg=None,
-                      execute_offset: float = 0.0,
-                      medial_seeds: int = 0,
-                      roll_max: float = np.pi / 2, yaw_max_deg=None,
-                      refine: bool = True, refine_scan: int = 25, seed: int = 0, verbose: bool = False,
-                      record_history: bool = False,
-                      diversity_tol: float = 0.0) -> dict:
-    """CMA-ES over the 7-DOF TCP grasp maximizing the FEM gentleness score, with real finger geometry +
-    table constraint. Multi-start over top-down approaches at diverse yaw (a good starting basin for a
-    tabletop grasp); the search may tilt/translate from there. `obj_com` is the object world COM,
-    `obj_size` a rough object diameter for the xy search box. Returns dict(x, score, stress_top10, grip,
-    align, evals[, history]).
+# ── Search constants ──────────────────────────────────────────────────────────
+BBOX_MARGIN  = 1.2       # xy search box = this x the object's bbox, centred on the COM
+Z_LIFT_HI    = 0.12      # tz upper bound above the COM (m)
+CMA_STEP     = [0.002, 0.002, 0.002, np.radians(5), np.radians(5), np.radians(5), 0.002]
+                         # per-coordinate initial step: 2 mm, 5 deg, 2 mm (the 7-vector mixes m and rad)
+CMA_BUDGET_PER_SEED = 400  # scorer calls per seed
+TOP_K_CMA    = 15        # distinct best grasps shown after the CMA stage
+WIDTH_MIN, WIDTH_MAX = 0.008, 0.079     # gripper range (m)
+REFINE_SCAN  = 25        # width refine: widths scanned per CMA result ...
+REFINE_HALF  = 0.003     # ... over +- this (m) about the CMA width (0.25 mm steps; CMA's width step is 2 mm)
+# Rotation box about the top-down home pose (roll pi, pitch 0, yaw 0), degrees; yaw bounds occlusion.
+ROLL_MAX_DEG, PITCH_MAX_DEG, YAW_MAX_DEG = 30.0, 20.0, 60.0
+# Seed pool
+N_ANTIPODAL   = 2600     # antipodal surface pairs
+N_MEDIAL_AXIS = 500      # medial-axis points, closing across the local tangent
+MULT_FACTOR   = 4        # widths per medial pose (w0 + MULT_FACTOR-1 random tighter)
+MEDIAL_WIDTH_SPREAD = 0.008   # tighter widths drawn from [w0 - this, w0] (m)
+SEED_INDENT   = 1.5e-3   # seed width = object span inside the finger footprint - 2 x this
+SEED_TIP_MARGIN = 0.005  # fingertip height sampled up to this far below the object top
+SEED_PEN_MAX  = 0.010    # filter: max finger/object penetration per finger (generous; the scorer uses PEN_TOL)
+TOP_K         = 6       # seeds carried forward
 
-    v4 additions, ALL default-inert so an unchanged caller gets bit-identical v3 results:
-      w_com / w_tilt          geometry priors (COM lever arm, verticality)
-      area_min                hard floor on the worst pad's contact area (anti-pinch)
-      cam_pos                 camera position, for the cam_azimuth audit/bound (None -> off)
-      roll_max                half-width of the roll search band about top-down. The default pi/2
-                              reproduces the historical bounds, which admit a FULLY HORIZONTAL tool
-                              axis (a pure side grasp); tighten it to structurally exclude those.
-      w_peak / w_area         now three-way sentinels (see `_UNSET`) — omitting them keeps the
-                              long-standing 0.0 behaviour; pass None to get the module defaults.
-      execute_offset          extra metres the EXECUTOR closes beyond the returned width (the
-                              collector's base squeeze + firm). Every candidate is scored at
-                              `width - execute_offset`, i.e. at the grip the robot will actually
-                              apply. Leaving this at 0 optimizes an operating point that is never
-                              executed and, because stress is steeply nonlinear in indentation,
-                              yields a metric uncorrelated with the simulator's measured stress
-                              (rho +0.10 over 100 canonical episodes). 0.0 = historical behaviour.
-    """
+
+def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
+                      table_z: float = 0.0, seed: int = 0,
+                      yield_stress=None, record_history: bool = False, stage_cb=None) -> dict:
+    """Plan one 7-DOF TCP grasp `[tx,ty,tz,roll,pitch,yaw,width]` maximizing `score_finger_grasp`.
+
+    Pipeline (each step is a `stage_cb(name, data)` for the step-through viewer):
+      seeds   grasp primitives (antipodal pairs + medial-axis points) -> seed grasps
+      filter  table clearance, rotation box, finger/object penetration
+      score   every survivor through the full scorer
+      topk    the TOP_K best
+      cma     CMA-ES from each top-K seed;  refine  width scan per result;  final  the best
+
+    The returned grasp is the best-scoring refined candidate.
+    Returns dict(x, score, evals, stress_top10, grip, align, pressure, min_pad_area, width_face,
+    tilt_deg, status[, history, seeds])."""
     import cma
 
-    aln = {}
-    if w_align is not None: aln["w_align"] = w_align
-    if w_press is not None: aln["w_press"] = w_press
-    for _name, _val, _legacy in (("w_peak", w_peak, 0.0), ("w_area", w_area, 0.0)):
-        _fwd, _v = _resolve_w(_val, _legacy)
-        if _fwd: aln[_name] = _v
-    # AREA FLOOR. "auto" derives it from what THIS object can actually achieve instead of a
-    # per-object constant (mushroom 20 / strawberry 15 / raspberry 4 / banana 20 mm2 were all
-    # hand-set). Rationale, measured on the banana over 76 synthesized grasps (2026-08-26): contact
-    # area is the strongest predictor of whether a grasp LIFTS -- min_pad 37.4 mm2 on lifts vs 24.4
-    # on failures, and 0/16 lifts below 15 mm2 (a pinch on a flat object never lifts), while stress
-    # does NOT discriminate (18.4 vs 18.5 kPa). But a hard floor set too HIGH is also wrong: it is
-    # satisfied by pressing harder (area grows with indentation), so area_min 35 gave 2/8 feasible
-    # at 32-38 kPa, over the 25 kPa yield. "auto" therefore searches with NO floor and then keeps
-    # only the upper half of the feasible pool by contact area -- scale-free, no fitted constant,
-    # and it cannot force a squeeze because it only ever SELECTS among grasps already found.
-    _area_auto = isinstance(area_min, str)
-    if _area_auto and area_min != "auto":
-        raise ValueError(f"area_min must be a number or 'auto' (got {area_min!r})")
-    aln.update(w_com=w_com, w_tilt=w_tilt,
-               area_min=0.0 if _area_auto else area_min,
-               execute_offset=execute_offset)
-    if cam_pos is not None:
-        # cam_pos always -> the azimuth AUDIT is computed; the bound only bites when max is set.
-        aln.update(cam_pos=np.asarray(cam_pos, float), cam_azimuth_max_deg=cam_azimuth_max_deg)
     com = np.asarray(obj_com, float)
-    if obj_sdf is None:                                          # build the penetration SDF once (reused)
-        obj_sdf = build_object_sdf(obj)
-    # Occlusion rays are fixed for the whole search (only the fingers move), so build them once.
-    _div_on = diversity_tol > 0.0
-    _drng = np.random.default_rng(seed) if _div_on else None    # one stream: seed smear + sampling/jitter
+    obj_sdf = build_object_sdf(obj)
 
     best = {"score": -np.inf, "x": None, "res": None}
-    history, feasible, n_eval, cur_round = [], [], [0], [1]      # cur_round: 1=CMA search, 2=width refine
+    history, feasible, n_eval, cur_round = [], [], [0], [1]      # cur_round: 1 = CMA, 2 = width refine
+    seeds: list = []
 
-    def _score(x):
-        return score_finger_grasp(obj, x, obj_com=com, obj_quat_wxyz=obj_quat_wxyz, pad_geo=pad_geo,
-                                  E=E, density=density, mu=mu, table_z=table_z, ground_buf=ground_buf,
-                                  g=g, accel=accel, max_indent=max_indent, obj_sdf=obj_sdf,
-                                  pen_tol=pen_tol, table_tol=table_tol, **aln)
+    _kw = dict(obj_com=com, obj_quat_wxyz=obj_quat_wxyz, pad_geo=pad_geo, E=E, density=density, mu=mu,
+               table_z=table_z, obj_sdf=obj_sdf, yield_stress=yield_stress)
+
+    def cost_batch(X):
+        """Score many candidates with one batched GPU solve; same bookkeeping as `cost`."""
+        return [_record(x, res) for x, res in zip(X, score_finger_grasp_batch(obj, X, **_kw))]
 
     def cost(x):
+        return _record(x, score_finger_grasp(obj, x, **_kw))
+
+    def _record(x, res):
         n_eval[0] += 1
-        res = _score(x)
         if is_real_grasp(res["score"]):
-            feasible.append((np.asarray(x, float).copy(), res["score"], res))   # store res (no re-score later)
+            feasible.append((np.asarray(x, float).copy(), res["score"], res))
             if res["score"] > best["score"]:
                 best.update(score=res["score"], x=np.asarray(x, float).copy(), res=res)
-        if record_history:                                       # record EVERY candidate (the search process)
+        if record_history:
             st = res.get("stress_top10")
             history.append({"eval": n_eval[0], "x": np.asarray(x, float).copy(), "round": cur_round[0],
                             "status": res["status"], "holdable": bool(res.get("holdable", False)),
@@ -756,271 +531,195 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                             "stress": float(st) if (st is not None and np.isfinite(st)) else None})
         return -res["score"]
 
-    # xy search range = bbox_margin × the object's (rotated) world bounding box, centred on the COM.
-    # Per-axis and object-sized (vs a fixed multiple of the MAX extent) → the TCP can reach anywhere over
-    # the object with a little margin, but far fewer samples fly off and miss (most of the ~95% infeasible
-    # were distant xy positions). tz range mirrors the collector's _synth_bounds: this grasp-frame "TCP"
-    # sits LOW (the finger pad is ~z_center down the long finger), so tz near/below the object is normal
-    # and executable. The per-candidate table filter enforces exact table clearance.
-    qw = np.asarray(obj_quat_wxyz, float)
-    vw_xy = Rot.from_quat([qw[1], qw[2], qw[3], qw[0]]).apply(obj.verts)[:, :2]   # world-frame verts (COM-rel)
-    half_xy = np.maximum(0.5 * bbox_margin * (vw_xy.max(0) - vw_xy.min(0)), 0.01)  # ≥1cm floor
-    tz_lo = com[2] + FINGER_TO_TCP_Z - 0.04
-    tz_hi = com[2] + z_lift[1]
-    # roll_max = pi/2 (default) reproduces the historical band, which reaches a fully HORIZONTAL
-    # tool axis at either end -> pure side grasps are inside the feasible set. Tightening roll_max
-    # excludes them structurally, rather than relying on the w_tilt penalty alone.
-    # yaw_max_deg (2026-08-26, user): bound the TOOL yaw about the home orientation (yaw=0 is
-    # the gripper's initial pose). The camera-relative `cam_azimuth_max_deg` bounds the seed FAN
-    # about the camera-perpendicular direction, which still let the tool reach ~90 deg in the HOME
-    # frame and occlude the object on the real rig. A near-axisymmetric cap gives CMA no yaw
-    # gradient (grasps sit at their seed), so this is bounded STRUCTURALLY — box + seed clip —
-    # exactly like roll_max. Yaw and yaw+pi are the same parallel-jaw grasp, so fold into
-    # [-pi/2, pi/2] before clipping. None (default) = unchanged.
-    _yaw_hi = np.pi if yaw_max_deg is None else float(np.radians(float(yaw_max_deg)))
-    # WIDTH bound. The default 0.079 is the gripper max, which on an ELONGATED object lets CMA
-    # grasp along the LONG axis — pressing the two ends together instead of closing across the
-    # body. Measured on the banana (2026-08-26, run 26-08-26-tfi): synthesized widths were
-    # 42-79 mm (median 76.6) against a ~17 mm local cross-section, i.e. 4 of 5 grasps spanned the
-    # crescent end-to-end, and none lifted. Those grasps WIN on the cost function because they
-    # present MORE pad contact (min_pad 28-34 mm2 vs 23.8 for the across-body grasp), which both
-    # the `area_min` floor and the `w_press` pressure term reward. Bounding the width structurally
-    # — like roll_max/yaw_max_deg — removes them from the search space instead of trying to
-    # out-weight them. None (default) = 0.079, unchanged.
-    if width_max is None:
-        _w_hi = 0.079
-    elif isinstance(width_max, str):                 # "auto": derive from the shape descriptor
-        if width_max != "auto":
-            raise ValueError(f"width_max must be a number, None or 'auto' (got {width_max!r})")
-        _w_hi = float(np.clip(LOCAL_XSEC_TO_WIDTH * local_cross_section(obj), 0.012, 0.079))
-    else:
-        _w_hi = float(np.clip(width_max, 0.012, 0.079))
-    lb = [com[0] - half_xy[0], com[1] - half_xy[1], tz_lo,
-          np.pi - roll_max, -0.2 * np.pi, -_yaw_hi, 0.008]
-    ub = [com[0] + half_xy[0], com[1] + half_xy[1], tz_hi,
-          np.pi + roll_max,  0.2 * np.pi,  _yaw_hi, _w_hi]
-
-    # object world→local rotation, for measuring the cross-section along each seed's closing axis
+    # CMA search box (also the rotation filter): xy about the COM, tz, roll/pitch/yaw, width
     q = np.asarray(obj_quat_wxyz, float)
-    Robj_inv = Rot.from_quat([q[1], q[2], q[3], q[0]]).inv()
-
-    def _seed_width(closing_axis_world, indent=1.5e-3):
-        """Width at first contact along this closing axis = the object's cross-section along it (minus a
-        light indent). Per-axis, so a grasp across the short body seeds ~body-width and one along the long
-        stem seeds ~stem-length — the abstract planner's trick (planner._seed_width) in TCP space. Without
-        it, a single max-extent seed width biases every start toward the long axis (high stress)."""
-        ax = Robj_inv.apply(closing_axis_world); ax = ax / (np.linalg.norm(ax) + 1e-12)
-        proj = obj.verts @ ax
-        return float(np.clip((proj.max() - proj.min()) - 2 * indent, 0.01, _w_hi))
+    Robj = Rot.from_quat([q[1], q[2], q[3], q[0]])
+    vw_xy = Robj.apply(obj.verts)[:, :2]
+    half_xy = np.maximum(0.5 * BBOX_MARGIN * (vw_xy.max(0) - vw_xy.min(0)), 0.01)
+    tz_lo = com[2] + FINGER_TO_TCP_Z - 0.04
+    tz_hi = com[2] + Z_LIFT_HI
+    _r, _p, _y = np.radians([ROLL_MAX_DEG, PITCH_MAX_DEG, YAW_MAX_DEG])
+    lb = [com[0] - half_xy[0], com[1] - half_xy[1], tz_lo, np.pi - _r, -_p, -_y, WIDTH_MIN]
+    ub = [com[0] + half_xy[0], com[1] + half_xy[1], tz_hi, np.pi + _r,  _p,  _y, WIDTH_MAX]
+    Robj_inv = Robj.inv()
 
     def _local_width(point, closing_axis_world, indent=1.5e-3):
-        """Cross-section along the closing axis measured LOCALLY, in a slab around `point`, not
-        across the whole object. On an elongated body the global extent (banana long axis: 95 mm)
-        is wider than the gripper and nothing near it can touch; the local section is the ~30 mm
-        that actually has to be closed on."""
-        ax = Robj_inv.apply(closing_axis_world)          # world -> object-local, like _seed_width
-        ax = ax / (np.linalg.norm(ax) + 1e-12)
+        """Cross-section along the closing axis measured in a slab around `point` (not the whole body)."""
+        ax = Robj_inv.apply(closing_axis_world); ax = ax / (np.linalg.norm(ax) + 1e-12)
         d = obj.verts - np.asarray(point, float)
         along = d @ ax
         radial = np.linalg.norm(d - np.outer(along, ax), axis=1)
-        near = radial <= max(float(np.percentile(radial, 5)), 8e-3)      # slab about the axis
+        near = radial <= max(float(np.percentile(radial, 5)), 8e-3)
         if near.sum() < 8:
             near = radial <= np.percentile(radial, 15)
         sel = along[near]
-        return float(np.clip((sel.max() - sel.min()) - 2 * indent, 0.01, 0.079))
+        return float(np.clip((sel.max() - sel.min()) - 2 * indent, 0.01, WIDTH_MAX))
 
-    yaws = np.linspace(-np.pi / 2, np.pi / 2, n_starts)
-    if cam_azimuth_max_deg is not None and cam_pos is not None:
-        # Centre the seed fan on the yaw whose closing axis is PERPENDICULAR to the camera ray and
-        # span only the allowed cone, so every start begins feasible w.r.t. the bound instead of
-        # paying the shaped penalty from step one. Top-down closing axis(yaw) = [sin y, -cos y, 0]
-        # is ⊥ d_h exactly when tan(y) = d_y/d_x; axis symmetry folds yaw0 into [-pi/2, pi/2].
-        d_h = (np.asarray(obj_com, float) - np.asarray(cam_pos, float))[:2]
-        if np.linalg.norm(d_h) > 1e-8:
-            yaw0 = float(np.arctan2(d_h[1], d_h[0]))
-            yaw0 = (yaw0 + np.pi / 2) % np.pi - np.pi / 2                  # fold mod pi
-            half = np.radians(float(cam_azimuth_max_deg))
-            yaws = yaw0 + np.linspace(-half, half, n_starts)
-    pitch_seeds = np.zeros(n_starts)
-    if _drng is not None:
-        if diversity_tol > 0.0:
-            # The fixed seed yaws ARE the discrete yaw bands in the demos: a near-axisymmetric object gives
-            # CMA no yaw gradient, so each grasp stays at its seed. Jitter the seeds by ±half the inter-seed
-            # gap per synthesis so, over the dataset, the bands smear into a CONTINUOUS yaw distribution.
-            gap = np.pi / max(n_starts - 1, 1)
-            yaws = yaws + _drng.uniform(-gap / 2, gap / 2, n_starts)
-    if yaw_max_deg is not None:                       # fold to the equivalent grasp, then clip
-        yaws = (np.asarray(yaws, float) + np.pi / 2) % np.pi - np.pi / 2
-        yaws = np.clip(yaws, -_yaw_hi, _yaw_hi)
-    # MEDIAL SEEDING (opt-in): replace the all-starts-at-COM placement with points spread along
-    # the body, each closing PERPENDICULAR to the local tangent and sized by the LOCAL section.
-    med = medial_seed_points(obj, n_starts) if medial_seeds else None
-    # ANTIPODAL SEEDING (opt-in, 2026-09-04). Derives each start's closing axis + width from a
-    # force-closure surface pair instead of fanning yaw over a COM-anchored top-down pose. Falls
-    # back to the yaw fan when no pair qualifies, so it can never seed WORSE than the default.
-    anti = None
-    if antipodal_seeds and med is None:
-        _amu = float(antipodal_mu) if antipodal_mu is not None else float(mu)
-        # Ask for MORE pairs than starts, then keep a spread subset: with n_starts=3 the plain
-        # top-3 can cluster on one face. Medial seeding is folded in here rather than kept as a
-        # separate mode — a medial point gives a DEEP anchor with a body-perpendicular axis, which
-        # is a different failure mode from an antipodal pair (surface-derived), so mixing them
-        # widens the basin coverage a small budget can reach.
-        anti = antipodal_seed_pairs(obj, max(2 * n_starts, 6), mu=_amu, rng_seed=seed) or None
-        if anti is not None and len(anti) > n_starts:
-            _keep = max(1, n_starts - 1)                     # leave one slot for a medial seed
-            anti = anti[:_keep]
-            _m = medial_seed_points(obj, 1)
-            if _m:
-                _c, _t = _m[0]
-                _ax = np.asarray(_t, float)
-                _ax = _ax / (np.linalg.norm(_ax) + 1e-12)
-                # medial gives a TANGENT; the grasp closes perpendicular to it
-                _perp = np.cross(_ax, [0.0, 0.0, 1.0])
-                if np.linalg.norm(_perp) < 1e-6:
-                    _perp = np.cross(_ax, [1.0, 0.0, 0.0])
-                _perp = _perp / (np.linalg.norm(_perp) + 1e-12)
-                anti = list(anti) + [(np.asarray(_c, float), _perp,
-                                      float(_local_width(_c, Robj_inv.inv().apply(_perp))))]
-            anti = anti[:n_starts]
-        if anti is not None:
-            yaws = []
-            for _mid, _ax, _w in anti:
-                th = Robj_inv.inv().apply(np.asarray(_ax, float))[:2]   # local axis -> world
-                if np.linalg.norm(th) < 1e-9:
-                    th = np.array([1.0, 0.0])
-                th = th / np.linalg.norm(th)
-                # top-down closing axis(yaw) = [sin y, -cos y, 0]; align it WITH the antipodal axis
-                yaws.append(float(np.arctan2(th[0], -th[1])))
-            yaws = (np.asarray(yaws) + np.pi / 2) % np.pi - np.pi / 2       # fold (jaw symmetry)
-            if yaw_max_deg is not None:
-                yaws = np.clip(yaws, -_yaw_hi, _yaw_hi)
-    if med is not None:
-        yaws = []
-        for _c, _t in med:
-            th = Robj_inv.inv().apply(np.asarray(_t, float))[:2]   # local tangent -> world
-            if np.linalg.norm(th) < 1e-9:
-                th = np.array([1.0, 0.0])
-            th = th / np.linalg.norm(th)
-            # top-down closing axis(yaw) = [sin y, -cos y, 0]; make it _|_ the tangent
-            yaws.append(float(np.arctan2(-th[0], th[1])))
-        yaws = (np.asarray(yaws) + np.pi / 2) % np.pi - np.pi / 2          # fold (jaw symmetry)
-        if yaw_max_deg is not None:
-            yaws = np.clip(yaws, -_yaw_hi, _yaw_hi)
+    # ── Step 1: seed grasps from primitives ──
+    def _grasp_from_primitive(anchor_local, axis_local, width, kind, k):
+        """A seed grasp from a primitive (anchor point + closing axis, object frame):
+          orientation  tool +y = closing axis, tool +z (approach) as close to straight down as possible
+          xy           pad centre on the anchor
+          height       fingertip at a random height within the object (table clearance .. top)
+          width        object span inside the finger footprint at that height, minus a light indent"""
+        yv = Robj.apply(np.asarray(axis_local, float)); yv = yv / np.linalg.norm(yv)
+        def _rot(yv):
+            zv = np.array([0.0, 0.0, -1.0]); zv = zv - (zv @ yv) * yv
+            if np.linalg.norm(zv) < 1e-6:                        # vertical axis: approach horizontally
+                zv = np.array([1.0, 0.0, 0.0]); zv = zv - (zv @ yv) * yv
+            zv = zv / np.linalg.norm(zv)
+            return Rot.from_matrix(np.stack([np.cross(yv, zv), yv, zv], axis=1))   # columns = tool x, y, z
+        R = _rot(yv)
+        if abs(R.as_euler("xyz")[2]) > np.pi / 2:                # jaw symmetry: keep yaw in [-90, 90]
+            R = _rot(-yv)
+        r, p, y = R.as_euler("xyz")
+        r = r % (2 * np.pi)                                      # top-down = pi (the rotation box's convention)
+        w = float(np.clip(width, 0.01, WIDTH_MAX))
+        tcp0 = com + Robj.apply(anchor_local) - R.apply([0.0, 0.0, _z_off(w) + pad_geo["z_center"]])
+        x = np.array([tcp0[0], tcp0[1], tcp0[2], r, p, y, w])
+        # height
+        floor = table_z - TABLE_TOL + 0.001
+        tip_target = _hrng.uniform(floor, max(floor, obj_top - SEED_TIP_MARGIN))
+        x[2] += tip_target - finger_min_world_z(x, pad_geo)
+        # width
+        c, a, u1, u2, wf = tcp_to_local_grasp(x, obj_com=com, obj_quat_wxyz=obj_quat_wxyz, pad_geo=pad_geo)
+        d = obj.verts - c; proj = d @ a
+        foot = (np.abs(d @ u1) < pad_geo["half_u1"]) & (np.abs(d @ u2) < pad_geo["half_u2"])
+        if foot.sum() > 3:
+            span = float(proj[foot].max() - proj[foot].min())
+            x[6] = float(np.clip(span - 2 * SEED_INDENT - (wf - w), 0.01, WIDTH_MAX))   # wf - w = inner-face offsets
+            x[:3] = com + Robj.apply(anchor_local) - R.apply([0.0, 0.0, _z_off(x[6]) + pad_geo["z_center"]])
+            x[2] += tip_target - finger_min_world_z(x, pad_geo)
+        return {"start": k, "x": x, "kind": kind}
 
-    for i, yaw in enumerate(yaws):
-        r, p, y = _down_quat_euler(yaw)
-        p = p + float(pitch_seeds[i])
-        # place TCP so the pad centre sits over the object COM in xy, then set tz so the lowest finger
-        # point clears the table (these fingers are ~61 mm — finger_min_world_z is linear in tz, slope +1,
-        # so one eval gives the exact lift). Width is seeded at THIS axis's cross-section (see _seed_width).
-        Ri = Rot.from_euler("xyz", [r, p, y])
-        _axis_w = Ri.apply([0.0, 1.0, 0.0])
-        # med points live in the object-LOCAL recentered frame; lift to world through the object's
-        # orientation before using them as a TCP anchor (obj.verts are recentered, NOT rotated).
-        if med is not None:
-            _anchor = com + Robj_inv.inv().apply(med[i][0])
-            wi = _local_width(med[i][0], _axis_w)
-        elif anti is not None:
-            # midpoint of the antipodal pair; width = the pair's separation minus a light indent
-            _anchor = com + Robj_inv.inv().apply(anti[i][0])
-            wi = float(np.clip(anti[i][2] - 3.0e-3, 0.01, _w_hi))
-        else:
-            _anchor = com
-            wi = _seed_width(_axis_w)
-        tcp0 = _anchor - Ri.apply([0.0, 0.0, _z_off(wi) + pad_geo["z_center"]])
-        s0 = np.array([tcp0[0], tcp0[1], tcp0[2], r, p, y, wi])
-        s0[2] += (table_z + ground_buf + 0.003) - finger_min_world_z(s0, pad_geo)
-        s0[2] = float(np.clip(s0[2], tz_lo, tz_hi))
-        s0[4] = float(np.clip(s0[4], lb[4], ub[4]))          # keep the (jittered) pitch seed in bounds
-        cost(s0)
-        es = cma.CMAEvolutionStrategy(list(s0), sigma,
-                                      {"maxfevals": max(maxfevals // n_starts, 20), "bounds": [lb, ub],
-                                       "seed": seed + i, "verbose": -9 if not verbose else 1})
-        es.optimize(cost)
+    _hrng = np.random.default_rng(seed + 1)                          # fingertip heights
+    obj_top = float(com[2] + Robj.apply(obj.verts)[:, 2].max())
+    # antipodal pairs: anchor = pair midpoint, axis = pair line
+    for mid, ax, w in antipodal_seed_pairs(obj, N_ANTIPODAL, mu=float(mu), rng_seed=seed):
+        seeds.append(_grasp_from_primitive(mid, ax, w - 3.0e-3, "antipodal", len(seeds)))
+    # medial-axis points: anchor = the point, axis across the local tangent; MULT_FACTOR widths each
+    medial = medial_seed_points(obj, N_MEDIAL_AXIS)
+    _wrng = np.random.default_rng(seed)
+    for c, tan in medial:
+        perp = np.cross(np.asarray(tan, float), [0.0, 0.0, 1.0])
+        if np.linalg.norm(perp) < 1e-6:
+            perp = np.cross(tan, [1.0, 0.0, 0.0])
+        perp = perp / np.linalg.norm(perp)
+        w0 = _local_width(c, Robj.apply(perp))
+        for w in [w0] + list(w0 - _wrng.uniform(0.0, MEDIAL_WIDTH_SPREAD, MULT_FACTOR - 1)):
+            seeds.append(_grasp_from_primitive(c, perp, w, "medial", len(seeds)))
+    if stage_cb is not None:
+        stage_cb("seeds", {"seeds": seeds, "medial": medial})
 
-    # ── ROUND 2: width-refine the top DISTINCT poses (widest holdable = gentlest). CMA optimizes all 7
-    # dims at once and rarely lands on the precise gentlest width; a 1-D width scan at a fixed pose does
-    # (stress is monotone in indent depth, so the largest width that still holds is the gentlest). Refine
-    # SEVERAL distinct poses, not just the CMA best — on elongated objects the gentlest basin (flush
-    # across the short axis) is often not where CMA's raw best landed.
-    if refine and feasible:
-        cur_round[0] = 2
-        for xb in _distinct_tcp_poses(feasible, n=6, pos_thr=1.5 * obj_size, ang_thr=np.radians(30)):
-            # Cap at _w_hi, NOT the hardcoded gripper max: otherwise the refine scan walks a
-            # width-bounded grasp straight back out past `width_max` (measured: a 40 mm cap
-            # still returned a 45.1 mm grasp) and the structural bound leaks.
-            for w in np.linspace(0.7 * xb[6], min(1.6 * xb[6], _w_hi), refine_scan):
-                x2 = xb.copy(); x2[6] = w
-                cost(x2)                                         # updates best if a gentler holdable width wins
+    # ── Step 2: filter — table clearance, rotation box, then per-finger penetration (one batched
+    #    SDF query over the survivors of the two cheap checks) ──
+    for sd in seeds:
+        x = sd["x"]
+        sd["table_ok"] = bool(finger_min_world_z(x, pad_geo) >= table_z - TABLE_TOL)
+        sd["rot_ok"] = bool(lb[3] <= x[3] <= ub[3] and lb[4] <= x[4] <= ub[4] and lb[5] <= x[5] <= ub[5])
+        sd["pen_ok"] = None                                      # None = not checked
+    cand = [sd for sd in seeds if sd["table_ok"] and sd["rot_ok"]]
+    if cand:
+        chunks, owner = [], []
+        for i, sd in enumerate(cand):
+            Lw, Rw = finger_world_pts(sd["x"], pad_geo)
+            for f, P in enumerate((Lw[::3], Rw[::3])):
+                chunks.append(P); owner.append((i, f, len(P)))
+        depth = np.maximum(-obj_sdf(Robj_inv.apply(np.concatenate(chunks) - com)), 0.0)
+        worst = np.zeros((len(cand), 2)); k = 0
+        for (i, f, n) in owner:
+            worst[i, f] = depth[k:k + n].max(); k += n
+        for i, sd in enumerate(cand):
+            sd["pen_ok"] = bool(worst[i].max() <= SEED_PEN_MAX)
+    kept = [sd for sd in cand if sd["pen_ok"]]
+    if stage_cb is not None:
+        stage_cb("filter", {"seeds": seeds, "kept": kept})
 
-    # ── Diversity (opt-in): the single-argmax return concentrates the demo set on one peaked optimum
-    # (v3 pins pitch ~0 and snaps yaw to a few gentle axes). To cover the whole NEAR-GENTLE manifold
-    # instead — for a more learnable, less OOD-prone BC dataset — (1) SAMPLE among feasible grasps whose
-    # score is within `diversity_tol` of the best, and (3) JITTER its orientation/position, re-verifying
-    # the perturbed grasp still holds and stays within tolerance (so every recorded demo is still gentle).
-    # `seed` is per-env in the collector, so each env samples independently -> a broad dataset. Default
-    # (diversity_tol=0, jitter=0) is a NO-OP: `sel_*` stays `best` -> bit-identical to the argmax path.
-    # "auto" area floor: re-select the best-scoring grasp among those in the UPPER HALF of the
-    # feasible pool by worst-pad contact area. Falls back to the raw argmax if the pool carries no
-    # area info (nothing feasible, or every candidate lacks min_pad_area).
-    if _area_auto and feasible:
-        _pool = [(x, sc, res) for (x, sc, res) in feasible
-                 if res.get("min_pad_area") is not None and res.get("stress_top10") is not None]
-        # YIELD GUARD first. Contact area and stress are coupled (area grows with indentation), so
-        # "largest contact area" alone BUYS AREA BY CRUSHING on a small soft object. Measured on the
-        # raspberry (yield 15 kPa): area-only selection ran at 165 % of yield. Restrict to grasps
-        # under YIELD_SAFETY x yield before ranking by area; if none qualify, keep the whole pool
-        # (a too-hard grasp still beats no grasp) but the caller sees the stress and can reject.
-        if yield_stress and _pool:
-            _safe = [t for t in _pool if t[2]["stress_top10"] <= YIELD_SAFETY * float(yield_stress)]
-            if _safe:
-                _pool = _safe
-        if _pool:
-            # Keep the upper half by BOTH contact area AND alignment, then take the best score.
-            # Area alone still admits PINCHES: a fingertip catch on a top edge can clear the area
-            # median while gripping a corner. `align` is the discriminator there -- measured on the
-            # banana chunk, lifts averaged align 0.83 vs 0.53 for failures, and the pinch the user
-            # flagged (ep0004_env3) scored align 0.541 with the jaws nearly fully open. Both are
-            # POOL-RELATIVE medians, so this stays scale-free and adds no fitted constant; if one
-            # criterion empties the set we fall back to the other rather than returning nothing.
-            _med_a = float(np.median([res["min_pad_area"] for _, _, res in _pool]))
-            _med_g = float(np.median([res.get("align", 0.0) or 0.0 for _, _, res in _pool]))
-            _fat = [(x, sc, res) for (x, sc, res) in _pool
-                    if res["min_pad_area"] >= _med_a and (res.get("align", 0.0) or 0.0) >= _med_g]
-            if not _fat:                                   # both filters together were too strict
-                _fat = [(x, sc, res) for (x, sc, res) in _pool if res["min_pad_area"] >= _med_a]
-            if _fat:
-                _bx, _bs, _br = max(_fat, key=lambda t: t[1])
-                best = {"x": np.asarray(_bx, float).copy(), "score": _bs, "res": _br}
+    # ── Step 3: score the survivors; Step 4: top-K ──
+    t0 = time.perf_counter()
+    for sd, res in zip(kept, score_finger_grasp_batch(obj, [sd["x"] for sd in kept], **_kw)):
+        sd["res"], sd["score"], sd["status"] = res, res["score"], res["status"]
+    kept.sort(key=lambda sd: -sd["score"])
+    if stage_cb is not None:
+        stage_cb("score", {"seeds": seeds, "kept": kept, "secs": time.perf_counter() - t0})
+    top = kept[:TOP_K]
+    if stage_cb is not None:
+        stage_cb("topk", {"top": top})
 
-    sel_x, sel_res = best["x"], best["res"]
-    if sel_x is not None and _div_on:
-        drng = _drng                                                   # same stream (after the seed-yaw smear)
-        thr = best["score"] - diversity_tol * abs(best["score"])       # "near-gentle" acceptance floor
-        if diversity_tol > 0.0 and feasible:                           # (1) tolerance sampling (stored res)
-            near = [(x, res) for (x, s, res) in feasible if s >= thr and res.get("stress_top10") is not None]
-            if near:
-                sel_x, sel_res = near[int(drng.integers(len(near)))]
-                sel_x = sel_x.copy()
+    # ── Step 5: CMA-ES from each of the top-K seeds (small budget, small step) ──
+    t0 = time.perf_counter(); cur_round[0] = 1
+    cost_batch([sd["x"] for sd in top])                         # the seeds are the incumbents
+    ess = [cma.CMAEvolutionStrategy(list(sd["x"]), 1.0,
+                                    {"CMA_stds": CMA_STEP, "maxfevals": CMA_BUDGET_PER_SEED,
+                                     "bounds": [lb, ub], "seed": seed + i, "verbose": -9})
+           for i, sd in enumerate(top)]
+    per_run = [[] for _ in top]                                  # feasible (x, score, res) per run
+    while any(not es.stop() for es in ess):                      # lockstep: one batched score per generation
+        live = [i for i, es in enumerate(ess) if not es.stop()]
+        asks = [ess[i].ask() for i in live]
+        n0 = len(feasible)
+        costs = cost_batch([np.asarray(x, float) for X in asks for x in X])
+        for i, X in zip(live, asks):
+            ess[i].tell(X, costs[:len(X)]); costs = costs[len(X):]
+        k = n0                                                   # attribute new feasible candidates to their run
+        # (feasible entries are appended in ask order, so walk both lists together)
+        for i, X in zip(live, asks):
+            for x in X:
+                if k < len(feasible) and np.array_equal(feasible[k][0], np.asarray(x, float)):
+                    per_run[i].append(feasible[k]); k += 1
+    runs = []
+    for i, sd in enumerate(top):
+        new = per_run[i]
+        bx, bs, br = max(new, key=lambda t: t[1]) if new else (None, -np.inf, None)
+        if sd["score"] >= bs and sd.get("res") is not None and is_real_grasp(sd["score"]):
+            bx, bs, br = sd["x"], sd["score"], sd["res"]        # the incumbent seed was never beaten
+        runs.append({"seed": sd, "x": bx, "score": bs, "res": br, "n_feasible": len(new)})
+    # the best DISTINCT grasps over everything CMA evaluated (top-scoring, 5 mm / 10 deg apart)
+    distinct = _distinct_tcp_poses(feasible, n=TOP_K_CMA, pos_thr=0.005, ang_thr=np.radians(10))
+    by_x = {np.asarray(x, float).tobytes(): (x, sc, res) for x, sc, res in feasible}
+    best_k = sorted(({"x": x, "score": sc, "res": res} for x, sc, res in
+                     (by_x[np.asarray(xb, float).tobytes()] for xb in distinct)),
+                    key=lambda c: -c["score"])
+    if stage_cb is not None:
+        stage_cb("cma", {"runs": runs, "best": best_k, "evals": n_eval[0], "secs": time.perf_counter() - t0})
 
-    # Fallback guard: if the selected grasp is somehow invalid (no stress readout), keep the argmax
-    # best (always a holdable "ok" grasp) so downstream never sees a None stress/grip.
-    if sel_res is None or sel_res.get("stress_top10") is None:
-        sel_x, sel_res = best["x"], best["res"]
+    # ── Step 6: width refine — a 1-D scan at each CMA result's pose (widest holdable = gentlest) ──
+    t0, cur_round[0], refined = time.perf_counter(), 2, []
+    X2, owner = [], []
+    for j, c in enumerate(best_k):
+        xb = np.asarray(c["x"], float)
+        for w in np.clip(xb[6] + np.linspace(-REFINE_HALF, REFINE_HALF, REFINE_SCAN), WIDTH_MIN, WIDTH_MAX):
+            x2 = xb.copy(); x2[6] = w; X2.append(x2); owner.append(j)
+    R2 = score_finger_grasp_batch(obj, X2, **_kw)
+    for x2, res in zip(X2, R2):
+        _record(x2, res)
+    for j, c in enumerate(best_k):
+        xb = np.asarray(c["x"], float)
+        rows = [(x2, res) for x2, res, o in zip(X2, R2, owner) if o == j]
+        curve = [(x2[6], res["score"]) for x2, res in rows]
+        cands = [(x2, res["score"], res) for x2, res in rows if is_real_grasp(res["score"])]
+        bx, bs, br = max(cands, key=lambda t: t[1]) if cands else (xb, c["score"], c["res"])
+        if c["score"] >= bs:                                     # the CMA width was already the best
+            bx, bs, br = xb, c["score"], c["res"]
+        refined.append({"from": c, "x": bx, "score": bs, "res": br, "curve": curve})
+    refined.sort(key=lambda r: -r["score"])
+    if stage_cb is not None:
+        stage_cb("refine", {"refined": refined, "secs": time.perf_counter() - t0})
+
+    # ── Step 7: selection — the best refined grasp ──
+    sel_x, sel_res = (refined[0]["x"], refined[0]["res"]) if refined else (best["x"], best["res"])
+    if stage_cb is not None:
+        stage_cb("final", {"x": sel_x, "res": sel_res, "evals": n_eval[0]})
     r = sel_res or {}
     out = {"x": sel_x if sel_x is not None else best["x"],
            "score": r.get("score", best["score"]), "evals": n_eval[0],
            "stress_top10": r.get("stress_top10"), "grip": r.get("grip"), "align": r.get("align"),
            "pressure": r.get("pressure"), "min_pad_area": r.get("min_pad_area"),
-           "width_face": r.get("width_face"),
-           # grasp-quality AUDIT (always populated, independent of whether the terms are weighted) —
-           # consumed by the benchmark's per-episode columns to make stem/pinch/side grasps countable.
-           "tilt_deg": r.get("tilt_deg"), "com_lever": r.get("com_lever"),
-           "cam_azimuth_deg": r.get("cam_azimuth_deg"),
+           "width_face": r.get("width_face"), "tilt_deg": r.get("tilt_deg"), "twist": r.get("twist"),
            "status": r.get("status")}
     if record_history:
         out["history"] = history
+        out["seeds"] = seeds
     return out
 
 
@@ -1029,44 +728,43 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
 # varies per relaunch, not per sub-env), build the FEM ONCE per batch (`build_grasp_fem`) and plan per-env
 # pose (`synthesize_grasp`) — the FEM factorization (the expensive part) is reused across all envs.
 
-def build_grasp_fem(mesh_path, *, voxel_div: int = 14, target_tets: int = 1500, prepare: bool = True,
-                    use_gpu: bool = False, gpu_max_ndof: int = None, nu: float = None):
-    """Build the FEM ElasticObject + finger pad geometry for one object mesh (once per batch). Returns
-    (obj, pad_geo, meta). `use_gpu` toggles the GPU dense solver (default OFF so the metric doesn't
-    starve the simulator's GPU); it self-disables above `gpu_max_ndof` (falls back to CPU sparse)."""
+# FEM Poisson ratio, one value for every object. Unlike E (applied after the solve), nu sets the Lame
+# constants and must be fixed when the FEM is built. 0.33 is what all results so far were built with.
+FEM_NU = 0.33
+# Watertight meshes with at most this many faces are tetrahedralized DIRECTLY (exact volume/thickness);
+# denser or open meshes go through the voxel remesh, which is robust for scans but dilates the body by
+# about one voxel (tofu +22 % volume, banana_chunk +42 %, a 6 mm letter -> 11 mm). Direct tetgen on a
+# dense scan explodes (banana_chunk: 60k tets) or hangs (prim_lamp), hence the face cap.
+DIRECT_TET_MAX_FACES = 2500
+
+
+def build_grasp_fem(mesh_path, *, voxel_div: int = 14, target_tets: int = 1500,
+                    use_gpu: bool = False, nu: float = FEM_NU):
+    """Build the FEM object + finger pad geometry for one mesh (once per batch) -> (obj, pad_geo, meta).
+    `use_gpu` enables the dense GPU solver (falls back to CPU sparse above width_grasp.GPU_MAX_NDOF)."""
     from .geometry import build_elastic_object
     from .preprocess import prepare_mesh, tet_switches
+    from .types import MetricConfig
     from . import width_grasp as wg
     _LF = str(_ROOT / "gentle_manip/assets/xarm/xarm_gripper/meshes/left_finger.STL")
     _RF = str(_ROOT / "gentle_manip/assets/xarm/xarm_gripper/meshes/right_finger.STL")
     raw = trimesh.load(str(mesh_path), force="mesh")
-    mesh = prepare_mesh(raw, voxel_div=voxel_div, force_remesh=True) if prepare else raw
-    # POISSON RATIO. Historically this call passed NO config, so cfg.nu fell back to
-    # MetricConfig's default 0.33 ("copper, as in the paper") for EVERY object — while the
-    # materials declare nu 0.30-0.42 and the DR randomizes object_nu for the MPM sim. Unlike E,
-    # nu CANNOT be rescaled after the fact (it sets the Lame constants, so the whole solution
-    # changes), which is why it has to be chosen here. `nu=None` preserves the historical 0.33 so
-    # every result collected before 2026-08-27 stays reproducible; pass the object's material nu
-    # to use the physically correct value.
-    if nu is None:
-        obj = build_elastic_object(mesh, switches=tet_switches(mesh, target_tets=target_tets))
-    else:
-        from .types import MetricConfig
-        obj = build_elastic_object(mesh, MetricConfig(nu=float(nu)),
-                                   switches=tet_switches(mesh, target_tets=target_tets))
-    cap = gpu_max_ndof if gpu_max_ndof is not None else wg.GPU_MAX_NDOF
-    wg.use_gpu_solve(bool(use_gpu) and obj.fem.ndof <= cap)
+    direct = bool(raw.is_watertight) and len(raw.faces) <= DIRECT_TET_MAX_FACES
+    mesh = raw if direct else prepare_mesh(raw, voxel_div=voxel_div, force_remesh=True)
+    obj = build_elastic_object(mesh, MetricConfig(nu=float(nu)),
+                               switches=tet_switches(mesh, target_tets=target_tets))
+    wg.use_gpu_solve(bool(use_gpu) and obj.fem.ndof <= wg.GPU_MAX_NDOF)
     pad_geo = finger_pad_geometry(_LF, _RF)
-    return obj, pad_geo, {"tets": len(obj.tets), "ndof": int(obj.fem.ndof), "gpu": bool(wg.USE_GPU_SOLVE)}
+    return obj, pad_geo, {"tets": len(obj.tets), "ndof": int(obj.fem.ndof), "gpu": bool(wg.USE_GPU_SOLVE),
+                          "direct_tet": direct}
 
 
 def synthesize_grasp(obj, pad_geo, obj_com, obj_quat_wxyz, *, E: float = 3e5, density: float = 1000.0,
-                     mu: float = 0.7, table_z: float = 0.0, maxfevals: int = 1000, n_starts: int = 6,
+                     mu: float = 0.7, table_z: float = 0.0,
                      seed: int = 0, **plan_kw) -> dict:
     """Plan one grasp for a given object world pose (obj_com = sim object_center, obj_quat_wxyz = its
     orientation). Thin wrapper over `plan_finger_grasp`; returns its dict — `out["x"]` is the executable
     7-DOF TCP grasp `[tx,ty,tz,roll,pitch,yaw,width]` the collector FSM drives directly (like v2's best_x)."""
-    obj_size = float((obj.verts.max(0) - obj.verts.min(0)).max())
     return plan_finger_grasp(obj, obj_com=np.asarray(obj_com, float), obj_quat_wxyz=obj_quat_wxyz,
                              pad_geo=pad_geo, E=E, density=density, mu=mu, table_z=table_z,
-                             obj_size=obj_size, maxfevals=maxfevals, n_starts=n_starts, seed=seed, **plan_kw)
+                             seed=seed, **plan_kw)

@@ -1,0 +1,13 @@
+# [experiment] letter_m: 7d euler abs action, arm-focus cloud, realws DR (no tilt), D435i noise — the shared template.
+# Used by: collect_demos_synth_v4 / DPPO training + eval / deploy
+# Status: active
+
+task: single_lift_letter_m_soft
+action: abs_pose_euler_abs_gripper
+dr: soft_orientation_realws_letter_m
+augmentation: d435i_noise
+
+obs: superset_soft_armfocus
+views: {student: [point_cloud], teacher: [privileged]}
+
+rl: {batch_size: 256, discount: 0.99, max_episode_steps: 400, random_steps: 300, training_starts: 5000}

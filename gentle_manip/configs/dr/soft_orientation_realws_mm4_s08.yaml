@@ -11,7 +11,7 @@
 # cap-up convention and origin height) — see docs/DEVLOG.md item 6, 2026-08-24.
 object_mesh_pool: [mushroom, mushroom1, mushroom2, mushroom3]
 
-object_pos_x: [0.29, 0.48]
+object_pos_x: [0.30, 0.46]
 object_pos_y: [-0.11, 0.11]
 object_nominal_xy: [0.47, 0.0]
 robot_init_pos_xyz: 0.02      # per-env arm-home jitter (unchanged from sim_demo)

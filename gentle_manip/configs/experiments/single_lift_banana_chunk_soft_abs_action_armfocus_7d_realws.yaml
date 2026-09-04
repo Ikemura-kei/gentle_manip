@@ -1,24 +1,13 @@
-# [experiment] banana_chunk EVAL variant of the collection experiment: 7-dim euler-absolute actions.
-# Used by: dppo_eval.sbatch (SIM_EXPERIMENT/EVAL_EXPERIMENT) for the 12-object generalist
-# Status: active (2026-09-01)
-#
-# IDENTICAL to single_lift_banana_chunk_soft_abs_action_armfocus except `action:` -- the policy is trained on 7-dim
-# euler-absolute (derived at conversion), so EVAL must decode that space. A 10-dim config
-# here is inert at collection but FATAL at eval (ActionPipeline indexes [:,9] -> IndexError
-# inside the sim server, surfacing only as 'socket closed mid-message'). See CHECKLISTS S0.
+# [experiment] banana_chunk: 7d euler abs action, arm-focus cloud, realws DR, D435i noise — the shared template.
+# Used by: collect_demos_synth_v4 / DPPO training + eval / deploy
+# Status: active (2026-09-04 per-object cleanup: identical to the tofu file except task/dr names)
+
 task: single_lift_banana_chunk_soft
 action: abs_pose_euler_abs_gripper
 dr: soft_orientation_realws_banana_chunk
-augmentation: l515_noise
+augmentation: d435i_noise
 
 obs: superset_soft_armfocus
-views:
-  teacher: [privileged]
-  student: [point_cloud]
+views: {student: [point_cloud], teacher: [privileged]}
 
-rl:
-  discount: 0.99
-  random_steps: 300
-  training_starts: 5000
-  batch_size: 256
-  max_episode_steps: 400
+rl: {batch_size: 256, discount: 0.99, max_episode_steps: 400, random_steps: 300, training_starts: 5000}

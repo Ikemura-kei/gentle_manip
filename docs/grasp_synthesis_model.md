@@ -1,5 +1,11 @@
 # Grasp synthesis: model reference (verified against code, 2026-08-27)
 
+> **2026-09-04 — PARTLY SUPERSEDED.** `finger_grasp_final.py` was trimmed to the frozen v4.1 recipe +
+> the antipodal variant ONLY. The knobs below marked as CLI flags (`cam_azimuth_max_deg`,
+> `--grasp-area-min-mm2`, `--grasp-width-max-mm`, `--grasp-yaw-max-deg`, `w_peak/w_area/w_com/w_tilt`,
+> `execute_offset`, medial-seed MODE) no longer exist there; their values are frozen constants or gone.
+> This page stays as the DESIGN RECORD of why they existed. See DEVLOG 2026-09-04.
+
 Reference for **paper writing**. Every statement below was checked against the implementation on
 2026-08-27; file/line pointers are given so claims can be re-verified after edits. Where a natural
 paper claim would **overstate** what the code does, it is flagged **⚠ DO NOT CLAIM**.

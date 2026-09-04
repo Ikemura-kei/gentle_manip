@@ -1,33 +1,30 @@
-# [task] Soft tomato lift (5.9 x 6.0 x 4.6 cm — user-set nominal, 2026-08-27. Real local
-# tomatoes are 7-8 cm but that needs ~75 mm of grasp width against a 79 mm planner bound,
-# i.e. AT the gripper's limit; 6 cm keeps a workable ~19 mm margin.)
-# Used by: experiments/single_lift_tomato_soft_abs_action_armfocus.yaml
-# Status: experimental (multi-object synthesis SMOKE TEST, 2026-08-27)
-#
-# Regular tomato ~6.5 cm, 5-lobed. Softer and more bruise-prone than a cherry tomato (larger, riper). E 0.3 MPa / yield 25 kPa, literature-plausible, NOT measured.
-# MPM: grid 180 and substeps 175 follow the project scaling
-# (substeps ~ grid_density * sqrt(E), referenced to the mushroom's 250 / 235 at E 3e5).
+# [task] tomato on the 2026-09-04 D435i board rig. SHARED block = single_lift_tofu_soft.yaml.
+# Used by: experiments/single_lift_tomato_soft_abs_action_armfocus_7d_realws.yaml
+# Status: active
+
+# ── OBJECT-SPECIFIC ──
 object_name: "tomato"
 object_type: "soft"
-mpm_grid_density: 180
 sim_substeps: 175
-mpm_bounds: [[0.27, -0.20, -0.03], [0.67, 0.20, 0.30]]
+mpm_grid_density: 180
+object_spawn_z: 0.08   # max(flat-floor + 20 mm, board + half-diagonal x max scale + 5 mm) = board + half-diagonal x max scale 1.26 + 5 mm (tilted/flipped/scaled spawn must clear the board; flat+20mm = 0.051 did not)
 
-success_z_min: 0.150
-success_z_max: 0.280
+# ── SHARED (identical for all objects) ──
+success_z_min: 0.175
+success_z_max: 0.275
 hold_steps: 30
 success_scale: 0.2
+board_thickness: 0.0138
+board_size: [0.6, 0.7, 0.0138]
+board_center: [0.41, 0.0]
+board_color: [0.647, 0.608, 0.514, 1.0]
+finger_color: [0.1, 0.1, 0.1, 1.0]
+cam_fov: 43.15
+cam_pos: [0.69895466, -0.06643963, 0.3168003]
+cam_lookat: [0.30454208, -0.07412394, 0.0138]
+cam_up: [-0.60697255, -0.06794066, 0.79181336]
 
 rewards:
-  stress:
-    scale: 0.2
-    cap: 1.5                 # fraction of this object's OWN yield (auto-injected)
-    mean_weight: 0.2
-    top10_weight: 0.8
-  dist_to_obj:
-    scale: 0.1
-    decay: 8.0
-  lift:
-    scale: 0.1
-    grasp_gate_dist: 0.075
-    lift_target: 0.13
+  stress: {cap: 1.5, mean_weight: 0.2, scale: 0.2, top10_weight: 0.8}
+  dist_to_obj: {decay: 8.0, scale: 0.1}
+  lift: {grasp_gate_dist: 0.075, lift_target: 0.16, scale: 0.1}   # grasp_gate_dist per object (size-dependent); lift_target shared

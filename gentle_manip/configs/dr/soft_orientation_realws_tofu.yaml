@@ -1,41 +1,24 @@
-# [dr] soft_orientation_realws with the TOFU material range (E 30-80 kPa).
-# Used by: experiments single_lift_tofu_soft_abs_action_armfocus_{realws,7d_realws}
-# Status: experimental (second object category)
-#
-# Matches the CMA-ES demo collection parameters (collect_demos_synth.py defaults):
-#   xy_range=0.04, pitch_roll_range_deg=45, full yaw (360°).
-# Use this for both BC pretraining (via sim server) and eval so the policy sees the
-# same distribution it was trained on.  The wider pitch/roll (45° vs sim_demo's 15°)
-# is the whole point of the rigid orientation experiment.
-# ABSOLUTE spawn region matching the REAL workspace (2026-08-22, user-specified):
-# x in [0.29, 0.48], y in [-0.11, 0.11] (robot-base frame). Overrides the old ±4.5cm
-# box around the registry pose (0.47, 0). nominal_xy converts to the internal offset.
-object_pos_x: [0.29, 0.48]
-object_pos_y: [-0.11, 0.11]
+# [dr] tofu: realws pose DR (SHARED with every object) + this object's shape/size/material ranges.
+# Used by: experiments/single_lift_tofu_soft_abs_action_armfocus_7d_realws.yaml
+# Status: active (2026-09-04 per-object cleanup: shared block = soft_orientation_realws_tofu.yaml)
+
+# ── SHARED (identical for all objects; edit the tofu file and regenerate) ──
+object_pos_x: [0.30, 0.46]
+object_pos_y: [-0.12, 0.12]
 object_nominal_xy: [0.47, 0.0]
-robot_init_pos_xyz: 0.02      # per-env arm-home jitter (unchanged from sim_demo)
-object_yaw_deg: 180           # full 360° yaw (U(-180,180))
-object_pitch_roll_deg: 45     # ±45° pitch & roll — matches --pitch-roll-range 45 in data collection
-object_flip_prob: 0.25        # per-env prob of a big FLIP instead of the ±45° tilt: sets one of pitch/roll
-object_flip_deg: [160, 180]   # to ±U(160,180)° so the mushroom spawns flipped -> settles upright/upside-down
+robot_init_pos_xyz: 0.02
+object_yaw_deg: 180
+object_pitch_roll_deg: 45
+object_flip_prob: 0.25
+object_flip_deg: [160, 180]
+coup_friction: [3.5, 4.5]
 
-# Per-scene SIZE + SHAPE DR (object geometry) — re-randomized per scene rebuild. In collection
-# (collect_demos_synth.py --scene-dr-every) each rebuild deforms+scales the mushroom mesh; in eval
-# the harness drives it deterministically per scene group. Recorded into priv_object_dr_params
-# ([scale, bend_deg]). Ranges match configs/dr/food_shape.yaml (the earlier sim demo collection).
-# Tofu is CUT — near-perfect cuboid. Shape DR reduced to TINY imperfection-level
-# deformation only (user, 2026-08-25); size range widened downward instead.
-object_scale:      [0.8, 1.4]    # uniform object scale (2.4-4.2 cm blocks)
-object_bend_deg:   [-3, 3]       # tiny: real cut-face imperfection, not organic curvature
-object_twist_deg:  [-3, 3]       # tiny
-object_taper:      [-0.03, 0.03] # tiny
-object_axis_scale: [0.95, 1.05]  # near-cubic aspect only
-
-# ── per-scene material (rebuild) ─────────────────────────────────────────────
-# Bounded for MPM stability at the tuned substeps (210): stable substeps ∝ √E, so we keep E on
-# the SOFT side of the tuned 3e5 (softer = fewer substeps needed = always stable). yield stays
-# from the registry material.
-object_E: [3.0e4, 8.0e4]     # tofu firmness range around the 5e4 nominal (see materials.py)
-object_nu: [0.28, 0.38]      # tofu Poisson range
-object_rho: [900, 1100]      # density (kg/m^3)
-coup_friction: [3.5, 4.5]    # rigid<->MPM coupling friction
+# ── OBJECT-SPECIFIC ──
+object_scale: [0.8, 1.4]
+object_axis_scale: [0.95, 1.05]
+object_bend_deg: [0, 0]
+object_twist_deg: [0, 0]
+object_taper: [-0.01, 0.01]
+object_E: [3.0e4, 8.0e4]
+object_nu: [0.28, 0.38]
+object_rho: [900, 1100]

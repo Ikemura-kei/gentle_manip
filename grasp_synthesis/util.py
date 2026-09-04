@@ -7,13 +7,21 @@ the `--grasp-*` "auto" resolvers do NOT (they encode synthesis policy) and stay 
 """
 from __future__ import annotations
 
+import datetime
+import os
 import pickle
+import random
+import string
 import subprocess
-from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
 import numpy as np
+
+# Repo root, for `git rev-parse` provenance. Defined HERE because _git_commit's bare
+# except would otherwise swallow the NameError and silently record an EMPTY commit in
+# every dataset's config.yaml.
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _np(tensor) -> np.ndarray:

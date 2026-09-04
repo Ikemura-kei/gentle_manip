@@ -17,7 +17,6 @@ import argparse
 import csv
 import os
 import dataclasses
-import random
 import tempfile
 import sys
 import time
@@ -46,6 +45,7 @@ from smgrasp import finger_grasp_final as fg  # noqa: E402  (TRIMMED module, 202
 # provably-inert w_occ occlusion term and its ray machinery removed. finger_grasp.py is kept
 # UNCHANGED for v2/v3/v5, eval_grasp_synth and test_grasp_v4, which still audit `occ`.)
 from smgrasp import finger_viz          # noqa: E402  (grasp-pose viz paired with each execution video)
+from live_seed_viz import StageViewer  # noqa: E402  (--dev-viz: standalone step-through window)
 from gentle_manip.actions.action_config import ActionConfig
 from gentle_manip.experiment import Experiment
 from gentle_manip.tasks.single_lift import SingleLiftTask
@@ -64,13 +64,6 @@ N_GRASP       = 37           # gripper close steps
 N_LIFT        = 66          # lift steps
 N_HOLD        = 12           # hold at lift height (success eval window)
 LIFT_HEIGHT   = 0.2         # metres above grasp position
-OBJ_SIZE      = np.array([0.05, 0.05, 0.04])   # rough mushroom AABB half-size
-
-# Kept ONLY because occ_sweep.py / retry_window_probe.py / shelf_ik_probe.py import it as
-# c4.MUSHROOM_MESH. The collector itself no longer falls back to it — a missing mesh_path
-# now raises (see _mesh_for_batch). Those probes still carry the old `or c4.MUSHROOM_MESH`
-# fallback; harmless for a debug probe, but it is the same silent-wrong-object trap.
-MUSHROOM_MESH = str(ROOT / "gentle_manip/assets/objects/mushroom.obj")
 
 # ── Action inversion ──────────────────────────────────────────────────────────
 
@@ -308,20 +301,11 @@ def _x_to_targets(x: np.ndarray, num_envs: int):
 # state is what a later retry/robustness pass would rewind (e.g. jump phase_idx back
 # to "approach" or "grasp" for an env whose object slipped), independent of every
 # other env's progress.
-GRASP_W_ALIGN = 2000.0            # flush-alignment weight (frozen v4.1; was --grasp-align, never passed)
 GRASP_VOXEL_DIV = 14              # FEM remesh resolution (frozen v4.1; was --grasp-voxel-div, never passed)
 GRASP_TARGET_TETS = 1500          # FEM target tet count (ndof stays <~5k) (frozen v4.1; was --grasp-target-tets, never passed)
 GRASP_MU = 0.7                    # pad-object friction coefficient (frozen v4.1; was --grasp-mu, never passed)
-GRASP_FEM_NU = 0.33                # FEM Poisson ratio. NOT the material's: this is
-# MetricConfig's historical default ("copper, as in the paper") and is what every v4.1
-# result was collected with (their config.yaml records grasp_nu: null, which resolved to
-# exactly this — verified bit-identical stiffness). The registry materials declare nu
-# 0.30-0.42, so 0.33 is physically wrong for most objects; switching to the material value
-# is arguably the right fix but CHANGES the FEM solution (nu sets the Lame constants and
-# cannot be rescaled after the E=1 solve), so it is a deliberate separate decision.
-GRASP_ACCEL = 9.81                 # lift-accel safety margin m/s^2: holdability needs 2*mu*grip >= m*(g+accel) (frozen v4.1; was --grasp-accel, never passed)
-GRASP_ESCALATE = 2                # maxfevals multiplier on a failed synth retry (frozen v4.1; was --grasp-escalate, never passed)
 N_FIRM = 8   # "firm" phase duration (steps) — gradual extra close IF triggered, else a no-op hold
+
 PHASES = [
     ("approach", N_HOME_TO_PRE),   # home → pre-grasp pose (slerp + lerp)
     ("settle",   N_SETTLE),        # hold at grasp pose, gripper still open
@@ -333,33 +317,22 @@ PHASES = [
 N_PHASES  = len(PHASES)
 _GRASP_IDX = [name for name, _ in PHASES].index("grasp")   # boundary the firm-check fires at
 
-# ── Robustness idea #1: force/stress-based grasp firming ──────────────────────
-# At the moment an env finishes "grasp" (checked ONCE, per env, at the grasp->firm
-# boundary), read its just-measured grip signal. If the grasp came out weak, close
-# an EXTRA FIRM_EXTRA_CLOSE_M over the "firm" phase before lifting; otherwise skip
-# "firm" entirely. Bounded to fire once per env (a one-way linear FSM check, not a
-# retry loop). The signal is object-type dependent:
-#   RIGID: gripper->object contact FORCE (N). Weak ⟺ force < FIRM_FORCE_THRESH_N.
-#   SOFT:  von-Mises stress top-10% RISE over the settled-rest baseline (Pa) — a
-#          missed/grazing grasp barely perturbs the body, so its stress stays near
-#          rest. Weak ⟺ rise < FIRM_STRESS_THRESH_PA. (Force is None for MPM.)
-# ── Re-grasp (hover-start) demos ──────────────────────────────────────────────
-REGRASP_H_MIN, REGRASP_H_MAX = 0.06, 0.12   # m above the grasp pose (user spec 6-12 cm)
-REGRASP_XY_JIT   = 0.030                    # m — xy scatter radius (user: the object may ROLL
-                                            # after a failed grasp, so 3 cm not 1 cm)
-REGRASP_ROT_DEG  = 8.0                      # deg — small orientation jitter, per axis
-REGRASP_W_MIN, REGRASP_W_MAX = 0.010, 0.080 # m — random part-closed gripper width
-REGRASP_GOTO_STEPS = 40                     # UNRECORDED steps to reach the hover start
-REGRASP_REOPEN_STEPS = 12                   # recorded steps spent RE-OPENING to the nominal width
-                                            # while HOLDING the start pose, before any motion. This
-                                            # is the recovery action itself: a failed grasp leaves
-                                            # the gripper part-closed, and the policy must learn to
-                                            # release before re-approaching.
+# ── Robustness idea #1: force-based grasp firming ─────────────────────────────
+# At the moment an env finishes "grasp" (checked ONCE per env, at the grasp->firm
+# boundary), read its just-measured grip force. If the grasp came out weak
+# (< FIRM_FORCE_THRESH_N) the env closes an extra min(0.5 * commanded closure, 2mm)
+# over the "firm" phase before lifting; otherwise "firm" is a no-op hold that
+# _trim_long_holds collapses. Bounded to fire once per env (a one-way FSM check, not
+# a retry loop). This collector is SOFT-ONLY, and for an MPM body the force is the
+# MPM->finger COUPLING force (XArm7Sim.gripper_coupling_force), which the worker
+# always populates — so there is exactly one firm path.
 
 CLOSURE_SCAN_STEP_M = 0.0005   # width-scan resolution (0.5 mm)
 CLOSURE_SCAN_MAX_M  = 0.012    # scan depth; c_y beyond this is clipped (very soft objects)
 CLOSURE_CMD_MIN_M   = 0.0008   # never command less than this (contact would be marginal)
 CLOSURE_CMD_MAX_M   = 0.008    # hard safety cap
+SCAN_METRIC         = "p98"    # closure-scan yield-crossing stress metric (unmasked 98th pct)
+CLOSURE_GAIN        = 4.92     # commanded closure = CLOSURE_GAIN * c_y (identified once on the mushroom, p98)
 
 
 def surrogate_closure(fem_obj, pad_geo, best_x, obj_com, obj_quat, E, yld, density, mu, table_z,
@@ -415,12 +388,6 @@ def surrogate_closure(fem_obj, pad_geo, best_x, obj_com, obj_quat, E, yld, densi
 FIRM_FORCE_THRESH_N  = 1.0     # below this gripper->object contact force (N) the grasp is
                                # judged weak and gets the extra firm close. For a SOFT body
                                # this is the MPM->finger coupling force, not a rigid contact.
-FIRM_EXTRA_CLOSE_M   = 0.002   # BASE firm close (m, 2.0mm) — applied to EVERY soft grasp. This is the
-                               # unconditional grip margin the old soft path gave all grasps; dropping
-                               # it (skip-firm) cost ~15% success (skip-firm fails 39% vs firm 24%).
-                               # came out weak (stress rise < FIRM_STRESS_THRESH_PA, or rigid force <
-                               # FIRM_FORCE_THRESH_N) — the "squeeze more only when NOT grasped"
-                               # robustness. Soft NEVER skips firm; weak firms base+extra = 4.5mm.
 
 
 def _stress_top10(vm: np.ndarray) -> np.ndarray:
@@ -488,12 +455,6 @@ def execute_and_collect(
     dr_vec=None,                   # (2,) [scale, bend_deg] for priv_object_dr_params
     yield_stress=None,             # Pa — normalizer for priv_stress (None = stress not emitted)
     closure_cmd=None,              # (N,) m — v4 surrogate-selected closure (replaces all constants)
-    regrasp_mask=None,             # (N,) bool — envs collected as RE-GRASP demos (hover start)
-    regrasp_rng=None,              # Generator for the hover-start randomization
-    approach_xy_finish=None,       # v3.2: (lo, hi) per-env xy-progress finish fraction; None = straight line
-    approach_rng=None,             # rng for the per-env f_i draw (reproducibility)
-    trim_max_run: int = HELD_RUN_MAX,   # v3.2: held-run trim knobs (end-of-episode stop supervision)
-    trim_keep: int = HELD_RUN_KEEP,
 ) -> Tuple[List[List[dict]], List[List[np.ndarray]], List[List[float]], np.ndarray, List[List]]:
     """Execute the scripted grasp trajectory with DECOUPLED per-env phase control;
     record (obs, action, reward) per env.
@@ -547,9 +508,7 @@ def execute_and_collect(
     # "weak" is judged by a stress RISE, and 2000 Pa is 5 % of the mushroom's 40 kPa yield but
     # 6.7 % of the cherry tomato's 30 kPa — so the same absolute bar means different things.
     # Express it as that same 5 % of the object's own yield (mushroom unchanged).
-    _firm_weak = None           # v4: per-env, see below (0.5 x commanded closure, capped 2 mm)
     firm_close = np.full(num_envs, _firm_base, np.float32)
-    _has_firm  = any(n == "firm" for n, _ in PHASES)   # --n-firm 0 drops the phase: skip the check too
 
     home_pos  = np.tile(worker.robot.home_pos[None].astype(np.float32),  (num_envs, 1))
     home_quat = np.tile(worker.robot.home_quat[None].astype(np.float32), (num_envs, 1))
@@ -559,94 +518,13 @@ def execute_and_collect(
     slerps = [Slerp([0., 1.], Rot.concatenate([home_r, _wxyz_to_rot(quat_b[i])]))
               for i in range(num_envs)]
 
-    # v3.2 real-style approach: per-env xy-progress finish fraction f_i. The real teleop
-    # approach converges xy EARLY (median: xy aligned at 60% of the pre-close time, still
-    # ~84mm above the grasp) while z descends ~linearly throughout — captured here as
-    # per-AXIS progress profiles over the same phase (CONTINUOUS: no via-point, no corner,
-    # the trajectory never stops; xy eases in with a smoothstep while z keeps moving).
-    # v3.3 approach speed compensation: with a FIXED duration, per-episode speed is
-    # proportional to spawn distance (measured corr 0.91 in sim vs 0.29 in real — humans
-    # move at a ~constant preferred speed and just take longer for farther objects).
-    # Per-env duration = distance / speed reproduces that, and makes the commanded lead
-    # (the BC action magnitude) a near-deterministic function of the current state.
-    _APPR_IDX = 0    # "approach" is always the first phase
-
-
-    if approach_xy_finish is not None:
-        _rng = approach_rng if approach_rng is not None else np.random.default_rng(0)
-        xy_finish = _rng.uniform(approach_xy_finish[0], approach_xy_finish[1], num_envs)
-    else:
-        xy_finish = None
-
-    xy_len = np.linalg.norm(pos_b[:, :2] - home_pos[:, :2], axis=1)
-    z_len = np.abs(pos_b[:, 2] - home_pos[:, 2])
-    appr_dur = np.full(num_envs, int(dict(PHASES)["approach"]), np.int64)
-
-    if xy_finish is not None:
-        # Speed guard: smoothstep peak xy speed = 1.5 * xy_len / (f * dur). Floor f so the
-        # peak stays <= XY_V_MAX (real p95 band + deploy rate clamp). Raising f only ever
-        # SHORTENS the path -> per-step speed after the guard is <= the target, never above.
-        XY_V_MAX = 0.0032   # m/step
-        f_min = 1.5 * xy_len / (XY_V_MAX * appr_dur.astype(np.float64))
-        xy_finish = np.minimum(np.maximum(xy_finish, f_min), 1.0)
-
-    # ── RE-GRASP demos: start ABOVE the object instead of at home ────────────────────
-    # Rationale: BC only ever sees states on the expert trajectory, so after a FAILED grasp the
-    # policy is off-distribution — hovering over the object, gripper part-closed, holding nothing.
-    # These episodes START in exactly that state so the policy has seen how to recover from it.
-    # The novel part is the part-closed WIDTH (a normal approach passes through this height, but
-    # always fully open), which is why width is randomized over the full range.
-    # The move home -> hover is executed but NOT recorded, so the demo's first frame IS the hover.
-    is_rg = (np.zeros(num_envs, bool) if regrasp_mask is None
-             else np.asarray(regrasp_mask, bool).reshape(num_envs))
-    rg_w0 = width_open.copy()          # per-env START width (== nominal for standard envs)
-    if is_rg.any():
-        rg = regrasp_rng if regrasp_rng is not None else np.random.default_rng(0)
-        for i in np.nonzero(is_rg)[0]:
-            # 6-12 cm above the GRASP pose (where a failed attempt leaves the gripper), with a
-            # small xy scatter so it is not perfectly pre-aligned.
-            hp = pos_b[i].astype(np.float32).copy()
-            hp[2] += float(rg.uniform(REGRASP_H_MIN, REGRASP_H_MAX))
-            hp[:2] += rg.uniform(-REGRASP_XY_JIT, REGRASP_XY_JIT, 2)
-            home_pos[i] = hp
-            # small orientation jitter about the planned grasp orientation
-            dr = Rot.from_euler("xyz", np.radians(rg.uniform(-REGRASP_ROT_DEG, REGRASP_ROT_DEG, 3)))
-            rq = (dr * _wxyz_to_rot(quat_b[i])).as_quat()
-            home_quat[i] = np.array([rq[3], rq[0], rq[1], rq[2]], np.float32)
-            # gripper part-closed to a RANDOM width: the genuinely unseen part of the state
-            rg_w0[i] = float(rg.uniform(REGRASP_W_MIN, REGRASP_W_MAX))   # random part-closed START width
-            slerps[i] = Slerp([0., 1.], Rot.concatenate([_wxyz_to_rot(home_quat[i]),
-                                                         _wxyz_to_rot(quat_b[i])]))
-            if xy_finish is not None:
-                xy_finish[i] = 1.0          # straight line: no two-phase approach for a re-grasp
 
     def _env_target(i: int, phase_idx: int, phase_step: int):
         """(pos, quat_wxyz, grip) for env i at its OWN (phase_idx, phase_step)."""
         name, dur = PHASES[phase_idx]
         if name == "approach":
-            dur = int(appr_dur[i])                    # per-env duration (v3.3 speed compensation)
-            if is_rg[i]:
-                # RE-GRASP: hold the hover pose and RE-OPEN to nominal first (the recovery action),
-                # then drive straight to the grasp at the normal constant velocity.
-                if phase_step < REGRASP_REOPEN_STEPS:
-                    a = (phase_step + 1) / REGRASP_REOPEN_STEPS
-                    return (home_pos[i], home_quat[i],
-                            np.float32(rg_w0[i] + a * (width_open[i] - rg_w0[i])))
-                b = (phase_step + 1 - REGRASP_REOPEN_STEPS) / max(dur - REGRASP_REOPEN_STEPS, 1)
-                b = min(b, 1.0)
-                xyzw = slerps[i](b).as_quat()
-                return (home_pos[i] + b * (pos_b[i] - home_pos[i]),
-                        np.array([xyzw[3], xyzw[0], xyzw[1], xyzw[2]], np.float32),
-                        width_open[i])
             alpha = (phase_step + 1) / dur
-            if xy_finish is None:
-                pos = home_pos[i] + alpha * (pos_b[i] - home_pos[i])
-            else:
-                x = min(alpha / xy_finish[i], 1.0)
-                s_xy = x * x * (3.0 - 2.0 * x)          # smoothstep: zero xy-velocity only at ITS arrival
-                pos = np.empty(3, np.float32)
-                pos[:2] = home_pos[i, :2] + s_xy * (pos_b[i, :2] - home_pos[i, :2])
-                pos[2] = home_pos[i, 2] + alpha * (pos_b[i, 2] - home_pos[i, 2])   # z: linear, never pauses
+            pos = home_pos[i] + alpha * (pos_b[i] - home_pos[i])
             xyzw = slerps[i](alpha).as_quat()
             quat = np.array([xyzw[3], xyzw[0], xyzw[1], xyzw[2]], np.float32)
             grip = width_open[i]
@@ -702,8 +580,6 @@ def execute_and_collect(
     # the grasp->firm rise is measured against. None until the first soft state.
 
     def _step(cur_pos, cur_quat, cur_grip, record_mask):
-        nonlocal prev_pos, prev_quat, prev_grip
-
         # Invert scripted target → normalized action (delta needs prev_*; absolute
         # is a stateless per-step transform of the current target alone).
         if action_config.mode == "absolute":
@@ -752,21 +628,6 @@ def execute_and_collect(
         return next_obs_list, state
 
     # ── Main loop: every env advances through PHASES independently ──
-    # Drive the re-grasp envs from home to their hover start WITHOUT recording, so the saved
-    # episode begins at the hover state rather than at home.
-    if is_rg.any():
-        _h0 = np.tile(worker.robot.home_pos[None].astype(np.float32), (num_envs, 1))
-        _q0 = np.tile(worker.robot.home_quat[None].astype(np.float32), (num_envs, 1))
-        _none = np.zeros(num_envs, bool)
-        for k in range(REGRASP_GOTO_STEPS):
-            a = (k + 1) / REGRASP_GOTO_STEPS
-            gp = _h0.copy(); gq = _q0.copy(); gg = np.full(num_envs, 0.08, np.float32)
-            for i in np.nonzero(is_rg)[0]:
-                gp[i] = _h0[i] + a * (home_pos[i] - _h0[i])
-                gq[i] = home_quat[i]
-                gg[i] = 0.08 + a * (rg_w0[i] - 0.08)
-            cur_obs_list, state = _step(gp, gq, gg, record_mask=_none)
-        prev_pos, prev_quat, prev_grip = home_pos.copy(), home_quat.copy(), rg_w0.copy()
 
     while np.any(phase_idx < N_PHASES):
         active = phase_idx < N_PHASES   # (N,) bool — envs still progressing this step
@@ -793,31 +654,29 @@ def execute_and_collect(
         # phase_idx may already be N_PHASES (done envs) — clip before indexing PHASES;
         # those entries are masked out by `active` anyway so the clipped value is unused.
         durations = np.array([PHASES[min(int(p), N_PHASES - 1)][1] for p in phase_idx])
-        in_appr = (phase_idx == _APPR_IDX)
-        durations[in_appr] = appr_dur[in_appr]        # per-env approach duration (v3.3)
         rolled_over = active & (phase_step >= durations)
 
-        # Idea #1: force-based grasp firming. Check ONCE, exactly at the moment an
-        # env finishes "grasp" (about to enter "firm") — read this env's just-measured
-        # contact force. If it's already fine, SKIP "firm" entirely (jump straight to
-        # "lift", +2 instead of +1) rather than stepping through a no-op hold and
-        # relying on the trim pass to clean it up afterward — no artificial stops.
+        # Idea #1: force-based grasp firming. Checked ONCE per env, exactly at the
+        # grasp->firm boundary. A weak grip (contact force < FIRM_FORCE_THRESH_N) closes
+        # an extra min(0.5 * commanded closure, 2mm); every other env passes through
+        # "firm" as a no-op hold that _trim_long_holds collapses afterwards. (Soft never
+        # SKIPS the phase — an earlier skip-straight-to-lift path was removed.)
         advance = np.ones(num_envs, dtype=np.int64)   # normal: one phase forward
         leaving_grasp = rolled_over & (phase_idx == _GRASP_IDX)
-        if _has_firm and np.any(leaving_grasp):
+        if np.any(leaving_grasp):
             # Gripper->object contact force (N). For a soft body this is the MPM->finger COUPLING
             # force (XArm7Sim.gripper_coupling_force), which genesis_worker always populates — so
             # this is the only firm path. (It used to have a von-Mises `else` for soft, written when
             # contact_force was rigid-only; that branch became unreachable and never fired in any
             # collected run — every [firm] line reads "weak grip force N".)
             cf = state.get("contact_force")
-            if cf is not None:                        # ALWAYS firm base; a weak grip firms base+extra
+            if cf is not None:                        # only a WEAK grip closes further
                 for i in np.where(leaving_grasp)[0]:
                     if cf[i] < FIRM_FORCE_THRESH_N:
                         firm_close[i] = min(0.5 * float(_cc[i]), 0.002)
                         print(f"    [firm] env {i}: weak grip force {cf[i]:.2f}N < "
-                              f"{FIRM_FORCE_THRESH_N}N -> closing {firm_close[i]*1000:.1f}mm (base+extra)")
-                    # else: base firm close (never skip)
+                              f"{FIRM_FORCE_THRESH_N}N -> closing {firm_close[i]*1000:.1f}mm")
+                    # else: no extra close, but still pass through the phase
 
         phase_idx[rolled_over]  += advance[rolled_over]
         phase_step[rolled_over]  = 0
@@ -832,8 +691,7 @@ def execute_and_collect(
     if action_config.mode == "absolute":
         for i in range(num_envs):
             act_bufs[i], obs_bufs[i], rew_bufs[i], frame_bufs[i] = _trim_long_holds(
-                act_bufs[i], obs_bufs[i], rew_bufs[i], frame_bufs[i],
-                max_run=trim_max_run, keep=trim_keep)
+                act_bufs[i], obs_bufs[i], rew_bufs[i], frame_bufs[i])
 
     return obs_bufs, act_bufs, rew_bufs, success, frame_bufs
 
@@ -845,28 +703,8 @@ def execute_and_collect(
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-def _yaw_max_arg(args, obj_def):
-    """'auto' -> size-scaled hard yaw bound (see --grasp-yaw-max-deg); a number passes through."""
-    if args.grasp_yaw_max_deg is None:
-        return None
-    if str(args.grasp_yaw_max_deg).lower() != "auto":
-        return float(args.grasp_yaw_max_deg)
-    # LARGEST extent, not smallest: what matters is how much of the object's SILHOUETTE a finger
-    # can hide. A 60 mm pasta bundle is only 25 mm thick but presents a large silhouette from most
-    # angles, so sizing off the thickness gave it the TIGHTEST bound (30 deg) and cost it half its
-    # yield (50 % -> ~17 %) — measured 2026-08-27. The cherry tomato is small in EVERY dimension,
-    # which is why it is the one that vanishes.
-    largest = float(max(obj_def.size))
-    t = (largest - 0.025) / (0.065 - 0.025)
-    return float(np.clip(30.0 + 45.0 * t, 30.0, 75.0))
 
 
-def _area_min_arg(args, scene_dr):
-    """'auto' passes through (the planner picks the floor from its own feasible pool); a number is
-    mm2 and gets the scene-DR scale^2 applied, as before."""
-    if str(args.grasp_area_min_mm2).lower() == "auto":
-        return "auto"
-    return float(args.grasp_area_min_mm2) * 1e-6 * float(scene_dr["scale"]) ** 2
 
 
 
@@ -888,10 +726,8 @@ def main() -> None:
 
     p.add_argument("--n-episodes", type=int, default=50,
                    help="total successful episodes to collect")
-    p.add_argument("--n-envs",     type=int, default=5,
+    p.add_argument("--n-envs",     type=int, default=10,
                    help="parallel envs per batch")
-    p.add_argument("--maxfevals",  type=int, default=1145,
-                   help="CMA-ES function evaluations per env per batch")
     # ── v3 FEM gentleness synthesis ──
     # E / density / yield DEFAULT TO THE OBJECT'S OWN MATERIAL (resolved from the registry after the
     # experiment loads). They used to default to 3e5 / 1000 — the MUSHROOM's values — for every
@@ -900,131 +736,42 @@ def main() -> None:
     # AND the grip force were wrong per object. On the raspberry (true E 1e5) the planner believed
     # it had 3x the grip it actually had, and reported 24.8 kPa where the true figure is ~8.3 kPa.
     # Pass a value explicitly to override.
-    p.add_argument("--scan-metric", choices=("masked", "p98"), default="p98",
-                   help="stress metric for the closure scan's yield crossing. 'p98' (DEFAULT -- "
-                        "the collection recipe): unmasked 98th percentile; errs GENTLE, so its "
-                        "failures are unsaved lift failures (wall-clock cost only) and saved-demo "
-                        "sub-yield was 88-100%% on every object in the 7-object A/B. 'masked' = "
-                        "contact-masked top10; errs FIRM -- better success on strawberry/"
-                        "banana_chunk but saves past-yield episodes on raspberry (56%% sub-yield), "
-                        "i.e. damaged data. Use masked only for comparison/ablation, never for a "
-                        "frozen dataset without per-episode stress filtering.")
-    p.add_argument("--closure-gain", type=float, default=None,
-                   help="v4: commanded closure = gain * c_y, where c_y is the closure at which the "
-                        "SURROGATE predicts yield at the chosen pose. The single global constant of "
-                        "the executor, identified once on the mushroom per metric: masked c_y 4.88 mm "
-                        "-> 1.31; p98 c_y 1.30 mm -> 4.92 (both against the measured-good 6.4 mm). "
-                        "Default None resolves the gain matching --scan-metric — pairing p98 with "
-                        "the masked gain would command ~4x too little. Replaces v3's constants.")
-    p.add_argument("--regrasp-prob", type=float, default=0.0,
-                   help="Fraction of episodes collected as RE-GRASP demos: the gripper STARTS "
-                        "6-12 cm above the grasp pose with a RANDOM part-closed width and a small "
-                        "(+-8 deg) orientation jitter, then drives straight to the grasp at the "
-                        "normal constant velocity -- no two-phase approach. Mimics the state a "
-                        "FAILED grasp leaves the gripper in, which BC otherwise never sees (a "
-                        "normal approach passes through that height but always fully OPEN, so the "
-                        "part-closed width is the genuinely unseen part). The home->hover move is "
-                        "NOT recorded, so the demo's first frame is the hover state. Episodes are "
-                        "labelled re-grasp-demo vs standard in dr_params.csv. 0 = off; ~0.2 for a "
-                        "real collection; 1.0 to smoke-test the path.")
     p.add_argument("--table-z",           type=float, default=0.0,  help="table surface height (world z, m)")
-    p.add_argument("--grasp-n-starts",    type=int,   default=6,    help="CMA multi-start count")
-    p.add_argument("--keep-synth-failures", action="store_true",
-                   help="SAVE episodes whose grasp synthesis failed and fell back to the default "
-                        "top-down grasp. Off by default because those demos are actively HARMFUL: "
-                        "the fallback closes to a fixed 45 mm regardless of the object, and the "
-                        "old comment's assumption that such an episode 'may not lift -> simply "
-                        "won't be saved' is FALSE for a wide object -- on the banana (70 mm across "
-                        "the crescent) it CRUSHES the object and lifts it, so it was saved as a "
-                        "success. Measured 2026-08-26: 5 of 8 saved banana episodes were crushing "
-                        "fallbacks. A demonstrator that crushes teaches a policy that crushes.")
-    p.add_argument("--grasp-gpu",         action="store_true",
-                   help="use the GPU FEM solver (default CPU, so the metric doesn't compete with the sim GPU)")
     # ── Grasp-pose DIVERSITY (ON by default — these defaults broaden the demo distribution to match v2's
     # coverage: pitch σ≈14°, continuous yaw, at ~85% collect success. Set the knobs to 0/None for the old
     # single-argmax, concentrated behaviour (v3 otherwise pins pitch~0 + snaps yaw to a few gentle axes).
-    p.add_argument("--grasp-diversity-tol", type=float, default=0.3,
-                   help="sample among feasible grasps within this FRACTION of the best gentleness score "
-                        "(0=off/argmax; 0.3 default = accept up to 30%% worse score -> diverse but still gentle)")
     p.add_argument("--scene-dr-every", type=int, default=1,
                    help="re-randomize object SIZE+SHAPE every N batches by rebuilding the worker "
                         "(needs shape/scale fields in the experiment DR config; 0 = off, nominal "
                         "geometry). Geometry is shared across a batch's envs (batched build).")
     p.add_argument("--seed",       type=int, default=0,
                    help="RNG seed for pose DR")
-    p.add_argument("--keep-failures", action="store_true",
-                   help="also save episodes where the grasp failed (default: success only)")
     p.add_argument("--record-video", nargs="?", type=int, const=10**9, default=0,
                    help="record per-episode mp4 videos + grasp-pose PNGs to <out-dir>/videos/ (slower). "
                         "Bare `--record-video` = ALL episodes; `--record-video N` = only the FIRST N saved "
                         "episodes (rendering stops after N -> no extra cost/disk on a long run). Off by default.")
-    p.add_argument("--n-home-to-pre", type=int, default=N_HOME_TO_PRE,
-                   help="home -> pre-grasp interpolation steps (the 'approach' phase length); "
-                        f"default matches the module constant ({N_HOME_TO_PRE}). Recorded into "
-                        "config.yaml's control.n_home_to_pre so a non-default run is clearly marked.")
     p.add_argument("--n-grasp", type=int, default=N_GRASP,
                    help=f"gripper-close steps (the 'grasp' phase length); default {N_GRASP}. A shorter "
                         "close reaches the target width sooner (less dwell before the lift).")
-    p.add_argument("--n-settle", type=int, default=N_SETTLE,
-                   help=f"hold-at-grasp-pose steps before closing; default {N_SETTLE}. Item-2 finding: "
-                        "real teleop hovers ~6 steps at the grasp pose before closing (scripted ~2).")
-    p.add_argument("--approach-xy-finish", type=float, nargs=2, default=None,
-                   metavar=("F_LO", "F_HI"),
-                   help="v3.2 real-style approach: per-env xy-progress finish fraction sampled "
-                        "uniform [F_LO, F_HI] (real median 0.60; recipe 0.45 0.75). xy converges "
-                        "early (smoothstep) while z descends linearly — continuous, no stopping. "
-                        "Default None = straight-line approach (bit-identical to v3/v3.1).")
-    p.add_argument("--grasp-area-min-mm2", type=str, default="0",
-                   help="v3.3 anti-stem/pinch HARD floor: reject grasps whose WORST pad grips less "
-                        "than this many mm^2 of object surface (v4 anti-pinch floor in the FEM "
-                        "planner; auto-scaled by scene scale^2). Measured: stem grasp 8 mm^2 vs "
-                        "cap grasp 49 mm^2; suggest 15. 0 (default) = off.")
-    p.add_argument("--held-run-max", type=int, default=HELD_RUN_MAX,
-                   help=f"trim held-command runs LONGER than this (default {HELD_RUN_MAX}); "
-                        "v3.2 recipe 12 (with --held-run-keep 10) preserves ~10 stop frames at "
-                        "the episode end — the 'stop at lift height' supervision the 4-frame "
-                        "floor was starving (fleli hold deficit).")
-    p.add_argument("--held-run-keep", type=int, default=HELD_RUN_KEEP,
-                   help=f"frames kept from a trimmed run (default {HELD_RUN_KEEP}); v3.2 recipe 10.")
-    p.add_argument("--cam-azimuth-max-deg", type=float, default=None,
-                   help="item-5 occlusion bound: shaped penalty on grasp yaw beyond this azimuth from "
-                        "the camera-perpendicular direction (deg; None = off). Passed to the FEM "
-                        "planner with the task camera's position; also centres the CMA seed fan. "
-                        "45 validated in the v5c profile (fully-hidden episodes 24%% -> 4%%).")
-    p.add_argument("--n-firm", type=int, default=N_FIRM,
-                   help=f"'firm' phase steps (post-grasp extra squeeze idea #1); default {N_FIRM}. "
-                        "0 = NO firm phase at all — the grasp goes straight to lift at width_cls "
-                        "(matches the pre-firm v1 collector, e.g. the cho dataset).")
+    p.add_argument("--dev-viz", action="store_true",
+                   help="STANDALONE step-through window (not Genesis) for ENV 0 of each batch: each synthesis "
+                        "stage is drawn and BLOCKS until you press q (GM_DEV_VIZ_AUTOADVANCE=<s> auto-plays).")
     p.add_argument("--dev-viewer", action="store_true",
                    help="DEV: force --n-envs 1 and open the Genesis viewer window so the scripted "
                         "grasp can be watched live. Slow and interactive — never use for collection.")
-    p.add_argument("--grasp-antipodal-seeds", action="store_true",
-                   help="seed CMA-ES from ANTIPODAL surface pairs (force-closure geometry) instead "
-                        "of the COM-anchored yaw fan. Opt-in: default OFF reproduces frozen v4.1 "
-                        "exactly. Falls back to the yaw fan when no pair qualifies.")
-    p.add_argument("--grasp-yaw-max-deg", type=str, default=None,
-                   help="bound the TOOL yaw about the gripper's HOME orientation (yaw 0), in deg, "
-                        "at CMA time — box + seed clip, folded for the parallel-jaw 180-deg "
-                        "symmetry. cam_azimuth_max_deg bounds the fan about the CAMERA, which still "
-                        "permitted ~90 deg home-frame yaw and real-rig occlusion. Suggest 55. "
-                        "None (default) = unchanged.")
     args = p.parse_args()
     if getattr(args, "dev_viewer", False) and args.n_envs != 1:
         print(f"[dev-viewer] forcing --n-envs {args.n_envs} -> 1 (one viewer window, one env)")
         args.n_envs = 1
 
-    # Approach-phase length is configurable so a dataset can be collected with a shorter/longer
-    # home->pre-grasp interpolation to study its effect on downstream policy learning; PHASES is
-    # module-level (execute_and_collect reads the globals directly), so rebuild it from the CLI value.
+    # PHASES is module-level (execute_and_collect reads the globals directly); only the grasp
+    # (close) length is a CLI knob.
     global PHASES, N_PHASES, _GRASP_IDX
     PHASES = [
-        ("approach", args.n_home_to_pre),
-        ("settle",   args.n_settle),
+        ("approach", N_HOME_TO_PRE),
+        ("settle",   N_SETTLE),
         ("grasp",    args.n_grasp),
-    ]
-    if args.n_firm > 0:                    # --n-firm 0 drops the firm phase entirely (cho/v1 behaviour)
-        PHASES.append(("firm", args.n_firm))
-    PHASES += [
+        ("firm",     N_FIRM),
         ("lift",     N_LIFT),
         ("hold",     N_HOLD),
     ]
@@ -1051,18 +798,10 @@ def main() -> None:
     _mat_E     = float(_mat.youngs_modulus)
     _mat_rho   = float(_mat.density)
     _mat_yield = float(_mat.von_mises_yield_stress)
-    _fem_nu = GRASP_FEM_NU
+    _fem_nu = fg.FEM_NU                 # one FEM Poisson ratio for every object (planner constant)
     print(f"  grasp material ({exp.task_cfg['object_name']}): E={_mat_E:.3g} Pa  "
-          f"rho={_mat_rho:.0f}  yield={_mat_yield:.3g} Pa  (FEM nu=0.33 historical)")
-    _yaw = _yaw_max_arg(args, _god(exp.task_cfg["object_name"]))
-    if _yaw is not None:
-        print(f"  grasp yaw bound: {_yaw:.1f} deg (largest extent "
-              f"{1000*max(_god(exp.task_cfg['object_name']).size):.1f} mm)")
+          f"rho={_mat_rho:.0f}  yield={_mat_yield:.3g} Pa  (FEM nu={_fem_nu})")
     spec       = task.scene_spec
-    # item-5 occlusion bound: the task camera's world position, only when the knob is on
-    # (None keeps the planner call byte-identical to the baseline recipe).
-    cam_pos = (np.asarray(spec.cameras[0].pos, float)
-               if args.cam_azimuth_max_deg is not None else None)
     obs_config = exp.collection_obs()
     priv_cfg   = obs_config.privileged        # sim-only state-teacher fields (None if not requested)
     action_config = exp.action_config
@@ -1083,21 +822,14 @@ def main() -> None:
         "source":      "cmaes_synth",
         "git_commit":  _git_commit(),
         "experiment":  args.experiment,
-        "control":     {"n_envs": args.n_envs, "maxfevals": args.maxfevals,
+        "control":     {"n_envs": args.n_envs,
                         "n_episodes": args.n_episodes, "scene_dr_every": args.scene_dr_every,
-                        "seed": args.seed, "n_home_to_pre": args.n_home_to_pre,
-                        "n_grasp": args.n_grasp, "n_lift": N_LIFT, "n_firm": args.n_firm,
-                        "n_settle": args.n_settle,
-                        "cam_azimuth_max_deg": args.cam_azimuth_max_deg,
-                        "approach_xy_finish": list(args.approach_xy_finish) if args.approach_xy_finish else None,
-                        "held_run_max": args.held_run_max, "held_run_keep": args.held_run_keep,
-                        "grasp_area_min_mm2": args.grasp_area_min_mm2,
-                        "grasp_escalate": int(GRASP_ESCALATE),
-                        "regrasp_prob": args.regrasp_prob,
-                        "scan_metric": args.scan_metric,
-                        "closure_gain": args.closure_gain,
-                        "grasp_yaw_max_deg": args.grasp_yaw_max_deg,
-                        "grasp_yaw_max_deg_resolved": _yaw,
+                        "seed": args.seed, "n_home_to_pre": N_HOME_TO_PRE,
+                        "n_grasp": args.n_grasp, "n_lift": N_LIFT, "n_firm": N_FIRM,
+                        "n_settle": N_SETTLE,
+                        "held_run_max": HELD_RUN_MAX, "held_run_keep": HELD_RUN_KEEP,
+                        "scan_metric": SCAN_METRIC,
+                        "closure_gain": CLOSURE_GAIN,
                         "grasp_nu": _fem_nu, "mat_E": _mat_E, "mat_rho": _mat_rho, "mat_yield": _mat_yield,
                         },
         "dr": exp.dr,
@@ -1105,9 +837,6 @@ def main() -> None:
 
     print(f"\n=== collect_demos_synth  experiment={args.experiment}"
           f" — target {args.n_episodes} episodes, {args.n_envs} envs/batch")
-    if args.n_home_to_pre != N_HOME_TO_PRE:
-        print(f"  *** NON-DEFAULT n_home_to_pre={args.n_home_to_pre} "
-              f"(module default is {N_HOME_TO_PRE}) — recorded in config.yaml ***")
 
     rng = np.random.default_rng(args.seed)   # DR RNG (pose + scene) — must precede the first build
     # Separate stream (distinct offset so it never shares draws with `rng` above, keeping
@@ -1115,7 +844,6 @@ def main() -> None:
     # (previously every _synth_worker call used run_cmaes's hardcoded default seed=2567, so
     # ALL envs/batches shared the identical internal search sequence regardless of --seed).
     cma_seed_rng = np.random.default_rng(args.seed + 1_000_000)
-    approach_rng = np.random.default_rng(args.seed + 2_000_000)   # v3.2 per-env xy-finish draws
 
     # ── Build scene + worker (with per-scene SIZE+SHAPE DR) ──
     # Scene DR re-randomizes object geometry by REBUILDING the worker every N batches (GenesisWorker
@@ -1125,10 +853,7 @@ def main() -> None:
     do_scene_dr    = args.scene_dr_every > 0 and dr_cfg.has_scene_dr()
     deform_dir     = tempfile.mkdtemp(prefix="gm_synth_deform_") if do_scene_dr else None
 
-    _regrasp_rng = np.random.default_rng(args.seed + 977)   # independent of the scene RNG
-    if args.closure_gain is None:
-        args.closure_gain = 1.31 if args.scan_metric == "masked" else 4.92
-    print(f"  closure scan: metric={args.scan_metric} gain={args.closure_gain}")
+    print(f"  closure scan: metric={SCAN_METRIC} gain={CLOSURE_GAIN}")
     _mesh_cycle = None    # round-robin cursor (see --mesh-cycle);
                                                      # must precede the first _make_worker() call
     def _make_worker():
@@ -1178,8 +903,7 @@ def main() -> None:
     dr_writer.writerow(["batch", "env", "success", "obj_dx", "obj_dy",
                         "roll_deg", "pitch_deg", "yaw_deg", "flipped",
                         "home_dx", "home_dy", "home_dz", "scene_scale", "scene_bend_deg",
-                        "mesh_variant",
-                        "episode_type", "closure_cmd_mm",
+                        "mesh_variant", "closure_cmd_mm",
                         "twist_deg", "taper", "rbf", "axis_scale", "axis_scale_ax",
                         "mat_E", "mat_nu", "mat_rho", "coup_friction",
                         "stress_Pa", "grip_N", "align", "pressure_Pa", "min_pad_mm2", "width_mm", "tilt_deg",
@@ -1281,57 +1005,25 @@ def main() -> None:
         if actual_mesh != fem_mesh:
             fem_obj, fem_pad_geo, fem_meta = fg.build_grasp_fem(
                 actual_mesh, voxel_div=GRASP_VOXEL_DIV, target_tets=GRASP_TARGET_TETS,
-                use_gpu=args.grasp_gpu, nu=_fem_nu)
+                use_gpu=True, nu=_fem_nu)
             fem_mesh = actual_mesh
             print(f"  FEM: {fem_meta['tets']} tets, ndof={fem_meta['ndof']}, gpu={fem_meta['gpu']}")
+            _viz_pad_geo = fem_pad_geo          # pad placement is known only once the FEM is built
         all_best_x = []
         closure_cmd: list = []          # v4: per-env surrogate-selected closure (m)
-        synth_failed: set[int] = set()      # envs running the fallback grasp (see --keep-synth-failures)
+        synth_failed: set[int] = set()      # envs running the fallback grasp (never saved)
         all_grasp  = []                                          # per-env synthesis dict (for the grasp-pose viz)
         for i in range(n):
             cma_seed = int(cma_seed_rng.integers(1, 2**31 - 1))
+            live_viz = (StageViewer(fem_obj, obj_pos_all[i], obj_quat_all[i], _viz_pad_geo,
+                                    label=f"batch {batch_idx} env {i} — {args.experiment}")
+                        if (args.dev_viz and i == 0) else None)    # step-through window: env 0 only
             r = fg.synthesize_grasp(fem_obj, fem_pad_geo, obj_pos_all[i], obj_quat_all[i],
                                     E=_mat_E, density=_mat_rho, mu=GRASP_MU,
-                                    table_z=args.table_z, maxfevals=args.maxfevals,
-                                    n_starts=args.grasp_n_starts, seed=cma_seed, accel=GRASP_ACCEL,
-                                    diversity_tol=args.grasp_diversity_tol,
-                                    w_align=GRASP_W_ALIGN,
-                                    cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg,
-                                    area_min=_area_min_arg(args, scene_dr),
+                                    table_z=args.table_z, seed=cma_seed,
                                     yield_stress=_mat_yield,
-                                    antipodal_seeds=bool(args.grasp_antipodal_seeds),
-                                    **({"yaw_max_deg": _yaw} if _yaw is not None else {}))
-            if r.get("x") is None or r.get("stress_top10") is None:   # diversity found no feasible grasp;
-                print(f"  Env {i}: no feasible diverse grasp -> retry WITHOUT diversity")  # retry reliably
-                r = fg.synthesize_grasp(fem_obj, fem_pad_geo, obj_pos_all[i], obj_quat_all[i],
-                                        E=_mat_E, density=_mat_rho, mu=GRASP_MU,
-                                        table_z=args.table_z, maxfevals=args.maxfevals,
-                                        n_starts=args.grasp_n_starts, seed=cma_seed + 7, accel=GRASP_ACCEL,
-                                        cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg,
-                                        area_min=_area_min_arg(args, scene_dr),
-                                        yield_stress=_mat_yield,
-                                    antipodal_seeds=bool(args.grasp_antipodal_seeds),
-                                    **({"yaw_max_deg": _yaw} if _yaw is not None else {}))
-            # BUDGET ESCALATION: the retry above only drops diversity; if synthesis is still empty
-            # the feasible set is simply too small for this budget to land in. Double it and look
-            # again (see --grasp-escalate). Runs only on the failure path, so a run whose grasps all
-            # succeed at the base budget is bit-identical to before this existed.
-            for _esc in range(1, int(GRASP_ESCALATE) + 1):
-                if r.get("x") is not None and r.get("stress_top10") is not None:
-                    break
-                mult = 2 ** _esc
-                print(f"  Env {i}: still no feasible grasp -> escalating budget x{mult} "
-                      f"({args.grasp_n_starts * mult} starts, {args.maxfevals * mult} fevals)")
-                r = fg.synthesize_grasp(fem_obj, fem_pad_geo, obj_pos_all[i], obj_quat_all[i],
-                                        E=_mat_E, density=_mat_rho, mu=GRASP_MU,
-                                        table_z=args.table_z, maxfevals=args.maxfevals * mult,
-                                        n_starts=args.grasp_n_starts * mult,
-                                        seed=cma_seed + 13 * _esc, accel=GRASP_ACCEL,
-                                        cam_pos=cam_pos, cam_azimuth_max_deg=args.cam_azimuth_max_deg,
-                                        area_min=_area_min_arg(args, scene_dr),
-                                        yield_stress=_mat_yield,
-                                    antipodal_seeds=bool(args.grasp_antipodal_seeds),
-                                        **({"yaw_max_deg": _yaw} if _yaw is not None else {}))
+                                    record_history=bool(args.dev_viz),
+                                    stage_cb=(live_viz.on_stage if live_viz is not None else None))
             best_x = r["x"]
             if best_x is None or r.get("stress_top10") is None:       # extremely rare: still nothing ->
                 # default straight-down grasp at the object xy so the FSM never sees None (this episode may
@@ -1351,8 +1043,8 @@ def main() -> None:
                                         obj_pos_all[i], obj_quat_all[i],
                                         _E_scan, float(_mat_yield),
                                         _mat_rho, GRASP_MU, args.table_z,
-                                        metric=args.scan_metric)
-                _cc = float(np.clip(args.closure_gain * _cy, CLOSURE_CMD_MIN_M, CLOSURE_CMD_MAX_M))
+                                        metric=SCAN_METRIC)
+                _cc = float(np.clip(CLOSURE_GAIN * _cy, CLOSURE_CMD_MIN_M, CLOSURE_CMD_MAX_M))
                 print(f"  Env {i}: c_y={_cy*1000:.1f}mm -> commanded closure {_cc*1000:.1f}mm")
             else:
                 _cc = 0.002                      # fallback grasp: episodes are dropped anyway
@@ -1381,15 +1073,10 @@ def main() -> None:
         rec_this_batch = args.record_video > 0 and total_saved < args.record_video
         print(f"  Executing …")
         try:
-            _rg_mask = (_regrasp_rng.random(args.n_envs) < float(args.regrasp_prob))
             obs_bufs, act_bufs, rew_bufs, success, frame_bufs = execute_and_collect(
                 worker, all_best_x, init_obs_batch, perception, action_config,
                 record_video=rec_this_batch, priv_cfg=priv_cfg, dr_vec=dr_vec,
-                approach_xy_finish=args.approach_xy_finish, approach_rng=approach_rng,
-                trim_max_run=args.held_run_max, trim_keep=args.held_run_keep,
-                yield_stress=_mat_yield,
-                closure_cmd=closure_cmd,
-                regrasp_mask=_rg_mask, regrasp_rng=_regrasp_rng)
+                yield_stress=_mat_yield, closure_cmd=closure_cmd)
             consec_batch_aborts = 0
         except Exception as e:
             # Some scene draws are systematically unstable (solver NaN mid-episode even after a
@@ -1426,7 +1113,6 @@ def main() -> None:
                                 round(float(scene_dr.get("scale", 1.0)), 4),
                                 round(float(scene_dr.get("bend_deg", 0.0)), 2),
                                 scene_dr.get("mesh_variant", ""),
-                                ("re-grasp-demo" if _rg_mask[i] else "standard"),
                                 round(1000 * float(closure_cmd[i]), 2),
                                 round(float(scene_dr.get("twist_deg", 0.0)), 2),
                                 round(float(scene_dr.get("taper", 0.0)), 4),
@@ -1443,7 +1129,7 @@ def main() -> None:
                                 round(float(g["x"][6] * 1e3), 2),
                                 round(float(g.get("tilt_deg") or 0), 1),
                                 None,                      # dataset_idx, stamped in the save loop
-                                args.scan_metric])
+                                SCAN_METRIC])
 
         # ── Package and shard successful (or all) episodes ──
         for i in range(n):
@@ -1457,10 +1143,9 @@ def main() -> None:
                     imageio.mimwrite(str(vid_path), frame_bufs[i], fps=round(rate_hz), quality=8)
                     _save_grasp_pose(vid_dir, vid_path.stem, i)
                     print(f"    fail video → {vid_path.name}")
-                if not args.keep_failures:
-                    continue
+                continue
 
-            if i in synth_failed and not args.keep_synth_failures:
+            if i in synth_failed:
                 # Fallback (no synthesized grasp): drop the demo even though it "succeeded" — it
                 # succeeded by crushing. The failure video above is still written for inspection.
                 total_fallback_dropped += 1

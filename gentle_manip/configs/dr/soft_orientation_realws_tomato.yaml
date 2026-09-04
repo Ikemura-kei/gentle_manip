@@ -1,24 +1,25 @@
-# [dr] njhbz realws recipe for TOMATO (single mesh).
-# Used by: experiments/single_lift_tomato_soft_abs_action_armfocus.yaml
-# Status: experimental (smoke test, 2026-08-27)
-#
-# Matches soft_orientation_realws_banana except the material range, which brackets this
-# object's own E/rho. Material values are literature-plausible, NOT measured.
-object_pos_x: [0.29, 0.48]
-object_pos_y: [-0.11, 0.11]
+# [dr] tomato: realws pose DR (SHARED with every object) + this object's shape/size/material ranges.
+# Used by: experiments/single_lift_tomato_soft_abs_action_armfocus_7d_realws.yaml
+# Status: active (2026-09-04 per-object cleanup: shared block = soft_orientation_realws_tofu.yaml)
+
+# ── SHARED (identical for all objects; edit the tofu file and regenerate) ──
+object_pos_x: [0.30, 0.46]
+object_pos_y: [-0.12, 0.12]
 object_nominal_xy: [0.47, 0.0]
 robot_init_pos_xyz: 0.02
 object_yaw_deg: 180
 object_pitch_roll_deg: 45
 object_flip_prob: 0.25
 object_flip_deg: [160, 180]
-object_bend_deg:   [-25, 25]
-object_twist_deg:  [-20, 20]
-object_taper:      [-0.15, 0.15]
+coup_friction: [3.5, 4.5]
+
+# ── OBJECT-SPECIFIC ──
+object_scale: [0.9, 1.1]
 object_axis_scale: [0.95, 1.15]
-object_mesh_pool: [tomato1, tomato3, tomato4, tomato5]   # per-scene base-mesh randomization over the photo-derived variants
-object_scale:      [0.90, 1.10]
-object_E: [2.40e+05, 3.60e+05]
+object_bend_deg: [-25, 25]
+object_twist_deg: [-20, 20]
+object_taper: [-0.15, 0.15]
+object_E: [240000.0, 360000.0]
 object_nu: [0.37, 0.43]
 object_rho: [950, 1050]
-coup_friction: [3.5, 4.5]
+object_mesh_pool: [tomato1, tomato3, tomato4, tomato5]

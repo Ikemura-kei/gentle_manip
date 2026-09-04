@@ -5,7 +5,7 @@
 # scale [0.9, 1.1] (user): the 9.5 cm banana is 3.24 cm thick, so this spans 2.9-3.6 cm of
 # grasp width — comfortably inside the 8.8 cm opening. Everything else matches
 # soft_orientation_realws_mm4_s08.
-object_pos_x: [0.29, 0.48]
+object_pos_x: [0.30, 0.46]
 object_pos_y: [-0.11, 0.11]
 object_nominal_xy: [0.47, 0.0]
 robot_init_pos_xyz: 0.02

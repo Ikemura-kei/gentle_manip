@@ -1,0 +1,25 @@
+# [dr] letter_c: realws pose DR (SHARED) + tofu-like shape/size/material. NO pitch/roll and NO flip: the letter
+# lies flat as modelled (thin axis z); yaw is free.
+# Used by: experiments/single_lift_letter_c_soft_abs_action_armfocus_7d_realws.yaml
+# Status: active
+
+# ── SHARED (identical for all objects; edit the tofu file and regenerate) ──
+object_pos_x: [0.30, 0.46]
+object_pos_y: [-0.12, 0.12]
+object_nominal_xy: [0.47, 0.0]
+robot_init_pos_xyz: 0.02
+object_yaw_deg: 180
+object_pitch_roll_deg: 0
+object_flip_prob: 0.0
+object_flip_deg: [160, 180]
+coup_friction: [3.5, 4.5]
+
+# ── OBJECT-SPECIFIC (tofu-like) ──
+object_scale: [0.8, 1.4]
+object_axis_scale: [0.95, 1.05]
+object_bend_deg: [0, 0]
+object_twist_deg: [0, 0]
+object_taper: [-0.01, 0.01]
+object_E: [3.0e4, 8.0e4]
+object_nu: [0.28, 0.38]
+object_rho: [900, 1100]

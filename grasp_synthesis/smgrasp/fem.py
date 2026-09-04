@@ -226,6 +226,49 @@ class FEM:
         lam = np.linalg.solve(S, -np.asarray(g, float))
         return -(W @ lam), lam
 
+    def solve_constrained_gpu_batch(self, nodes_list, axis_list, g_list):
+        """Batched `solve_constrained_gpu`: ONE dense `lu_solve` for every candidate's constraint columns,
+        then each candidate's small Schur system on the GPU. Returns (U, lams): U (ndof, K) torch tensor
+        of displacements (left on the device for `element_stress_gpu`), lams = list of numpy multipliers.
+        Per candidate k the constraint is a^T u_i = g_i on its contact nodes (3 nnz per column).
+        Identical to the per-candidate path to machine precision; ~4-5x faster per candidate because the
+        host-side dense build and the host<->device copies are paid once per batch."""
+        import torch
+        self._ensure_gpu_factor()
+        n, m, dev = self.ndof, self.R.shape[1], self._gpu_dev
+        ncs = [len(nd) for nd in nodes_list]; tot = int(sum(ncs))
+        rows, cols, vals = [], [], []; off = 0
+        for nd, a, nc in zip(nodes_list, axis_list, ncs):
+            rows.append((3 * np.asarray(nd)[:, None] + np.arange(3)).reshape(-1))
+            cols.append(np.repeat(np.arange(nc) + off, 3)); vals.append(np.tile(np.asarray(a, float), nc)); off += nc
+        Ct = torch.zeros((n + m, tot), dtype=torch.float64, device=dev)
+        Ct[torch.as_tensor(np.concatenate(rows), device=dev), torch.as_tensor(np.concatenate(cols), device=dev)] = \
+            torch.as_tensor(np.concatenate(vals), dtype=torch.float64, device=dev)
+        W = torch.linalg.lu_solve(self._gpu_lu[0], self._gpu_lu[1], Ct)[:n]           # (n, tot)
+        U = torch.empty((n, len(ncs)), dtype=torch.float64, device=dev); lams = []; off = 0
+        for k, (nd, a, g, nc) in enumerate(zip(nodes_list, axis_list, g_list, ncs)):
+            Wk = W[:, off:off + nc]                                                     # (n, nc)
+            idx = torch.as_tensor((3 * np.asarray(nd)[:, None] + np.arange(3)), device=dev)   # (nc, 3)
+            at = torch.as_tensor(np.asarray(a, float), dtype=torch.float64, device=dev)
+            S = (Wk[idx] * at[None, :, None]).sum(1)                                    # C_k W_k  (nc, nc)
+            lam = torch.linalg.solve(S, -torch.as_tensor(np.asarray(g, float), dtype=torch.float64, device=dev))
+            U[:, k] = -(Wk @ lam); lams.append(lam.cpu().numpy()); off += nc
+        return U, lams
+
+    def element_stress_gpu(self, U):
+        """Batched `element_stress`: U (ndof, K) torch -> Voigt stress (M, 6, K) torch, on the device."""
+        import torch
+        dev = U.device
+        if getattr(self, "_gpu_ops", None) is None:
+            dof = (3 * self.tets[:, :, None] + np.arange(3)[None, None, :]).reshape(len(self.tets), 12)
+            self._gpu_ops = (torch.as_tensor(dof, device=dev),
+                             torch.as_tensor(np.asarray(self.B, float), dtype=torch.float64, device=dev),
+                             torch.as_tensor(np.asarray(self.C, float), dtype=torch.float64, device=dev))
+        dof, B, C = self._gpu_ops
+        ue = U[dof]                                                                     # (M, 12, K)
+        eps = torch.einsum("mij,mjk->mik", B, ue)                                       # (M, 6, K)
+        return torch.einsum("ab,mbk->mak", C, eps)                                      # (M, 6, K)
+
     # ── stress recovery ────────────────────────────────────────────────────────
     def element_stress(self, u: np.ndarray) -> np.ndarray:
         """Per-element Voigt stress σ (M,6) from a global displacement u (ndof,)."""

@@ -236,8 +236,7 @@ uv run --project envs/sim python grasp_synthesis/collect_demos_synth_v4.py \
   --task-name  <output dataset name, {single,multi}_{task}_{object}_{soft,rigid}> \
   --table-z    <SUPPORT SURFACE height in m>   \
   --n-grasp    <close steps>                   \
-  --grasp-gpu                                  \
-  --n-episodes 200 --n-envs 8 --seed 0 --scene-dr-every 1 \
+  --n-episodes 200 --n-envs 10 --seed 0 --scene-dr-every 1 \
   --record-video 20
 ```
 
@@ -247,11 +246,11 @@ Concrete, for the 2026-09-04 board rig:
 OMP_NUM_THREADS=8 uv run --project envs/sim python grasp_synthesis/collect_demos_synth_v4.py \
   --experiment single_lift_cube3_soft_board_abs7d \
   --task-name  single_lift_cube3_soft_board \
-  --table-z 0.0138 --n-grasp 28 --grasp-gpu \
-  --n-episodes 200 --n-envs 8 --seed 0 --scene-dr-every 1 --record-video 20
+  --table-z 0.0138 --n-grasp 28 \
+  --n-episodes 200 --n-envs 10 --seed 0 --scene-dr-every 1 --record-video 20
 ```
 
-### 1b.2 The four flags that MUST be set deliberately (each has bitten us)
+### 1b.2 The three flags that MUST be set deliberately (each has bitten us)
 
 - **`--table-z`** — the height of the surface the object RESTS ON, not the table. Default is
   `0.0`. It feeds three things in `smgrasp/finger_grasp.py`: the finger/table penetration filter,
@@ -267,7 +266,10 @@ OMP_NUM_THREADS=8 uv run --project envs/sim python grasp_synthesis/collect_demos
   policy sees two grasp modes. Measure both sides the same way (mean per-step width decrease over
   closing steps): real 2026-09-01 set = **1.601 mm/step**; sim at the default `--n-grasp 37` =
   1.232 mm/step, i.e. sim is SLOWER, so the step count comes DOWN (28), not up.
-- **`--grasp-gpu`** — see 1b.4. Free speed, GPU otherwise idle.
+- (`--grasp-gpu` is gone — the GPU FEM solver is always on since the 2026-09-05 trim; so are every
+  never-varied knob: `--maxfevals/--grasp-n-starts/--grasp-antipodal-seeds`, `--n-home-to-pre/--n-settle/
+  --n-firm`, `--held-run-*`, `--scan-metric/--closure-gain`, `--regrasp-prob`, `--approach-xy-finish`,
+  `--keep-failures/--keep-synth-failures`. They are module constants in `collect_demos_synth_v4.py`.)
 
 **Recorded action caveat:** `_invert_actions_absolute` always emits **10-dim rot6d**; the
 collector dispatches only on `action_config.mode == "absolute"`, which BOTH absolute configs
@@ -288,7 +290,7 @@ a domain boundary, or gripped beside. Every collection bug in the 2026-09-04 rou
 in the counter and obvious in one frame of video.
 
 ```bash
-... --task-name <name>_smoke --n-episodes 8 --n-envs 8 --record-video 100000
+... --task-name <name>_smoke --n-episodes 10 --n-envs 10 --record-video 100000
 ```
 
 Expected healthy yield is **~85-100%**. Below ~60% means a config bug, not a hard object — stop

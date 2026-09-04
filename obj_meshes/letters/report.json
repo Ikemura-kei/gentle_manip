@@ -1,0 +1,418 @@
+[
+  {
+    "letter": "A",
+    "file": "A.obj",
+    "extents_mm": [
+      48.62,
+      50.0,
+      5.83
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 1,
+    "genus_expected": 1,
+    "volume_mm3": 4652.2,
+    "vertices": 22,
+    "faces": 44
+  },
+  {
+    "letter": "B",
+    "file": "B.obj",
+    "extents_mm": [
+      34.31,
+      50.0,
+      5.87
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 2,
+    "genus_expected": 2,
+    "volume_mm3": 5780.1,
+    "vertices": 212,
+    "faces": 428
+  },
+  {
+    "letter": "C",
+    "file": "C.obj",
+    "extents_mm": [
+      43.93,
+      50.0,
+      5.71
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 0,
+    "genus_expected": 0,
+    "volume_mm3": 4081.0,
+    "vertices": 196,
+    "faces": 388
+  },
+  {
+    "letter": "D",
+    "file": "D.obj",
+    "extents_mm": [
+      46.04,
+      50.0,
+      5.87
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 1,
+    "genus_expected": 1,
+    "volume_mm3": 5910.6,
+    "vertices": 108,
+    "faces": 216
+  },
+  {
+    "letter": "E",
+    "file": "E.obj",
+    "extents_mm": [
+      29.03,
+      50.0,
+      5.87
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 0,
+    "genus_expected": 0,
+    "volume_mm3": 4509.4,
+    "vertices": 24,
+    "faces": 44
+  },
+  {
+    "letter": "F",
+    "file": "F.obj",
+    "extents_mm": [
+      26.69,
+      50.0,
+      5.87
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 0,
+    "genus_expected": 0,
+    "volume_mm3": 3582.8,
+    "vertices": 20,
+    "faces": 36
+  },
+  {
+    "letter": "G",
+    "file": "G.obj",
+    "extents_mm": [
+      44.5,
+      50.0,
+      5.71
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 0,
+    "genus_expected": 0,
+    "volume_mm3": 5049.7,
+    "vertices": 204,
+    "faces": 404
+  },
+  {
+    "letter": "H",
+    "file": "H.obj",
+    "extents_mm": [
+      42.38,
+      50.0,
+      5.87
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 0,
+    "genus_expected": 0,
+    "volume_mm3": 5273.7,
+    "vertices": 24,
+    "faces": 44
+  },
+  {
+    "letter": "I",
+    "file": "I.obj",
+    "extents_mm": [
+      7.18,
+      50.0,
+      5.87
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 0,
+    "genus_expected": 0,
+    "volume_mm3": 2107.0,
+    "vertices": 8,
+    "faces": 12
+  },
+  {
+    "letter": "J",
+    "file": "J.obj",
+    "extents_mm": [
+      12.94,
+      50.0,
+      4.39
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 0,
+    "genus_expected": 0,
+    "volume_mm3": 1267.5,
+    "vertices": 82,
+    "faces": 160
+  },
+  {
+    "letter": "K",
+    "file": "K.obj",
+    "extents_mm": [
+      42.52,
+      50.0,
+      5.87
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 0,
+    "genus_expected": 0,
+    "volume_mm3": 4866.1,
+    "vertices": 22,
+    "faces": 40
+  },
+  {
+    "letter": "L",
+    "file": "L.obj",
+    "extents_mm": [
+      29.77,
+      50.0,
+      5.87
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 0,
+    "genus_expected": 0,
+    "volume_mm3": 2961.4,
+    "vertices": 12,
+    "faces": 20
+  },
+  {
+    "letter": "M",
+    "file": "M.obj",
+    "extents_mm": [
+      46.63,
+      50.0,
+      5.87
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 0,
+    "genus_expected": 0,
+    "volume_mm3": 6190.0,
+    "vertices": 30,
+    "faces": 56
+  },
+  {
+    "letter": "N",
+    "file": "N.obj",
+    "extents_mm": [
+      46.33,
+      50.0,
+      5.87
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 0,
+    "genus_expected": 0,
+    "volume_mm3": 5969.3,
+    "vertices": 20,
+    "faces": 36
+  },
+  {
+    "letter": "O",
+    "file": "O.obj",
+    "extents_mm": [
+      50.0,
+      47.75,
+      5.46
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 1,
+    "genus_expected": 1,
+    "volume_mm3": 4771.5,
+    "vertices": 192,
+    "faces": 384
+  },
+  {
+    "letter": "P",
+    "file": "P.obj",
+    "extents_mm": [
+      31.52,
+      50.0,
+      5.87
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 1,
+    "genus_expected": 1,
+    "volume_mm3": 4257.1,
+    "vertices": 112,
+    "faces": 224
+  },
+  {
+    "letter": "Q",
+    "file": "Q.obj",
+    "extents_mm": [
+      44.28,
+      50.0,
+      4.82
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 1,
+    "genus_expected": 1,
+    "volume_mm3": 3738.2,
+    "vertices": 248,
+    "faces": 496
+  },
+  {
+    "letter": "R",
+    "file": "R.obj",
+    "extents_mm": [
+      38.64,
+      50.0,
+      5.87
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 1,
+    "genus_expected": 1,
+    "volume_mm3": 5147.3,
+    "vertices": 188,
+    "faces": 376
+  },
+  {
+    "letter": "S",
+    "file": "S.obj",
+    "extents_mm": [
+      27.57,
+      50.0,
+      5.71
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 0,
+    "genus_expected": 0,
+    "volume_mm3": 3509.3,
+    "vertices": 244,
+    "faces": 484
+  },
+  {
+    "letter": "T",
+    "file": "T.obj",
+    "extents_mm": [
+      41.79,
+      50.0,
+      5.87
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 0,
+    "genus_expected": 0,
+    "volume_mm3": 3416.4,
+    "vertices": 16,
+    "faces": 28
+  },
+  {
+    "letter": "U",
+    "file": "U.obj",
+    "extents_mm": [
+      42.47,
+      50.0,
+      5.79
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 0,
+    "genus_expected": 0,
+    "volume_mm3": 4653.2,
+    "vertices": 156,
+    "faces": 308
+  },
+  {
+    "letter": "V",
+    "file": "V.obj",
+    "extents_mm": [
+      43.9,
+      50.0,
+      5.81
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 0,
+    "genus_expected": 0,
+    "volume_mm3": 3583.5,
+    "vertices": 14,
+    "faces": 24
+  },
+  {
+    "letter": "W",
+    "file": "W.obj",
+    "extents_mm": [
+      50.0,
+      33.05,
+      3.84
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 0,
+    "genus_expected": 0,
+    "volume_mm3": 1980.9,
+    "vertices": 26,
+    "faces": 48
+  },
+  {
+    "letter": "X",
+    "file": "X.obj",
+    "extents_mm": [
+      50.0,
+      48.44,
+      5.68
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 0,
+    "genus_expected": 0,
+    "volume_mm3": 4376.6,
+    "vertices": 24,
+    "faces": 44
+  },
+  {
+    "letter": "Y",
+    "file": "Y.obj",
+    "extents_mm": [
+      44.28,
+      50.0,
+      5.87
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 0,
+    "genus_expected": 0,
+    "volume_mm3": 3308.0,
+    "vertices": 18,
+    "faces": 32
+  },
+  {
+    "letter": "Z",
+    "file": "Z.obj",
+    "extents_mm": [
+      45.09,
+      50.0,
+      5.87
+    ],
+    "watertight": true,
+    "components": 1,
+    "genus": 0,
+    "genus_expected": 0,
+    "volume_mm3": 5020.5,
+    "vertices": 16,
+    "faces": 28
+  }
+]
