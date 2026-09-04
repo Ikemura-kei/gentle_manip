@@ -317,7 +317,10 @@ seconds per env, planning only — no MPM rollout or rendering:
 
 Reading:
 - **The CMA-ES pose search is 82-88% of planning**, and 97-99% of that is inside the FEM scorer.
-  Cost is `n_starts x maxfevals x per-call`, so both knobs scale it linearly.
+  **`maxfevals` is effectively the TOTAL evaluation budget; `n_starts` does NOT multiply it.**
+  Measured FEM scorer calls: `1145 x 6` -> **1175**, `800 x 3` -> **863** (a multiplicative model
+  would predict 6870). `n_starts` only splits the budget across restarts. See
+  `docs/paper/search_budget_ablation.md` §4.3.
 - **GPU makes cost nearly object-INDEPENDENT** (16.3 / 16.4 / 21.0 s) where CPU does not
   (28.1 / 26.4 / 94.5 s). Per-call: CPU 18-37 ms varying with ndof; GPU a flat ~12-13 ms.
 - **The GPU win grows with CONTACT SET SIZE.** The CPU constrained solve costs one back-substitution
@@ -333,7 +336,8 @@ Budgeting a run: `n_envs x per-env-planning` per batch, plus MPM rollout and vid
 
 ### 1b.5 If planning cost matters, cut the SEARCH, not the solver
 
-The GPU buys 1.6-4.5x. `n_starts x maxfevals` is the dominant term and cutting it is worth more —
+The GPU buys 1.6-4.5x. `maxfevals` (the TOTAL eval budget) is the dominant term and cutting it is
+worth some more — MEASURED: 800x3 gives 1.36x planning / 1.09x collection at identical quality —
 but it trades against grasp quality, so it must be MEASURED (yield + final stress on a fixed seed
 set) before being baked into a dataset, not assumed. Antipodal seeding is the natural companion:
 the scorer already scores `align` and rejects non-antipodal candidates through the holdability
