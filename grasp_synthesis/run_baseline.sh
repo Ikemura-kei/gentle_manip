@@ -7,7 +7,7 @@ env -u PYTHONPATH -u ROS_DISTRO uv run --project envs/sim --no-sync python \
   --baseline $BASE --baseline-width $BW $EXTRA \
   --experiment "$EXP" \
   --n-episodes $N --n-envs 8 --scene-dr-every 1 --maxfevals 1145 --seed 0 \
-  --n-home-to-pre 77 --n-grasp 20 --n-settle 1 --grasp-extra-close auto \
+  --n-home-to-pre 77 --n-grasp 20 --n-settle 1 \
   --cam-azimuth-max-deg 60 \
   --grasp-diversity-tol 0 --grasp-jitter-deg 0 --grasp-jitter-pos 0 --grasp-pitch-seed-deg 0 \
   --grasp-w-peak 0.3 --approach-xy-finish 0.45 0.75 --approach-speed 0.0024 \
