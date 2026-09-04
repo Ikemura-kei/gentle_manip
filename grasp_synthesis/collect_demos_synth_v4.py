@@ -169,7 +169,7 @@ def _state_to_raw_obs(state: dict) -> RawObs:
 # ── Scene-level DR (object SIZE + SHAPE) ──────────────────────────────────────
 
 def _apply_scene_dr(nominal_spec, dr_cfg, rng, deform_dir, mesh_cycle=None):
-    """Per-scene SIZE + SHAPE DR for the (rigid) object — mirrors
+    """Per-scene SIZE + SHAPE DR for the object — mirrors
     SimBackend._apply_scene_dr, but BAKES the uniform scale into the exported mesh
     (not the ObjectEntry.scale field) so the CMA-ES SDF, which loads the mesh file
     directly, matches the geometry Genesis actually simulates.
@@ -412,8 +412,9 @@ def surrogate_closure(fem_obj, pad_geo, best_x, obj_com, obj_quat, E, yld, densi
     return float(CLOSURE_SCAN_MAX_M)
 
 
-FIRM_FORCE_THRESH_N  = 1.0     # rigid: below this measured contact force -> needs firming
-FIRM_STRESS_THRESH_PA = 2000.0 # soft: below this top10 von-Mises rise (Pa) -> grasp came out WEAK
+FIRM_FORCE_THRESH_N  = 1.0     # below this gripper->object contact force (N) the grasp is
+                               # judged weak and gets the extra firm close. For a SOFT body
+                               # this is the MPM->finger coupling force, not a rigid contact.
 FIRM_EXTRA_CLOSE_M   = 0.002   # BASE firm close (m, 2.0mm) — applied to EVERY soft grasp. This is the
                                # unconditional grip margin the old soft path gave all grasps; dropping
                                # it (skip-firm) cost ~15% success (skip-firm fails 39% vs firm 24%).
@@ -546,8 +547,6 @@ def execute_and_collect(
     # "weak" is judged by a stress RISE, and 2000 Pa is 5 % of the mushroom's 40 kPa yield but
     # 6.7 % of the cherry tomato's 30 kPa — so the same absolute bar means different things.
     # Express it as that same 5 % of the object's own yield (mushroom unchanged).
-    _firm_thresh = (FIRM_STRESS_THRESH_PA if not yield_stress
-                    else 0.05 * float(yield_stress))
     _firm_weak = None           # v4: per-env, see below (0.5 x commanded closure, capped 2 mm)
     firm_close = np.full(num_envs, _firm_base, np.float32)
     _has_firm  = any(n == "firm" for n, _ in PHASES)   # --n-firm 0 drops the phase: skip the check too
@@ -701,7 +700,6 @@ def execute_and_collect(
     # Soft firm-check baseline: top10 von-Mises of the SETTLED object (gripper still
     # at home, no contact) — captured on the first step, used as the "no grasp" floor
     # the grasp->firm rise is measured against. None until the first soft state.
-    rest_stress = None
 
     def _step(cur_pos, cur_quat, cur_grip, record_mask):
         nonlocal prev_pos, prev_quat, prev_grip
@@ -785,11 +783,6 @@ def execute_and_collect(
 
         cur_obs_list, state = _step(cur_pos_arr, cur_quat_arr, cur_grip_arr, record_mask=active)
 
-        # Capture the settled-rest stress baseline on the first step (soft only).
-        if rest_stress is None:
-            vm0 = state.get("von_mises_stress")
-            rest_stress = (_stress_top10(vm0) if vm0 is not None
-                           else np.zeros(num_envs, np.float32))
 
         # Advance phase state for envs that were active this step.
         # TODO(retry): this is where a robustness pass would check per-env
@@ -812,35 +805,26 @@ def execute_and_collect(
         advance = np.ones(num_envs, dtype=np.int64)   # normal: one phase forward
         leaving_grasp = rolled_over & (phase_idx == _GRASP_IDX)
         if _has_firm and np.any(leaving_grasp):
+            # Gripper->object contact force (N). For a soft body this is the MPM->finger COUPLING
+            # force (XArm7Sim.gripper_coupling_force), which genesis_worker always populates — so
+            # this is the only firm path. (It used to have a von-Mises `else` for soft, written when
+            # contact_force was rigid-only; that branch became unreachable and never fired in any
+            # collected run — every [firm] line reads "weak grip force N".)
             cf = state.get("contact_force")
-            if cf is not None:                        # RIGID: contact force (N). ALWAYS firm base;
-                for i in np.where(leaving_grasp)[0]:  # weak grip (force < thresh) firms base+extra.
+            if cf is not None:                        # ALWAYS firm base; a weak grip firms base+extra
+                for i in np.where(leaving_grasp)[0]:
                     if cf[i] < FIRM_FORCE_THRESH_N:
                         firm_close[i] = min(0.5 * float(_cc[i]), 0.002)
                         print(f"    [firm] env {i}: weak grip force {cf[i]:.2f}N < "
                               f"{FIRM_FORCE_THRESH_N}N -> closing {firm_close[i]*1000:.1f}mm (base+extra)")
                     # else: base firm close (never skip)
-            else:                                     # SOFT: von-Mises stress rise (Pa)
-                # Soft ALWAYS firms by the base amount (never skip — dropping it cost ~15% success:
-                # skip-firm fails 39% vs firm 24%). A WEAK grasp (low stress rise) firms MORE.
-                vm = state.get("von_mises_stress")
-                if vm is not None:
-                    cur = _stress_top10(vm)
-                    for i in np.where(leaving_grasp)[0]:
-                        rise = float(cur[i] - rest_stress[i])
-                        if rise < _firm_thresh:
-                            firm_close[i] = min(0.5 * float(_cc[i]), 0.002)
-                            print(f"    [firm] env {i}: weak stress rise {rise:.0f}Pa < "
-                                  f"{_firm_thresh:.0f}Pa -> closing {firm_close[i]*1000:.1f}mm (base+extra)")
-                        # else: firm_close stays at base -> still firms, just not extra
 
         phase_idx[rolled_over]  += advance[rolled_over]
         phase_step[rolled_over]  = 0
 
-    # Success check from final object height. Rigid: get_pos; soft MPM: the particle-mean centre from
-    # the last step's state (MPMEntity has no get_pos).
-    _o = worker.handle.objects[0]
-    obj_z   = _np(_o.get_pos())[:, 2] if hasattr(_o, "get_pos") else np.asarray(state["object_center"])[:, 2]
+    # Success check from final object height: the particle-mean centre from the last step's state
+    # (MPMEntity has no get_pos; this collector is soft-only, see the object_type guard in main).
+    obj_z = np.asarray(state["object_center"])[:, 2]
     success = obj_z > (grasp_pos[:, 2] + LIFT_HEIGHT * 0.5)
 
     # Post-process: trim long held-command runs (absolute mode only — see
@@ -892,7 +876,7 @@ def main() -> None:
 
     p.add_argument("--experiment", required=True,
                    help="experiment name under configs/experiments/ "
-                        "(e.g. single_lift_mushroom_rigid) — source of task, obs, "
+                        "(e.g. single_lift_mushroom_soft_armfocus_stress) — source of task, obs, "
                         "action, and DR config")
     p.add_argument("--task-name",  default=None,
                    help="override output dataset name (default: experiment's task field)")
@@ -1053,6 +1037,16 @@ def main() -> None:
     # Grasp material comes from the OBJECT's registry entry — the experiment is the single source
     # of truth, so there are no CLI overrides for it.
     from gentle_manip.assets.registry import get_object_def as _god
+    # SOFT-ONLY COLLECTOR (2026-09-04). Rigid support was dropped: the firm decision reads the
+    # MPM->finger coupling force, the success check reads the particle-mean centre, and the FEM
+    # gentleness metric is meaningless for a body that does not deform. A rigid object would run
+    # but produce grasps selected by a metric that cannot apply, so fail loudly instead.
+    _otype = str(exp.task_cfg.get("object_type", "soft")).lower()
+    if _otype != "soft":
+        raise SystemExit(
+            f"collect_demos_synth_v4 is SOFT-ONLY, but experiment {args.experiment!r} has "
+            f"object_type={_otype!r} (task {exp.task_cfg.get('object_name')!r}). Rigid collection "
+            f"was removed on 2026-09-04 — use an MPM/soft object, or collect_demos_synth_v3.py.")
     _mat = _god(exp.task_cfg["object_name"]).material
     _mat_E     = float(_mat.youngs_modulus)
     _mat_rho   = float(_mat.density)
