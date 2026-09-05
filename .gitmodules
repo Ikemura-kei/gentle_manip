@@ -15,3 +15,7 @@
 	path = third_party/IsaacLab
 	url = https://github.com/isaac-sim/IsaacLab.git
 	branch = main
+[submodule "third_party/TripoSG"]
+	path = third_party/TripoSG
+	url = https://github.com/VAST-AI-Research/TripoSG.git
+	branch = main
