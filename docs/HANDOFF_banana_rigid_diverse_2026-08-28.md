@@ -298,3 +298,197 @@ Jobs 1789727 (clean) + 1790415 (regrasp), ckpt `hytxr/state_200`, CFL-safe eval 
 DR + the start families, crush gate 1.1x), a `single_lift_cross_category_diverse_pcd` DP3
 cfg dir, launch CONTINUOUS 500/object collection + the matching NON-REGRASPABLE (home-only
 start) baseline collection.
+
+---
+## 2026-08-30 03:55 — Phase 4 START: cross-category generalist infra built
+
+Regrasp confirmed on soft banana -> building the direct 9-object generalist.
+
+- **Collector extended** (`grasp_synthesis/collect_demos_diverse_start_v2.py`):
+  - `object_category_pool` support: `_make_worker` draws a registry object per scene
+    (rebuilds `spec.objects[0]` from `get_object_def`, resets material to None),
+    threads that object's name + `von_mises_yield_stress` into the width-cap and
+    crush-gate. Falls back to `task.object_name` when no pool.
+  - New `strict_home` start family = EE starts exactly at home, full approach
+    recorded, no pre-roll -> the NON-REGRASPABLE BASELINE distribution
+    (`--start-modes strict_home:1.0`).
+  - New `--crush-frac` CLI (default 1.15; Phase 4 uses 1.10 -> gentler than the
+    banana run's 1.25).
+  - Syntax-checked; behaviour untested on aarch64 -> smoke job 1792715
+    (`yd_xcatsm`, 8 ep / 2 env / scene-dr-every 1) validating object-switching +
+    strict_home + no crash BEFORE the big runs.
+- **Configs** (9 objects: mushroom, banana_lying, grape, kiwi, strawberry, tomato,
+  cherry, raspberry, egg_boiled):
+  - `dr/xcat_diverse_regrasp.yaml` (+ `_eval`), `tasks/single_lift_xcat_diverse.yaml`
+    (+ `_eval`), `experiments/single_lift_xcat_diverse{,_eval}.yaml`,
+    `experiments/single_lift_xcat_regrasp_eval.yaml`.
+  - Task CFL point: grid 170 / substeps 420 (pool E 1e5..8e5; anchored on the
+    banana soft eval's stable 200/340 at E 3e5, scaled up for the stiffer members;
+    rare blowups caught by the collector's per-batch skip).
+  - DP3 cfg dir `dppo/cfg/single_lift_xcat_diverse_pcd/{pre,eval}_diffusion_pointnet.yaml`.
+  - `scripts/arrhenius/yd_xcat_collect.sbatch` (71 h walltime, continuous, salvage-merge,
+    `TAG` for regrasp vs baseline; `--record-video 60`).
+- **NEXT**: smoke passes -> launch (a) `yd_xcat_collect` regraspable (4500 ep, won't
+  finish in window) and (b) `START_MODES=strict_home:1.0 TAG=xcat_baseline` non-regraspable
+  baseline. Both continuous; report cumulative progress.
+
+---
+## 2026-08-30 04:15 — Phase 4 smoke 1792715 found 2 issues -> pool narrowed to 5
+
+Smoke (cross-category draw worked: pool loaded, per-scene object switch + yield
+threading confirmed). But:
+1. **Small fruit break the pipeline.** raspberry (1.5cm) / cherry / grape / tomato
+   (~2cm) deform to degenerate meshes (~64 MPM particles at grid 170); trimesh
+   `bounds_tree` raises "Bounds must be (n, dimension*2)!" in the SDF build ->
+   CMA-ES crashes the batch. Also 0/8 grasp success on raspberry (mushroom-scale
+   `OBJ_SIZE` bounds + grasp_gate_dist search a +-5cm box for a 1.5cm object).
+2. Collector's per-batch skip caught the crashes (no run abort) but no demos saved.
+
+**Fix:** pool narrowed to the 5 mushroom-scale (3-6cm) soft objects:
+`mushroom, banana_lying, kiwi, egg_boiled, strawberry` (E 3e5..5.3e5). Scale DR
+tightened to [0.88,1.15]. Task -> grid 190 / substeps 440. Committed.
+-> re-smoke job 1792749 (10 ep / 3 env). If it saves demos across >=2 objects with
+no crash, launch the two continuous runs.
+
+NOTE for later: adding the small fruit back needs per-object grid_density (finer)
++ object-size-scaled CMA bounds + a deform-mesh validity guard. Deferred.
+
+---
+## 2026-08-30 04:25 — Phase 4 smoke fix 2
+
+Re-smoke 1792749 still 0-success + strawberry mesh crash. Diagnosed:
+- **CMA-ES returns a STRADDLE width** (w=74-80mm, the 0.08 bound) on a 33mm mushroom
+  -> SDF cost ~0 but no contact. The soft width cap was `_short + 2mm` = 34mm on a
+  33mm object -> zero compression -> slips on lift. **Fix: soft `_wcap = 0.80*short`**
+  (~20% compression), `_floor = 0.42*short`. Rigid unchanged.
+- **strawberry deformed mesh degenerate** -> trimesh `bounds_tree` crash in the SDF
+  build. **Fix: `_mesh_ok()` validity guard in `_make_worker`** (finite AABB, extent
+  > 0.1mm, >=8 faces) -> retry deform up to 3x, then fall back to the nominal mesh.
+- crush_frac default 1.10 -> **1.20** (the tighter grip now does the gentleness work;
+  1.10 would starve the dataset).
+Committed. -> re-smoke 1792788 (12 ep / 3 env).
+
+---
+## 2026-08-30 04:40 — Phase 4 smoke fix 3
+
+Smoke 1792788: still 0-success + strawberry crash. Root causes:
+- **strawberry.obj is a 1.4 KB PLACEHOLDER mesh** (egg=37KB, kiwi=26KB) -> 99% quadric
+  decimation in build_object_sdf collapses it -> trimesh rtree "Bounds must be
+  (n,dimension*2)". Dropped strawberry. `_mesh_ok` guard kept (catches deform
+  degeneracy, not this).
+- **0-success across mushroom + banana_lying** even though the banana proof got 54%
+  on the identical collector -> the only diff was physics (grid 190 / substeps 440).
+  Reverted the COLLECTION task to the banana-COLLECTION values **grid 250 / substeps
+  240** (54% SR + regrasp confirmed there). Also reverted the soft width cap to the
+  banana-proven `_short + 2mm` (my 0.8*short "tighten" likely ejected the coarse-grid
+  soft body during close). EVAL task keeps CFL-safe grid 190/substeps 440.
+- Pool now **4 objects**: mushroom, banana_lying, kiwi, egg_boiled.
+-> re-smoke 1792811 (15 ep / 3 env). Expect >0 saves this time.
+
+---
+## 2026-08-30 04:50 — Phase 4 smoke PASSED -> continuous collections LAUNCHED
+
+Smoke 1792811 (banana-physics, 4-obj pool) SAVING demos:
+- batch 1 mushroom 0/3, batch 2 kiwi 1/3, batch 3 banana_lying 3/3 (incl. 2
+  failed_grasp recovery demos), batch 4 kiwi ... -> cross-category + recovery
+  demos + video all working. mushroom looks harder (rounder); it just contributes
+  fewer demos per rotation, acceptable.
+
+**LAUNCHED (continuous, 71 h walltime, resubmit to continue):**
+- **1792833  yd_xcat  TAG=xcat_regrasp** -- 9-obj... actually 4-obj pool
+  (mushroom/banana_lying/kiwi/egg_boiled), diverse start-modes
+  (sweep .44/failed .30/above .10/ground .09/air .07), crush 1.20, n_envs 6.
+  Target 4500 (500/obj-equiv); WILL NOT finish in the window -> report cumulative.
+  -> dataset/demos/single_lift_xcat_regrasp/
+- **1792834  yd_xcat  TAG=xcat_baseline** -- same pool + physics, but
+  `--start-modes strict_home:1.0` (EE starts exactly at home, full approach) =
+  the NON-REGRASPABLE baseline for the 3-metric comparison.
+  -> dataset/demos/single_lift_xcat_baseline/
+
+Both PENDING (Priority). Next: confirm both RUNNING + accumulating, then when a
+usable batch exists (~a few hundred/side) convert + BC pretrain the generalist
+via dppo/cfg/single_lift_xcat_diverse_pcd + dual eval.
+
+DEVIATION FROM PLAN (documented): pool is 4 not 9. The 5 small/degenerate-mesh
+objects (grape, cherry, tomato, raspberry, strawberry) are incompatible with the
+current CMA-ES-SDF + MPM pipeline without per-object grid/bounds work. 4 clean
+cross-category objects still demonstrates the direct-generalist + regrasp claim
+vs the baseline. Re-adding the others = a follow-up (per-object grid_density +
+object-size-scaled CMA bounds + real scanned meshes for grape/cherry/etc.).
+
+---
+## 2026-08-30 05:00 — Phase 4 collections steady
+
+- **1792833 xcat_regrasp**: 16/4500, ~0.8/min, batchfail 0/7. Per-object SR so far:
+  egg_boiled 50%, kiwi 42%, mushroom 42% (the earlier "mushroom 0/6" was one unlucky
+  batch, not systematic). banana_lying not yet re-drawn.
+- **1792834 xcat_baseline** (strict_home): 26/4500, ~1.3/min (faster -- no CMA
+  diversity), batchfail 0/7. egg_boiled 75%, mushroom 50%.
+- Both clean, no crashes, videos recording (first 60 each).
+- Neither finishes in the window (~40 h to 2000 each) -> cumulative reporting.
+
+STOP-CONDITION check: Phase 4 collection running steadily = YES. All *reachable*
+evals diagnosed = YES (rigid banana iter1/2, soft banana clean_v2/regrasp_v2). The
+generalist policy can't be evaluated until it trains -> preliminary generalist BC
+train + dual eval will fire once ~600 demos/side accumulate (~13 h), tracked here.
+
+---
+## 2026-08-30 07:00 — Phase 4 collections @ 2h
+
+- 1792833 xcat_regrasp: 127/4500 (~1/min), batchfail 1/43 (caught).
+- 1792834 xcat_baseline: 207/4500 (~1.7/min), batchfail 0/51.
+- Both stable. Generalist preliminary train will fire when xcat_regrasp reaches
+  ~500-600 (~7-8 h out at current rate). Baseline will be ready first (~3 h).
+- No code/config changes needed.
+
+---
+## 2026-08-30 07:55 — Phase 4 @ ~3h: 2nd regrasp collector added
+
+- 1792833 xcat_regrasp: 205/4500 (slowed to ~0.7/min -- CMA-bound). 1792834
+  xcat_baseline: 332/4500 (~1.9/min). Both clean.
+- The regrasp side is the bottleneck -> launched **1793396** = 2nd xcat_regrasp
+  collector (seed 7, separate run dir, same TAG folder) to ~2x throughput.
+  First attempt (1793395) cancelled: the salvage-merge loop would have eaten the
+  live collector's shards -> added an mtime<20min guard to yd_xcat_collect.sbatch,
+  committed, then relaunched as 1793396.
+- yd_xcat_pipeline.sbatch ready (PRELIM shard-staging). Prelim generalist train
+  fires when combined regrasp demos ~= 300-400.
+
+---
+## 2026-08-30 08:05 — GPU concurrency cap = 2
+
+1793396 (2nd regrasp collector) could not start: `AssocGrpGRESRunMinutes` -- the
+account caps concurrent GPU jobs at 2. Cancelled. So the two running collectors
+(1792833 regrasp, 1792834 baseline) are the max; regrasp stays CMA-bound at
+~0.7/min. Window will likely end with ~350-450 regrasp + ~600-750 baseline demos
+-> the preliminary generalist comparison uses matched subsets (same N/side).
+
+---
+## 2026-08-30 08:45 — Phase 4 PRELIM generalist comparison started
+
+Given the 2-GPU cap + CMA-bound regrasp rate, collecting the full 500/obj won't
+happen in the window. Pivot to a PRELIM comparison on what's collected:
+- **Stopped baseline collector 1792834** at 474 demos (~118/obj, run 26-08-30-mcy).
+- **regrasp collector 1792833 keeps running** (292 -> ..., run 26-08-30-rdz).
+- New cfg dirs: `single_lift_xcat_{baseline,regrasp}_pcd` (n_epochs 150), both
+  evaluated on the SAME `single_lift_xcat_diverse_eval` (clean) +
+  `single_lift_xcat_regrasp_eval` (arm-low) experiments -> apples-to-apples.
+- **Submitted 1796505 yd_xpipe_b** = baseline pipeline (stage shards -> convert ->
+  BC 150ep -> dual eval). Regrasp pipeline follows once a slot frees / regrasp
+  collection has a comparable count.
+- 3-metric comparison (SR / gentleness / SR*gentleness, clean + regrasp start)
+  will be the Phase 4 preliminary result.
+
+---
+## 2026-08-30 10:15 — Phase 4 pipeline bug: eval used the COLLECTION experiment
+
+1796555 got through pretrain (baseline gen `tqmjv`, 150ep, val 0.025) but the clean
+eval sim server launched with `--experiment single_lift_xcat_diverse` (COLLECTION:
+grid 250 / substeps 240, CFL-risky; success band z 0.16-0.40 hold 6) instead of
+`single_lift_xcat_diverse_eval` (grid 190 / substeps 440, CFL-safe; z 0.13-0.45 hold 4).
+Killed it before a mid-eval NaN.
+FIX: pipeline now has `EVAL_EXPERIMENT` (defaults `${EXPERIMENT}_eval`) for both eval
+sim servers, distinct from `EXPERIMENT` (train/convert). Added `SKIP_TRAIN=1`+`RUN_DIR`
+to reuse an existing checkpoint. Committed.
+Resubmitted baseline as **1797433** (SKIP_TRAIN, reuses tqmjv/state_150, eval-only).
+regrasp collector 1792833 still running (~358).
