@@ -9010,3 +9010,349 @@ target the tier-3 `finger_grasp.py` API or are already stale; left untouched.
 2 episodes, video): 2/2 saved, 100 %, 1.5 min. Tests 461 passed / 1 skipped (run with
 `env -u PYTHONPATH -u ROS_DISTRO`, the ROS `launch` package otherwise breaks collection).
 Earlier the same day: 10-env batched-planner smoke on mushroom → 10/10, 100 %, 5.8 min.
+
+### 2026-09-05 — Executor: why the planned width misses (MPM body ≠ FEM), FEM direct-tet for every scan, executor simplified
+
+**Executor test (user-run, tofu + mushroom, `dev_synth.sh`):** with c_y and firm removed, closing to the
+PLANNED width misses. Per-step debug (`[grasp]`/`[dwell]` lines: planned / commanded / measured width +
+coupling force) showed the gripper tracks the command to 0.1 mm and the coupling force first appears
+~1 mm before the planned width but stays at 0.02–0.03 N through a 2-step dwell — the FEM predicts ~0.7 N
+at the same indentation. Not a control or timing problem: the fingers meet almost nothing.
+
+**Root cause, measured (new `[proj]` line + `--dev-viz` "particles" stage overlaying MPM particles on
+the FEM):** two discretisation gaps add up.
+1. **Voxel-remesh dilation of the FEM** (any scan that failed the direct-tet test: >2500 faces or not
+   watertight — 30 of 41 registry objects). Nominal-scale mushroom: FEM extent 37.6/32.5/37.5 mm vs
+   mesh 33.1/31.8/34.7 (ratio 1.136/1.024/1.081), volume +38 %. ≈2 mm/side, ×1.3 at the run's DR scale.
+2. **MPM particles under-fill their mesh.** Genesis's `regular` sampler keeps lattice points whose
+   signed distance is < 0 (centres strictly inside) at spacing `particle_size = 0.01·64/grid_density`
+   = 2.56 mm for grid 250 → outermost centres sit 0–2.56 mm inside the surface (~1.3 mm average per
+   side). Nothing pushes particles to the surface; the 4 mm grid cell only sets the coupling smear.
+   Mushroom run: FEM span 49.2 vs particle span 41.6 mm along the closing axis = 3.8 mm/side observed
+   (≈2.7 dilation + ≈1.2 inset). Tofu (direct tet, no dilation) showed ~1 mm — inset only.
+
+**Fix 1 — FEM direct-tet for every object, in memory, no files** (`finger_grasp_final.build_grasp_fem`):
+ladder = watertight raw → else trimesh manifold repair (drop faces on >2-face edges, refill, repeat) →
+else pymeshlab non-manifold repair; decimate to `DIRECT_TET_FACES=2000` with fast_simplification
+(agg 7→5→3→1 until manifold); tetgen with `Y` (keep the input surface; without it quality refinement
+cascades on decimated triangles: 1000 faces → 38k tets/13 s, with Y → 1.9k/0.2 s) — `Y` ONLY for
+decimated scans, coarse CAD meshes (12-face box) need the boundary refinement; on a self-intersecting
+decimation → pymeshlab isotropic remesh (3 mm) → last resort the old voxel remesh (prints `[fem] …
+fallback (dilates)`). Result: **30/31 meshes direct** (prim_lamp self-intersects → remesh), extent
+ratio within ±0.6 % (two scan spikes trimmed: cherry_tomato5 y −4.5 % at −0.3 % volume, raspberry3
+z 0.4 mm), tets 3–7k / ndof 3–6k (same range as before), build <1.5 s. Planner on the new mushroom
+FEM: 9.2 s, 1943/4600 seeds kept, width 30.4 mm. Deps declared: `fast-simplification`, `pymeshlab`
+(both were transitive via genesis). Writing 30 repaired assets was rejected (file buildup, cluster
+contradiction); the raw scan still drives the MPM.
+
+**Fix 2 — collector cleanup:** `gm_synth_deform_*` temp dirs (one deformed .obj per relaunch) are now
+`atexit`-removed. Genesis's own `~/.cache/genesis` (16 GB here; `.ptc` 2,647 files/53 MB) is
+content-hashed (parallel-safe) but grows with every scene-DR relaunch — delete between campaigns.
+
+**Executor simplification (this session, user-driven):** approach duration = |home→grasp| /
+`APPROACH_SPEED` (0.0024 m/step, clipped 40–130 steps; constant 2.4 mm/step across the DR box —
+fixed duration made speed grow with spawn distance); c_y surrogate closure and the firm phase REMOVED
+(commanded close width = planned width; `N_DWELL=2` hold after closing); re-grasp demos are gone (in
+git at 096f945). Executor is fully open loop: approach → settle → grasp → dwell → lift → hold.
+
+**Open — the remaining gap is the particle inset (~1.3 mm/side) + coupling smear (~1 cell):** the
+`[proj]` line now prints FEM span − particle span along the closing axis per env; the candidate
+principled correction is to subtract that measured difference (plus ~one grid cell) from the executed
+width, replacing the old c_y gain and firm squeeze with a discretisation term. Next: user re-runs
+`dev_synth.sh` on mushroom to read the post-fix `[proj]` numbers.
+
+### 2026-09-05 — Planner speed: SDF cache + vectorized seeds/filter + one device copy per batch → ~10 s → ~4.5 s per env, final grasp bit-identical
+
+Profile (mushroom, torch loaded): seeds 5.0 s (SDF grid 2.7 + Python loop over 4,600 seeds 2.4),
+filter 0.4, score 2.1, CMA 3.6, refine 0.55 → ~10 s/env; ~10k tiny `torch.as_tensor` copies
+(1.3 s) spread over score/CMA/refine. Three changes in `smgrasp/finger_grasp_final.py`,
+`fem.py`, `width_grasp.py`:
+1. **`build_object_sdf` cached on the FEM object** (`obj._obj_sdf`; the SDF is object-local, so all
+   envs of a batch share it) — 1.5–2.7 s × (n_envs − 1) per batch.
+2. **Seed construction + filter vectorized** (`finger_world_pts_batch`, `finger_min_world_z_batch`,
+   `tcp_to_local_grasp_batch`, batched `_rot`, chunked footprint span): same primitives, same RNG
+   draw order (one `uniform(size=N)` == N scalar draws), same yaw-flip / re-anchor rules.
+3. **GPU batch solve + contact masking copy their per-candidate index/axis/g/mask once per batch**
+   (`solve_constrained_gpu_batch`, `width_grasp_stress_batch`), then slice on the device.
+
+**Proof (same FEM object, seed 0):** final x and score bit-identical on mushroom and tofu; 4,600
+seeds each, 2,883 / 3,016 rows bit-identical, the rest differ by ≤5.6e-17 (fp reassociation of the
+batched dots); kept counts identical (1,943 / 1,903); mushroom's top-10 ORDER swaps on a near-tie but
+converges to the same grasp. Timings per env (mushroom / tofu): seeds 0.7 / 0.65 s (SDF warm),
+filter 0.2, score 0.6 / 0.4, CMA 2.8 / 2.35, refine 0.44 / 0.34 → **4.7 / 4.0 s** vs ~10 / 9 s.
+CMA (2,400 evals in ~46 lockstep GPU batches) is now ~60 % of a synthesis; the next lever is
+structural — scoring all envs of a batch in one GPU call or per-env processes — not per-stage.
+
+**Addendum (same day):** the first collector run hit a shape bug in the vectorized re-anchor
+(`_tcp` used the full anchor array for the subset of seeds whose width changed; only seeds WITHOUT a
+pad footprint expose it — 38 of 4,600 on that pose). Fixed; footprint-less rows now skip the span
+update without the All-NaN warning. Re-verified on four poses (flat mushroom/tofu, tilted mushroom
+seed 3, yawed banana_chunk seed 5) with RuntimeWarnings promoted to errors: clean, 5–8 s each. Tilted
+mushroom old-vs-new: seeds ≤1.8e-15, kept 1,888 = 1,888, same 2,811 evals, final x differs by
+2.8e-13 mm / 4e-13 deg / 1e-13 mm, score −6641.7901913 vs −6641.7901913 (1e-12 relative) — the same
+grasp to the last bits; only the flat poses are bit-exact.
+
+### 2026-09-05 — Demo start modes + DART-style kicks (recovery coverage), DR-configured, off = identical
+
+Borrowed the IDEA from `cross-category-dp` (which has one-step positional kicks during a phase and a
+lift-failure regrasp retry — no explicit start modes; the "above-object" start was master's own
+hover-start regrasp, removed this morning), re-implemented minimally on v4 (~80 lines).
+- **`DRConfig.start_modes`** (weights, normalized; default home 0.6 / in_air 0.15 / above_object 0.15 /
+  mid_approach 0.1) and **`disturbance_prob`** (0.05), per-category via the DR yaml. Own RNG stream
+  (`seed + 3_000_000`), so home-only + 0 reproduces today's draws exactly (`_sample_starts` returns the
+  home poses untouched; no teleport, no re-read, no kick — verified).
+- **Start poses** (`_sample_starts`): in_air = uniform in the action box shrunk 5 mm, z ≤ home + 10 cm,
+  top-down ±15/10/30° jitter; above_object = grasp xy ± 1.5 cm, z + 4–12 cm, orientation slerp(home,
+  grasp); mid_approach = fraction 0.3–0.8 along home→grasp ± 1 cm xy. All lifted so the lowest finger
+  point ≥ object top + 2 cm, clipped into the box. Applied AFTER planning (needs the settled object) via
+  `worker.set_ee_pose` (IK teleport + settle); a >5 mm IK miss falls back to home; obs_0 is re-read.
+  Approach duration floor 40 → 12 steps so short starts keep the 2.4 mm/step speed.
+- **Kicks**: per env with `disturbance_prob`, one command offset |k| ~ U(0, 2 cm) at step u·dur of a
+  random phase in (approach, grasp, lift); the plan is untouched so the next action is the correction.
+- **Records**: `dr_params.csv` + `start_mode, start_x/y/z, kick`; `config.yaml` control gets the table.
+  `[start]` line per env. Dev overrides `GM_START_MODE`, `GM_DISTURB`.
+
+**Verified (tofu, 1 env each, video):** in_air / above_object / mid_approach / forced kick / default mix
+all 100 % lift; obs_0 `ee_pos` equals the sampled start to 1 mm; episode lengths 128–185 steps vs 205–211
+from home; the kick shows as a single 14.5 mm command jump at step 28 (u = 0.27) with the median step
+unchanged at 2.4 mm; CSV 37/37 columns. Unit check over 200 draws: mix 58/17/17/9 %, all non-home
+starts inside the box with ≥20 mm finger clearance.
+**Note (pre-existing, unchanged):** in `home` mode the approach lerps from the NOMINAL home while the
+arm sits at the ±2 cm jittered home, so the first commands include a ≤2 cm correction — a small built-in
+recovery already; left as-is for bit-identity. Values (heights, fractions, kick size) are first guesses
+to tune on the new setup.
+
+### 2026-09-05 — TCP z floor 15 mm (action box == real EE clip == planner bound); TABLE_TOL 0 fixes the tilted-finger carve
+
+Measured lowest-finger-point vs TCP (tofu pads): top-down +0.9…+5.6 mm ABOVE the TCP; roll ±30° puts a
+corner 8–14 mm BELOW it. So the board carve the user saw is the planner's `TABLE_TOL` (2 mm into the
+table allowed, seeds at table −1 mm), not a TCP-height issue — a TCP floor alone would not fix it.
+- **`TABLE_TOL` 2 → 0 mm** (seed fingertip floor = table + 1 mm): the carve fix. Tilted grasps sit ≤2 mm higher.
+- **TCP z floor 15 mm, one number in three places:** new `configs/action/abs_pose_euler_abs_gripper_z15.yaml`
+  (`pos_min z` 0.003 → 0.015; all 41 experiment configs repointed), `xarm7_config.EE_BOUNDS_MIN z`
+  0.0139 → 0.015 (real clip), and the planner bound `tcp_z_min` (CMA box + seed filter), fed by the
+  collector from `action_config.pos_min[2]` so no planned grasp can land in the band the action
+  inversion would clip (executed low, recorded at the floor — a silent dataset lie). Before, `pos_min z`
+  3 mm vs `EE_BOUNDS` 13.9 mm meant actions in 3–13.9 mm executed in sim but were clipped on the robot.
+- **Old checkpoints keep the OLD yaml** (`abs_pose_euler_abs_gripper.yaml`, unchanged; deploy_real.sh
+  still references it) — the z change alters the action normalization.
+- Planner on tofu at the board: floor 0 → kept 1880, lowest kept TCP 11.8 mm; floor 15 → kept 1722,
+  lowest kept 15.0 mm, final lowest finger 14.8 mm (board 13.8). Tests 461 pass.
+- **Addendum: x max 0.59 → 0.55** in `abs_pose_euler_abs_gripper_z15.yaml` and `EE_BOUNDS_MAX` (gripper can
+  hit the external camera beyond 0.55). Old action yamls (0.59) untouched — old checkpoints; on the real
+  robot they are clipped at 0.55 by `EE_BOUNDS` anyway. DR spawn x max is 0.46, so grasps are unaffected;
+  in_air starts follow the box automatically. Tests 461 pass.
+- **Addendum: start gripper width + 3 cm clearance.** Non-home starts now teleport with a part-closed
+  gripper, width ~ U(20, 80) mm (`START_W_MIN`; 10 → 20 mm on 2026-09-05 evening), and the approach re-opens it to 80 mm over the first
+  `GRIP_SPEED` = 2.2 mm/step (the real teleop close speed re-measured on the 2026-09-01 7-object set: 2.20 mm/step, p10–p90 2.11–2.25, commanded == measured; the CHECKLISTS "1.601" was wrong; approach lasts at least the re-open) — that ramp is the recorded "release before re-approaching" action (the
+  genuinely unseen part of a failed-grasp state; home starts stay at 80 mm, off-case unchanged).
+  `set_ee_pose_hard`/`worker.set_ee_pose` take an optional per-env `gripper_width`. `START_CLEAR_M`
+  2 → 3 cm (lowest finger point above the highest object particle, all non-home modes). CSV gains
+  `start_w`.
+- **Real gripper speed re-measured** (`dataset/transfer/real_paired_7obj_2026-09-01`, 141 episodes, 7
+  objects): closing **2.20 mm/step @ 30 Hz** (per-object 2.09–2.23; p10–p90 2.11–2.25; commanded ==
+  measured, i.e. the teleop drives the gripper at a constant rate); only 1 opening event in 141 episodes
+  (2.24 mm/step). Arm approach speed median **2.61 mm/step** (per-object 2.28–2.98) vs our
+  `APPROACH_SPEED` 2.4. The CHECKLISTS figure "real = 1.601 mm/step" that set `--n-grasp 28` is NOT what
+  this set shows: at 2.2 mm/step an 80→35 mm close is ~20 steps, not 28. Sim grasp phase is still the
+  fixed `--n-grasp`; making it speed-based ((80 − width)/GRIP_SPEED per env) is the consistent fix — user decision.
+- **Close phase is speed-based; `--n-grasp` removed.** Per env, grasp steps = ceil((80 mm − planned width) /
+  `GRIP_SPEED`) with `GRIP_SPEED = 2.2 mm/step` (the measured real close speed), so every object closes at
+  the human rate instead of a fixed 28 steps (20 % too slow at 35 mm, 2× off at the extremes). PHASES now
+  carries per-env placeholders for approach AND grasp; the main() PHASES rebuild is gone (nothing left to
+  rebuild). `config.yaml` records `grip_speed`/`approach_speed`. `dev_synth.sh`, `profile_demo_collection.sh`
+  and the CHECKLISTS recipes drop the flag.
+
+### 2026-09-05 — Collector profiling (tofu / strawberry / banana_chunk, 20 eps × 10 envs, videos): speed, success, gentleness
+
+`gentle_manip/scripts/profile_demo_collection.sh` (one run per object, summary.md from the per-attempt
+CSVs). Collector now logs per attempt `ever_success` (object ever above half lift height) and
+`stress_max_frac` (max top-10 % von Mises / yield), and times synthesis / execution / FEM build
+(`stats.yaml`: `synth_s_per_attempt`, `exec_s_per_attempt`, `sec_per_saved_episode`, …). Run
+`logs/profile_demo_collection/260905-1458/`; stopped after banana_chunk by the user.
+
+| object | attempts | success | ever | planner fallbacks | sub-yield | max σ/yield mean / max | min | min/saved ep | synth s/env | exec s/env |
+|---|---|---|---|---|---|---|---|---|---|---|
+| tofu | 20 | 100 % | 100 % | 0 | 100 % | 0.35 / 0.45 | 7.7 | 0.38 | 4.7 | 15.7 |
+| strawberry | 30 | 90 % | 90 % | 0 | 100 % | 0.41 / 0.62 | 16.5 | 0.82 | 8.4 | 21.5 |
+| banana_chunk | 40 | 52 % | 57 % | 12 | 95 % | 0.42 / 1.18 | 19.3 | 0.96 | 3.3 | 22.7 |
+
+- **Speed:** ~0.4–1 min per saved episode at 10 envs; execution dominates (16–23 s/env, Genesis MPM at
+  3–4 FPS/env incl. video), synthesis 3–8 s/env. A failed batch costs a full extra 4–6 min.
+- **Gentleness:** every tofu/strawberry grasp sub-yield (max 0.45 / 0.62 of yield). Banana had ONE
+  over-yield grasp (1.18): planner chose an 11 mm width on a 29 mm span (indent 8.7 mm/side) — a planner
+  quality outlier worth a look (torsion/pinch gate?).
+- **banana_chunk 52 %: the first real cost of today's 15 mm TCP floor + TABLE_TOL 0.** 12/40 attempts
+  were PLANNER FALLBACKS ("SYNTH FAILED", default 45 mm top-down, never saved, always fail). The chunk is
+  20 mm tall (top ≈ 34 mm on the 13.8 mm board): top-down fingertips can't get below ~16–21 mm, tilted
+  grasps put a corner under the board and are rejected, and most seeds (fingertip anywhere in the
+  object's height) fall under the floor. Tofu/strawberry (taller): 0 fallbacks. Decision needed: relax
+  the floor for low objects (it is a real-robot safety number), or accept fewer/higher grasps on them.
+- **Bookkeeping bug (fix after the campaign):** `stats.yaml` `success_rate` counts attempts only until
+  the 20-episode cap (20/21 for strawberry) while the new `ever_success_rate`/stress stats count every
+  executed env (27/30) — different denominators, so `ever < success` appeared. The CSV has every attempt;
+  the table above uses it (one denominator). Make `success_rate` use the same.
+- **Follow-up (same day):** `TABLE_TOL` back to 2 mm in the planner (the 15 mm TCP bound stays; execution is
+  capped there anyway). `assets/objects/banana_chunk.obj` REPLACED by a taller variant (thickness axis z
+  scaled 1.3 about the centroid: 33.7 × 35.0 × 26.5 mm, 17.0 cm³, watertight; real chunks are not that
+  flat) — old mesh in git history at 85e1a44. `object_spawn_z` 0.052 still clears (needs ≥ 0.049 at scale
+  1.1). Genesis particle cache is content-hashed, so the new mesh resamples automatically.
+
+### 2026-09-05 — Letters A–Z thickened to 25 mm; two planner fixes they exposed (local-stroke seed width, coarse-surface remesh)
+
+- **Meshes:** all 26 `assets/objects/letter_*.obj` scaled along their thin axis (z, 3.8–5.9 mm) to
+  **25.0 mm** about the centroid (in place; old meshes at 85e1a44). Task configs: `object_spawn_z`
+  0.0201 → **0.0333** (board + 12.5 mm × max scale 1.4 + 2 mm), `mpm_grid_density` 500 → **250** and
+  `sim_substeps` 470 → **235** (tofu's; the fine grid existed only for the 6 mm plate — ~16× cheaper).
+- **Planner fix 1 — seed width measured on the LOCAL stroke** (`SEED_SPAN_MARGIN` 8 mm): the seed width
+  was the object span inside the pad footprint slab, which runs straight through the body, so on a
+  letter it spanned OTHER strokes (36–53 mm seeds, 711/734 `no_contact` on `a`). Now the span is taken
+  within primitive width/2 + 8 mm of the anchor. Convex objects unaffected (tofu final identical).
+- **Planner fix 2 — coarse CAD surfaces are isotropically remeshed to 4 mm before direct tet**
+  (`SURFACE_MAX_EDGE`; pymeshlab; `subdivide_to_size` leaves T-junctions). A 44-face letter had ~10×
+  too little FEM grip (few contact nodes on narrow stroke faces): `w` went from NO grasp to 29.7 mm /
+  0.2 N. `Y` is now keyed to "surface is fine", not raw face count. Side effect on coarse CAD objects:
+  tofu 2623 → 2699 tets, holdable seeds 32 → 63, final 29.4 → 29.1 mm (stress 1031 → 1635 Pa), plan
+  time unchanged (~5.6 s). 6 mm was tried: letters worse (`w` none). Scans (>2000 faces) unchanged.
+- **Letters remain hard:** holdable seeds `a` 5, `w` 1, `i` 10, `o` 4 of 4,600; thin strokes at the tofu
+  material give marginal grip (0.15–0.35 N), and `i`'s 7 mm stroke is under `WIDTH_MIN` 8 mm so it is
+  grasped along its length. Expect lower success than tofu; material or `WIDTH_MIN` are the knobs.
+- **letter_a collector smoke (2 envs, thick mesh, grid 250):** 2 saved / 9 attempts (22 %), ever lifted 4/10,
+  all sub-yield (max 0.62), 0 planner fallbacks, 7.1 min. The planner picks WHOLE-LETTER grasps (36–52 mm
+  on a 48.6 mm letter — lowest FEM stress, passes force + torsion gates; predicted grip 0.3–2.2 N ≈
+  measured MPM coupling 0.25–0.9 N) yet they pivot/slide out at lift: two tiny contact patches on the
+  outer bulges of a non-convex 50 mm shape. Stroke pinches (12–17 mm) exist among the seeds but score
+  worse. Candidate fixes (user decision): a contact-area / compactness term or stricter torsion margin
+  in the score; a stiffer letter material; or accept the low rate.
+- **Letters → MUSHROOM material** (registry `MATERIALS["mushroom"]`, E 3e5 / ν 0.35 / yield 4e4, all 26). Because
+  scene DR re-samples E/ν/ρ from the DR yaml every batch, the 26 letter DR files got mushroom's ranges too
+  (`object_E` [2e5, 3e5], `object_nu` [0.32, 0.38]; ρ unchanged) — without that the registry swap is inert in
+  collection. Planner at E 3e5: holdable seeds a 6 / w 8 / i 7 (tofu: 5 / 1 / 10), grip 0.19–0.60 N,
+  stress 0.12–0.17 of yield — still whole-letter widths (44–50 mm); the wide-grasp preference is unchanged.
+- **letter_a smoke with mushroom material: no better** — 2 saved / 9 attempts (22 %), ever lifted 3/10, all
+  sub-yield (max 0.64), 6.7 min. Coupling force at close end 0.3–3.1 N (≥ 5× what a 21 g letter needs), yet
+  the 36–56 mm whole-letter grasps still pivot out at lift. Force is NOT the limiter; the planner's preference
+  for wide two-extremity grasps on a non-convex shape is. Next candidate: a compactness / contact-area term
+  or a stricter torsion margin in the score (stroke pinches exist among the seeds but lose on stress).
+
+### 2026-09-05 — `diagnostics/calib_replay.py`: replay a recorded hand-eye round after moving the camera
+
+Camera placement changed → `WORLD_T_CAM_EXT` obsolete. New driver replays the ADOPTED round's 14 TCP poses
+(`charuco_hand_eye_2026-09-03-21-10-38.npz`; outlier #7 dropped from `_selected.npz`), captures the
+clamped ChAruco board at each, saves a new round in the same format and runs `calib_select` (+ optional
+`--table-check` after a `--park` pose that takes the board out of view). Gentle: position-mode Cartesian
+moves capped by `--speed` (30 mm/s) / `--mvacc`, `--dwell` 5 s per pose, ESC on the live window →
+`set_state(4)` at any moment; dry run by default, `--live` to move; poses outside `EE_BOUNDS` skipped.
+Geometry note: with the OLD placement the board is visible only for TCP z ≤ 0.22–0.26 m, so `--dz` has
+~6–10 cm headroom, while z ≥ 0.35 is out of view (right for the table check) — the new placement will
+differ; undetected poses are skipped, not fatal. The 2026-09-03 touch-plane correction cannot be replayed
+(the 6 touch points were never saved); the user's TCP-measured table ArUco corners are the intended
+replacement (fixes tilt + height + x/y + yaw).
+
+### 2026-09-05 — Camera moved: replayed hand-eye round + plane/ArUco correction (tools: calib_replay, aruco_check, extrinsic_correct)
+
+`diagnostics/calib_replay.py` drove the 13 stored poses (30 mm/s, 5 s dwell, ESC-stop, start/park at z 0.35
+with the board out of view): 13/13 captured, HORAUD 12/13 inliers @ 1.85 mm, camera (0.768, 0.002, 0.290) m
+28.8° down. Raw solve vs external truth: table tilt 1.71°, height 7.7 mm (13.8 expected), TCP-measured
+ArUco corner off (−7.9, −2.6, −9.7) mm — the same "self-consistent but tilted" defect as 09-03.
+`diagnostics/extrinsic_correct.py`: rotate about the table-plane centroid so the plane is level, lift to
+13.8 mm, shift x/y onto the ArUco corner → corner error (0, 0, +1.9) mm; 1.71° / 13.2 mm correction. Costs
+hand-eye self-consistency 1.74 → 3.91 mm (09-03: 0.94 → 1.76). Crop: 0.46 % of board points above the 18 mm
+floor (0 % above 20 mm) — camera is farther now (0.37–1.43 m), depth noisier. `diagnostics/aruco_check.py
+--ref 1 0.1613 0.0829 0.0136` is the per-session drift check (old extrinsic: 123 mm off). Lessons: D435i
+640×480 colour is a centre CROP of the 16:9 sensor (HFOV 55.6° vs 70°) — realsense-viewer shows more than the
+pipeline does; fit the table plane ONCE (seeded RANSAC + SVD on a 10-frame median) and transform it, else
+RANSAC noise (±1°) masquerades as tilt. Corrected matrix saved beside the round; adoption pending.
+- **Camera tooling consolidated → `docs/camera_calibration.md`**: (1) `drift_check.py` (camera only; pixel drift
+  vs the pinned `dataset/camera_calibration/reference/aruco_ref.npz`, mm-lateral at range; `--pin` after a
+  recalibration), (2) `extrinsic_check.py` (`--move` to the pinned park pose (0.3793, 0.0829, 0.350) m; ArUco
+  corner + table plane through the CURRENT `WORLD_T_CAM_EXT`), (3) recalibration = today's procedure with the
+  operator prerequisites. Drift right after pinning: ≤1 px (≈1 mm); PnP camera-frame corners are ±5 mm along
+  the ray at 0.73 m, so pixel drift is the number to judge. Old matrix through extrinsic_check: 123 mm / 10.7°.
+
+### 2026-09-05 — ADOPTED: new D435i extrinsic (sim + real), plane-fit fix, camera tooling
+
+- **`WORLD_T_CAM_EXT` = the 2026-09-05-17-22-02 round + external correction (4 mm plane).** Camera at
+  (0.781, −0.003, 0.289) m, optical axis 27.9° down. Sim follows: all 40 task yamls' `cam_pos/cam_lookat/cam_up`
+  (= T translation / axis hitting the board plane at 13.8 mm / −T y-column), `d435i_noise.yaml`
+  `pc_axial_cam_pos`, and the `SingleLiftTask` defaults. No stale values remain (grep-verified). 461 tests pass.
+- **Plane-fit bug found while validating:** RANSAC at 8 mm merged the bare table beyond the board (reads
+  −10…0 mm) with the board (13.8) into one plane tilted ~1° that varied 0.9–1.4° between captures; at 4 mm
+  the fit is stable (0.16–0.22°, 13.6–13.7 mm, inlier std 0.9 mm). The raw hand-eye tilt is real (1.81° on the
+  clean plane); the correction recomputed on it differs from the first by 0.17° / 1.0 mm — re-adopted so the
+  config equals what `docs/camera_calibration.md` reproduces. Bare table reads ~5 mm low at 1–1.4 m (depth
+  scale) → only the board plane is a height reference.
+- **Validity after adoption** (`extrinsic_check`, arm at the pinned park pose): corner 3.6 mm, plane 0.2° /
+  13.6–13.8 mm — the tool's noise floor (corner ±4 mm from PnP depth ambiguity at 0.73 m, tilt ±0.2°). Stale
+  matrix read 122 mm / 10°. Drift reference re-pinned with sub-pixel corners (0.1 px repeatability).
+
+### 2026-09-05 — Disturbance = OBJECT drag + scripted re-target (ported from the colleague's reactive collector; robot-side kick removed)
+
+`cross-category-dp` moved on from DART kicks to a **reactive** collector (commits 4cc9875…2523268): a lateral
+velocity drag on the object mid-approach, then the demonstrator re-targets the grasp by the object's xy
+displacement and re-approaches hover-then-descend (`start_mode=reactive_recover`; eval-side twin
+`object_perturb_prob/speed/frame` in `DRConfig` + `GenesisWorker._apply_perturbation`). Ours now mirrors it,
+minimally, under the existing `disturbance_prob`:
+- `GenesisWorker.drag_object(env, vel)` (per-env `set_particles_vel`), applied by the executor for `DRAG_HOLD=4`
+  steps from a random step in `DRAG_STEP=(12,45)` while in approach, speed `DRAG_SPEED=(0.12,0.38)` m/s.
+- After `RX_SETTLE=16` steps: shift `pos_b/grasp_pos/lift_b` by the object's xy displacement (skip < 12 mm),
+  re-approach from the current pose in TWO constant-speed legs: vertical to `RX_HOVER=0.11` above the new grasp,
+  then to it (their version jumps the approach origin to the hover in one command). One drag per env.
+- Robot-side kick (`DISTURB_MAX_M/PHASES`) removed; CSV `kick` → `drag`, `retarget`; `metrics["retargeted"]`.
+- Smoke (tofu, 2 envs, forced): drags at steps 37/23, object moved 6–9 cm, both re-targeted and lifted (100 %),
+  commanded step ≤ 3.0 mm throughout (constant speed kept), sub-yield 0.28. Not ported: their eval-side
+  perturbation (`object_perturb_*` in SimBackend/eval harness) — separate decision.
+- **Two orientation bugs fixed in the re-target / start-mode path (user saw the gripper snap to the nominal
+  top-down pose after a drag):** (1) leg 2 of the re-approach restarted `alpha` on the old slerp (start
+  orientation → grasp), so the command snapped back to the pre-re-target orientation at the hover — 27.8° and
+  70.4° single-step command jumps, 5.4°/step measured on the arm; now leg 1 finishes the rotation and leg 2
+  holds the grasp orientation. (2) the executor built every env's approach slerp from `home_quat[0]` — right
+  when all envs shared one home orientation, wrong with per-env start modes (env 1 first snapped to env 0's
+  start orientation, then rotated ~97°); now per-env. After both: commanded orientation step ≤ 2.0°, measured
+  ≤ 1.9°, positions ≤ 3.0 mm/step, 2/2 lifted with drags + re-targets (`mid_approach` starts, forced drags).
+  Proper check = decode recorded actions with `ActionPipeline` (euler is range-normalized with a frame offset,
+  not ±π) or use the measured `ee_quat`.
+- **Pre-grasp STANDOFF approach (collision fix for large objects).** The approach was one straight lerp from the
+  start to the grasp TCP with the fingers open 80 mm; on a 60 mm tomato (10 mm clearance per finger) the
+  ~45° diagonal put the leading finger into the fruit before the TCP was over it, and the re-target hover
+  (above the OLD xy) made the descent to the new grasp diagonal too. Now two legs: start → standoff =
+  grasp − `STANDOFF` (0.10 m) × approach axis (planned tool +z, tilt-aware), then straight along the axis into
+  the grasp — the open fingers straddle the object by construction; a re-target's via is the NEW grasp's
+  standoff. Both legs at 2.4 mm/step; orientation completes in leg 1. Smoke (forced drags, videos): tomato
+  2/2 and tofu 2/2 lifted after 1–8 cm slides, commanded ≤3.0 mm / ≤2.7° per step, measured ≤2.0°/step,
+  coupling force 0.00 N at the first grasp step (no approach contact).
+
+### 2026-09-05 — Paired real→sim replay for play data (`replay_real_to_sim_paired.py`): object placement fixes
+
+Real play data `dataset/demos/play_red_cube_real/26-09-05-xiv` (spacemouse teleop, red 3 cm cube on the board at
+xy (0.3779, −0.0003), recorded absolute-euler actions). Sim twin = `single_lift_cube3_soft_board.yaml` (soft
+cube3). Two tool fixes: (1) `--object-xy X Y` (+ optional `--object-z Z`) — the real object's location; before,
+the tool always put the object at the real first-frame TCP xy (the "cube below the arm" probe protocol).
+(2) The shift is now RELATIVE TO THE TASK SPAWN (`object_spawn_xy/z`), not the registry default: the board
+task spawns at x 0.30 while the registry says 0.47, so the old shift sent the cube to x≈0.208 — on the MPM
+box edge (x ≥ 0.21) — where it was sliced away and never appeared in the sim cloud ("buried"/missing).
+`SimBackend.reset`/`GenesisWorker.reset` accept `object_dxy` as (N,2) or (N,3) so a z shift flows through;
+the tool prints the settled sim object centre per episode. Diagnostics on the way: the real cloud near the
+cube spans z 20–47.5 mm ⇒ the cube was on the BOARD (top 43.8), not the bare table; a bare-table twin sat
+14 mm low. MPM spawn/bounds were verified NOT to be the issue (soft cube settles at centre z 16.0 mm on the
+plane, 29.8 mm on the board). Kinematic pairing quality: EE ≤ 1.5 mm, quat ≤ 1.4°, gripper exact.
+- **Docs for the hand-off:** `docs/grasp_synthesis_final.md` (the frozen planner + executor, what a run does,
+  expected numbers, what is tunable) and `docs/adding_new_objects.md` (mesh → post-process (FEM-aware
+  direct-tet check, thickness ≥ 25 mm, centring) → additive registry entry → tofu-trio configs with the
+  SHARED vs OBJECT-SPECIFIC split (spawn_z rule = the burying knob) → dev_synth / profile smoke → the two
+  levers (mesh, material) → collect_demo_template).
+- **Gripper jitter after a non-home start (user-found, run 26-09-05-eni ep0008_env7):** at the standoff
+  rollover the approach step counter restarts for leg 2 and the re-open ramp `grip0 + ramp(step)` restarted
+  with it — the command snapped 80 → 23 mm at step 27 and re-opened; the gripper physically slammed to 3.6 mm
+  and back (decoded from the recorded actions, gripper = LAST column: the collector records 10-dim rot6d even
+  under the euler config, so column 6 is a rotation component — earlier same-day "commanded" decodes through
+  the euler pipeline were invalid for rotation/gripper; the measured-ee_quat checks stand). Fix: `grip0` set to
+  open when the standoff is reached (the re-target path already did). Affects EVERY non-home start recorded
+  before the fix (~40 % of episodes with the default start_modes): filter by `start_mode != home` in
+  `dr_params.csv` or re-collect.
+- **Adaptive standoff (user-found up-then-down, run 26-09-05-jdq ep0002_env1):** the fixed 10 cm standoff made
+  starts below it (above_object 4–12 cm up, late mid_approach) climb first, then descend — non-monotonic z from
+  a hidden constant, bad for IL. Now the standoff sits at the start's own axial distance along the approach
+  axis, clamped to [`STANDOFF_MIN` 4 cm, `STANDOFF_MAX` 10 cm]: a start near the axis gets a short lateral
+  move onto it then a straight descent; far starts (home, in_air) get a monotonic diagonal to the 10 cm point;
+  only a start under 4 cm along the axis lifts (≤ a few cm, collision safety). Same rule for re-targets.

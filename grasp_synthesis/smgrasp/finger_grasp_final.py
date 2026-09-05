@@ -126,6 +126,44 @@ def finger_min_world_z(x_tcp, pad_geo) -> float:
     return float(min(Lw[:, 2].min(), Rw[:, 2].min()))
 
 
+# ── batched versions of the three helpers above (X: (N, 7) grasps) — the seed stage runs on
+#    thousands of candidates, and the per-grasp Python loop was ~half of a synthesis.
+def _finger_offsets(w):
+    """(N,3) left / right finger-origin offsets in the tool frame for widths w (N,)."""
+    w = np.asarray(w, float); z = _z_off(w)
+    tL = np.stack([np.zeros_like(w),  (w / 2.0 + FINGER_GRIP_OFF), z], axis=1)
+    tR = np.stack([np.zeros_like(w), -(w / 2.0 + FINGER_GRIP_OFF), z], axis=1)
+    return tL, tR
+
+
+def finger_world_pts_batch(X, pad_geo, step: int = 1):
+    """(N, P, 3) left and right finger points in world for every grasp (points subsampled by `step`)."""
+    X = np.asarray(X, float); M = Rot.from_euler("xyz", X[:, 3:6]).as_matrix()       # (N,3,3)
+    tL, tR = _finger_offsets(X[:, 6])
+    L = pad_geo["left_pts"][::step]; R_ = pad_geo["right_pts"][::step]
+    Lw = np.einsum("nij,npj->npi", M, L[None] + tL[:, None]) + X[:, None, :3]
+    Rw = np.einsum("nij,npj->npi", M, R_[None] + tR[:, None]) + X[:, None, :3]
+    return Lw, Rw
+
+
+def finger_min_world_z_batch(X, pad_geo):
+    """(N,) lowest finger point per grasp (= finger_min_world_z for each row)."""
+    Lw, Rw = finger_world_pts_batch(X, pad_geo)
+    return np.minimum(Lw[:, :, 2].min(1), Rw[:, :, 2].min(1))
+
+
+def tcp_to_local_grasp_batch(X, obj_com, obj_quat_wxyz, pad_geo):
+    """Batched tcp_to_local_grasp: (center, axis, u1, u2) as (N,3) arrays + width_face (N,)."""
+    X = np.asarray(X, float); R = Rot.from_euler("xyz", X[:, 3:6]); w = X[:, 6]
+    zc = _z_off(w) + pad_geo["z_center"]
+    center_w = X[:, :3] + R.apply(np.stack([np.zeros_like(w), np.zeros_like(w), zc], axis=1))
+    axis_w = R.apply([0.0, 1.0, 0.0]); u1_w = R.apply([1.0, 0.0, 0.0]); u2_w = R.apply([0.0, 0.0, 1.0])
+    q = np.asarray(obj_quat_wxyz, float)
+    Rinv = Rot.from_quat([q[1], q[2], q[3], q[0]]).inv()
+    center = Rinv.apply(center_w - np.asarray(obj_com, float))
+    return center, Rinv.apply(axis_w), Rinv.apply(u1_w), Rinv.apply(u2_w), w + pad_geo["eps_left"] + pad_geo["eps_right"]
+
+
 # ── v4 geometry priors ────────────────────────────────────────────────────────
 
 def approach_dir(x_tcp) -> np.ndarray:
@@ -207,7 +245,7 @@ G            = 9.81      # gravity
 LIFT_ACCEL   = 9.81      # lift margin: holdability is checked at m*(G + LIFT_ACCEL)
 MAX_INDENT   = 0.01      # jaw buried deeper than this -> `degenerate` (outside the linear FEM regime)
 PEN_TOL      = 0.005     # finger-body penetration allowed before `penetrate`
-TABLE_TOL    = 0.002     # table scratch allowed before `table`
+TABLE_TOL    = 0.002     # finger may dip this far below the table before `table` (execution is capped at the 15 mm TCP floor anyway)
 
 
 def _pre_fem(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, table_z, obj_sdf):
@@ -478,13 +516,15 @@ N_MEDIAL_AXIS = 500      # medial-axis points, closing across the local tangent
 MULT_FACTOR   = 4        # widths per medial pose (w0 + MULT_FACTOR-1 random tighter)
 MEDIAL_WIDTH_SPREAD = 0.008   # tighter widths drawn from [w0 - this, w0] (m)
 SEED_INDENT   = 1.5e-3   # seed width = object span inside the finger footprint - 2 x this
+SEED_SPAN_MARGIN = 0.008 # ...measured within primitive width/2 + this of the anchor along the closing axis
+                         # (non-convex objects: the pad slab runs through the body and would span OTHER strokes)
 SEED_TIP_MARGIN = 0.005  # fingertip height sampled up to this far below the object top
 SEED_PEN_MAX  = 0.010    # filter: max finger/object penetration per finger (generous; the scorer uses PEN_TOL)
 TOP_K         = 6       # seeds carried forward
 
 
 def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
-                      table_z: float = 0.0, seed: int = 0,
+                      table_z: float = 0.0, tcp_z_min: float = 0.0, seed: int = 0,
                       yield_stress=None, record_history: bool = False, stage_cb=None) -> dict:
     """Plan one 7-DOF TCP grasp `[tx,ty,tz,roll,pitch,yaw,width]` maximizing `score_finger_grasp`.
 
@@ -501,7 +541,9 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
     import cma
 
     com = np.asarray(obj_com, float)
-    obj_sdf = build_object_sdf(obj)
+    obj_sdf = getattr(obj, "_obj_sdf", None)             # object-local -> one per FEM object, shared by all envs
+    if obj_sdf is None:
+        obj_sdf = obj._obj_sdf = build_object_sdf(obj)
 
     best = {"score": -np.inf, "x": None, "res": None}
     history, feasible, n_eval, cur_round = [], [], [0], [1]      # cur_round: 1 = CMA, 2 = width refine
@@ -536,7 +578,7 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
     Robj = Rot.from_quat([q[1], q[2], q[3], q[0]])
     vw_xy = Robj.apply(obj.verts)[:, :2]
     half_xy = np.maximum(0.5 * BBOX_MARGIN * (vw_xy.max(0) - vw_xy.min(0)), 0.01)
-    tz_lo = com[2] + FINGER_TO_TCP_Z - 0.04
+    tz_lo = max(com[2] + FINGER_TO_TCP_Z - 0.04, tcp_z_min)       # tcp_z_min: the action box / real EE clip
     tz_hi = com[2] + Z_LIFT_HI
     _r, _p, _y = np.radians([ROLL_MAX_DEG, PITCH_MAX_DEG, YAW_MAX_DEG])
     lb = [com[0] - half_xy[0], com[1] - half_xy[1], tz_lo, np.pi - _r, -_p, -_y, WIDTH_MIN]
@@ -555,50 +597,17 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
         sel = along[near]
         return float(np.clip((sel.max() - sel.min()) - 2 * indent, 0.01, WIDTH_MAX))
 
-    # ── Step 1: seed grasps from primitives ──
-    def _grasp_from_primitive(anchor_local, axis_local, width, kind, k):
-        """A seed grasp from a primitive (anchor point + closing axis, object frame):
-          orientation  tool +y = closing axis, tool +z (approach) as close to straight down as possible
-          xy           pad centre on the anchor
-          height       fingertip at a random height within the object (table clearance .. top)
-          width        object span inside the finger footprint at that height, minus a light indent"""
-        yv = Robj.apply(np.asarray(axis_local, float)); yv = yv / np.linalg.norm(yv)
-        def _rot(yv):
-            zv = np.array([0.0, 0.0, -1.0]); zv = zv - (zv @ yv) * yv
-            if np.linalg.norm(zv) < 1e-6:                        # vertical axis: approach horizontally
-                zv = np.array([1.0, 0.0, 0.0]); zv = zv - (zv @ yv) * yv
-            zv = zv / np.linalg.norm(zv)
-            return Rot.from_matrix(np.stack([np.cross(yv, zv), yv, zv], axis=1))   # columns = tool x, y, z
-        R = _rot(yv)
-        if abs(R.as_euler("xyz")[2]) > np.pi / 2:                # jaw symmetry: keep yaw in [-90, 90]
-            R = _rot(-yv)
-        r, p, y = R.as_euler("xyz")
-        r = r % (2 * np.pi)                                      # top-down = pi (the rotation box's convention)
-        w = float(np.clip(width, 0.01, WIDTH_MAX))
-        tcp0 = com + Robj.apply(anchor_local) - R.apply([0.0, 0.0, _z_off(w) + pad_geo["z_center"]])
-        x = np.array([tcp0[0], tcp0[1], tcp0[2], r, p, y, w])
-        # height
-        floor = table_z - TABLE_TOL + 0.001
-        tip_target = _hrng.uniform(floor, max(floor, obj_top - SEED_TIP_MARGIN))
-        x[2] += tip_target - finger_min_world_z(x, pad_geo)
-        # width
-        c, a, u1, u2, wf = tcp_to_local_grasp(x, obj_com=com, obj_quat_wxyz=obj_quat_wxyz, pad_geo=pad_geo)
-        d = obj.verts - c; proj = d @ a
-        foot = (np.abs(d @ u1) < pad_geo["half_u1"]) & (np.abs(d @ u2) < pad_geo["half_u2"])
-        if foot.sum() > 3:
-            span = float(proj[foot].max() - proj[foot].min())
-            x[6] = float(np.clip(span - 2 * SEED_INDENT - (wf - w), 0.01, WIDTH_MAX))   # wf - w = inner-face offsets
-            x[:3] = com + Robj.apply(anchor_local) - R.apply([0.0, 0.0, _z_off(x[6]) + pad_geo["z_center"]])
-            x[2] += tip_target - finger_min_world_z(x, pad_geo)
-        return {"start": k, "x": x, "kind": kind}
-
+    # ── Step 1: seed grasps from primitives (all at once) ──
+    #   orientation  tool +y = closing axis, tool +z (approach) as close to straight down as possible
+    #   xy           pad centre on the anchor
+    #   height       fingertip at a random height within the object (table clearance .. top)
+    #   width        object span inside the finger footprint at that height, minus a light indent
     _hrng = np.random.default_rng(seed + 1)                          # fingertip heights
     obj_top = float(com[2] + Robj.apply(obj.verts)[:, 2].max())
-    # antipodal pairs: anchor = pair midpoint, axis = pair line
+    prims = []                                                       # (anchor_local, axis_local, width, kind)
     for mid, ax, w in antipodal_seed_pairs(obj, N_ANTIPODAL, mu=float(mu), rng_seed=seed):
-        seeds.append(_grasp_from_primitive(mid, ax, w - 3.0e-3, "antipodal", len(seeds)))
-    # medial-axis points: anchor = the point, axis across the local tangent; MULT_FACTOR widths each
-    medial = medial_seed_points(obj, N_MEDIAL_AXIS)
+        prims.append((mid, ax, w - 3.0e-3, "antipodal"))
+    medial = medial_seed_points(obj, N_MEDIAL_AXIS)                  # anchor = the point, axis across the tangent
     _wrng = np.random.default_rng(seed)
     for c, tan in medial:
         perp = np.cross(np.asarray(tan, float), [0.0, 0.0, 1.0])
@@ -607,34 +616,81 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
         perp = perp / np.linalg.norm(perp)
         w0 = _local_width(c, Robj.apply(perp))
         for w in [w0] + list(w0 - _wrng.uniform(0.0, MEDIAL_WIDTH_SPREAD, MULT_FACTOR - 1)):
-            seeds.append(_grasp_from_primitive(c, perp, w, "medial", len(seeds)))
+            prims.append((c, perp, w, "medial"))
+    N = len(prims)
+    anchors = np.array([p[0] for p in prims], float); axes = np.array([p[1] for p in prims], float)
+    widths = np.array([p[2] for p in prims], float)
+
+    def _rot_batch(yv):
+        zv = np.tile([0.0, 0.0, -1.0], (len(yv), 1)); zv -= (zv * yv).sum(1)[:, None] * yv
+        bad = np.linalg.norm(zv, axis=1) < 1e-6                     # vertical axis: approach horizontally
+        if bad.any():
+            z2 = np.tile([1.0, 0.0, 0.0], (int(bad.sum()), 1)); z2 -= (z2 * yv[bad]).sum(1)[:, None] * yv[bad]
+            zv[bad] = z2
+        zv /= np.linalg.norm(zv, axis=1)[:, None]
+        return Rot.from_matrix(np.stack([np.cross(yv, zv), yv, zv], axis=2))   # columns = tool x, y, z
+    yv = Robj.apply(axes); yv /= np.linalg.norm(yv, axis=1)[:, None]
+    R = _rot_batch(yv); eul = R.as_euler("xyz")
+    flip = np.abs(eul[:, 2]) > np.pi / 2                              # jaw symmetry: keep yaw in [-90, 90]
+    if flip.any():
+        R2 = _rot_batch(-yv[flip]); eul[flip] = R2.as_euler("xyz")
+        Rm = R.as_matrix(); Rm[flip] = R2.as_matrix(); R = Rot.from_matrix(Rm)
+    eul[:, 0] %= 2 * np.pi                                           # top-down = pi (the rotation box's convention)
+    w = np.clip(widths, 0.01, WIDTH_MAX)
+    anchor_w = com + Robj.apply(anchors)
+    def _tcp(Rb, w_, anchors_):
+        z = np.zeros_like(w_)
+        return anchors_ - Rb.apply(np.stack([z, z, _z_off(w_) + pad_geo["z_center"]], axis=1))
+    X = np.concatenate([_tcp(R, w, anchor_w), eul, w[:, None]], axis=1)   # (N, 7)
+    floor = table_z - TABLE_TOL + 0.001
+    tip = _hrng.uniform(floor, max(floor, obj_top - SEED_TIP_MARGIN), N)
+    X[:, 2] += tip - finger_min_world_z_batch(X, pad_geo)
+    # width from the object span inside the pad footprint at that height
+    c, a, u1, u2, wf = tcp_to_local_grasp_batch(X, com, obj_quat_wxyz, pad_geo)
+    V = obj.verts
+    for lo_ in range(0, N, 512):                                     # chunked: (n, V, 3) intermediates
+        sl = slice(lo_, min(lo_ + 512, N))
+        d = V[None] - c[sl, None]                                    # (n, V, 3)
+        proj = np.einsum("nvk,nk->nv", d, a[sl])
+        foot = (np.abs(np.einsum("nvk,nk->nv", d, u1[sl])) < pad_geo["half_u1"]) & \
+               (np.abs(np.einsum("nvk,nk->nv", d, u2[sl])) < pad_geo["half_u2"]) & \
+               (np.abs(proj) <= 0.5 * widths[sl, None] + SEED_SPAN_MARGIN)          # local stroke only
+        ok = foot.sum(1) > 3
+        if not ok.any():
+            continue
+        pm = np.where(foot[ok], proj[ok], np.nan)                    # only rows with a footprint
+        span = np.nanmax(pm, axis=1) - np.nanmin(pm, axis=1)
+        idx = np.nonzero(ok)[0] + lo_
+        X[idx, 6] = np.clip(span - 2 * SEED_INDENT - (wf[idx] - w[idx]), 0.01, WIDTH_MAX)
+    upd = np.nonzero(X[:, 6] != w)[0]                                # rows whose width changed: re-anchor
+    if len(upd):
+        Rm = R.as_matrix()[upd]
+        X[upd, :3] = _tcp(Rot.from_matrix(Rm), X[upd, 6], anchor_w[upd])
+        X[upd, 2] += tip[upd] - finger_min_world_z_batch(X[upd], pad_geo)
+    seeds = [{"start": k, "x": X[k].copy(), "kind": prims[k][3]} for k in range(N)]
     if stage_cb is not None:
         stage_cb("seeds", {"seeds": seeds, "medial": medial})
-
     # ── Step 2: filter — table clearance, rotation box, then per-finger penetration (one batched
     #    SDF query over the survivors of the two cheap checks) ──
-    for sd in seeds:
+    zmin = finger_min_world_z_batch(X, pad_geo)
+    for k, sd in enumerate(seeds):
         x = sd["x"]
-        sd["table_ok"] = bool(finger_min_world_z(x, pad_geo) >= table_z - TABLE_TOL)
+        sd["table_ok"] = bool(zmin[k] >= table_z - TABLE_TOL and x[2] >= tcp_z_min)
         sd["rot_ok"] = bool(lb[3] <= x[3] <= ub[3] and lb[4] <= x[4] <= ub[4] and lb[5] <= x[5] <= ub[5])
         sd["pen_ok"] = None                                      # None = not checked
     cand = [sd for sd in seeds if sd["table_ok"] and sd["rot_ok"]]
     if cand:
-        chunks, owner = [], []
-        for i, sd in enumerate(cand):
-            Lw, Rw = finger_world_pts(sd["x"], pad_geo)
-            for f, P in enumerate((Lw[::3], Rw[::3])):
-                chunks.append(P); owner.append((i, f, len(P)))
-        depth = np.maximum(-obj_sdf(Robj_inv.apply(np.concatenate(chunks) - com)), 0.0)
-        worst = np.zeros((len(cand), 2)); k = 0
-        for (i, f, n) in owner:
-            worst[i, f] = depth[k:k + n].max(); k += n
+        Lw, Rw = finger_world_pts_batch([sd["x"] for sd in cand], pad_geo, step=3)   # (n, P, 3) each
+        worst = np.zeros((len(cand), 2))
+        for f, Pw in enumerate((Lw, Rw)):
+            n_, P_, _ = Pw.shape
+            depth = np.maximum(-obj_sdf(Robj_inv.apply(Pw.reshape(-1, 3) - com)), 0.0).reshape(n_, P_)
+            worst[:, f] = depth.max(1)
         for i, sd in enumerate(cand):
             sd["pen_ok"] = bool(worst[i].max() <= SEED_PEN_MAX)
     kept = [sd for sd in cand if sd["pen_ok"]]
     if stage_cb is not None:
         stage_cb("filter", {"seeds": seeds, "kept": kept})
-
     # ── Step 3: score the survivors; Step 4: top-K ──
     t0 = time.perf_counter()
     for sd, res in zip(kept, score_finger_grasp_batch(obj, [sd["x"] for sd in kept], **_kw)):
@@ -735,7 +791,99 @@ FEM_NU = 0.33
 # denser or open meshes go through the voxel remesh, which is robust for scans but dilates the body by
 # about one voxel (tofu +22 % volume, banana_chunk +42 %, a 6 mm letter -> 11 mm). Direct tetgen on a
 # dense scan explodes (banana_chunk: 60k tets) or hangs (prim_lamp), hence the face cap.
-DIRECT_TET_MAX_FACES = 2500
+DIRECT_TET_FACES = 2000
+SURFACE_MAX_EDGE = 0.004   # coarse CAD meshes are subdivided to this edge length first (contact nodes on every face)
+
+
+def _pymeshlab():
+    """pymeshlab, imported with its plugin-load chatter silenced (it prints to stdout/stderr)."""
+    import io, contextlib
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        import pymeshlab
+    return pymeshlab
+
+
+def _ml_to_trimesh(ms) -> trimesh.Trimesh:
+    mm = ms.current_mesh()
+    return trimesh.Trimesh(mm.vertex_matrix(), mm.face_matrix(), process=True)
+
+
+def _pymeshlab_repair(m: trimesh.Trimesh):
+    """Second-chance manifold repair (non-manifold edges/vertices + hole closing) or None."""
+    import io, contextlib
+    ml = _pymeshlab()
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        ms = ml.MeshSet(); ms.add_mesh(ml.Mesh(np.asarray(m.vertices, float), np.asarray(m.faces, np.int32)))
+        ms.meshing_remove_duplicate_faces(); ms.meshing_remove_duplicate_vertices()
+        ms.meshing_repair_non_manifold_edges(); ms.meshing_repair_non_manifold_vertices()
+        ms.meshing_close_holes(maxholesize=200)
+        r = _ml_to_trimesh(ms)
+    return r if (r.is_watertight and r.is_winding_consistent and r.volume > 0) else None
+
+
+def _pymeshlab_isotropic(m: trimesh.Trimesh, edge_m: float = 3e-3):
+    """Isotropic remesh (uniform ~edge_m triangles) — the fallback when a decimation self-intersects."""
+    import io, contextlib
+    ml = _pymeshlab()
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        ms = ml.MeshSet(); ms.add_mesh(ml.Mesh(np.asarray(m.vertices, float), np.asarray(m.faces, np.int32)))
+        ms.meshing_isotropic_explicit_remeshing(targetlen=ml.PureValue(edge_m), iterations=6)
+        ms.meshing_repair_non_manifold_edges(); ms.meshing_close_holes(maxholesize=100)
+        r = _ml_to_trimesh(ms)
+    return r if (r.is_watertight and r.is_winding_consistent and r.volume > 0) else None
+
+
+def _make_manifold(m: trimesh.Trimesh, rounds: int = 4):
+    """Watertight copy of `m` or None: drop faces on non-manifold edges (>2 faces), refill holes, repeat."""
+    m = trimesh.Trimesh(m.vertices, m.faces, process=True)
+    for _ in range(rounds):
+        if m.is_watertight:
+            break
+        cnt = np.bincount(m.edges_unique_inverse)
+        bad_edges = np.nonzero(cnt > 2)[0]
+        if bad_edges.size:                            # faces incident to a non-manifold edge
+            bad_faces = np.unique(m.edges_unique_inverse.reshape(-1, 3)[
+                np.isin(m.edges_unique_inverse.reshape(-1, 3), bad_edges).any(axis=1)].shape[0] and
+                np.nonzero(np.isin(m.edges_unique_inverse.reshape(-1, 3), bad_edges).any(axis=1))[0])
+            keep = np.ones(len(m.faces), bool); keep[bad_faces] = False
+            m.update_faces(keep)
+        trimesh.repair.fill_holes(m)
+        m = trimesh.Trimesh(m.vertices, m.faces, process=True)
+        trimesh.repair.fix_normals(m)
+    return m if (m.is_watertight and m.is_winding_consistent and m.volume > 0) else None
+
+
+def _direct_tet_mesh(raw: trimesh.Trimesh):
+    """(surface, fine) for DIRECT tetrahedralisation, or None. `fine` = the surface was subdivided /
+    decimated to ~DIRECT_TET_FACES uniform faces (tetgen then keeps it as-is: `Y`); a coarse CAD mesh is
+    subdivided to SURFACE_MAX_EDGE first so every face carries FEM contact nodes (a 44-face letter had
+    ~10x too little grip force otherwise).
+    Repairs holes, then decimates IN MEMORY (no files) so scans go direct instead of through the
+    voxel remesh, which dilates the surface by half a voxel (~2 mm/side on a mushroom, +38 % volume;
+    measured 2026-09-05). Decimation error is a few 0.1 mm; the raw mesh still drives the MPM."""
+    m = raw if raw.is_watertight else _make_manifold(raw)   # repair BEFORE decimating
+    if m is None:
+        m = _pymeshlab_repair(raw)
+    if m is None:
+        return None
+    fine = len(m.faces) > DIRECT_TET_FACES
+    if not fine and m.edges_unique_length.max() > SURFACE_MAX_EDGE:
+        iso = _pymeshlab_isotropic(m, SURFACE_MAX_EDGE)          # uniform triangles (subdivide_to_size leaves T-junctions)
+        if iso is not None:
+            m, fine = iso, True
+    if len(m.faces) > DIRECT_TET_FACES:
+        import fast_simplification
+        V, F = np.asarray(m.vertices, np.float64), np.asarray(m.faces, np.int64)
+        m = None
+        for agg in (7, 5, 3, 1):                         # less aggressive collapses keep it manifold
+            pts, tri = fast_simplification.simplify(V, F, target_count=DIRECT_TET_FACES, agg=agg)
+            cand = _make_manifold(trimesh.Trimesh(pts, tri, process=False))
+            if cand is not None:
+                m = cand
+                break
+        if m is None:
+            return None
+    return m, fine
 
 
 def build_grasp_fem(mesh_path, *, voxel_div: int = 14, target_tets: int = 1500,
@@ -749,10 +897,34 @@ def build_grasp_fem(mesh_path, *, voxel_div: int = 14, target_tets: int = 1500,
     _LF = str(_ROOT / "gentle_manip/assets/xarm/xarm_gripper/meshes/left_finger.STL")
     _RF = str(_ROOT / "gentle_manip/assets/xarm/xarm_gripper/meshes/right_finger.STL")
     raw = trimesh.load(str(mesh_path), force="mesh")
-    direct = bool(raw.is_watertight) and len(raw.faces) <= DIRECT_TET_MAX_FACES
-    mesh = raw if direct else prepare_mesh(raw, voxel_div=voxel_div, force_remesh=True)
-    obj = build_elastic_object(mesh, MetricConfig(nu=float(nu)),
-                               switches=tet_switches(mesh, target_tets=target_tets))
+    dm = _direct_tet_mesh(raw)                        # in-memory repair + subdivision/decimation; None = not possible
+    direct = dm is not None
+    mesh, fine = dm if direct else (None, False)
+    obj = None
+    if direct:
+        # `Y` keeps the input surface as-is (no boundary Steiner points) — ONLY for decimated scans:
+        # without it tetgen's quality refinement cascades on decimated triangles (1000 faces -> 38k
+        # tets, 13 s; with Y -> 1.9k, 0.2 s). Coarse CAD meshes (a 12-face box, a 192-face cylinder)
+        # NEED the boundary refinement or the pad footprint has no nodes, so they keep the default.
+        Y = "Y" if fine else ""
+        try:
+            obj = build_elastic_object(mesh, MetricConfig(nu=float(nu)),
+                                       switches=tet_switches(mesh, target_tets=target_tets) + Y)
+        except RuntimeError:                          # self-intersecting decimation: isotropic remesh
+            iso = _pymeshlab_isotropic(raw)
+            try:
+                if iso is None:
+                    raise RuntimeError("isotropic remesh not watertight")
+                obj = build_elastic_object(iso, MetricConfig(nu=float(nu)),
+                                           switches=tet_switches(iso, target_tets=target_tets) + "Y")
+                mesh = iso
+            except RuntimeError as e:
+                print(f"  [fem] direct tet failed ({str(e)[:50]}) -> voxel remesh fallback (dilates)", flush=True)
+                direct = False
+    if not direct:                                    # fallback: voxel remesh (dilates the surface)
+        mesh = prepare_mesh(raw, voxel_div=voxel_div, force_remesh=True)
+        obj = build_elastic_object(mesh, MetricConfig(nu=float(nu)),
+                                   switches=tet_switches(mesh, target_tets=target_tets))
     wg.use_gpu_solve(bool(use_gpu) and obj.fem.ndof <= wg.GPU_MAX_NDOF)
     pad_geo = finger_pad_geometry(_LF, _RF)
     return obj, pad_geo, {"tets": len(obj.tets), "ndof": int(obj.fem.ndof), "gpu": bool(wg.USE_GPU_SOLVE),

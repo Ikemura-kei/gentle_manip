@@ -226,6 +226,11 @@ loss, ~0% eval success, run `oppsu`); every `+train_dataset` override has its `+
 `--mem=0` on the sbatch (checkpoint save, not training, is what OOM'd before).
 
 
+## 1a-cam. EXTERNAL CAMERA — drift check / extrinsic validity / recalibration
+
+See `docs/camera_calibration.md` (tools in `gentle_manip/diagnostics/`: `drift_check`, `extrinsic_check`,
+`calib_replay` + `extrinsic_correct`; pinned reference + park pose in `dataset/camera_calibration/reference/`).
+
 ## 1b. SIM DEMO COLLECTION (grasp synthesis v4.1) — commands, and how to profile it
 
 ### 1b.1 The command
@@ -235,7 +240,6 @@ uv run --project envs/sim python grasp_synthesis/collect_demos_synth_v4.py \
   --experiment <experiment name under configs/experiments/> \
   --task-name  <output dataset name, {single,multi}_{task}_{object}_{soft,rigid}> \
   --table-z    <SUPPORT SURFACE height in m>   \
-  --n-grasp    <close steps>                   \
   --n-episodes 200 --n-envs 10 --seed 0 --scene-dr-every 1 \
   --record-video 20
 ```
@@ -246,11 +250,11 @@ Concrete, for the 2026-09-04 board rig:
 OMP_NUM_THREADS=8 uv run --project envs/sim python grasp_synthesis/collect_demos_synth_v4.py \
   --experiment single_lift_cube3_soft_board_abs7d \
   --task-name  single_lift_cube3_soft_board \
-  --table-z 0.0138 --n-grasp 28 \
+  --table-z 0.0138 \
   --n-episodes 200 --n-envs 10 --seed 0 --scene-dr-every 1 --record-video 20
 ```
 
-### 1b.2 The three flags that MUST be set deliberately (each has bitten us)
+### 1b.2 The two flags that MUST be set deliberately (each has bitten us)
 
 - **`--table-z`** — the height of the surface the object RESTS ON, not the table. Default is
   `0.0`. It feeds three things in `smgrasp/finger_grasp.py`: the finger/table penetration filter,
@@ -262,14 +266,26 @@ OMP_NUM_THREADS=8 uv run --project envs/sim python grasp_synthesis/collect_demos
   to whatever the task spawns at. A mismatch (nominal 0.47 vs spawn 0.30) pushed objects outside
   the MPM domain, which SLICED them into thin sheets AT SPAWN. Measured: clipped -> 5% grasp
   success, un-clipped -> 83%.
-- **`--n-grasp`** — close-phase length; sets the closing SPEED. Match it to the real demos or the
-  policy sees two grasp modes. Measure both sides the same way (mean per-step width decrease over
-  closing steps): real 2026-09-01 set = **1.601 mm/step**; sim at the default `--n-grasp 37` =
-  1.232 mm/step, i.e. sim is SLOWER, so the step count comes DOWN (28), not up.
+- **Close speed is fixed, not a flag (2026-09-05):** the grasp phase lasts (80 mm − planned width) /
+  `GRIP_SPEED` (2.2 mm/step = the real teleop close speed, re-measured over 141 eps / 7 objects); `--n-grasp`
+  is gone. Approach 2.4 mm/step, re-open after a non-home start also `GRIP_SPEED`.
 - (`--grasp-gpu` is gone — the GPU FEM solver is always on since the 2026-09-05 trim; so are every
   never-varied knob: `--maxfevals/--grasp-n-starts/--grasp-antipodal-seeds`, `--n-home-to-pre/--n-settle/
-  --n-firm`, `--held-run-*`, `--scan-metric/--closure-gain`, `--regrasp-prob`, `--approach-xy-finish`,
+  --n-firm` (firm phase and the c_y closure scan removed entirely; approach duration is now
+  per-env distance / `APPROACH_SPEED`), `--held-run-*`, `--scan-metric/--closure-gain`, `--regrasp-prob`, `--approach-xy-finish`,
   `--keep-failures/--keep-synth-failures`. They are module constants in `collect_demos_synth_v4.py`.)
+
+- **Action yaml (2026-09-05): experiments use `abs_pose_euler_abs_gripper_z15.yaml`** (TCP z floor
+  15 mm == `EE_BOUNDS_MIN z` == planner `tcp_z_min`). Checkpoints trained before that date deploy with
+  the old `abs_pose_euler_abs_gripper.yaml` (z floor 3 mm) — different normalization, never mix.
+- **Start modes + kicks (DR keys, 2026-09-05):** `start_modes: {home, in_air, above_object, mid_approach}`
+  (weights, default 0.6/0.15/0.15/0.1) and `disturbance_prob` (default 0.05) in the DR yaml. Non-home
+  starts teleport the arm (IK, inside the action box −5 mm, fingers ≥3 cm above the object, gripper
+  part-closed 20–80 mm, re-opened at 2.2 mm/step) before the approach; `disturbance_prob` = a mid-approach
+  OBJECT drag (4 steps at 0.12–0.38 m/s, random direction), after which the demonstrator re-targets the
+  grasp by the object's xy displacement and re-approaches via a hover 11 cm above it. `dr_params.csv`
+  gets `start_mode/start_x/y/z/start_w/drag/retarget`. All-zero = today's plain demo. Dev: `GM_START_MODE=<mode>`,
+  `GM_DISTURB=1` force them.
 
 **Recorded action caveat:** `_invert_actions_absolute` always emits **10-dim rot6d**; the
 collector dispatches only on `action_config.mode == "absolute"`, which BOTH absolute configs

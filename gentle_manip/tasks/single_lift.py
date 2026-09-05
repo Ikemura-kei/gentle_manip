@@ -40,10 +40,10 @@ class SingleLiftTask(BaseTask):
         self.sim_substeps: int = int(task_cfg.get("sim_substeps", 80))
         self.mpm_grid_density: float = float(task_cfg.get("mpm_grid_density", 300.0))
         self.cam_fov: float = float(task_cfg.get("cam_fov", 43.15))  # D435i VFOV (measured)
-        # cam_ext (depth -> point cloud) extrinsic. Default = the calibrated L515 pose validated in
-        # the dev prototype; override cam_pos/cam_lookat in the task cfg for camera-placement studies.
-        self.cam_pos: tuple = tuple(task_cfg.get("cam_pos", (0.98910661, -0.00034108, 0.09825304)))
-        self.cam_lookat: tuple = tuple(task_cfg.get("cam_lookat", (-0.01056659, 0.0207823, 0.11265116)))
+        # cam_ext (depth -> point cloud) extrinsic. Default = the 2026-09-05 D435i WORLD_T_CAM_EXT
+        # (pos + optical axis to the board plane); task cfgs carry the same values (+ cam_up).
+        self.cam_pos: tuple = tuple(task_cfg.get("cam_pos", (0.78032539, -0.00362529, 0.28947945)))
+        self.cam_lookat: tuple = tuple(task_cfg.get("cam_lookat", (0.25932406, 0.01186746, 0.01380000)))
         # Camera ROLL. pos+lookat leave rotation about the optical axis free and Genesis defaults
         # to up=(0,0,1), which is ~3 deg off the real D435i mounting. Set cam_up = -world_T_cam[:3,1]
         # to reproduce a calibrated extrinsic exactly. None => Genesis default.

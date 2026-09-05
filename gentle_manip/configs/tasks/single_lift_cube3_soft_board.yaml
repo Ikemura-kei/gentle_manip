@@ -9,13 +9,13 @@
 #   * object at x=0.30, y=0.00 resting ON the board -> centre z = 0.0138 + 0.015 = 0.0288
 object_name: "cube3_soft"
 object_type: "soft"
-object_spawn_xy: [0.30, 0.0]
+object_spawn_xy: [0.40, 0.0]
 # = registry default_pos.z (0.016 = half-height 0.015 + 1 mm CLEARANCE) + board 0.0138.
 # The 1 mm clearance is NOT optional: the registry notes a soft body must SPAWN RESTING, and at
 # 0.0288 (my first value, board + bare half-height) the cube's base sat 1 mm INSIDE the board.
 # MPM particles initialised inside a rigid fixture get violent contact resolution, which kicks
 # and tilts the object at spawn — the grasp is then planned for a pose the object has left.
-object_spawn_z: 0.0298
+object_spawn_z: 0.035
 
 lift_height: 0.15
 hold_steps: 30
@@ -36,9 +36,9 @@ mpm_grid_density: 250
 
 # ── camera: the calibrated D435i, reproduced exactly ──────────────────────────
 cam_fov: 43.15
-cam_pos:    [0.69895466, -0.06643963, 0.31680030]
-cam_lookat: [0.30454208, -0.07412394, 0.01380000]
-cam_up:     [-0.60697255, -0.06794066, 0.79181336]
+cam_pos: [0.78032539, -0.00362529, 0.28947945]
+cam_lookat: [0.25932406, 0.01186746, 0.01380000]
+cam_up: [-0.46799099, -0.01495762, 0.88360665]
 
 rewards:
   dist_to_obj: {scale: 1.0, decay: 20.0}

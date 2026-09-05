@@ -44,6 +44,8 @@ dependencies = [
     "torch==2.8.0",
     "torchvision==0.23.0",
     "torchaudio==2.8.0",
+    "fast-simplification>=0.1.13",  # in-memory quadric decimation (direct-tet FEM path); also a genesis dep
+    "pymeshlab",                    # manifold repair + isotropic remesh rescues on that path (pinned <2025 below)
 ]
 
 [[tool.uv.index]]

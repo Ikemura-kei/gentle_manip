@@ -13,7 +13,7 @@ task: single_lift_mushroom_soft_pi05rgb
 # wrong is silent at collection (the collector ignores this field and always writes rot6d)
 # and fatal at eval: ActionPipeline indexes [:, 9] for the gripper and an IndexError kills
 # the sim server mid-episode, surfacing only as 'socket closed mid-message' on the client.
-action: abs_pose_euler_abs_gripper
+action: abs_pose_euler_abs_gripper_z15
 dr: soft_orientation_realws
 augmentation: l515_noise
 

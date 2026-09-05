@@ -1,22 +1,20 @@
-"""v4 — SURROGATE-SELECTED EXECUTED WIDTH (fork of v3; v3 stays untouched as the fallback).
+"""v4 collector — scripted grasp execution from the FEM grasp planner.
 
-The single change vs v3: the executor's closure constants (2.5 mm width_cls baseline,
-material-aware extra_close, firm base) are REPLACED by a width chosen by the FEM surrogate
-itself. After synthesis, the same pose is scanned over commanded width (the refine-round
-primitive); c_y = the closure at which PREDICTED stress crosses the object's yield; the
-commanded closure is lambda * c_y with ONE global gain (--closure-gain, default 1.28,
-identified once on the mushroom: measured-good closure 6.4 mm / predicted c_y 5.0 mm).
-Measured basis (2026-08-30, docs/fem_surrogate_status.md section 5.1'): the surrogate's
-yield-closure ordering is rank-perfect across mushroom/raspberry/cherry_tomato/banana_chunk
-with a stable ~0.5-0.6 conservative bias, so one gain transfers. Zero per-object constants.
-The weak-grasp firm CHECK is kept as a fallback (extra = 0.5 * commanded closure, capped).
+Per env: plan a grasp (smgrasp/finger_grasp_final.plan_finger_grasp), then execute a fixed
+five-phase trajectory — approach (constant speed: duration = distance / APPROACH_SPEED),
+settle, close to the PLANNED width, lift, hold — recording (obs, action) through the shared
+PerceptionPipeline / ActionPipeline inversion. Open loop: the planner's width refine sets the
+indentation; there is no surrogate closure scan and no force-triggered firm squeeze (both
+removed 2026-09-05 to test whether the planner width alone lifts; see git history for them).
 """
 from __future__ import annotations
 
 import argparse
+import atexit
 import csv
 import os
 import dataclasses
+import shutil
 import tempfile
 import sys
 import time
@@ -58,9 +56,27 @@ from gentle_manip.domain_randomization.dr_config import DRConfig
 
 # ── Constants (keep in sync with run_grasp_synth.py) ─────────────────────────
 
-N_HOME_TO_PRE = 98          # home → grasp pose interpolation steps
+APPROACH_SPEED = 0.0024     # m/step — approach duration = |home→grasp| / speed (constant speed,
+                            # like real teleop; v3.3 recipe value), clipped to the range below
+APPROACH_DUR_MIN, APPROACH_DUR_MAX = 12, 130   # steps (low floor: a short non-home start keeps the speed)
+START_MARGIN_M = 0.005       # sampled start TCP stays inside the action box shrunk by this
+START_CLEAR_M  = 0.03        # lowest finger point >= object top + this at the start
+START_W_MIN    = 0.02        # non-home starts: gripper width ~ U(this, open) -> re-opened at the start
+GRIP_SPEED     = 0.0022      # m/step — gripper speed at a non-home start re-open (= real teleop close speed: 2.20 mm/step, 141 eps, 7 objects, 2026-09-01 set)
+START_AIR_DZ   = 0.10        # in_air starts no higher than home + this
+# Mid-approach OBJECT drag + scripted re-target (colleague's reactive collector, 2026-09-02/05):
+DRAG_SPEED   = (0.12, 0.38)  # m/s lateral particle velocity, random direction
+DRAG_HOLD    = 4             # steps the velocity is set -> a bounded slide (~2-5 cm)
+DRAG_STEP    = (12, 45)      # recorded-step window in which the drag starts (approach only)
+RX_SETTLE    = 16            # steps to let the object stop before re-targeting
+RX_MIN_DISP  = 0.012         # m; a smaller xy displacement is not re-targeted
+STANDOFF_MIN, STANDOFF_MAX = 0.04, 0.10   # m along the grasp's approach axis: the pre-grasp standoff sits at the
+                             # start pose's OWN axial distance clamped to this range (no up-then-down for a start
+                             # already near the axis); the final leg runs straight along the axis (open fingers
+                             # straddle the object, no diagonal into it)
 N_SETTLE      = 1           # hold at grasp pose before closing
-N_GRASP       = 37           # gripper close steps
+N_DWELL       = 2            # hold at the final close width before lifting (MPM contact settles)
+EXEC_EXTRA_CLOSE = 0.0008    # m — execute the PLANNED width minus this (total width; 19.0 mm planned -> 18.2 mm)
 N_LIFT        = 66          # lift steps
 N_HOLD        = 12           # hold at lift height (success eval window)
 LIFT_HEIGHT   = 0.2         # metres above grasp position
@@ -304,91 +320,18 @@ def _x_to_targets(x: np.ndarray, num_envs: int):
 GRASP_VOXEL_DIV = 14              # FEM remesh resolution (frozen v4.1; was --grasp-voxel-div, never passed)
 GRASP_TARGET_TETS = 1500          # FEM target tet count (ndof stays <~5k) (frozen v4.1; was --grasp-target-tets, never passed)
 GRASP_MU = 0.7                    # pad-object friction coefficient (frozen v4.1; was --grasp-mu, never passed)
-N_FIRM = 8   # "firm" phase duration (steps) — gradual extra close IF triggered, else a no-op hold
 
 PHASES = [
-    ("approach", N_HOME_TO_PRE),   # home → pre-grasp pose (slerp + lerp)
+    ("approach", -1),              # home → grasp pose (lerp + slerp); duration is PER-ENV
+                                   #   (distance / APPROACH_SPEED), set in execute_and_collect
     ("settle",   N_SETTLE),        # hold at grasp pose, gripper still open
-    ("grasp",    N_GRASP),         # close gripper (gradual)
-    ("firm",     N_FIRM),          # robustness idea #1: extra squeeze IF the grip came out weak
+    ("grasp",    -1),              # close to the PLANNED width; duration PER-ENV = (open - width) / GRIP_SPEED
+    ("dwell",    N_DWELL),         # hold the final width before lifting
     ("lift",     N_LIFT),          # lift to LIFT_HEIGHT above the grasp point
     ("hold",     N_HOLD),          # hold at lift height (success eval window)
 ]
 N_PHASES  = len(PHASES)
-_GRASP_IDX = [name for name, _ in PHASES].index("grasp")   # boundary the firm-check fires at
-
-# ── Robustness idea #1: force-based grasp firming ─────────────────────────────
-# At the moment an env finishes "grasp" (checked ONCE per env, at the grasp->firm
-# boundary), read its just-measured grip force. If the grasp came out weak
-# (< FIRM_FORCE_THRESH_N) the env closes an extra min(0.5 * commanded closure, 2mm)
-# over the "firm" phase before lifting; otherwise "firm" is a no-op hold that
-# _trim_long_holds collapses. Bounded to fire once per env (a one-way FSM check, not
-# a retry loop). This collector is SOFT-ONLY, and for an MPM body the force is the
-# MPM->finger COUPLING force (XArm7Sim.gripper_coupling_force), which the worker
-# always populates — so there is exactly one firm path.
-
-CLOSURE_SCAN_STEP_M = 0.0005   # width-scan resolution (0.5 mm)
-CLOSURE_SCAN_MAX_M  = 0.012    # scan depth; c_y beyond this is clipped (very soft objects)
-CLOSURE_CMD_MIN_M   = 0.0008   # never command less than this (contact would be marginal)
-CLOSURE_CMD_MAX_M   = 0.008    # hard safety cap
-SCAN_METRIC         = "p98"    # closure-scan yield-crossing stress metric (unmasked 98th pct)
-CLOSURE_GAIN        = 4.92     # commanded closure = CLOSURE_GAIN * c_y (identified once on the mushroom, p98)
-
-
-def surrogate_closure(fem_obj, pad_geo, best_x, obj_com, obj_quat, E, yld, density, mu, table_z,
-                      metric="masked"):
-    """c_y: closure (m, beyond the synthesized width) at which the surrogate's predicted stress
-    first crosses yield. v4.2: the DEFAULT crossing is back on the contact-MASKED top10 (bulk
-    damage onset). v4.1's unmasked-p98 crossing was an over-correction bundled with the real fix
-    (the pen_tol relaxation): measured 2026-08-30, on soft/low-yield objects the unmasked contact
-    concentration exceeds yield AT THE PLAN WIDTH ITSELF (raspberry, strawberry: c_y = 0.0 mm),
-    collapsing commands to the clip minimum — strawberry success 100 % -> 46 %. The masked curve
-    is smooth and non-degenerate under the relaxed scan (verified a genuine stress crossing, not
-    a geometric artifact, at the identification pose). `metric="p98"` retains the v4.1 behaviour
-    for comparison.
-
-    v4.1 also fixes two scan terminations that made v4.0's c_y geometric instead of
-    stress-based (measured: raspberry c_y clustered at 3.0-3.5 mm = pad depth ~1.5 mm + dw/2
-    crossing the search's 3 mm gross-clipping SDF tolerance):
-    - pen_tol is RELAXED to 5 cm for scan calls only. Deep indents are legitimate here (a soft
-      object may take 8 mm below yield); validity is bounded by the 10 mm max_indent
-      (`degenerate`) instead. The 3 mm filter still protects the CMA search unchanged.
-    - statuses are handled by MEANING: `no_contact` -> keep scanning (not touching yet);
-      `degenerate`/`table` -> stop at the validity edge; `ok` -> test the crossing."""
-    from smgrasp import finger_grasp as fg
-    x0 = np.asarray(best_x, float)
-    prev_dw, prev_s = 0.0, None
-    for dw in np.arange(0.0, CLOSURE_SCAN_MAX_M + 1e-9, CLOSURE_SCAN_STEP_M):
-        x = x0.copy(); x[6] = max(0.004, float(x0[6]) - dw)
-        sc = fg.score_finger_grasp(fem_obj, x, obj_com=np.asarray(obj_com, float),
-                                   obj_quat_wxyz=np.asarray(obj_quat, float), pad_geo=pad_geo,
-                                   E=E, density=density, mu=mu, table_z=table_z,
-                                   pen_tol=0.05, w_press=0.05, w_peak=0.3, area_min=0.0)
-        st = sc.get("status")
-        if st == "no_contact":
-            prev_s = None
-            continue                              # pads not touching yet — deepen
-        if st in ("degenerate", "table", "penetrate"):
-            return float(max(dw, CLOSURE_SCAN_STEP_M))   # validity edge before yield
-        s98 = sc.get("stress_top10" if metric == "masked" else "stress_p98")
-        if s98 is None or not np.isfinite(s98):
-            return float(max(dw, CLOSURE_SCAN_STEP_M))
-        if s98 >= yld:
-            # LINEAR INTERPOLATION of the crossing between the bracketing samples: the command is
-            # gain * c_y with gain ~5, so raw 0.5 mm quantization would amplify to ~2.5 mm of
-            # command error. p98 is smooth in closure, so the interpolated crossing is accurate.
-            if prev_s is not None and s98 > prev_s:
-                frac = (yld - prev_s) / (s98 - prev_s)
-                return float(max(prev_dw + frac * (dw - prev_dw), 1e-4))
-            return float(max(dw, CLOSURE_SCAN_STEP_M))
-        prev_dw, prev_s = dw, s98
-    return float(CLOSURE_SCAN_MAX_M)
-
-
-FIRM_FORCE_THRESH_N  = 1.0     # below this gripper->object contact force (N) the grasp is
-                               # judged weak and gets the extra firm close. For a SOFT body
-                               # this is the MPM->finger coupling force, not a rigid contact.
-
+_GRASP_PHASE = [n for n, _ in PHASES].index("grasp")
 
 def _stress_top10(vm: np.ndarray) -> np.ndarray:
     """(N,) top-10%-mean von Mises per env from (N, n_p) particle stress — the same
@@ -443,6 +386,34 @@ def _trim_long_holds(act_list, *parallel_lists, max_run=HELD_RUN_MAX,
     return (trimmed_acts,) + trimmed_parallel
 
 
+def _sample_starts(rng, dr_cfg, home_p, home_q, grasp_p, grasp_q, obj_top, lo, hi, pad_geo):
+    """Per-env start from dr_cfg.start_modes -> (pos (N,3), quat wxyz (N,4), width (N,), mode names).
+    Non-home starts are clipped into [lo, hi], lifted so the fingers clear the object, part-closed."""
+    names = list(dr_cfg.start_modes); w = np.array([dr_cfg.start_modes[k] for k in names], float)
+    w = w / w.sum() if w.sum() > 0 else np.array([float(k == "home") for k in names])
+    force = os.environ.get("GM_START_MODE")                       # dev: force one mode
+    P, Q, W, modes = home_p.copy(), home_q.copy(), np.full(len(home_p), 0.08), []
+    for i in range(len(P)):
+        m = force or names[rng.choice(len(names), p=w)]
+        rh, rg = Rot.from_quat(np.roll(home_q[i], -1)), Rot.from_quat(np.roll(grasp_q[i], -1))
+        sl = Slerp([0.0, 1.0], Rot.concatenate([rh, rg]))
+        if m == "in_air":
+            p = rng.uniform(lo, np.minimum(hi, [hi[0], hi[1], home_p[i, 2] + START_AIR_DZ]))
+            r = Rot.from_euler("xyz", np.radians(rng.uniform(-1, 1, 3) * [15, 10, 30])) * rh
+        elif m == "above_object":
+            p = np.r_[grasp_p[i, :2] + rng.uniform(-0.015, 0.015, 2), grasp_p[i, 2] + rng.uniform(0.04, 0.12)]
+            r = sl(rng.uniform())
+        elif m == "mid_approach":
+            f = rng.uniform(0.3, 0.8); p = home_p[i] + f * (grasp_p[i] - home_p[i])
+            p[:2] += rng.uniform(-0.01, 0.01, 2); r = sl(f)
+        else:
+            modes.append("home"); continue
+        zmin = fg.finger_min_world_z(np.r_[p, r.as_euler("xyz"), 0.08], pad_geo)
+        p[2] += max(0.0, obj_top[i] + START_CLEAR_M - zmin)
+        P[i], Q[i], W[i] = np.clip(p, lo, hi), np.roll(r.as_quat(), 1), rng.uniform(START_W_MIN, 0.08); modes.append(m)
+    return P, Q, W, modes
+
+
 def execute_and_collect(
     worker:       GenesisWorker,
     all_best_x:   List[np.ndarray],
@@ -454,7 +425,11 @@ def execute_and_collect(
     priv_cfg=None,                 # PrivilegedConfig or None — sim-only state-teacher fields
     dr_vec=None,                   # (2,) [scale, bend_deg] for priv_object_dr_params
     yield_stress=None,             # Pa — normalizer for priv_stress (None = stress not emitted)
-    closure_cmd=None,              # (N,) m — v4 surrogate-selected closure (replaces all constants)
+    start_pos=None,                # (N,3)/(N,4) per-env start pose (DR start_modes); None = home
+    start_quat=None,
+    start_grip=None,               # (N,) start gripper width; re-opened to 80 mm over START_REOPEN steps
+    drags=None,                    # {env: (start_step, vel(3,))}: mid-approach object drag, then re-target
+    obj_center0=None,              # (N,3) object centres at plan time (re-target measures displacement from these)
 ) -> Tuple[List[List[dict]], List[List[np.ndarray]], List[List[float]], np.ndarray, List[List]]:
     """Execute the scripted grasp trajectory with DECOUPLED per-env phase control;
     record (obs, action, reward) per env.
@@ -493,67 +468,67 @@ def execute_and_collect(
     lift_b   = grasp_pos.copy(); lift_b[:, 2] += LIFT_HEIGHT
 
     width_open = np.full(num_envs, 0.08, np.float32)
-    # Commanded width = planned width − the surrogate-selected closure. No 2.5 mm baseline and
-    # no unconditional firm in v4: the surrogate's sigma(width) curve sets the squeeze.
-    _cc = (np.full(num_envs, 0.002, np.float32) if closure_cmd is None
-           else np.asarray(closure_cmd, np.float32).reshape(num_envs))
-    width_cls  = np.array([max(0.004, p[2] - _cc[k]) for k, p in enumerate(poses)], np.float32)
-    # Mutable — "firm" phase tightens this once per env (idea #1); "lift"/"hold"/
-    # a frozen (DONE) env all read the FINAL width, which is width_cls unless firmed.
-    grip_target = width_cls.copy()
-    # Per-env firm close distance (m). v4 firms NOTHING unconditionally (base 0): a grasp is
-    # firmed only if it comes out weak at the grasp->firm boundary. (v3's material-aware
-    # base+weak scaling is retired — the surrogate already targets the stress level.)
-    _firm_base = 0.0            # v4: no unconditional firm — width already targets the stress level
-    # "weak" is judged by a stress RISE, and 2000 Pa is 5 % of the mushroom's 40 kPa yield but
-    # 6.7 % of the cherry tomato's 30 kPa — so the same absolute bar means different things.
-    # Express it as that same 5 % of the object's own yield (mushroom unchanged).
-    firm_close = np.full(num_envs, _firm_base, np.float32)
+    # Commanded close width = the PLANNED width minus a small fixed safety margin (the planner's
+    # FEM width refine already sets the indentation); no surrogate closure, no firm squeeze.
+    width_plan = np.array([p[2] for p in poses], np.float32)
+    width_cls  = np.maximum(0.004, width_plan - EXEC_EXTRA_CLOSE).astype(np.float32)
 
-    home_pos  = np.tile(worker.robot.home_pos[None].astype(np.float32),  (num_envs, 1))
-    home_quat = np.tile(worker.robot.home_quat[None].astype(np.float32), (num_envs, 1))
+    home_pos  = (np.asarray(start_pos, np.float32) if start_pos is not None
+                 else np.tile(worker.robot.home_pos[None].astype(np.float32), (num_envs, 1)))
+    home_quat = (np.asarray(start_quat, np.float32) if start_quat is not None
+                 else np.tile(worker.robot.home_quat[None].astype(np.float32), (num_envs, 1)))
+    grip0 = (np.asarray(start_grip, np.float32) if start_grip is not None else np.full(num_envs, 0.08, np.float32))
 
     def _wxyz_to_rot(q): return Rot.from_quat([q[1], q[2], q[3], q[0]])
-    home_r = _wxyz_to_rot(home_quat[0])
-    slerps = [Slerp([0., 1.], Rot.concatenate([home_r, _wxyz_to_rot(quat_b[i])]))
-              for i in range(num_envs)]
+    slerps = [Slerp([0., 1.], Rot.concatenate([_wxyz_to_rot(home_quat[i]), _wxyz_to_rot(quat_b[i])]))
+              for i in range(num_envs)]                      # per-env start orientation (start modes differ per env)
+    # Per-env approach duration = straight-line distance / APPROACH_SPEED, so every demo
+    # approaches at the same speed (a fixed duration made speed grow with spawn distance).
+    reopen = np.ceil((width_open - grip0) / GRIP_SPEED).astype(np.int64)             # steps to re-open (0 at home)
+    grasp_dur = np.maximum(np.ceil((width_open - width_cls) / GRIP_SPEED), 1).astype(np.int64)   # close at GRIP_SPEED
+    # Two-leg approach: start -> pre-grasp standoff (STANDOFF along the grasp's approach axis, tool +z),
+    # then straight along that axis into the grasp. `via` holds the standoff until it is reached.
+    adir = Rot.from_quat(np.roll(quat_b, -1, axis=1)).apply([0.0, 0.0, 1.0]).astype(np.float32)   # (N,3)
+
+    def _standoff(i, from_pos):
+        """Pre-grasp point on the approach axis at the start's own axial distance, clamped [MIN, MAX]."""
+        d = float(np.clip(-(from_pos - pos_b[i]) @ adir[i], STANDOFF_MIN, STANDOFF_MAX))
+        return (pos_b[i] - d * adir[i]).astype(np.float32)
+    via = [_standoff(i, home_pos[i]) for i in range(num_envs)]
+    appr_dur = np.clip(np.maximum(np.round(np.linalg.norm(np.stack(via) - home_pos, axis=1) / APPROACH_SPEED), reopen),
+                       APPROACH_DUR_MIN, APPROACH_DUR_MAX).astype(np.int64)      # leg 1 >= re-open
 
 
     def _env_target(i: int, phase_idx: int, phase_step: int):
         """(pos, quat_wxyz, grip) for env i at its OWN (phase_idx, phase_step)."""
         name, dur = PHASES[phase_idx]
         if name == "approach":
-            alpha = (phase_step + 1) / dur
-            pos = home_pos[i] + alpha * (pos_b[i] - home_pos[i])
+            alpha = (phase_step + 1) / int(appr_dur[i])
+            goal = pos_b[i] if via[i] is None else via[i]        # via = hover above a re-targeted grasp
+            pos = home_pos[i] + alpha * (goal - home_pos[i])
             xyzw = slerps[i](alpha).as_quat()
             quat = np.array([xyzw[3], xyzw[0], xyzw[1], xyzw[2]], np.float32)
-            grip = width_open[i]
+            grip = grip0[i] + min(1.0, (phase_step + 1) / max(int(reopen[i]), 1)) * (width_open[i] - grip0[i])
         elif name == "settle":
             pos, quat, grip = pos_b[i], quat_b[i], width_open[i]
         elif name == "grasp":
-            alpha = (phase_step + 1) / dur
+            alpha = (phase_step + 1) / int(grasp_dur[i])
             pos, quat = pos_b[i], quat_b[i]
             grip = width_open[i] + alpha * (width_cls[i] - width_open[i])
-        elif name == "firm":
-            # Close by this env's firm_close (base for a firm grasp; base+extra for a weak one).
-            # SOFT always passes through firm (never skipped) so the base grip margin is preserved;
-            # RIGID only reaches here when its grip was weak (strong rigid grips skip firm).
-            pos, quat = pos_b[i], quat_b[i]
-            alpha = (phase_step + 1) / dur
-            grip_target[i] = max(0.0, width_cls[i] - alpha * firm_close[i])
-            grip = grip_target[i]
+        elif name == "dwell":
+            pos, quat, grip = pos_b[i], quat_b[i], width_cls[i]
         elif name == "lift":
             alpha = (phase_step + 1) / dur
             pos = pos_b[i] + alpha * (lift_b[i] - pos_b[i])
-            quat, grip = quat_b[i], grip_target[i]
+            quat, grip = quat_b[i], width_cls[i]
         else:  # "hold"
-            pos, quat, grip = lift_b[i], quat_b[i], grip_target[i]
+            pos, quat, grip = lift_b[i], quat_b[i], width_cls[i]
         return pos, quat, grip
 
     def _frozen_target(i: int):
         """Command for a DONE env — hold steady so it doesn't disturb the sim
         while other envs keep progressing (identical to its final hold target)."""
-        return lift_b[i], quat_b[i], grip_target[i]
+        return lift_b[i], quat_b[i], width_cls[i]
 
     # Per-env buffers — lengths WILL differ across envs once retry logic diverges
     # phase durations; for now (no retry) every env still finishes at the same step.
@@ -569,15 +544,14 @@ def execute_and_collect(
     # Commanded targets (initialised to home; updated each step for action inversion)
     prev_pos  = home_pos.copy()
     prev_quat = home_quat.copy()
-    prev_grip = width_open.copy()
+    prev_grip = grip0.copy()
 
     # Per-env FSM state
     phase_idx  = np.zeros(num_envs, dtype=np.int64)
     phase_step = np.zeros(num_envs, dtype=np.int64)
-
-    # Soft firm-check baseline: top10 von-Mises of the SETTLED object (gripper still
-    # at home, no contact) — captured on the first step, used as the "no grasp" floor
-    # the grasp->firm rise is measured against. None until the first soft state.
+    ever_lifted = np.zeros(num_envs, bool); stress_max = np.zeros(num_envs)     # episode metrics
+    drags = dict(drags or {}); retargeted = np.zeros(num_envs, bool); it = 0
+    obj_ref = None if obj_center0 is None else np.asarray(obj_center0, np.float32).copy()
 
     def _step(cur_pos, cur_quat, cur_grip, record_mask):
         # Invert scripted target → normalized action (delta needs prev_*; absolute
@@ -641,9 +615,42 @@ def execute_and_collect(
             else:
                 pos, quat, grip = _frozen_target(i)
             cur_pos_arr[i], cur_quat_arr[i], cur_grip_arr[i] = pos, quat, grip
+        for i, (t_fire, vel) in drags.items():                  # object drag: DRAG_HOLD steps, approach only
+            if active[i] and phase_idx[i] == 0 and t_fire <= it < t_fire + DRAG_HOLD:
+                worker.drag_object(i, vel)
 
         cur_obs_list, state = _step(cur_pos_arr, cur_quat_arr, cur_grip_arr, record_mask=active)
+        it += 1
+        # re-target: once the object has stopped sliding, shift the grasp by its xy displacement and
+        # re-approach from the current pose via a hover above the new grasp (one drag per env)
+        for i in [k for k, (t_fire, _) in drags.items() if active[k] and it >= t_fire + DRAG_HOLD + RX_SETTLE]:
+            del drags[i]
+            disp = np.asarray(state["object_center"][i], np.float32) - obj_ref[i]; disp[2] = 0.0
+            if np.hypot(disp[0], disp[1]) < RX_MIN_DISP:
+                continue
+            pos_b[i] += disp; grasp_pos[i] += disp; lift_b[i] += disp; obj_ref[i] += disp
+            home_pos[i], home_quat[i], grip0[i] = cur_pos_arr[i], cur_quat_arr[i], width_open[i]
+            via[i] = _standoff(i, home_pos[i])                                    # standoff of the NEW grasp
+            slerps[i] = Slerp([0., 1.], Rot.concatenate([_wxyz_to_rot(home_quat[i]), _wxyz_to_rot(quat_b[i])]))
+            appr_dur[i] = int(np.clip(np.round(np.linalg.norm(via[i] - home_pos[i]) / APPROACH_SPEED), APPROACH_DUR_MIN, APPROACH_DUR_MAX))
+            phase_idx[i] = 0; phase_step[i] = -1; retargeted[i] = True   # -1: incremented below
+            print(f"    [drag] env {i}: object moved {np.round(1e3*disp[:2],1)} mm -> re-target via the new standoff")
+        ever_lifted |= np.asarray(state["object_center"])[:, 2] > grasp_pos[:, 2] + LIFT_HEIGHT * 0.5
+        if state.get("von_mises_stress") is not None:
+            stress_max = np.maximum(stress_max, _stress_top10(state["von_mises_stress"]))
 
+        # DEBUG: planned vs commanded vs measured width while closing (+ coupling force).
+        _in_grasp = active & ((phase_idx == _GRASP_PHASE) | (phase_idx == _GRASP_PHASE + 1))
+        if np.any(_in_grasp):
+            _gw = np.asarray(state["gripper_width"], np.float32)
+            _cf = state.get("contact_force")
+            for i in np.where(_in_grasp)[0]:
+                _ph = PHASES[int(phase_idx[i])]
+                _du = int(grasp_dur[i]) if phase_idx[i] == _GRASP_PHASE else _ph[1]
+                print(f"    [{_ph[0]}] env {i} step {int(phase_step[i]) + 1:2d}/{_du}: "
+                      f"planned {width_plan[i]*1000:5.1f} mm  target {width_cls[i]*1000:5.1f} mm  cmd {cur_grip_arr[i]*1000:5.1f} mm  "
+                      f"measured {_gw[i]*1000:5.1f} mm"
+                      + (f"  force {float(_cf[i]):.2f} N" if _cf is not None else ""))
 
         # Advance phase state for envs that were active this step.
         # TODO(retry): this is where a robustness pass would check per-env
@@ -654,32 +661,19 @@ def execute_and_collect(
         # phase_idx may already be N_PHASES (done envs) — clip before indexing PHASES;
         # those entries are masked out by `active` anyway so the clipped value is unused.
         durations = np.array([PHASES[min(int(p), N_PHASES - 1)][1] for p in phase_idx])
+        durations[phase_idx == 0] = appr_dur[phase_idx == 0]     # per-env approach length
+        durations[phase_idx == _GRASP_PHASE] = grasp_dur[phase_idx == _GRASP_PHASE]   # per-env close length
         rolled_over = active & (phase_step >= durations)
 
-        # Idea #1: force-based grasp firming. Checked ONCE per env, exactly at the
-        # grasp->firm boundary. A weak grip (contact force < FIRM_FORCE_THRESH_N) closes
-        # an extra min(0.5 * commanded closure, 2mm); every other env passes through
-        # "firm" as a no-op hold that _trim_long_holds collapses afterwards. (Soft never
-        # SKIPS the phase — an earlier skip-straight-to-lift path was removed.)
-        advance = np.ones(num_envs, dtype=np.int64)   # normal: one phase forward
-        leaving_grasp = rolled_over & (phase_idx == _GRASP_IDX)
-        if np.any(leaving_grasp):
-            # Gripper->object contact force (N). For a soft body this is the MPM->finger COUPLING
-            # force (XArm7Sim.gripper_coupling_force), which genesis_worker always populates — so
-            # this is the only firm path. (It used to have a von-Mises `else` for soft, written when
-            # contact_force was rigid-only; that branch became unreachable and never fired in any
-            # collected run — every [firm] line reads "weak grip force N".)
-            cf = state.get("contact_force")
-            if cf is not None:                        # only a WEAK grip closes further
-                for i in np.where(leaving_grasp)[0]:
-                    if cf[i] < FIRM_FORCE_THRESH_N:
-                        firm_close[i] = min(0.5 * float(_cc[i]), 0.002)
-                        print(f"    [firm] env {i}: weak grip force {cf[i]:.2f}N < "
-                              f"{FIRM_FORCE_THRESH_N}N -> closing {firm_close[i]*1000:.1f}mm")
-                    # else: no extra close, but still pass through the phase
-
-        phase_idx[rolled_over]  += advance[rolled_over]
+        phase_idx[rolled_over]  += 1
         phase_step[rolled_over]  = 0
+        for i in np.nonzero(rolled_over & (phase_idx == 1))[0]:          # standoff reached -> final leg along the axis
+            if via[i] is not None:
+                home_pos[i] = via[i]; via[i] = None; phase_idx[i] = 0
+                grip0[i] = width_open[i]                                       # re-open finished in leg 1: hold open
+                home_quat[i] = quat_b[i]                                        # orientation finished in leg 1
+                slerps[i] = Slerp([0., 1.], Rot.concatenate([_wxyz_to_rot(quat_b[i]), _wxyz_to_rot(quat_b[i])]))
+                appr_dur[i] = int(np.clip(np.round(np.linalg.norm(pos_b[i] - home_pos[i]) / APPROACH_SPEED), APPROACH_DUR_MIN, APPROACH_DUR_MAX))
 
     # Success check from final object height: the particle-mean centre from the last step's state
     # (MPMEntity has no get_pos; this collector is soft-only, see the object_type guard in main).
@@ -693,7 +687,9 @@ def execute_and_collect(
             act_bufs[i], obs_bufs[i], rew_bufs[i], frame_bufs[i] = _trim_long_holds(
                 act_bufs[i], obs_bufs[i], rew_bufs[i], frame_bufs[i])
 
-    return obs_bufs, act_bufs, rew_bufs, success, frame_bufs
+    metrics = {"ever": ever_lifted, "retargeted": retargeted,
+               "stress_frac": stress_max / float(yield_stress) if yield_stress else np.full(num_envs, np.nan)}
+    return obs_bufs, act_bufs, rew_bufs, success, frame_bufs, metrics
 
 
 # ── Output helpers ────────────────────────────────────────────────────────────
@@ -750,9 +746,6 @@ def main() -> None:
                    help="record per-episode mp4 videos + grasp-pose PNGs to <out-dir>/videos/ (slower). "
                         "Bare `--record-video` = ALL episodes; `--record-video N` = only the FIRST N saved "
                         "episodes (rendering stops after N -> no extra cost/disk on a long run). Off by default.")
-    p.add_argument("--n-grasp", type=int, default=N_GRASP,
-                   help=f"gripper-close steps (the 'grasp' phase length); default {N_GRASP}. A shorter "
-                        "close reaches the target width sooner (less dwell before the lift).")
     p.add_argument("--dev-viz", action="store_true",
                    help="STANDALONE step-through window (not Genesis) for ENV 0 of each batch: each synthesis "
                         "stage is drawn and BLOCKS until you press q (GM_DEV_VIZ_AUTOADVANCE=<s> auto-plays).")
@@ -764,19 +757,6 @@ def main() -> None:
         print(f"[dev-viewer] forcing --n-envs {args.n_envs} -> 1 (one viewer window, one env)")
         args.n_envs = 1
 
-    # PHASES is module-level (execute_and_collect reads the globals directly); only the grasp
-    # (close) length is a CLI knob.
-    global PHASES, N_PHASES, _GRASP_IDX
-    PHASES = [
-        ("approach", N_HOME_TO_PRE),
-        ("settle",   N_SETTLE),
-        ("grasp",    args.n_grasp),
-        ("firm",     N_FIRM),
-        ("lift",     N_LIFT),
-        ("hold",     N_HOLD),
-    ]
-    N_PHASES   = len(PHASES)
-    _GRASP_IDX = [name for name, _ in PHASES].index("grasp")
 
     # ── Load everything from the experiment config (same as training / eval) ──
     exp        = Experiment.load(args.experiment)
@@ -824,12 +804,10 @@ def main() -> None:
         "experiment":  args.experiment,
         "control":     {"n_envs": args.n_envs,
                         "n_episodes": args.n_episodes, "scene_dr_every": args.scene_dr_every,
-                        "seed": args.seed, "n_home_to_pre": N_HOME_TO_PRE,
-                        "n_grasp": args.n_grasp, "n_lift": N_LIFT, "n_firm": N_FIRM,
-                        "n_settle": N_SETTLE,
+                        "seed": args.seed,
+                        "grip_speed": GRIP_SPEED, "approach_speed": APPROACH_SPEED, "n_dwell": N_DWELL, "exec_extra_close": EXEC_EXTRA_CLOSE, "n_lift": N_LIFT, "n_settle": N_SETTLE,
+                        "start_modes": dict(dr_cfg.start_modes), "disturbance_prob": dr_cfg.disturbance_prob,
                         "held_run_max": HELD_RUN_MAX, "held_run_keep": HELD_RUN_KEEP,
-                        "scan_metric": SCAN_METRIC,
-                        "closure_gain": CLOSURE_GAIN,
                         "grasp_nu": _fem_nu, "mat_E": _mat_E, "mat_rho": _mat_rho, "mat_yield": _mat_yield,
                         },
         "dr": exp.dr,
@@ -844,6 +822,7 @@ def main() -> None:
     # (previously every _synth_worker call used run_cmaes's hardcoded default seed=2567, so
     # ALL envs/batches shared the identical internal search sequence regardless of --seed).
     cma_seed_rng = np.random.default_rng(args.seed + 1_000_000)
+    start_rng = np.random.default_rng(args.seed + 3_000_000)     # start modes + drags (own stream)
 
     # ── Build scene + worker (with per-scene SIZE+SHAPE DR) ──
     # Scene DR re-randomizes object geometry by REBUILDING the worker every N batches (GenesisWorker
@@ -852,8 +831,9 @@ def main() -> None:
     nominal_spec   = spec
     do_scene_dr    = args.scene_dr_every > 0 and dr_cfg.has_scene_dr()
     deform_dir     = tempfile.mkdtemp(prefix="gm_synth_deform_") if do_scene_dr else None
+    if deform_dir:                     # one deformed .obj per relaunch — never leave them behind
+        atexit.register(shutil.rmtree, deform_dir, ignore_errors=True)
 
-    print(f"  closure scan: metric={SCAN_METRIC} gain={CLOSURE_GAIN}")
     _mesh_cycle = None    # round-robin cursor (see --mesh-cycle);
                                                      # must precede the first _make_worker() call
     def _make_worker():
@@ -900,10 +880,11 @@ def main() -> None:
     # Per-env-per-batch DR + grasp log (CSV, alongside the data). One row per env each batch.
     dr_csv = open(run_dir / "dr_params.csv", "w", newline="")
     dr_writer = csv.writer(dr_csv)
-    dr_writer.writerow(["batch", "env", "success", "obj_dx", "obj_dy",
+    dr_writer.writerow(["batch", "env", "success", "ever_success", "stress_max_frac", "obj_dx", "obj_dy",
                         "roll_deg", "pitch_deg", "yaw_deg", "flipped",
-                        "home_dx", "home_dy", "home_dz", "scene_scale", "scene_bend_deg",
-                        "mesh_variant", "closure_cmd_mm",
+                        "home_dx", "home_dy", "home_dz", "start_mode", "start_x", "start_y", "start_z", "start_w", "drag", "retarget",
+                        "scene_scale", "scene_bend_deg",
+                        "mesh_variant",
                         "twist_deg", "taper", "rbf", "axis_scale", "axis_scale_ax",
                         "mat_E", "mat_nu", "mat_rho", "coup_friction",
                         "stress_Pa", "grip_N", "align", "pressure_Pa", "min_pad_mm2", "width_mm", "tilt_deg",
@@ -912,11 +893,11 @@ def main() -> None:
                         # CSV<->dataset join is UNDERIVABLE: v4 logs every attempt, and a
                         # `success=1` row still may not be saved (n_episodes cap, or the
                         # fallback-grasp drop), so "the successes in order" is wrong.
-                        "dataset_idx",
-                        # scan_metric: guardrail #3 in docs/collection_v4_handoff.md.
-                        "scan_metric"])
+                        "dataset_idx"])
 
     total_saved  = 0
+    t_synth = t_exec = t_fem = 0.0            # profiling: synthesis / execution / FEM-build wall time
+    all_ever, all_sfrac = [], []              # per-attempt metrics for stats.yaml
     total_failed = 0
     total_fallback_dropped = 0   # succeeded-by-crushing fallback demos, dropped
     batch_idx   = 0
@@ -980,8 +961,6 @@ def main() -> None:
 
         # Read initial state (depth rendered; this is obs_0 for every env)
         init_state     = worker.read_state()
-        raw_init       = _state_to_raw_obs(init_state)
-        init_obs_batch = perception.process(raw_init)
 
         # Object pose (SETTLED) for synthesis + priv obs, straight from read_state: rigid = get_quat,
         # soft = Kabsch best-fit rotation of the settled particle cloud (NOT the spawn euler, which the
@@ -992,25 +971,31 @@ def main() -> None:
         # Episode scene-DR vector [scale, bend_deg] for priv_object_dr_params (mirrors SimBackend).
         dr_vec = np.array([float(scene_dr.get("scale", 1.0)),
                            float(scene_dr.get("bend_deg", 0.0))], dtype=np.float32)
-        if priv_cfg is not None:
-            init_obs_batch.update(_privileged_obs_batch(
-                obj_pos_all, obj_quat_all, dr_vec, priv_cfg,
-                von_mises=init_state.get("von_mises_stress"), yield_stress=_mat_yield,
-                contact_force=init_state.get("contact_force")))
+        def _initial_obs(state):                     # obs_0 for every env (re-read after a start teleport)
+            ob = perception.process(_state_to_raw_obs(state))
+            if priv_cfg is not None:
+                ob.update(_privileged_obs_batch(
+                    obj_pos_all, obj_quat_all, dr_vec, priv_cfg,
+                    von_mises=state.get("von_mises_stress"), yield_stress=_mat_yield,
+                    contact_force=state.get("contact_force")))
+            return ob
+        init_obs_batch = _initial_obs(init_state)
 
         # ── Per-env FEM gentleness grasp synthesis (v3) ──
         # Build the FEM ElasticObject ONCE for this batch's ACTUAL (DR shape+size) mesh — all envs share
         # it (scene-DR varies per relaunch, not per sub-env), so the expensive factorization is reused;
         # rebuild only when actual_mesh changes (a scene-DR relaunch). Then plan per-env settled pose.
+        _tf = time.perf_counter()
         if actual_mesh != fem_mesh:
             fem_obj, fem_pad_geo, fem_meta = fg.build_grasp_fem(
                 actual_mesh, voxel_div=GRASP_VOXEL_DIV, target_tets=GRASP_TARGET_TETS,
                 use_gpu=True, nu=_fem_nu)
             fem_mesh = actual_mesh
+            t_fem += time.perf_counter() - _tf
             print(f"  FEM: {fem_meta['tets']} tets, ndof={fem_meta['ndof']}, gpu={fem_meta['gpu']}")
             _viz_pad_geo = fem_pad_geo          # pad placement is known only once the FEM is built
+        _ts = time.perf_counter()
         all_best_x = []
-        closure_cmd: list = []          # v4: per-env surrogate-selected closure (m)
         synth_failed: set[int] = set()      # envs running the fallback grasp (never saved)
         all_grasp  = []                                          # per-env synthesis dict (for the grasp-pose viz)
         for i in range(n):
@@ -1020,7 +1005,8 @@ def main() -> None:
                         if (args.dev_viz and i == 0) else None)    # step-through window: env 0 only
             r = fg.synthesize_grasp(fem_obj, fem_pad_geo, obj_pos_all[i], obj_quat_all[i],
                                     E=_mat_E, density=_mat_rho, mu=GRASP_MU,
-                                    table_z=args.table_z, seed=cma_seed,
+                                    table_z=args.table_z, tcp_z_min=float(action_config.pos_min[2]),
+                                    seed=cma_seed,
                                     yield_stress=_mat_yield,
                                     record_history=bool(args.dev_viz),
                                     stage_cb=(live_viz.on_stage if live_viz is not None else None))
@@ -1034,21 +1020,26 @@ def main() -> None:
                      "pressure": None, "min_pad_area": None, "width_face": None}
                 print(f"  Env {i}: SYNTH FAILED -> default top-down grasp (fallback)")
                 synth_failed.add(i)
-            # v4: SURROGATE-SELECTED closure — scan sigma(width) at the chosen pose, take the
-            # predicted yield-crossing c_y, command gain * c_y. Uses the DR-drawn E when the scene
-            # sampled one (the scan must match the simulated material; yield is not DR'd).
-            if r.get("stress_top10") is not None:
-                _E_scan = float(scene_dr.get("mat_E") or 0.0) or float(_mat_E)
-                _cy = surrogate_closure(fem_obj, fem_pad_geo, best_x,
-                                        obj_pos_all[i], obj_quat_all[i],
-                                        _E_scan, float(_mat_yield),
-                                        _mat_rho, GRASP_MU, args.table_z,
-                                        metric=SCAN_METRIC)
-                _cc = float(np.clip(CLOSURE_GAIN * _cy, CLOSURE_CMD_MIN_M, CLOSURE_CMD_MAX_M))
-                print(f"  Env {i}: c_y={_cy*1000:.1f}mm -> commanded closure {_cc*1000:.1f}mm")
-            else:
-                _cc = 0.002                      # fallback grasp: episodes are dropped anyway
-            closure_cmd.append(_cc)
+            # DEV: where is the MPM body relative to the FEM the planner used? Project the settled
+            # particles and the FEM surface onto the planned closing axis; compare both spans with the
+            # commanded width (TCP) and the inner-face gap (width + finger offsets).
+            _parts = worker.particle_positions()
+            if _parts is not None:
+                _Rx = Rot.from_euler("xyz", np.asarray(best_x[3:6], float))
+                _ax = _Rx.apply([0.0, 1.0, 0.0])                                 # closing axis, world
+                _Rq = Rot.from_quat(np.roll(np.asarray(obj_quat_all[i], float), -1))   # wxyz -> xyzw
+                _Vw = obj_pos_all[i] + _Rq.apply(fem_obj.verts)                  # FEM surface, world
+                _pp = (_parts[i].astype(float) - obj_pos_all[i]) @ _ax
+                _pf = (_Vw - obj_pos_all[i]) @ _ax
+                _span_p, _span_f = float(_pp.max() - _pp.min()), float(_pf.max() - _pf.min())
+                _wf = float(best_x[6]) + fem_pad_geo["eps_left"] + fem_pad_geo["eps_right"]
+                _rows = [f"planned width (TCP) {1e3*best_x[6]:.1f} mm   inner-face gap {1e3*_wf:.1f} mm",
+                         f"FEM span along closing axis      {1e3*_span_f:.1f} mm  -> indent/side {0.5e3*(_span_f-_wf):+.2f} mm",
+                         f"particle span along closing axis {1e3*_span_p:.1f} mm  -> indent/side {0.5e3*(_span_p-_wf):+.2f} mm",
+                         f"FEM - particles: {1e3*(_span_f-_span_p):+.2f} mm total ({0.5e3*(_span_f-_span_p):+.2f}/side)"]
+                print(f"  [proj] env {i}: " + " | ".join(_rows))
+                if live_viz is not None:
+                    live_viz.show_particles(best_x, _parts[i], _rows)
             all_best_x.append(best_x); all_grasp.append(r)
             if r.get("stress_top10") is not None:
                 print(f"  Env {i}: stress={r['stress_top10']:.0f}Pa grip={r['grip']:.3f}N align={r['align']:.3f}"
@@ -1067,16 +1058,56 @@ def main() -> None:
             except Exception as e:  # viz must never break a collection run
                 print(f"    (grasp viz failed: {e})")
 
+        t_synth += time.perf_counter() - _ts
+        # ── Start condition (dr.start_modes) + disturbance draw (dr.disturbance_prob) ──
+        _tg = [_x_to_targets(x, 1) for x in all_best_x]
+        _hp = np.tile(worker.robot.home_pos[None], (n, 1)).astype(np.float64)
+        _hq = np.tile(worker.robot.home_quat[None], (n, 1)).astype(np.float64)
+        start_pos, start_quat, start_grip, start_mode = _sample_starts(
+            start_rng, dr_cfg, _hp, _hq, np.concatenate([t[0] for t in _tg]), np.concatenate([t[1] for t in _tg]),
+            worker.particle_positions()[:, :, 2].max(1),
+            np.asarray(action_config.pos_min) + START_MARGIN_M, np.asarray(action_config.pos_max) - START_MARGIN_M,
+            fem_pad_geo)
+        moved = np.array([m_ != "home" for m_ in start_mode])
+        if moved.any():
+            cur_p, cur_q = init_state["ee_pos"].astype(np.float64), init_state["ee_quat"].astype(np.float64)
+            for _ in range(2):                                       # 2nd pass: IK misses fall back to home
+                worker.set_ee_pose(np.where(moved[:, None], start_pos, cur_p).astype(np.float32),
+                                   np.where(moved[:, None], start_quat, cur_q).astype(np.float32),
+                                   gripper_width=np.where(moved, start_grip, 0.08).astype(np.float32))
+                init_state = worker.read_state()
+                miss = [i for i in np.nonzero(moved)[0]
+                        if np.linalg.norm(init_state["ee_pos"][i] - start_pos[i]) > 0.005]
+                if not miss:
+                    break
+                for i in miss:
+                    print(f"  [start] env {i}: IK missed {start_mode[i]} by "
+                          f"{1e3*np.linalg.norm(init_state['ee_pos'][i] - start_pos[i]):.1f} mm -> home")
+                    start_mode[i], moved[i], start_pos[i], start_quat[i], start_grip[i] = "home", False, _hp[i], _hq[i], 0.08
+            init_obs_batch = _initial_obs(init_state)
+        drags = {}
+        for i in range(n):
+            if start_rng.random() < dr_cfg.disturbance_prob or os.environ.get("GM_DISTURB"):
+                th, sp = start_rng.uniform(0, 2 * np.pi), start_rng.uniform(*DRAG_SPEED)
+                drags[i] = (int(start_rng.integers(DRAG_STEP[0], DRAG_STEP[1] + 1)), np.array([np.cos(th) * sp, np.sin(th) * sp, 0.0], np.float32))
+        drags0 = dict(drags)
+        for i in range(n):
+            print(f"  [start] env {i}: {start_mode[i]:12s} tcp={np.round(start_pos[i], 3)} w={1e3*start_grip[i]:.0f}mm"
+                  + (f"  drag @ step {drags[i][0]} {np.round(drags[i][1][:2], 2)} m/s" if i in drags else ""))
+
         # ── Execute scripted trajectory + collect data ──
         # Record video only while under the first-N cap (args.record_video = N, or 10**9 for "all");
         # once N saved, stop RENDERING (no per-step RGB cost/disk for the rest of the run).
         rec_this_batch = args.record_video > 0 and total_saved < args.record_video
         print(f"  Executing …")
         try:
-            obs_bufs, act_bufs, rew_bufs, success, frame_bufs = execute_and_collect(
+            _te = time.perf_counter()
+            obs_bufs, act_bufs, rew_bufs, success, frame_bufs, metrics = execute_and_collect(
                 worker, all_best_x, init_obs_batch, perception, action_config,
                 record_video=rec_this_batch, priv_cfg=priv_cfg, dr_vec=dr_vec,
-                yield_stress=_mat_yield, closure_cmd=closure_cmd)
+                yield_stress=_mat_yield, start_pos=start_pos, start_quat=start_quat, start_grip=start_grip,
+                drags=drags, obj_center0=obj_pos_all)
+            t_exec += time.perf_counter() - _te
             consec_batch_aborts = 0
         except Exception as e:
             # Some scene draws are systematically unstable (solver NaN mid-episode even after a
@@ -1098,7 +1129,7 @@ def main() -> None:
         # ── Log per-env DR + grasp params for this batch (CSV row per env) ──
         # Rows are BUFFERED, not written yet: dataset_idx is only known after the save loop.
         _dr_rows = []
-        _DS_IDX_COL = -2                     # dataset_idx is the 2nd-to-last column
+        _DS_IDX_COL = -1                     # dataset_idx is the last column
         eul_deg = np.degrees(object_euler) if object_euler is not None else np.zeros((n, 3))
         for i in range(n):
             g = all_grasp[i]
@@ -1106,14 +1137,17 @@ def main() -> None:
             flipped = int(abs(roll) > 140 or abs(pitch) > 140)                # a big-flip sample
             ho = home_offset[i] if home_offset is not None else (0.0, 0.0, 0.0)
             odxy = object_dxy[i] if object_dxy is not None else (0.0, 0.0)
-            _dr_rows.append([batch_idx, i, int(bool(success[i])),
+            all_ever.append(bool(metrics["ever"][i])); all_sfrac.append(float(metrics["stress_frac"][i]))
+            _dr_rows.append([batch_idx, i, int(bool(success[i])), int(bool(metrics["ever"][i])),
+                                round(float(metrics["stress_frac"][i]), 3),
                                 round(float(odxy[0]), 5), round(float(odxy[1]), 5),
                                 round(float(roll), 1), round(float(pitch), 1), round(float(yaw), 1), flipped,
                                 round(float(ho[0]), 5), round(float(ho[1]), 5), round(float(ho[2]), 5),
+                                start_mode[i], *[round(float(v), 4) for v in start_pos[i]], round(float(start_grip[i]), 4),
+                                int(i in drags0), int(bool(metrics["retargeted"][i])),
                                 round(float(scene_dr.get("scale", 1.0)), 4),
                                 round(float(scene_dr.get("bend_deg", 0.0)), 2),
                                 scene_dr.get("mesh_variant", ""),
-                                round(1000 * float(closure_cmd[i]), 2),
                                 round(float(scene_dr.get("twist_deg", 0.0)), 2),
                                 round(float(scene_dr.get("taper", 0.0)), 4),
                                 round(float(scene_dr.get("rbf", 0.0)), 4),
@@ -1129,7 +1163,7 @@ def main() -> None:
                                 round(float(g["x"][6] * 1e3), 2),
                                 round(float(g.get("tilt_deg") or 0), 1),
                                 None,                      # dataset_idx, stamped in the save loop
-                                SCAN_METRIC])
+                                ])
 
         # ── Package and shard successful (or all) episodes ──
         for i in range(n):
@@ -1210,6 +1244,10 @@ def main() -> None:
     if total_fallback_dropped:
         print(f"  Fallback dropped : {total_fallback_dropped}  (synthesis failed -> crushing demo, not saved)")
     print(f"  Elapsed          : {elapsed/60:.1f} min")
+    _sf = np.asarray(all_sfrac, float); _n = max(len(all_ever), 1)
+    print(f"  Ever lifted      : {100*sum(all_ever)/_n:.1f}%   sub-yield: {100*np.mean(_sf < 1.0) if len(_sf) else 0:.1f}%"
+          f"   max stress/yield mean {np.nanmean(_sf) if len(_sf) else 0:.2f} max {np.nanmax(_sf) if len(_sf) else 0:.2f}")
+    print(f"  Time             : synth {t_synth:.0f}s  exec {t_exec:.0f}s  fem {t_fem:.0f}s  -> {elapsed/max(total_saved,1):.0f} s / saved episode")
     print(f"  Data             : {data_path}")
 
     stats = {
@@ -1218,7 +1256,15 @@ def main() -> None:
         "episodes_fallback_dropped": total_fallback_dropped,
         "total_attempts":  total_attempts,
         "success_rate":    round(success_rate, 4),
+        "ever_success_rate": round(sum(all_ever) / _n, 4),
+        "sub_yield_frac":  round(float(np.mean(_sf < 1.0)) if len(_sf) else 0.0, 4),
+        "stress_max_frac_mean": round(float(np.nanmean(_sf)) if len(_sf) else 0.0, 4),
+        "stress_max_frac_max":  round(float(np.nanmax(_sf)) if len(_sf) else 0.0, 4),
         "elapsed_min":     round(elapsed / 60, 2),
+        "synth_s_per_attempt": round(t_synth / _n, 2),
+        "exec_s_per_attempt":  round(t_exec / _n, 2),
+        "fem_build_s":     round(t_fem, 2),
+        "sec_per_saved_episode": round(elapsed / max(total_saved, 1), 2),
     }
     stats_path = run_dir / "stats.yaml"
     with open(stats_path, "w") as f:

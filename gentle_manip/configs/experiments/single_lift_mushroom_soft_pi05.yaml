@@ -22,7 +22,7 @@
 # (incl. the generalist ddgrl) trains on this action space, so the pi0.5 baseline must too or the
 # comparison is not apples-to-apples and the shared eval harness would decode it differently.
 task: single_lift_mushroom_soft_wristcam
-action: abs_pose_euler_abs_gripper
+action: abs_pose_euler_abs_gripper_z15
 dr: soft_orientation_realws   # REAL-workspace object spawn box -- MATCHES the reference run
 augmentation: l515_noise
 

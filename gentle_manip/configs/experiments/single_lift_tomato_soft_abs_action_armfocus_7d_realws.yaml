@@ -3,7 +3,7 @@
 # Status: active (2026-09-04 per-object cleanup: identical to the tofu file except task/dr names)
 
 task: single_lift_tomato_soft
-action: abs_pose_euler_abs_gripper
+action: abs_pose_euler_abs_gripper_z15
 dr: soft_orientation_realws_tomato
 augmentation: d435i_noise
 

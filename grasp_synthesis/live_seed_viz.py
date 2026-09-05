@@ -106,6 +106,19 @@ class StageViewer:
         elif stage == "final":
             self.show_final(data["x"], data["res"], data.get("evals", 0))
 
+    def show_particles(self, x, parts, rows):
+        """MPM particles (world, m) over the FEM surface, with the planned fork; `rows` = text lines."""
+        ax = self._scene("PARTICLES vs FEM — the MPM body the fingers actually meet", text_rows=len(rows))
+        P = np.asarray(parts, float) * 1e3
+        ax.scatter(P[:, 0], P[:, 1], P[:, 2], s=2.5, c="tab:red", alpha=0.45, depthshade=False,
+                   label=f"MPM particles ({len(P)})")
+        draw_fork(ax, x, self.pad_geo, "tab:green", lw=3.0, alpha=1.0)
+        ax.legend(fontsize=7, loc="upper left")
+        for t in list(self.fig.texts):
+            t.remove()
+        self.fig.text(0.01, 0.01, "\n".join(rows), fontsize=8, family="monospace", va="bottom")
+        self._block("particles")
+
     def show_final(self, x, res, evals):
         from inspect_seeds import draw_grasp
         ax = self._scene("FINAL — the selected grasp", text_rows=3)

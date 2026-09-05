@@ -227,11 +227,14 @@ def width_grasp_stress_batch(obj, bcs, mask_contact: bool = True):
     xx, yy, zz, xy, yz, zx = (sig[:, i, :] for i in range(6))
     vm = torch.sqrt(0.5 * ((xx - yy) ** 2 + (yy - zz) ** 2 + (zz - xx) ** 2) + 3.0 * (xy ** 2 + yz ** 2 + zx ** 2))   # (M, K)
     tets = obj.tets; out = []
+    if mask_contact:                                                 # (M, K) contact mask, ONE device copy
+        keep_all = torch.as_tensor(np.stack([~np.isin(tets, bc["nodes"]).any(axis=1) for bc in bcs], axis=1),
+                                   device=vm.device)
     for k, (bc, lam) in enumerate(zip(bcs, lams)):
         v = vm[:, k]
         if mask_contact:
-            keep = ~np.isin(tets, bc["nodes"]).any(axis=1)
-            vk = v[torch.as_tensor(keep, device=v.device)] if keep.any() else v
+            keep = keep_all[:, k]
+            vk = v[keep] if bool(keep.any()) else v
         else:
             vk = v
         kk = max(1, int(0.1 * vk.numel()))

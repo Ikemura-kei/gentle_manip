@@ -10,7 +10,7 @@
 # this unit by ~1.6x). Applied sim-only: the real camera already HAS this noise.
 # cam pos = the plane-corrected WORLD_T_CAM_EXT translation (world-fixed cam_ext).
 pc_axial_coeff: 0.002
-pc_axial_cam_pos: [0.69895466, -0.06643963, 0.31680030]
+pc_axial_cam_pos: [0.78032539, -0.00362529, 0.28947945]
 
 # Lateral (pixel-footprint) error, ~0.24 mm at 0.5 m — an order below axial. Kept small but ON:
 # it is what stops the sim cloud lying on a geometrically perfect surface.

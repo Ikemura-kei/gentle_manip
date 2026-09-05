@@ -117,8 +117,8 @@ class GenesisWorker:
             if otype == "rigid":
                 base_pos, base_quat = base_pose
                 shift = np.zeros((self.num_envs, 3), dtype=np.float32)
-                if object_dxy is not None:
-                    shift[:, :2] = np.asarray(object_dxy, dtype=np.float32)
+                if object_dxy is not None:                        # (N,2) xy or (N,3) xyz offset from the spawn
+                    d = np.asarray(object_dxy, dtype=np.float32).reshape(self.num_envs, -1); shift[:, :d.shape[1]] = d
                 obj.set_pos(base_pos + shift, zero_velocity=True)
                 bq = np.asarray(base_quat, np.float32).reshape(self.num_envs, 4)
                 obj.set_quat(_quat_mul_wxyz(rot_quat, bq) if rot_quat is not None else bq,
@@ -141,8 +141,8 @@ class GenesisWorker:
                     dz = np.maximum(z0 - parts[:, :, 2].min(axis=1), 0.0)
                     parts[:, :, 2] += dz[:, None]
                 shift = np.zeros((self.num_envs, 1, 3), dtype=np.float32)
-                if object_dxy is not None:
-                    shift[:, 0, :2] = np.asarray(object_dxy, dtype=np.float32)
+                if object_dxy is not None:                        # (N,2) xy or (N,3) xyz offset from the spawn
+                    d = np.asarray(object_dxy, dtype=np.float32).reshape(self.num_envs, -1); shift[:, 0, :d.shape[1]] = d
                 obj.set_particles_pos(parts + shift)
 
         self._settle()
@@ -188,6 +188,7 @@ class GenesisWorker:
         pos: np.ndarray,
         quat_wxyz: np.ndarray,
         settle: int = 30,
+        gripper_width: Optional[np.ndarray] = None,
     ) -> None:
         """Teleport the robot EE to (pos, quat_wxyz) via IK and settle.
 
@@ -202,6 +203,7 @@ class GenesisWorker:
         self.robot.set_ee_pose_hard(
             np.asarray(pos, dtype=np.float32),
             np.asarray(quat_wxyz, dtype=np.float32),
+            gripper_width,
         )
         for _ in range(settle):
             self.handle.scene.step()
@@ -243,6 +245,20 @@ class GenesisWorker:
         self.close()
 
     # ── state read (all numpy; picklable across the process boundary) ────────────
+    def drag_object(self, env: int, vel_xyz) -> None:
+        """Set every particle's velocity of the (soft) object in ONE env — a lateral drag for one frame.
+        Call for a few consecutive frames for a bounded slide (the solver relaxes it afterwards)."""
+        obj = self.handle.objects[0]
+        n = np.asarray(self.handle.object_base_particles[0]).reshape(self.num_envs, -1, 3).shape[1]
+        obj.set_particles_vel(np.tile(np.asarray(vel_xyz, np.float32), (n, 1)), envs_idx=[int(env)])
+
+    def particle_positions(self):
+        """(B, n_p, 3) CURRENT MPM particle positions of the representative object (float32).
+        None for a rigid object. Dev/diagnostic accessor — not shipped in read_state()."""
+        if self.handle.object_types[0] == "rigid":
+            return None
+        return _np(self.handle.objects[0].get_state().pos).astype(np.float32)
+
     def read_state(self) -> dict:
         state = self.robot.read_state()
 

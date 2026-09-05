@@ -23,3 +23,5 @@ object_E: [320000.0, 480000.0]
 object_nu: [0.35, 0.41]
 object_rho: [950, 1050]
 object_mesh_pool: [cherry_tomato1, cherry_tomato2, cherry_tomato3, cherry_tomato5]
+start_modes: {home: 0.6, in_air: 0.15, above_object: 0.15, mid_approach: 0.1}
+disturbance_prob: 0.1

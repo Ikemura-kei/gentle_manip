@@ -22,3 +22,5 @@ object_taper: [-0.15, 0.15]
 object_E: [96000.0, 144000.0]
 object_nu: [0.39, 0.45]
 object_rho: [1050, 1150]
+start_modes: {home: 0.6, in_air: 0.15, above_object: 0.15, mid_approach: 0.1}
+disturbance_prob: 0.1

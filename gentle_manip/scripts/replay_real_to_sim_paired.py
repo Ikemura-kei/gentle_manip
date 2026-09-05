@@ -67,6 +67,11 @@ def main():
     ap.add_argument("--out", type=Path, default=None,
                     help="output dataset dir; default dataset/demos/<task-name>/<real leaf>")
     ap.add_argument("--episodes", default="", help="comma-sep episode indices (default: all)")
+    ap.add_argument("--object-z", type=float, default=None,
+                    help="object centre height (m) at spawn; default = the task's object_spawn_z (no z shift)")
+    ap.add_argument("--object-xy", type=float, nargs=2, default=None, metavar=("X", "Y"),
+                    help="where the real object actually was (robot-frame m), same for every episode; "
+                         "default = the real first-frame TCP xy (the 'cube right below the arm' protocol)")
     ap.add_argument("--video-stride", type=int, default=2)
     ap.add_argument("--with-rgb", action="store_true",
                     help="also render RGB in sim (paired RGB). Requires the scene spec's camera "
@@ -114,27 +119,35 @@ def main():
 
     task_dict = yaml.safe_load(args.task_config.read_text())
     task = SingleLiftTask(task_dict)
-    default_xy = np.array(get_object_def(task.object_name).default_pos[:2], dtype=np.float32)
+    # The object shift is applied RELATIVE TO THE SCENE SPAWN (the base particles/pose captured at build):
+    # task object_spawn_xy/z when set, else the registry default_pos.
+    _def = get_object_def(task.object_name).default_pos
+    spawn_xy = np.array(task.object_spawn_xy if getattr(task, "object_spawn_xy", None) is not None else _def[:2], np.float64)
+    spawn_z = float(task.object_spawn_z if getattr(task, "object_spawn_z", None) is not None else _def[2])
+    print(f"[replay] scene spawn (shift reference): xy {spawn_xy} z {spawn_z:.4f}", flush=True)
 
     out = args.out or (REPO / "dataset/demos" / args.task_name / args.real_run.name)
     out.mkdir(parents=True, exist_ok=True)
     print(f"real run: {args.real_run}\nout:      {out}\nepisodes: {picks}", flush=True)
 
-    if args.render_only:
-        paired = pickle.load(open(out / "data.pkl", "rb"))
+    if args.render_only:                      # figures + report + config from the existing paired data.pkl
+        paired = pickle.load(open(out / "data.pkl", "rb")); report, placements = [], []
         for ep_idx, sep in zip(picks, paired["episodes"]):
             ep = eps[ep_idx]
-            _figures(out, ep_idx,
-                     np.asarray(ep["observations"]["ee_pos"]),
-                     np.asarray(ep["observations"]["ee_quat"]),
-                     np.asarray(ep["observations"]["gripper_width"])[:, 0],
-                     np.asarray(ep["observations"]["point_cloud"]),
-                     {k: np.asarray(v) for k, v in sep["observations"].items()},
-                     args.video_stride)
+            re_ee, re_quat = np.asarray(ep["observations"]["ee_pos"]), np.asarray(ep["observations"]["ee_quat"])
+            re_gw, re_pc = np.asarray(ep["observations"]["gripper_width"])[:, 0], np.asarray(ep["observations"]["point_cloud"])
+            rec = {k: np.asarray(v) for k, v in sep["observations"].items()}
+            row = _match_row(ep_idx, re_ee, re_quat, re_gw, re_pc, rec); report.append(row)
+            placements.append({"episode": int(ep_idx), "cube_xy": ([float(v) for v in args.object_xy] if args.object_xy is not None
+                                                                   else [float(v) for v in re_ee[0, :2]]), "home_offset": None})
+            print(f"ep {ep_idx}: T={row['steps']}  ee_err {row['ee_err_mean_mm']:.1f} mm (max {row['ee_err_max_mm']:.1f})  "
+                  f"quat {row['quat_ang_mean_deg']:.2f} deg  gw {row['gw_err_mean_mm']:.1f} mm  cloud_nn {row['cloud_nn_mean_mm']:.1f} mm", flush=True)
+            _figures(out, ep_idx, re_ee, re_quat, re_gw, re_pc, rec, args.video_stride)
+        _write_meta(out, args, rec_cfg, _act_src, report, placements)
         return
 
     backend = SimBackend(task.scene_spec, 1, config={"sim": {"settle_steps": 20}},
-                         use_subprocess=False)
+                         use_subprocess=False, show_viewer=False)
     _rgb_shape = None
     if obs_cfg.images is not None:
         _cam = task.scene_spec.cameras[0]
@@ -160,16 +173,20 @@ def main():
         re_gw = np.asarray(ep["observations"]["gripper_width"])[:, 0]
         re_pc = np.asarray(ep["observations"]["point_cloud"])
 
-        # Item-1 protocol: cube right below the arm = real first-frame TCP xy.
-        cube_xy = re_ee[0, :2].astype(np.float64)
+        # Object xy: given explicitly, else the item-1 protocol (cube right below the arm = first-frame TCP xy).
+        cube_xy = (np.asarray(args.object_xy, np.float64) if args.object_xy is not None
+                   else re_ee[0, :2].astype(np.float64))
         home_off = re_ee[0].astype(np.float64) - nominal_home
         placements.append({"episode": int(ep_idx),
                            "cube_xy": [float(v) for v in cube_xy],
                            "home_offset": [float(v) for v in home_off]})
 
-        obs = env.reset(object_dxy=(cube_xy - default_xy)[None, :],
+        shift = np.r_[cube_xy - spawn_xy, (args.object_z - spawn_z) if args.object_z is not None else 0.0]
+        obs = env.reset(object_dxy=shift[None, :],
                         home_offset=home_off[None, :],
                         object_euler=[[0.0, 0.0, 0.0]])
+        _oc = backend.process.read_state()["object_center"][0]
+        print(f"  sim object centre after settle: {np.round(_oc, 4)}  (requested xy {np.round(cube_xy, 4)})", flush=True)
         sim_obs = [obs]
         for t in range(T - 1):
             obs, _, _, _ = env.step(actions[t][None, :])
@@ -188,19 +205,7 @@ def main():
                              "actions": actions.copy(),
                              "rewards": np.zeros(T, dtype=np.float32)})
 
-        # ---- pairing-quality metrics ----
-        sim_ee, sim_quat, sim_gw = rec["ee_pos"], rec["ee_quat"], rec["gripper_width"][:, 0]
-        ee_err = np.abs(sim_ee - re_ee)
-        qa = _quat_angular_diff_deg(sim_quat, _align_quat_sign(sim_quat, re_quat))
-        nn = np.array([_cloud_nn_dist(re_pc[t], rec["point_cloud"][t])
-                       for t in range(0, T, 5)])
-        row = {"episode": int(ep_idx), "steps": int(T),
-               "ee_err_mean_mm": float(ee_err.mean() * 1000),
-               "ee_err_max_mm": float(np.linalg.norm(sim_ee - re_ee, axis=1).max() * 1000),
-               "quat_ang_mean_deg": float(qa.mean()),
-               "gw_err_mean_mm": float(np.abs(sim_gw - re_gw).mean() * 1000),
-               "cloud_nn_mean_mm": float(np.nanmean(nn) * 1000),
-               "cloud_nn_p95_mm": float(np.nanpercentile(nn, 95) * 1000)}
+        row = _match_row(ep_idx, re_ee, re_quat, re_gw, re_pc, rec)   # pairing-quality metrics
         report.append(row)
         print(f"ep {ep_idx}: T={T}  ee_err {row['ee_err_mean_mm']:.1f} mm "
               f"(max {row['ee_err_max_mm']:.1f})  quat {row['quat_ang_mean_deg']:.2f} deg  "
@@ -210,24 +215,42 @@ def main():
         _figures(out, ep_idx, re_ee, re_quat, re_gw, re_pc, rec, args.video_stride)
 
     env.close()
-
-    commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=REPO,
-                            capture_output=True, text=True).stdout.strip()
     meta = dict(real["meta"])
     meta.update(task=args.task_name, n_episodes=len(sim_episodes),
                 created=datetime.now(timezone.utc).isoformat(),
                 paired_source=str(args.real_run))
     with open(out / "data.pkl", "wb") as f:
         pickle.dump({"meta": meta, "episodes": sim_episodes}, f)
+    _write_meta(out, args, rec_cfg, _act_src, report, placements)
+
+
+def _match_row(ep_idx, re_ee, re_quat, re_gw, re_pc, rec):
+    """Pairing-quality metrics of one episode: real vs sim proprio + cloud nearest-neighbour."""
+    T = len(re_ee); sim_ee, sim_quat, sim_gw = rec["ee_pos"], rec["ee_quat"], rec["gripper_width"][:, 0]
+    ee_err = np.abs(sim_ee - re_ee)
+    qa = _quat_angular_diff_deg(sim_quat, _align_quat_sign(sim_quat, re_quat))
+    nn = np.array([_cloud_nn_dist(re_pc[t], rec["point_cloud"][t]) for t in range(0, T, 5)])
+    return {"episode": int(ep_idx), "steps": int(T),
+            "ee_err_mean_mm": float(ee_err.mean() * 1000),
+            "ee_err_max_mm": float(np.linalg.norm(sim_ee - re_ee, axis=1).max() * 1000),
+            "quat_ang_mean_deg": float(qa.mean()),
+            "gw_err_mean_mm": float(np.abs(sim_gw - re_gw).mean() * 1000),
+            "cloud_nn_mean_mm": float(np.nanmean(nn) * 1000),
+            "cloud_nn_p95_mm": float(np.nanpercentile(nn, 95) * 1000)}
+
+
+def _write_meta(out, args, rec_cfg, act_src, report, placements):
+    commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=REPO, capture_output=True, text=True).stdout.strip()
+    tc = args.task_config.resolve()
     (out / "config.yaml").write_text(yaml.safe_dump({
         "task_name": args.task_name,
-        "description": "sim twin of the paired real run: real actions replayed open-loop, "
-                       "object at real first-frame TCP xy, home matched to real first frame",
+        "description": "sim twin of the paired real run: real actions replayed open-loop, home matched to the real "
+                       "first frame, object at " + ("--object-xy" if args.object_xy is not None else "the real first-frame TCP xy"),
         "paired_source": str(args.real_run),
         "generator": "gentle_manip/scripts/replay_real_to_sim_paired.py",
         "git_commit": commit,
-        "task_config": str(args.task_config.relative_to(REPO)),
-        "obs": rec_cfg["obs"], "action": rec_cfg[_act_src],
+        "task_config": str(tc.relative_to(REPO)) if tc.is_relative_to(REPO) else str(args.task_config),
+        "obs": rec_cfg["obs"], "action": rec_cfg[act_src],
         "placements": placements,
     }, sort_keys=False))
     (out / "match_report.yaml").write_text(yaml.safe_dump(report, sort_keys=False))

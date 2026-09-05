@@ -123,7 +123,7 @@ class SimBackend:
         # Explicit object_dxy (num_envs, 2) places the object at a chosen offset from
         # its default pose (e.g. to match a recorded demo's cube); otherwise per-reset DR.
         if object_dxy is not None:
-            object_dxy = np.asarray(object_dxy, dtype=np.float32).reshape(self.num_envs, 2)
+            object_dxy = np.asarray(object_dxy, dtype=np.float32).reshape(self.num_envs, -1)   # (N,2) xy or (N,3) xyz
         else:
             object_dxy = self._dr.sample_object_dxy(self._rng, self.num_envs)
 

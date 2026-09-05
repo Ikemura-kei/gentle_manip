@@ -31,3 +31,9 @@ rewards:
     scale: 0.1
     grasp_gate_dist: 0.079
     lift_target: 0.16
+
+# cam_ext twin of the 2026-09-05 WORLD_T_CAM_EXT (same values as every other task yaml)
+cam_fov: 43.15
+cam_pos: [0.78032539, -0.00362529, 0.28947945]
+cam_lookat: [0.25932406, 0.01186746, 0.01380000]
+cam_up: [-0.46799099, -0.01495762, 0.88360665]

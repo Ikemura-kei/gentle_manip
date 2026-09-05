@@ -23,3 +23,5 @@ object_E: [240000.0, 360000.0]
 object_nu: [0.37, 0.43]
 object_rho: [950, 1050]
 object_mesh_pool: [tomato1, tomato3, tomato4, tomato5]
+start_modes: {home: 0.6, in_air: 0.15, above_object: 0.15, mid_approach: 0.1}
+disturbance_prob: 0.1

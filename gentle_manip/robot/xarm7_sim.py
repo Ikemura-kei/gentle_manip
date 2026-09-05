@@ -173,7 +173,7 @@ class XArm7Sim:
         self.robot.control_dofs_position(grip_cmd, self.grip_dofs)
 
     def set_ee_pose_hard(
-        self, target_pos: np.ndarray, target_quat: np.ndarray
+        self, target_pos: np.ndarray, target_quat: np.ndarray, gripper_width: Optional[np.ndarray] = None
     ) -> None:
         """Hard-set arm to an EE pose via IK + set_dofs_position (not control).
 
@@ -192,9 +192,11 @@ class XArm7Sim:
         self.robot.set_dofs_position(qpos[:, :7], self.arm_dofs)
         self.robot.control_dofs_position(qpos[:, :7], self.arm_dofs)
 
-        grip = np.full(
-            (self.num_envs, len(self.grip_dofs)), cfg.GRIPPER_JOINT_OPEN, dtype=np.float32
-        )
+        if gripper_width is None:                      # default: calibrated open
+            grip = np.full((self.num_envs, len(self.grip_dofs)), cfg.GRIPPER_JOINT_OPEN, dtype=np.float32)
+        else:                                          # per-env width (m)
+            q = self._width_to_joint(np.asarray(gripper_width, dtype=np.float32))
+            grip = np.repeat(q[:, None], len(self.grip_dofs), axis=1)
         self.robot.set_dofs_position(grip, self.grip_dofs)
         self.robot.control_dofs_position(grip, self.grip_dofs)
 

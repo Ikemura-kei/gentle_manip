@@ -39,3 +39,5 @@ object_E: [3.0e4, 8.0e4]     # tofu firmness range around the 5e4 nominal (see m
 object_nu: [0.28, 0.38]      # tofu Poisson range
 object_rho: [900, 1100]      # density (kg/m^3)
 coup_friction: [3.5, 4.5]    # rigid<->MPM coupling friction
+start_modes: {home: 0.6, in_air: 0.15, above_object: 0.15, mid_approach: 0.1}
+disturbance_prob: 0.1

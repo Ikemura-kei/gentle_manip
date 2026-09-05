@@ -16,6 +16,6 @@ PYTHONPATH=$PWD third_party/openpi/.venv/bin/python \
   -m gentle_manip.scripts.deploy_real_pi05 \
   --checkpoint downloaded_runs/pi05_real7_ext/29999 \
   --repo-id gm/real7_ext \
-  --prompt "pick up the mushroom gently" \
-  --max-pos-step-m 0.01 \
+  --prompt "pick up the object from table gently" \
+  --max-pos-step-m 0.0065 \
   --record dataset/real_deploy/pi05_real7_e29999

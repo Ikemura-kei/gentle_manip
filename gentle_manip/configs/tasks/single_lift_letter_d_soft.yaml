@@ -5,9 +5,9 @@
 # ── OBJECT-SPECIFIC ──
 object_name: "letter_d"
 object_type: "soft"
-sim_substeps: 470
-mpm_grid_density: 500   # 2 mm cells: 3 across the 6 mm thickness (tofu: 250 for a 30 mm cube)
-object_spawn_z: 0.0201   # board 0.0138 + half-THICKNESS x max scale 1.47 + 2 mm (lies flat: no tilt DR)
+sim_substeps: 235
+mpm_grid_density: 250   # 25 mm thick letters: tofu's grid (was 500 for the 6 mm plate)
+object_spawn_z: 0.0333   # board 0.0138 + half-THICKNESS (25 mm) x max scale 1.4 + 2 mm (lies flat: no tilt DR)
 
 # ── SHARED (identical for all objects) ──
 success_z_min: 0.175
@@ -20,9 +20,9 @@ board_center: [0.41, 0.0]
 board_color: [0.647, 0.608, 0.514, 1.0]
 finger_color: [0.1, 0.1, 0.1, 1.0]
 cam_fov: 43.15
-cam_pos: [0.69895466, -0.06643963, 0.3168003]
-cam_lookat: [0.30454208, -0.07412394, 0.0138]
-cam_up: [-0.60697255, -0.06794066, 0.79181336]
+cam_pos: [0.78032539, -0.00362529, 0.28947945]
+cam_lookat: [0.25932406, 0.01186746, 0.01380000]
+cam_up: [-0.46799099, -0.01495762, 0.88360665]
 
 rewards:
   stress: {cap: 1.5, mean_weight: 0.2, scale: 0.2, top10_weight: 0.8}

@@ -33,8 +33,8 @@ EE_LINK = 'xarm_gripper_base_link'
 # reading of -9.8 mm was extrinsic tilt error, not a raised mounting).
 # NOTE the absolute-mode action configs PIN pos_min/pos_max themselves, so they are unaffected by
 # this and still map into z>=0.003; commands below the bound are simply clipped here.
-EE_BOUNDS_MIN = [0.26, -0.225, 0.0139]
-EE_BOUNDS_MAX = [0.59,  0.225, 0.50]
+EE_BOUNDS_MIN = [0.26, -0.225, 0.015]
+EE_BOUNDS_MAX = [0.55,  0.225, 0.50]   # x max 0.55: camera clearance (2026-09-05)
 
 # Home TCP (fingertip) pose, in "our TCP" convention — SHARED so sim and real reset
 # to the same Cartesian pose. [x, y, z (m), rx, ry, rz (rad, axis-angle / rotvec)].
@@ -181,10 +181,13 @@ SERVO_MVACC      = 500    # passed to set_servo_cartesian_aa(mvacc=)
 # residual only measures internal agreement among the calibration poses).
 # NOTE: a plane constrains 3 DOF only (2 tilt + height). In-plane x/y and yaw are UNCHANGED
 # from the hand-eye fit and remain unvalidated — a 3D probe would be needed for those.
+# 2026-09-05 — camera re-placed; replayed hand-eye round (calib_replay, 13 poses, HORAUD 12/13 @ 1.85 mm)
+# + external correction (extrinsic_correct): table plane level at 13.8 mm, x/y onto the TCP-measured
+# ArUco corner (residual (0, 0, +1.9) mm). Procedure + checks: docs/camera_calibration.md.
 WORLD_T_CAM_EXT = [
-    [    -0.05361751,      0.60697255,     -0.79291203,      0.69895466],
-    [     0.99756975,      0.06794066,     -0.01544824,     -0.06643963],
-    [     0.04449432,     -0.79181336,     -0.60914027,      0.31680030],
+    [     0.01622329,      0.46799099,     -0.88358431,      0.78032539],
+    [     0.99954285,      0.01495762,      0.02627469,     -0.00362529],
+    [     0.02551263,     -0.88360665,     -0.46753438,      0.28947945],
     [     0.00000000,      0.00000000,      0.00000000,      1.00000000],
 ]
 

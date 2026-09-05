@@ -245,13 +245,16 @@ class FEM:
         Ct[torch.as_tensor(np.concatenate(rows), device=dev), torch.as_tensor(np.concatenate(cols), device=dev)] = \
             torch.as_tensor(np.concatenate(vals), dtype=torch.float64, device=dev)
         W = torch.linalg.lu_solve(self._gpu_lu[0], self._gpu_lu[1], Ct)[:n]           # (n, tot)
+        # per-candidate index / axis / g: ONE host->device copy for the whole batch, sliced below
+        idx_all = torch.as_tensor(np.concatenate(rows).reshape(-1, 3), device=dev)      # (tot, 3)
+        a_all = torch.as_tensor(np.asarray(axis_list, float), dtype=torch.float64, device=dev)   # (K, 3)
+        g_all = -torch.as_tensor(np.concatenate([np.asarray(g, float) for g in g_list]),
+                                 dtype=torch.float64, device=dev)                       # (tot,)
         U = torch.empty((n, len(ncs)), dtype=torch.float64, device=dev); lams = []; off = 0
-        for k, (nd, a, g, nc) in enumerate(zip(nodes_list, axis_list, g_list, ncs)):
+        for k, nc in enumerate(ncs):
             Wk = W[:, off:off + nc]                                                     # (n, nc)
-            idx = torch.as_tensor((3 * np.asarray(nd)[:, None] + np.arange(3)), device=dev)   # (nc, 3)
-            at = torch.as_tensor(np.asarray(a, float), dtype=torch.float64, device=dev)
-            S = (Wk[idx] * at[None, :, None]).sum(1)                                    # C_k W_k  (nc, nc)
-            lam = torch.linalg.solve(S, -torch.as_tensor(np.asarray(g, float), dtype=torch.float64, device=dev))
+            S = (Wk[idx_all[off:off + nc]] * a_all[k][None, :, None]).sum(1)            # C_k W_k  (nc, nc)
+            lam = torch.linalg.solve(S, g_all[off:off + nc])
             U[:, k] = -(Wk @ lam); lams.append(lam.cpu().numpy()); off += nc
         return U, lams
 

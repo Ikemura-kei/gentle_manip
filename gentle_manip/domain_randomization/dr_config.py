@@ -11,7 +11,7 @@ when it (re)builds. Loaded from configs/dr/*.yaml via from_dict; presets in pres
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from typing import Dict, Optional, Tuple
 
 import numpy as np
@@ -35,6 +35,13 @@ class DRConfig:
     robot_init_offset_xyz: Optional[tuple] = None  # FIXED (dx,dy,dz) offset (m) added to the reset home
                                         # EE pose, SAME for all envs (a fixed home at a shifted location).
                                         # Combine with robot_init_pos_xyz>0 to jitter AROUND the shifted home.
+    # Demo START condition (collector only): per-env mode weights (normalized; all-zero = home).
+    # in_air = random workspace pose, above_object = over the grasp, mid_approach = on the home->grasp
+    # line. disturbance_prob = per-env chance of a mid-approach OBJECT drag (the demonstrator then
+    # re-targets the grasp; independent of the start mode).
+    start_modes: dict = field(default_factory=lambda: {"home": 0.6, "in_air": 0.15,
+                                                       "above_object": 0.15, "mid_approach": 0.1})
+    disturbance_prob: float = 0.05
     object_yaw_deg: float = 0.0         # half-range (deg); per-env uniform object YAW (about world z). 180 = full
     object_pitch_roll_deg: float = 0.0  # half-range (deg); per-env uniform object PITCH & ROLL tilt (small, e.g. 15)
     object_flip_prob: float = 0.0       # per-env probability of a big FLIP: instead of the small ±pitch_roll

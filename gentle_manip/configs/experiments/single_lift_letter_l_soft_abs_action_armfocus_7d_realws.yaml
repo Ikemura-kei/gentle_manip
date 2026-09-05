@@ -3,7 +3,7 @@
 # Status: active
 
 task: single_lift_letter_l_soft
-action: abs_pose_euler_abs_gripper
+action: abs_pose_euler_abs_gripper_z15
 dr: soft_orientation_realws_letter_l
 augmentation: d435i_noise
 

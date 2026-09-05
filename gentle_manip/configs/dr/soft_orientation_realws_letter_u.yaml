@@ -20,6 +20,8 @@ object_axis_scale: [0.95, 1.05]
 object_bend_deg: [0, 0]
 object_twist_deg: [0, 0]
 object_taper: [-0.01, 0.01]
-object_E: [3.0e4, 8.0e4]
-object_nu: [0.28, 0.38]
+object_E: [2.0e5, 3.0e5]   # mushroom material (2026-09-05)
+object_nu: [0.32, 0.38]
 object_rho: [900, 1100]
+start_modes: {home: 0.6, in_air: 0.15, above_object: 0.15, mid_approach: 0.1}
+disturbance_prob: 0.1

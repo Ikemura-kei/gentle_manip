@@ -23,3 +23,5 @@ object_E: [0.8e5, 1.2e5]
 object_nu: [0.36, 0.44]
 object_rho: [850, 950]
 object_mesh_pool: [raspberry1, raspberry2, raspberry3, raspberry4, raspberry5]
+start_modes: {home: 0.6, in_air: 0.15, above_object: 0.15, mid_approach: 0.1}
+disturbance_prob: 0.1
