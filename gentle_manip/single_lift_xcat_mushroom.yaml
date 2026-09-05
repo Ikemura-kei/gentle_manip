@@ -1,0 +1,15 @@
+# [experiment] Mushroom-only TOP-UP collection: identical to single_lift_xcat_diverse
+# but dr: xcat_mushroom_only (pool pinned to mushroom). Fixes mushroom undershooting
+# the per-cat target -- the 4-way concurrent small-pool collectors each undercount the
+# global tally (quota is per-collector, not global), so mushroom lagged at ~370/500
+# while grape/tomato overshot to ~550-590.
+# Used by: yd_xcat_collect.sbatch  TAG=xcat_regrasp EXPERIMENT=single_lift_xcat_mushroom
+# Status: experimental
+task: single_lift_xcat_diverse
+action: delta_pose_delta_gripper
+dr: xcat_mushroom_only
+augmentation: l515_noise
+obs: superset_soft
+views:
+  teacher: [privileged]
+  student: [point_cloud]
