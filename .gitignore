@@ -98,7 +98,6 @@ downloaded_runs/
 .agent_tmp/
 .cache/
 # mesh-from-photos: external MIT checkouts (not submodules yet) + heavy per-object intermediates
-third_party/TripoSG/
 third_party/TRELLIS/
 third_party/data/
 envs/triposg_arrhenius/.venv/
