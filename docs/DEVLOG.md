@@ -9356,3 +9356,19 @@ plane, 29.8 mm on the board). Kinematic pairing quality: EE ≤ 1.5 mm, quat ≤
   axis, clamped to [`STANDOFF_MIN` 4 cm, `STANDOFF_MAX` 10 cm]: a start near the axis gets a short lateral
   move onto it then a straight descent; far starts (home, in_air) get a monotonic diagonal to the 10 cm point;
   only a start under 4 cm along the axis lifts (≤ a few cm, collision safety). Same rule for re-targets.
+
+### 2026-09-05 — Sim2real training plan + a crop bug that would have sunk it
+
+- **BUG (config): all 39 realws experiments recorded clouds through `superset_soft_armfocus` (crop z ≥ 4 mm,
+  2026-08-20, pre-board) while real deploy crops at 19 mm.** The board-rig obs `superset_soft_armfocus_board`
+  (identical except crop 0.019, "matches real deploy") existed since 09-03 but was referenced by NO active
+  experiment. Every sim cloud thus contained the 13.8 mm board top that the real policy never sees. All 39
+  experiments repointed to `superset_soft_armfocus_board`; **sim demos collected before this are not usable
+  for sim2real — re-collect** (the collection running at the time was started on the old obs).
+- **Plan:** `docs/training_plan_sim2real_2026-09.md` — collect ≥ 200 tofu episodes (template, per-job seeds) →
+  convert (`--derive-action abs_pose_euler_abs_gripper_z15`, student view) → `build_paired_npz.py` from the
+  red-cube play pairs → train variants A (paired w=0) / B (w=0.5) with `n_epochs ≈ 3000·29.6k/N_steps`
+  clamped [800, 3000] (matches the real7 reference's gradient budget) → canonical sim eval (200 eps) → real
+  deploy (same obs crop + z15 action yaml, 20 trials/ckpt, sweep 750/1000/1500: val loss is not predictive).
+  New: cfg dir `gentle_manip/dppo/cfg/single_lift_tofu_sim2real_v1/` (pre + eval, `PairedRegDiffusionModel`
+  wired, aux heads off) and `gentle_manip/dppo/build_paired_npz.py` (no builder existed; the 08-23 file was ad hoc).

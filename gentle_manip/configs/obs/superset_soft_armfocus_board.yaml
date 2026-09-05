@@ -1,5 +1,5 @@
 # [obs] SUPERSET for the 13.8 mm BOARD rig (D435i, 2026-09-03) — soft tasks.
-# Used by: grasp_synthesis collection + DPPO training on single_lift_cube3_soft_board
+# Used by: ALL realws experiments (grasp_synthesis collection + DPPO training), 2026-09-05
 # Status: active
 #
 # ADDITIVE copy of superset_soft_armfocus.yaml with ONE change: crop z_min 0.004 -> 0.019,
