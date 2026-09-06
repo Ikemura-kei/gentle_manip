@@ -78,8 +78,8 @@ N_SETTLE      = 1           # hold at grasp pose before closing
 N_DWELL       = 2            # hold at the final close width before lifting (MPM contact settles)
 EXEC_EXTRA_CLOSE = 0.0008    # m — execute the PLANNED width minus this (total width; 19.0 mm planned -> 18.2 mm)
 N_LIFT        = 66          # lift steps
-N_HOLD        = 20           # hold at lift height, FROZEN 2026-09-06 (user): 20 steps = 5 action chunks of 'arrived,
-                             # stay closed'. 60 (24 % of frames) overwrote re-open-on-empty-grasp; 12 trimmed to 4
+N_HOLD        = 10           # hold at lift height, FROZEN 2026-09-06 (user's choice): 10 steps. (20/60 tried on 09-06:
+                             # 60 = 24 % of frames overwrote re-open-on-empty-grasp.) The trailing run is never trimmed; 12 trimmed to 4
                              # _trim_long_holds -> demos ended at the TOP of the lift (median 1 frame after max
                              # height): the policy had no data for 'stay closed at height' and re-opened mid-air
                              # (sim teaser 8/17 lift-then-release; real deploys). The trailing run is now KEPT.
@@ -425,6 +425,37 @@ def _sample_starts(rng, dr_cfg, home_p, home_q, grasp_p, grasp_q, obj_top, lo, h
     return P, Q, W, modes
 
 
+def synth_stats_row(r: dict, fallback: bool) -> dict:
+    """Per-env synthesis diagnostics from a planner result with record_history=True (frozen planner,
+    read-only): how many seeds each filter rejected and why, scored statuses, CMA feasibility, final."""
+    seeds = r.get("seeds") or []; hist = r.get("history") or []
+    n = len(seeds); npr = r.get("n_prims") or {}
+    table = sum(1 for sd in seeds if not sd.get("table_ok", True))
+    rot = sum(1 for sd in seeds if sd.get("table_ok", True) and not sd.get("rot_ok", True))
+    pen_checked = [sd for sd in seeds if sd.get("pen_ok") is not None]
+    pen = sum(1 for sd in pen_checked if not sd["pen_ok"])
+    scored = [sd for sd in seeds if "status" in sd]
+    st = {}
+    for sd in scored:
+        st[sd["status"]] = st.get(sd["status"], 0) + 1
+    holdable = sum(1 for sd in scored if sd.get("res", {}).get("holdable"))
+    cma = [h for h in hist if h.get("round") == 1]; ref = [h for h in hist if h.get("round") == 2]
+    cma_st = {}
+    for h in cma:
+        cma_st[h["status"]] = cma_st.get(h["status"], 0) + 1
+    return dict(n_seeds=n, seeds_antipodal=npr.get("antipodal", ""), seeds_medial=npr.get("medial", ""),
+                rej_table_or_tcpz=table, rej_rot_box=rot, rej_penetration=pen,
+                scored=len(scored), scored_holdable=holdable,
+                scored_status=";".join(f"{k}={v}" for k, v in sorted(st.items())),
+                cma_evals=len(cma), cma_holdable=sum(1 for h in cma if h.get("holdable")),
+                cma_status=";".join(f"{k}={v}" for k, v in sorted(cma_st.items())),
+                refine_evals=len(ref), refine_holdable=sum(1 for h in ref if h.get("holdable")),
+                tier=r.get("tier", ""),
+                final_status=("FALLBACK" if fallback else (r.get("status") or "?")),
+                final_stress=("" if r.get("stress_top10") is None else round(float(r["stress_top10"]))),
+                final_width_mm=("" if r.get("x") is None else round(1e3 * float(r["x"][6]), 1)))
+
+
 def execute_and_collect(
     worker:       GenesisWorker,
     all_best_x:   List[np.ndarray],
@@ -760,6 +791,10 @@ def main() -> None:
     p.add_argument("--dev-viz", action="store_true",
                    help="STANDALONE step-through window (not Genesis) for ENV 0 of each batch: each synthesis "
                         "stage is drawn and BLOCKS until you press q (GM_DEV_VIZ_AUTOADVANCE=<s> auto-plays).")
+    p.add_argument("--skip-execution", action="store_true",
+                   help="DEBUG: synthesize only — record per-env synthesis statistics (seeds rejected by reason, scored "
+                        "statuses, CMA feasibility, fallback) to <run>/synth_stats.csv and reset without executing. "
+                        "--n-episodes then counts synthesis ATTEMPTS (envs), nothing is saved.")
     p.add_argument("--dev-viewer", action="store_true",
                    help="DEV: force --n-envs 1 and open the Genesis viewer window so the scripted "
                         "grasp can be watched live. Slow and interactive — never use for collection.")
@@ -904,7 +939,7 @@ def main() -> None:
                         # CSV<->dataset join is UNDERIVABLE: v4 logs every attempt, and a
                         # `success=1` row still may not be saved (n_episodes cap, or the
                         # fallback-grasp drop), so "the successes in order" is wrong.
-                        "dataset_idx"])
+                        "dataset_idx", "synth_tier"])
 
     total_saved  = 0
     t_synth = t_exec = t_fem = 0.0            # profiling: synthesis / execution / FEM-build wall time
@@ -912,6 +947,8 @@ def main() -> None:
     total_failed = 0
     total_fallback_dropped = 0   # succeeded-by-crushing fallback demos, dropped
     batch_idx   = 0
+    synth_rows: list = []; _n_attempt = 0     # --skip-execution diagnostics
+    _tier_log: list = []                      # relaxation tier of every synthesis attempt (stats.yaml)
     shard_buf:  List[dict] = []
     shard_idx   = 0
     fem_mesh: Optional[str] = None            # v3: cache the FEM (obj+pad_geo) keyed on actual_mesh —
@@ -1019,9 +1056,10 @@ def main() -> None:
                                     table_z=args.table_z, tcp_z_min=float(action_config.pos_min[2]),
                                     seed=cma_seed,
                                     yield_stress=_mat_yield,
-                                    record_history=bool(args.dev_viz),
+                                    record_history=bool(args.dev_viz or args.skip_execution),
                                     stage_cb=(live_viz.on_stage if live_viz is not None else None))
             best_x = r["x"]
+            r_planner = r                                   # the planner's own dict (seeds/history) for --skip-execution diagnostics
             if best_x is None or r.get("stress_top10") is None:       # extremely rare: still nothing ->
                 # default straight-down grasp at the object xy so the FSM never sees None (this episode may
                 # not lift -> simply won't be saved, but the batch completes). tcp sits low (FINGER_TO_TCP_Z).
@@ -1052,6 +1090,20 @@ def main() -> None:
                 if live_viz is not None:
                     live_viz.show_particles(best_x, _parts[i], _rows)
             all_best_x.append(best_x); all_grasp.append(r)
+            _tier_log.append(int(r_planner.get("tier", 0)))
+            if args.skip_execution:
+                _row = dict(batch=batch_idx, env=i, scale=(round(scene_dr["scale"], 3) if do_scene_dr else ""),
+                            bend_deg=(round(scene_dr["bend_deg"], 1) if do_scene_dr else ""),
+                            mesh=(scene_dr.get("mesh_variant", "-") if do_scene_dr else "-"),
+                            obj_dx=round(float(object_dxy[i][0]), 4), obj_dy=round(float(object_dxy[i][1]), 4),
+                            obj_yaw_deg=round(float(np.degrees(object_euler[i][2])), 1), cma_seed=cma_seed,
+                            **synth_stats_row(r_planner, i in synth_failed))
+                synth_rows.append(_row)
+                print(f"  [synth] env {i}: seeds {_row['n_seeds']} (antipodal {_row['seeds_antipodal']}, medial {_row['seeds_medial']}) | rejected table/tcp_z {_row['rej_table_or_tcpz']}, rot box "
+                      f"{_row['rej_rot_box']}, penetration {_row['rej_penetration']} | scored {_row['scored']} "
+                      f"(holdable {_row['scored_holdable']}; {_row['scored_status']}) | CMA {_row['cma_evals']} evals, "
+                      f"holdable {_row['cma_holdable']} ({_row['cma_status']}) | refine holdable {_row['refine_holdable']}/"
+                      f"{_row['refine_evals']} | final {_row['final_status']}")
             if r.get("stress_top10") is not None:
                 print(f"  Env {i}: stress={r['stress_top10']:.0f}Pa grip={r['grip']:.3f}N align={r['align']:.3f}"
                       f"  tcp={best_x[:3].round(4)}  w={best_x[6]*1e3:.1f} mm")
@@ -1111,6 +1163,10 @@ def main() -> None:
         # ── Execute scripted trajectory + collect data ──
         # Record video only while under the first-N cap (args.record_video = N, or 10**9 for "all");
         # once N saved, stop RENDERING (no per-step RGB cost/disk for the rest of the run).
+        if args.skip_execution:                     # DEBUG: synthesis statistics only — no execution, straight to reset
+            total_saved += n                        # counts ATTEMPTS so the loop terminates; nothing is saved
+            _n_attempt += n
+            continue
         rec_this_batch = args.record_video > 0 and total_saved < args.record_video
         print(f"  Executing …")
         try:
@@ -1176,6 +1232,7 @@ def main() -> None:
                                 round(float(g["x"][6] * 1e3), 2),
                                 round(float(g.get("tilt_deg") or 0), 1),
                                 None,                      # dataset_idx, stamped in the save loop
+                                int(all_grasp[i].get("tier", 0)),   # synth_tier (relaxation tier of the planner)
                                 ])
 
         # ── Package and shard successful (or all) episodes ──
@@ -1273,6 +1330,7 @@ def main() -> None:
         "sub_yield_frac":  round(float(np.mean(_sf < 1.0)) if len(_sf) else 0.0, 4),
         "stress_max_frac_mean": round(float(np.nanmean(_sf)) if len(_sf) else 0.0, 4),
         "stress_max_frac_max":  round(float(np.nanmax(_sf)) if len(_sf) else 0.0, 4),
+        "synth_tiers":     {int(t): int(sum(1 for g in _tier_log if g == t)) for t in sorted(set(_tier_log))},   # attempts per relaxation tier (0 = nominal)
         "elapsed_min":     round(elapsed / 60, 2),
         "synth_s_per_attempt": round(t_synth / _n, 2),
         "exec_s_per_attempt":  round(t_exec / _n, 2),
@@ -1283,6 +1341,36 @@ def main() -> None:
     with open(stats_path, "w") as f:
         yaml.dump(stats, f, default_flow_style=False)
     print(f"  Stats            : {stats_path}")
+    if synth_rows:
+        import csv as _csv
+        sp = run_dir / "synth_stats.csv"
+        with open(sp, "w", newline="") as f:
+            w = _csv.DictWriter(f, fieldnames=list(synth_rows[0].keys())); w.writeheader(); w.writerows(synth_rows)
+        tot = len(synth_rows); fb = sum(1 for r_ in synth_rows if r_["final_status"] == "FALLBACK")
+        agg = {k: sum(r_[k] for r_ in synth_rows) for k in ("n_seeds", "rej_table_or_tcpz", "rej_rot_box", "rej_penetration",
+                                                             "scored", "scored_holdable", "cma_evals", "cma_holdable")}
+        def _merge(key):
+            d = {}
+            for r_ in synth_rows:
+                for kv in filter(None, r_[key].split(";")):
+                    k_, v_ = kv.split("="); d[k_] = d.get(k_, 0) + int(v_)
+            return d
+        print(f"\n── Synthesis diagnostics ({tot} attempts) → {sp}")
+        print(f"  no solution (fallback) : {fb}/{tot}")
+        zero = [r_ for r_ in synth_rows if r_['n_seeds'] == 0]
+        if zero:
+            print(f"  of which NO SEEDS AT ALL: {len(zero)} (antipodal pairs AND medial points empty for that mesh/pose draw)")
+        print(f"  seeds per attempt      : {agg['n_seeds']/tot:.0f} | rejected: table/tcp_z {agg['rej_table_or_tcpz']/tot:.0f}, "
+              f"rot box {agg['rej_rot_box']/tot:.0f}, penetration {agg['rej_penetration']/tot:.0f} | scored {agg['scored']/tot:.0f}, "
+              f"holdable {agg['scored_holdable']/tot:.1f}")
+        print(f"  scored statuses (total): {_merge('scored_status')}")
+        print(f"  CMA per attempt        : {agg['cma_evals']/tot:.0f} evals, holdable {agg['cma_holdable']/tot:.1f} | statuses {_merge('cma_status')}")
+        by_batch = {}
+        for r_ in synth_rows:
+            by_batch.setdefault(r_["batch"], []).append(r_)
+        for b, rows_ in sorted(by_batch.items()):
+            print(f"  batch {b} (scale {rows_[0]['scale']}, bend {rows_[0]['bend_deg']}): fallback {sum(1 for r_ in rows_ if r_['final_status']=='FALLBACK')}/{len(rows_)}, "
+                  f"scored holdable/attempt {np.mean([r_['scored_holdable'] for r_ in rows_]):.1f}")
 
     worker.close()
 

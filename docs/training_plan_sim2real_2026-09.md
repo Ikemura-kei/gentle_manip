@@ -77,7 +77,7 @@ eval), `EPOCHS`, `PAIRED_W`, `PC_AUG` (default `d435i_noise` = stereo noise + le
 `PC_AUG=` turns it off), `CLOUD_OFFSET` (default 0.008 m; 0 = off), `CONS_W` (clean-vs-perturbed encoder
 consistency, default 0.3; 0 = off), `CONS_AUG` (`d435i_noise_strong`), `CONS_OFFSET` (0.012 m), `SEED` (42).
 Round 2 (2026-09-06 evening) defaults: dataset `single_lift_tofu_sim2real_v1_tail60` (hold tail K=60 added post hoc — too long, see DEVLOG;
-the collector now records a 20-step hold itself (FROZEN), so NEW collections need no post-processing). Anything else goes through as a hydra override
+the collector now records a 10-step hold itself (FROZEN 2026-09-06), so NEW collections need no post-processing). Anything else goes through as a hydra override
 (`bash …/train_dppo_dp3.sh wandb=null`). Another object = same command with its `DATASET`/`EXPERIMENT`;
 never fork the cfg.
 
