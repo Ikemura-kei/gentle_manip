@@ -16,6 +16,15 @@ apply it: demos are recorded clean, train-time augmentation lives in the trainin
 real deploy crop **[v4.2]**). Collection, training and eval all load the same file (`Experiment.load`).
 Naming: `single_lift_<object>_soft_abs_action_armfocus_7d_realws`.
 
+## 1a. How to collect (the frozen launcher)
+`gentle_manip/scripts/final/collect_demo_template.sh` — edit `obj` / `n_episodes`, run one job per `SEED`
+(parallel jobs on the same object MUST use different seeds: DR + CMA streams). It runs the collector with the
+frozen flags (`--table-z 0.0138 --n-envs 10 --scene-dr-every 1 --record-video 25`), unsets every `GM_*` dev
+override, stamps the run (time + host + git sha) into `config.yaml`/`STAMP`, tees the log into the run dir, and
+copies the resolved experiment yaml plus every leaf it names into `<run>/config/` (the `augmentation` leaf is
+copied for the record only — collection never applies it, see 1b). Verified against the v4.2 collector
+(2026-09-06): every flag it passes exists and matches this recipe.
+
 ## 1b. Worked example: what a tofu collection run actually uses (and does NOT)
 `single_lift_tofu_soft_abs_action_armfocus_7d_realws.yaml` → the collector reads exactly four leaves
 (`exp.task_cfg`, `exp.collection_obs()`, `exp.action_config`, `exp.dr`); `augmentation:` is never read.
