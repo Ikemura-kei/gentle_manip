@@ -265,6 +265,10 @@ class PolicyEnv:
             cf_ = np.asarray(cf_, dtype=np.float32).reshape(-1)
             for i in range(self.num_envs):
                 infos[i]["contact_force"] = float(cf_[i])
+        hit = getattr(self._augmentor, "last_residue_hit", None) if self._augmentor is not None else None
+        if hit is not None:                              # sim-only diagnostic: residue injected into this env's obs
+            for i in range(self.num_envs):
+                infos[i]["aug_residue"] = bool(hit[i])
         if stress is not None:
             for i in range(self.num_envs):
                 infos[i]["stress_max"] = float(stress["max"][i])
