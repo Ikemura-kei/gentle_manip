@@ -8,7 +8,7 @@ object_pos_y: [-0.12, 0.12]
 object_nominal_xy: [0.47, 0.0]
 robot_init_pos_xyz: 0.02
 object_yaw_deg: 180
-object_pitch_roll_deg: 45
+object_pitch_roll_deg: 5   # 2026-09-06 (user, collection campaign): was 45 — large tilts made the ellipsoid spawn penetrating the board
 object_flip_prob: 0.25
 object_flip_deg: [160, 180]
 coup_friction: [3.5, 4.5]
