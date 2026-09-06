@@ -9586,3 +9586,13 @@ sbatch output through `grep | head` without line-buffering — 4KB block bufferi
 until EOF, indistinguishable from the hang it was meant to reveal. (c) the DR-applied spec is
 SimBackend._spec (mesh_path baked); _nominal_spec entries carry mesh_path=None (registry resolves
 at build). Gate-histogram tooling was removed at user request (local agent owns banana now).
+
+**2026-09-06 late — raspberry material A/B VERDICT: numerics, not material.** At E=1.6e5/yield=2e4
+(substeps unchanged at 560) every batch ABORTED with the rigid-solver NaN ("Invalid constraint
+forces causing 'nan'") before saving anything — job 2081797 killed after 3 aborted batches
+(log: rasp_mat_260906-2154/raspberry.log). Progression matches the CFL prediction exactly:
+E=1e5 -> shatter (marginal), E=1.6e5 -> NaN (margin ~30% short; needed ~730-780 by the
+mushroom-calibrated substeps ~ grid x sqrt(E) GH200 scaling vs configured 560).
+**Conclusion: raspberry's 0% is INTEGRATION STABILITY at grid 600, not material weakness.** The
+new material values are fine but need sim_substeps ~760 to go with them (config change, untested
+— pending user/local-agent decision).
