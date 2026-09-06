@@ -9543,3 +9543,46 @@ and the pymeshlab install/swap doc in its pyproject comment.
 - **Collector: `above_object` start and disturbance never combine (2026-09-06, user):** the disturbance draw is skipped for
   envs whose start mode is `above_object`, so `disturbance_prob` is the probability conditional on the other modes. One `continue`;
   every other env's draw and RNG consumption unchanged. Frozen with N_HOLD=20.
+
+### 2026-09-06 (eve) — small-object failure modes SPLIT: cherry buries, raspberry SHATTERS, banana gated out; raspberry material A/B in flight
+
+Post re-profile diagnosis session (user + agent, videos + per-attempt CSVs). The three sub-90%
+objects have THREE DIFFERENT diseases:
+
+**1. cherry_tomato (59%): DR-draw-conditional BURIAL.** Whole batches 0/10 while others are
+7-10/10 on the SAME mesh variant — the failing combination differs by the BEND draw
+(cherry_tomato5 bend+15 buried, bend-12 fine). Suspect: Barr-bend displaces the deformed mesh
+beyond the nominal half-diagonal that the spawn-z formula (board + half-diag x max-scale + 5mm)
+assumes, eating the 5mm margin. Non-buried batches are ~100% (user). Fix pending (user design).
+
+**2. raspberry (0% everywhere): NOT buried — it SHATTERS on spawn impact** (user, from videos:
+"scattered into pieces"; the flush 'speck' is debris). Evidence trail: settle probe at NOMINAL
+draw rests clean 1.3mm above the board (so no static burial), spawn-z 0.037->0.05 A/B = NO effect
+(0/30; job 2080773; higher spawn only adds impact speed — config comment updated + reverted),
+sigma/yield 1.0-1.27 on every attempt = the executor squeezes debris. Suspects, in order:
+(a) CFL margin: mushroom-calibrated GH200 scaling (substeps ~ grid x sqrt(E)) needs ~580 at
+grid 600/E=1e5; config has 560. (b) lowest-in-set yield 15kPa + plastic vM flow (yielded material
+never rejoins). (c) lobed thin-neck raspberry meshes. **A/B IN FLIGHT (job 2081797,
+rasp_mat_260906-2154): registry E 1e5->1.6e5 + yield 1.5e4->2e4, DR object_E range shifted to
+[1.28,1.92]e5 (the DR SAMPLES E — a registry-only change never reaches the sim; yield is
+registry-only).** NOTE the CFL tension: higher E RAISES needed substeps (~730 at 1.6e5) while the
+config stays 560 — if shatter persists/worsens, the answer is numerics (substeps), not material.
+cherry_tomato material was briefly harmonized too and ROLLED BACK (user corrected: keep 4e5/3e4).
+
+**3. banana_chunk (18%, mostly SYNTH-FAILED): handed to the LOCAL AGENT.** The no-solution
+condition: plan_finger_grasp returns x=None only when NO candidate (3.1k seeds + all CMA evals +
+refine) ever reaches holdable=True; every gate is hard — pre-filters (fingertips above board,
+TCP z>=15mm, rotation box, penetration<=10mm) then FEM statuses (no_contact/degenerate,
+force-closure 2*mu*N >= m(g+a), soft-finger torsion capacity, and OVER-YIELD as a hard gate).
+The 15mm TCP floor on a 20mm-tall chunk forces top-slice grasps where force/torsion/yield gates
+tighten together. Evidence for the fix work: 260906-2009/profile_banana_chunk (60 attempts, 18%,
+sigma/yield 0.25 = grasps are GENTLE, they just fail closure/torsion or never exist).
+
+**Ops lessons (cost ~1.5h of diagnostic retries):** (a) a script driving SimBackend with
+scene_dr_every>0 gets the SUBPROCESS backend -> mp spawn RE-IMPORTS the main module -> without an
+`if __name__ == "__main__"` guard the child re-runs the script and DEADLOCKS silently (jobs
+2080713/2081074: 0-byte logs, AveCPU 11s at 23min, two pythons in pipe_read). (b) never pipe
+sbatch output through `grep | head` without line-buffering — 4KB block buffering hides everything
+until EOF, indistinguishable from the hang it was meant to reveal. (c) the DR-applied spec is
+SimBackend._spec (mesh_path baked); _nominal_spec entries carry mesh_path=None (registry resolves
+at build). Gate-histogram tooling was removed at user request (local agent owns banana now).
