@@ -27,7 +27,7 @@ z 0.015–0.50), `dr` (pose/shape/material randomisation + start modes), `augmen
      top-down), finger–object penetration ≤ 10 mm, TCP z ≥ 15 mm (= the action box / real EE clip).
    - Score (batched GPU FEM, displacement-controlled contact on the pad footprint): gates for table,
      penetration, indentation ≤ 10 mm, force holdability 2µN ≥ m(g+9.81), torsion, yield; score =
-     −top-10 % von-Mises stress − 0.1·contact pressure. Top-10 seeds → CMA-ES (400 evals each, steps
+     −top-10 % von-Mises stress − 0.1·contact pressure. Top-6 seeds (`TOP_K`) → CMA-ES (400 evals each, steps
      2 mm / 5° / 2 mm) → ±3 mm width refine → argmax.
    - No feasible grasp → "SYNTH FAILED" fallback (45 mm top-down); such episodes are never saved.
 5. **Start condition** (`dr.start_modes`, per env): `home` (default 60 %), or teleport to `in_air`
