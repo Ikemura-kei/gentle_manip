@@ -828,8 +828,10 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
         tier_used = 3
         if fallback_pool:
             sd = min(fallback_pool, key=lambda sd: float(np.linalg.norm(np.asarray(sd["x"][:3]) - com)))
+            # numeric placeholders: the collector formats grip/align/stress of every non-failed result
             sel_x, sel_res = sd["x"], {"status": "fallback_seed", "holdable": False, "score": -np.inf,
-                                       "stress_top10": float("inf")}
+                                       "stress_top10": float("inf"), "grip": 0.0, "align": 0.0,
+                                       "pressure": 0.0, "min_pad_area": 0.0, "width_face": None}
             print("  [synth] every tier failed -> nearest-COM filter survivor (fallback_seed)", flush=True)
     # ONE "final" stage for the viewer, after the tiers (an intermediate tier's None result used to reach
     # the viewer and crash it before the next tier could run — dev_synth, 2026-09-06).

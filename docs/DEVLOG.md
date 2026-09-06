@@ -9669,3 +9669,17 @@ Frozen state (this commit): collector `N_HOLD = 10` (user's choice; trailing hol
 tier 1 geometry relaxed + pressure x2 + yield kept; tier 2 yield off; tier 3 nearest-COM survivor), `synth_tier` recorded per
 episode. Diagnose tool: `scripts/final/synth_diagnose.sh` (`--skip-execution`). No other synthesis/execution change since the
 2026-09-05 freeze. Verified: nominal draws bit-identical to the pre-tier planner; two-attempt banana_chunk check resolves both draws.
+- **raspberry local smoke (2026-09-06 23:27, frozen v4.2, seed 0, 10 envs): 0/10, reproduces the cluster's failure LOCALLY.** The
+  body has already spread at settle — `[proj]` particle span 23-24 mm vs FEM span 17 mm before any contact; the failure clip shows a
+  flat splat of particles from the first frame; coupling force during the close climbs to ~2000 N (debris). Same on mesh variant 5
+  at scale 1.08-1.12 in both batches. The "raspberry 16/16" DEVLOG entry predates the mesh pool and the frozen collector; the 05
+  profiling never included raspberry — so "the recipe held locally" was never verified for this object. The `_smooth` meshes have the
+  same extents (only half the faces), and the cluster already reported option C failing, so no local smooth-mesh run was made.
+  Raspberry is NOT collectable with the frozen recipe on this machine; parked here too pending a user decision (drop it, or a
+  dedicated stability recipe: coarser grid / more substeps / stiffer yield). Cherry tomato smoke started instead.
+- **v4.2 HOTFIX (2026-09-07 00:30) — two bugs found by the first local cherry_tomato collection (crashed at batch 6, 38 saved):**
+  (1) the tier-3 `fallback_seed` result carried no grip/align, so the collector's result print raised on the first draw where BOTH
+  relaxed tiers failed (never hit in the smokes) — placeholders added; (2) `dr_params.csv`: the save loop stamped `dataset_idx` into
+  the LAST column, which since v4.2 is `synth_tier` — column index fixed (-2). Rows of runs collected between e7ca088 and this fix
+  have the dataset index in `synth_tier` and an empty `dataset_idx`. Partial run 26-09-06-xxg kept (35 valid episodes, snapshot
+  completed by hand, NOTE.txt); collection resumed as a new run with SEED=1 for the remaining 215.

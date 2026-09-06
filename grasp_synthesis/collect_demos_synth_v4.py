@@ -1198,7 +1198,7 @@ def main() -> None:
         # ── Log per-env DR + grasp params for this batch (CSV row per env) ──
         # Rows are BUFFERED, not written yet: dataset_idx is only known after the save loop.
         _dr_rows = []
-        _DS_IDX_COL = -1                     # dataset_idx is the last column
+        _DS_IDX_COL = -2                     # dataset_idx column (synth_tier is the last one since v4.2)
         eul_deg = np.degrees(object_euler) if object_euler is not None else np.zeros((n, 3))
         for i in range(n):
             g = all_grasp[i]
