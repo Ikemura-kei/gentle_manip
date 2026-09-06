@@ -1,0 +1,13 @@
+# [action] 10-D absolute rot6d action (pos3 + rot6d + gripper) with the 2026-09-05 workspace bounds.
+# Used by: convert_demos --derive-source-action — the SOURCE config for demos collected under
+#          abs_pose_euler_abs_gripper_z15 (the collector records 10-D rot6d actions encoded with the
+#          experiment's pos/gripper bounds; decoding them through abs_pose_abs_gripper.yaml (x max 0.59,
+#          z min 0.003) shifts every target ~15-25 mm -> run covel 0/20 in sim, 2026-09-06).
+# Status: active
+mode: absolute
+clip: [-1.0, 1.0]
+pos_min: [0.26, -0.225, 0.015]   # == abs_pose_euler_abs_gripper_z15 / EE_BOUNDS_MIN
+pos_max: [0.55,  0.225, 0.50]
+gripper_min: 0.0
+gripper_max: 0.088
+rate_limit: [0.0045, 0.0045, 0.0055, 0.012, 0.012, 0.045, 0.005]

@@ -1,6 +1,8 @@
-# [dppo-pretrain] tofu sim->real study (2026-09): frozen-executor sim demos (board rig, start modes, drags) +
-# paired-feature encoder regularization on the red-cube PLAY pairs (real vs sim twin). afucm-twin net.
-# Used by: gentle_manip.dppo.train (see docs/training_plan_sim2real_2026-09.md). Variant A: paired weight 0.
+# [dppo-pretrain] sim->real study (2026-09), OBJECT-AGNOSTIC: frozen-executor sim demos (board rig, start
+# modes, drags) + train-time D435i cloud noise + rigid cloud offset + paired-feature encoder regularization
+# on the red-cube PLAY pairs (real vs sim twin). afucm-twin net. `env` (dataset) and `experiment` are the
+# only per-object keys — set them from gentle_manip/scripts/final/train_dppo_dp3.sh, do not fork this cfg.
+# Used by: gentle_manip/scripts/final/train_dppo_dp3.sh (see docs/training_plan_sim2real_2026-09.md)
 # Status: active
 defaults:
   - _self_
@@ -21,7 +23,7 @@ experiment: single_lift_tofu_soft_abs_action_armfocus_7d_realws
 
 seed: 42
 device: cuda:0
-env: single_lift_tofu_sim2real_v1
+env: single_lift_tofu_sim2real_v1_tail60   # hold-tail dataset (augment_hold_tail K=60 = 2 s); set per run via train_dppo_dp3.sh DATASET=
 obs_dim: 8                     # proprio only (ee_pos3 + ee_quat4 + gripper1); cloud is separate
 action_dim: 7                 # abs pos3 + euler3 (frame-offset) + gripper1 — afucm twin
 denoising_steps: 20
@@ -57,6 +59,20 @@ model:
   paired_consistency_weight: 0.5   # Variant B (best 2026-08 family used 0.5); Variant A baseline: 0.0
   paired_batch: 64
   paired_metric: cosine
+  # TRAIN-TIME cloud augmentation, applied ONCE per batch in the loss (the collector records CLEAN clouds:
+  # it bypasses PolicyEnv, so the experiment's `augmentation:` never reached the demos). Same noise on the
+  # BC clouds and the paired sim twins; offset on the BC clouds only. Val/deploy clean.
+  pc_aug: d435i_noise_train       # configs/augmentation/<name>.yaml: measured stereo noise + dropout; "" = off
+  pc_offset: 0.008                # per-sample rigid offset U(+-8 mm)/axis: the measured real-vs-sim x shift is
+                                  # ~7 mm (arm AND object together, paired_cloud_shift.py) -> tolerate cloud/proprio
+                                  # disagreement of that size instead of correcting the extrinsic again.
+  # Clean-vs-perturbed ENCODER consistency (2026-09-06): on a random half of every batch, cos-distance between
+  # the clean cloud's embedding (stop-grad) and a STRONGLY perturbed copy's (d435i_noise_strong.yaml + a common
+  # rigid offset U(+-12 mm)). Unlimited label-preserving pairs next to the 1031 real pairs of the paired term.
+  consistency_weight: 0.3         # 0 = off (baseline-identical); watch sim SR on clean clouds if raised
+  consistency_frac: 0.5
+  consistency_aug: d435i_noise_strong
+  consistency_offset: 0.012
   aux_contact_weight: 0.0          # aux heads OFF
   aux_object_pos_weight: 0.0
   aux_grasp_width_weight: 0.0
@@ -93,8 +109,7 @@ train_dataset:
   cond_steps: ${cond_steps}
   pc_cond_steps: ${pc_cond_steps}
   device: ${device}
-
-val_dataset:
+val_dataset:                      # clean (augmentation is train-mode only, see model.pc_aug)
   _target_: gentle_manip.dppo.pointcloud_dataset.StitchedSequencePointCloudDataset
   dataset_path: ${val_dataset_path}
   horizon_steps: ${horizon_steps}
