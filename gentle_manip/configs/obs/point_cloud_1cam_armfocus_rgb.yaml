@@ -39,5 +39,17 @@ point_cloud:
     r_ee: 0.11          # finger-safe SPHERE around the EE (gripper + grasped object).
                         #   0.13 left 1.0% cable points under hard focus; 0.11 -> 0.0%.
 
+  # REAL-ONLY residue removal (2026-09-06, default ON for the real rig; sim clouds have none -> no retrain).
+  # Drops 26-connected components (1 cm grid) whose top is <= z_max AND which hold < min_frac of the valid
+  # points: compact board residue/crumbs that survive outlier_removal. Measured on a real deploy (tzdhk_2000
+  # ep0): residue <= 0.7% of points, and 5 such points shift the gripper command 4-7 mm toward open (the
+  # mid-air reopen). Object on the board is exempt by height (tofu top 54 mm) or size (raspberry ~5%);
+  # finger tips by connectivity to the finger body. Verified live on tofu + raspberry. Key M in
+  # scripts/final/pre_deploy_check.sh toggles it for a visual A/B.
+  ground_residual:
+    voxel_size: 0.01
+    z_max: 0.05
+    min_frac: 0.012
+
 images:
   cameras: ["cam_ext"]   # -> obs["image_cam_ext"], paired by construction

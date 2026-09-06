@@ -20,4 +20,8 @@ pc_lateral_coeff: 0.0005
 # denser than that implies, so this is deliberately modest rather than 0.098.
 pc_dropout: 0.03
 
+# NOTE (2026-09-06): this yaml is the SIM-ROLLOUT / EVAL default (sensor noise only, = round-1 eval condition).
+# Train-time-only augmentations (leaked residue, ...) live in d435i_noise_train.yaml — never here, so evals
+# stay comparable across policies. A robustness eval opts in via `serl_sim_server --augmentation d435i_noise_train`.
+
 seed: 0

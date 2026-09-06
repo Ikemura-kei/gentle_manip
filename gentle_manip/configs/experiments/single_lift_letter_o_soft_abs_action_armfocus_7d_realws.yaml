@@ -7,7 +7,7 @@ action: abs_pose_euler_abs_gripper_z15
 dr: soft_orientation_realws_letter_o
 augmentation: d435i_noise
 
-obs: superset_soft_armfocus
+obs: superset_soft_armfocus_board
 views: {student: [point_cloud], teacher: [privileged]}
 
 rl: {batch_size: 256, discount: 0.99, max_episode_steps: 400, random_steps: 300, training_starts: 5000}

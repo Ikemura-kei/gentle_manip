@@ -37,6 +37,10 @@ def main() -> None:
     ap.add_argument("--subprocess", action="store_true",
                     help="force the subprocess backend without auto scene-DR — for the eval harness, "
                          "which drives DETERMINISTIC per-group scene rebuilds over rpc itself.")
+    ap.add_argument("--augmentation", default=None, metavar="NAME|none",
+                    help="sim-only obs augmentation yaml (configs/augmentation/<NAME>.yaml) applied to every rollout; "
+                         "default = the experiment's `augmentation:`; `none` = clean clouds. Evals: the default yaml carries "
+                         "only the measured sensor noise; pass a training yaml (e.g. d435i_noise_train) for a robustness eval.")
     ap.add_argument("--dr", default=None,
                     help="override the experiment's DR with configs/dr/<name>.yaml (e.g. 'food_shape' "
                          "for full size/shape/material ranges during scene-DR eval/training).")
@@ -55,7 +59,15 @@ def main() -> None:
     task = SingleLiftTask(exp.task_cfg)        # full reward (stress + dist + lift + bonus)
     # Sim-only obs augmentation only matters for the point-cloud pathway; skip it for a
     # state view (no cameras -> no render either).
-    aug = exp.augmentation_config() if obs_cfg.needs_cameras() else None
+    if args.augmentation is None:
+        aug = exp.augmentation_config() if obs_cfg.needs_cameras() else None
+    elif args.augmentation.lower() == "none" or not obs_cfg.needs_cameras():
+        aug = None
+    else:
+        from gentle_manip.experiment import _load
+        from gentle_manip.perception.augmentation import AugmentationConfig
+        aug = AugmentationConfig.from_dict(_load("augmentation", args.augmentation))
+    print(f"[server] obs augmentation: {args.augmentation or exp.augmentation or 'none'}", flush=True)
 
     # Periodic behaviour clips: keep ONE camera built (record_camera) even for a
     # state view, but don't depth-render it each step — frame_fn RGB-renders it only

@@ -174,6 +174,7 @@ class GenesisMultiStepVecEnv:
         c_max = None                                # contact force: chunk MAX (for a contact stop)
         s_max, s_sum, s_cnt = None, None, 0         # von-Mises over the chunk (soft body)
         s_t10, s_t20 = None, None                   # top-10%/20% particle tail (chunk-max)
+        res_any = None                              # residue-injected sub-steps per chunk, COUNT 0..K (diagnostic; OR was ~94% at p=0.5)
         for t in range(a.shape[1]):                 # execute the action chunk, sum reward
             a_exec = self._unnorm_action(self._smooth(a[:, t]))
             if self._dump_prefix is not None:       # diagnostic dump (see __init__)
@@ -186,6 +187,9 @@ class GenesisMultiStepVecEnv:
             if sub_info and "contact_force" in sub_info[0]:
                 cf = np.array([d["contact_force"] for d in sub_info], np.float32)
                 c_max = cf if c_max is None else np.maximum(c_max, cf)   # chunk max: contact ONSET
+            if sub_info and "aug_residue" in sub_info[0]:
+                ra = np.array([int(bool(d["aug_residue"])) for d in sub_info])
+                res_any = ra if res_any is None else (res_any + ra)
             if sub_info and "stress_max" in sub_info[0]:
                 sm = np.array([d["stress_max"] for d in sub_info], np.float32)
                 s_max = sm if s_max is None else np.maximum(s_max, sm)
@@ -213,6 +217,8 @@ class GenesisMultiStepVecEnv:
             info["stress_max"], info["stress_mean"] = s_max, s_sum / s_cnt
             if s_t10 is not None:
                 info["stress_top10"], info["stress_top20"] = s_t10, s_t20
+        if res_any is not None:
+            info["aug_residue"] = res_any
         if bool(truncated.all()):                   # synchronous horizon -> auto-reset all
             self._rec.flush()                       # write this episode's per-env clips; keep recording
             if self._dump_prefix is not None and self._dump_buf:

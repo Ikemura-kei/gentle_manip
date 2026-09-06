@@ -50,6 +50,11 @@ def main() -> None:
     for split in ("train", "val"):
         augment_split(src / f"{split}.npz", dst / f"{split}.npz", k)
     shutil.copy2(src / "normalization.npz", dst / "normalization.npz")
+    for extra in ("sources.yaml", "launch_command.sh"):          # provenance travels with the dataset
+        if (src / extra).exists():
+            shutil.copy2(src / extra, dst / extra)
+    with open(dst / "sources.yaml", "a") as f:
+        f.write(f"hold_tail_k: {k}   # augment_hold_tail from {src}\n")
     print(f"hold-tail dataset written -> {dst} (K={k}; normalization copied verbatim)")
 
 

@@ -27,6 +27,17 @@ class PointCloudConfig:
     focus_z_lo: Optional[float] = None
     focus_r_ee: float = 0.13
     focus_arm_weight: Optional[float] = None
+    #   ground_residual (REAL-ONLY by nature, like outlier_removal): drop small point clusters that
+    #     sit entirely near the table — sensor residue / crumbs the voxel filter leaves behind (they
+    #     survive it because they are compact). A connected component (26-conn on a gr_voxel_size grid)
+    #     is removed iff its max z <= gr_z_max AND it holds < gr_min_frac of the valid points. The
+    #     object on the board is exempt by height (tofu top 54 mm) or by size (raspberry ~5% of the
+    #     cloud); finger tips/edges stay because they connect to the finger body above gr_z_max.
+    #     Measured 2026-09-06 on a real deploy: residue components <= 0.7% of points, and 5 such
+    #     points shift the policy's gripper command by +4..7 mm toward open (mid-air reopen).
+    gr_voxel_size: Optional[float] = None
+    gr_z_max: float = 0.05
+    gr_min_frac: float = 0.012
 
     # Depth range (camera-frame z, meters). Points outside [depth_min, depth_max] are
     # discarded before backprojection. depth_max=1.0 is enough for our workspace
@@ -217,6 +228,7 @@ class ObsConfig:
             pc_d = d["point_cloud"]
             out_d = pc_d.get("outlier_removal") or {}
             foc_d = pc_d.get("object_focus") or {}
+            gr_d = pc_d.get("ground_residual") or {}
             pc = PointCloudConfig(
                 cameras=pc_d["cameras"],
                 crop_min=tuple(pc_d["crop_min"]),
@@ -227,6 +239,9 @@ class ObsConfig:
                 focus_z_lo=foc_d.get("z_lo"),
                 focus_arm_weight=foc_d.get("arm_weight"),
                 focus_r_ee=foc_d.get("r_ee", 0.13),
+                gr_voxel_size=gr_d.get("voxel_size"),
+                gr_z_max=float(gr_d.get("z_max", 0.05)),
+                gr_min_frac=float(gr_d.get("min_frac", 0.012)),
                 depth_min=float(pc_d.get("depth_min", 0.01)),
                 depth_max=float(pc_d.get("depth_max", 3.0)),
                 pixel_sample_n=pc_d.get("pixel_sample_n"),

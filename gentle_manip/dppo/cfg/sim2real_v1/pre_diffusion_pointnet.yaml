@@ -1,0 +1,118 @@
+# [dppo-pretrain] sim->real study (2026-09), OBJECT-AGNOSTIC: frozen-executor sim demos (board rig, start
+# modes, drags) + train-time D435i cloud noise + rigid cloud offset + paired-feature encoder regularization
+# on the red-cube PLAY pairs (real vs sim twin). afucm-twin net. `env` (dataset) and `experiment` are the
+# only per-object keys — set them from gentle_manip/scripts/final/train_dppo_dp3.sh, do not fork this cfg.
+# Used by: gentle_manip/scripts/final/train_dppo_dp3.sh (see docs/training_plan_sim2real_2026-09.md)
+# Status: active
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${logdir}
+  callbacks:                    # snapshot the env (experiment) config -> <run>/config/
+    experiment_snapshot:
+      _target_: gentle_manip.dppo.hydra_snapshot.ExperimentSnapshot
+_target_: agent.pretrain.train_diffusion_agent.TrainDiffusionAgent
+
+name: ${env}_pre_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
+# logdir leaf = the global 5-letter experiment ID (exp_id resolver; registered in experiments.csv)
+logdir: ${oc.env:DPPO_LOG_DIR}/dppo-pretrain/${env}/${exp_id:}
+train_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/train.npz
+val_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/val.npz   # held-out split (BY TRAJECTORY)
+experiment: single_lift_tofu_soft_abs_action_armfocus_7d_realws
+
+seed: 42
+device: cuda:0
+env: single_lift_tofu_sim2real_v1_tail60   # hold-tail dataset (augment_hold_tail K=60 = 2 s); set per run via train_dppo_dp3.sh DATASET=
+obs_dim: 8                     # proprio only (ee_pos3 + ee_quat4 + gripper1); cloud is separate
+action_dim: 7                 # abs pos3 + euler3 (frame-offset) + gripper1 — afucm twin
+denoising_steps: 20
+horizon_steps: 4
+cond_steps: 2                 # proprio history
+pc_cond_steps: 1             # clouds encoded per step (<= cond_steps)
+n_points: 1024
+visual_feature_dim: 512
+
+wandb:                          # enabled; disable per-run with `wandb=null`, or WANDB_MODE=offline
+  entity: ${oc.env:DPPO_WANDB_ENTITY,null}   # null -> logged-in default account
+  project: gentle-manip-${env}
+  run: ${exp_id:}               # wandb run name == the experiment ID (matches the log dir)
+  group: dppo-pretrain
+
+train:
+  n_epochs: 3000                # SET per dataset size: ~3000 x 29.6k / N_train_steps, clamp [800, 3000]
+  batch_size: 128
+  learning_rate: 1e-4
+  weight_decay: 1e-6
+  lr_scheduler:
+    first_cycle_steps: ${train.n_epochs}   # single cosine cycle over the whole run
+    warmup_steps: 100                      # DPPO uses 100 across all pretrains
+    min_lr: 1e-5
+  epoch_start_ema: 10
+  update_ema_freq: 5
+  save_model_freq: 250          # sweep checkpoints on the robot; val loss is NOT predictive (xagzg)
+  val_freq: 10
+
+model:
+  _target_: gentle_manip.dppo.paired_reg_diffusion.PairedRegDiffusionModel   # = DiffusionModel when the weight is 0
+  paired_npz: ${oc.env:DPPO_DATA_DIR}/paired/paired_red_cube_play_2026-09-05.npz
+  paired_consistency_weight: 0.5   # Variant B (best 2026-08 family used 0.5); Variant A baseline: 0.0
+  paired_batch: 64
+  paired_metric: cosine
+  # TRAIN-TIME cloud augmentation, applied ONCE per batch in the loss (the collector records CLEAN clouds:
+  # it bypasses PolicyEnv, so the experiment's `augmentation:` never reached the demos). Same noise on the
+  # BC clouds and the paired sim twins; offset on the BC clouds only. Val/deploy clean.
+  pc_aug: d435i_noise_train       # configs/augmentation/<name>.yaml: measured stereo noise + dropout; "" = off
+  pc_offset: 0.008                # per-sample rigid offset U(+-8 mm)/axis: the measured real-vs-sim x shift is
+                                  # ~7 mm (arm AND object together, paired_cloud_shift.py) -> tolerate cloud/proprio
+                                  # disagreement of that size instead of correcting the extrinsic again.
+  # Clean-vs-perturbed ENCODER consistency (2026-09-06): on a random half of every batch, cos-distance between
+  # the clean cloud's embedding (stop-grad) and a STRONGLY perturbed copy's (d435i_noise_strong.yaml + a common
+  # rigid offset U(+-12 mm)). Unlimited label-preserving pairs next to the 1031 real pairs of the paired term.
+  consistency_weight: 0.3         # 0 = off (baseline-identical); watch sim SR on clean clouds if raised
+  consistency_frac: 0.5
+  consistency_aug: d435i_noise_strong
+  consistency_offset: 0.012
+  aux_contact_weight: 0.0          # aux heads OFF
+  aux_object_pos_weight: 0.0
+  aux_grasp_width_weight: 0.0
+  predict_epsilon: True
+  denoised_clip_value: 1.0
+  network:
+    _target_: gentle_manip.dppo.pointnet_diffusion.PointNetDiffusionMLP
+    action_dim: ${action_dim}
+    horizon_steps: ${horizon_steps}
+    cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+    pc_cond_steps: ${pc_cond_steps}
+    visual_feature_dim: ${visual_feature_dim}
+    time_dim: 16
+    mlp_dims: [1024, 1024, 1024]
+    activation_type: ReLU
+    residual_style: True
+    pointnet:
+      in_channels: 3
+      use_layernorm: True
+      final_norm: layernorm
+  horizon_steps: ${horizon_steps}
+  obs_dim: ${obs_dim}
+  action_dim: ${action_dim}
+  denoising_steps: ${denoising_steps}
+  device: ${device}
+
+ema:
+  decay: 0.995
+
+train_dataset:
+  _target_: gentle_manip.dppo.pointcloud_dataset.StitchedSequencePointCloudDataset
+  dataset_path: ${train_dataset_path}
+  horizon_steps: ${horizon_steps}
+  cond_steps: ${cond_steps}
+  pc_cond_steps: ${pc_cond_steps}
+  device: ${device}
+val_dataset:                      # clean (augmentation is train-mode only, see model.pc_aug)
+  _target_: gentle_manip.dppo.pointcloud_dataset.StitchedSequencePointCloudDataset
+  dataset_path: ${val_dataset_path}
+  horizon_steps: ${horizon_steps}
+  cond_steps: ${cond_steps}
+  pc_cond_steps: ${pc_cond_steps}
+  device: ${device}

@@ -27,6 +27,13 @@ class ExperimentSnapshot(Callback):
             run_dir = Path(HydraConfig.get().runtime.output_dir)
             snapshot_experiment(Experiment.load(exp_name), run_dir)      # -> <run>/config/
             save_launch_command(run_dir)                                 # -> <run>/launch_command.sh
+            # Dataset provenance: a training set may MIX objects or sim+real (no single experiment
+            # describes it) — copy the converter/merge manifest (sources.yaml) beside the snapshot.
+            ds = config.get("train_dataset_path", None)
+            man = Path(str(ds)).parent / "sources.yaml" if ds else None
+            if man is not None and man.exists():
+                import shutil
+                shutil.copy(man, run_dir / "config" / "dataset_sources.yaml")
             print(f"[snapshot] env config for '{exp_name}' -> {run_dir}/config/ (+ launch_command.sh)", flush=True)
         except Exception as e:                                          # never fail a run over this
             print(f"[snapshot] env cfg snapshot skipped: {e}", flush=True)

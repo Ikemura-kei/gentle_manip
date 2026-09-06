@@ -9,7 +9,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../../.."
 
-n_episodes=50
+n_episodes=100
 obj=tofu
 seed=${SEED:-0}                 # parallel jobs on the same object MUST use different seeds (DR + CMA streams)
 exp=single_lift_${obj}_soft_abs_action_armfocus_7d_realws

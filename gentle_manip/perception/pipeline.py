@@ -13,6 +13,7 @@ from gentle_manip.perception.depth_to_pointcloud import depth_to_pointcloud
 from gentle_manip.perception.pointcloud_ops import (
     crop_pointcloud,
     remove_outliers_voxel,
+    remove_ground_residual,
     focus_object,
     focus_weights,
     subsample_pointcloud,
@@ -37,6 +38,9 @@ class PerceptionPipeline:
     def __init__(self, obs_config: ObsConfig, rng_seed: Optional[int] = None) -> None:
         obs_config.validate()
         self.cfg = obs_config
+        # Runtime switch for the ground_residual filter (live A/B in demos/record.py, key M). The
+        # config decides whether the filter EXISTS; this decides whether it is applied right now.
+        self.ground_residual_enabled = True
         # RNG for the small inherent quat noise (shared sim+real). Entropy-seeded by
         # default so the noise genuinely varies; pass rng_seed for reproducibility.
         self._rng = np.random.default_rng(rng_seed)
@@ -112,6 +116,13 @@ class PerceptionPipeline:
                     pts, valid,
                     self.cfg.point_cloud.outlier_voxel_size,
                     self.cfg.point_cloud.outlier_min_neighbors,
+                )
+            if self.cfg.point_cloud.gr_voxel_size is not None and self.ground_residual_enabled:
+                pts, valid = remove_ground_residual(
+                    pts, valid,
+                    self.cfg.point_cloud.gr_voxel_size,
+                    self.cfg.point_cloud.gr_z_max,
+                    self.cfg.point_cloud.gr_min_frac,
                 )
             weights = None
             if self.cfg.point_cloud.focus_z_lo is not None:
