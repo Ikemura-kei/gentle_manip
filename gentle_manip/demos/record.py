@@ -143,6 +143,13 @@ class DemoRecorder:
                     self._flush_video()
                     obs = self.env.reset()
                     continue
+                if "toggle_filter" in events:               # key M: live A/B of the ground_residual filter
+                    pp = self.env.perception
+                    if pp.cfg.point_cloud is not None and pp.cfg.point_cloud.gr_voxel_size is not None:
+                        pp.ground_residual_enabled = not pp.ground_residual_enabled
+                        print(f"  [filter] ground_residual {'ON' if pp.ground_residual_enabled else 'OFF'}", flush=True)
+                    else:
+                        print("  [filter] this obs config has no ground_residual block — nothing to toggle", flush=True)
                 if DISCARD in events:
                     self._discard_episode()
                     print("  discarded episode")

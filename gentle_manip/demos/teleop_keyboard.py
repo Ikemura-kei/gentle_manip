@@ -4,7 +4,7 @@ from typing import Optional, Set
 
 import numpy as np
 
-from gentle_manip.demos.keyboard_pygame import DISCARD, QUIT, SAVE
+from gentle_manip.demos.keyboard_pygame import DISCARD, QUIT, SAVE, TOGGLE_FILTER
 
 # Keyboard teleop: a drop-in alternative to SpaceMouseTeleop using a pygame
 # window. It implements BOTH interfaces the recorder needs — get_action() (motion
@@ -20,7 +20,7 @@ from gentle_manip.demos.keyboard_pygame import DISCARD, QUIT, SAVE
 #   rotate:    Left/Right = +roll/-roll   R/F = +pitch/-pitch   Q/E = +yaw/-yaw
 #   gripper:   O = open   P = close
 #   episode:   SPACE = save   BACKSPACE = discard   ESC = quit
-CAPTION = "trans W/S A/D Up/Dn  rot L/R R/F Q/E  grip O/P  SPACE save  BKSP discard  ESC quit"
+CAPTION = "trans W/S A/D Up/Dn  rot L/R R/F Q/E  grip O/P  M filter  SPACE save  BKSP discard  ESC quit"
 
 DEFAULT_MOVE_SPEED = 0.5
 DEFAULT_ROT_SPEED = 1.0
@@ -72,6 +72,7 @@ class KeyboardTeleop:
             pg.K_SPACE: SAVE,
             pg.K_BACKSPACE: DISCARD,
             pg.K_ESCAPE: QUIT,
+            pg.K_m: TOGGLE_FILTER,           # live A/B of the ground_residual cloud filter
         }
         self._opened = True
 

@@ -178,7 +178,8 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
                     shard_size: int = 0, action_config=None,
                     smooth_alpha: "float | None" = None,
                     max_pos_step_m: "float | None" = None,
-                    gripper_offset_m: float = 0.0) -> None:
+                    gripper_offset_m: float = 0.0,
+                    record_rgb: "str | None" = None) -> None:
     """Receding-horizon deploy loop shared by real and sim deployment.
 
     env: PolicyEnv-like — reset()->obs dict, step(action)->(obs, ...). policy:
@@ -219,6 +220,10 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
     final safety bound. Position only (rotation is already covered by smooth_alpha;
     gripper is intentionally uncapped so grasp/release stays decisive).
 
+    record_rgb: camera name (e.g. "cam_ext"): with record_path, also save that camera's RAW RGB
+        frame of every recorded step as <record_path>/videos/ep_NNN.mp4 (frame-locked to the pkl
+        step index; presentation only — the policy never sees it). Mirrors demos/record.py
+        --record-rgb, so visualization.deploy_episode_viz pairs RGB | cloud the same way.
     record_path: if set, save each (obs seen, action taken) step into the SAME pickle
     schema as recorded demos ({"episodes": [{"observations": {k: (T,...)}, "actions":
     (T,7)}]}), so visualize_demo / episode_player render real runs identically to sim
@@ -237,6 +242,8 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
     episodes: list = []
     obs_buf: list = []
     act_buf: list = []
+    rgb_buf: list = []                                 # presentation RGB frames (record_rgb)
+    ep_index = [0]                                     # global episode counter (videos/ep_NNN.mp4)
     shards_done = 0                                    # count of fully-written shards (sharding mode)
 
     def _flush_episode() -> None:
@@ -246,6 +253,18 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
         episodes.append({"observations": ep_obs, "actions": np.stack(act_buf)})
         obs_buf.clear()
         act_buf.clear()
+        if rgb_buf:                                    # presentation video — NEVER allowed to lose the pkl
+            try:
+                import imageio.v2 as imageio
+                vdir = (record_path if shard else record_path.parent) / "videos"
+                vdir.mkdir(parents=True, exist_ok=True)
+                # explicit codec, no macro_block_size: the dppo_deploy env's imageio uses the PyAV backend
+                # (needs a codec name, rejects macro_block_size); envs/deploy's ffmpeg backend accepts both.
+                imageio.mimsave(str(vdir / f"ep_{ep_index[0]:03d}.mp4"), rgb_buf, fps=int(round(rate)), codec="libx264")
+            except Exception as e:                     # noqa: BLE001
+                print(f"  WARNING: RGB video for ep {ep_index[0]:03d} not written ({e}); episode data is kept")
+            rgb_buf.clear()
+        ep_index[0] += 1
 
     def _write_pkl(path: "Path", eps: list, shard_idx: "int | None" = None) -> None:
         import pickle
@@ -472,6 +491,8 @@ def run_deploy_loop(env, policy: "DP3PolicyAdapter", max_steps: int, rate: float
                     if record:                                     # obs the policy acted on + action taken
                         obs_buf.append({k: np.asarray(v)[0].copy() for k, v in obs.items()})
                         act_buf.append(np.asarray(action, dtype=np.float32).copy())
+                        if record_rgb:                             # raw frame of the obs acted on
+                            rgb_buf.append(env.last_raw_obs.rgb_images[record_rgb][0].copy())
                     t0 = time.perf_counter()
                     obs = env.step(action[None, :].astype(np.float32))[0]
                     # Commanded (the sent action -> physical pose) vs ACTUAL (this step's obs) EE pose
@@ -536,6 +557,9 @@ def main() -> None:
                    help="(absolute mode only) hard per-tick cap, meters PER AXIS, on how far "
                         "the commanded position may move from the previous command — a slew-"
                         "rate limiter, independent of/in addition to --smooth-alpha. None = off.")
+    p.add_argument("--record-rgb", nargs="?", const="cam_ext", default=None, metavar="CAM",
+                   help="with --record: also save this camera's raw RGB per step as "
+                        "<record>/videos/ep_NNN.mp4 (presentation only; default cam_ext when bare)")
     p.add_argument("--record", type=Path, default=None,
                    help="save (obs, action) per step to this pickle in the demo schema, so "
                         "visualize_demo / episode_player can compare the real run against "
@@ -555,7 +579,7 @@ def main() -> None:
 
     run_deploy_loop(env, policy, args.max_steps, args.rate, pose_scale=args.pose_scale,
                     record_path=args.record, action_config=action_config,
-                    smooth_alpha=args.smooth_alpha, max_pos_step_m=args.max_pos_step_m)
+                    smooth_alpha=args.smooth_alpha, max_pos_step_m=args.max_pos_step_m, record_rgb=args.record_rgb)
 
 
 if __name__ == "__main__":

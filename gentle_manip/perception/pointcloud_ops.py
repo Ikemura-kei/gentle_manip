@@ -32,6 +32,17 @@ def crop_pointcloud(
     return points, valid & in_box
 
 
+def _voxel_keys(p: np.ndarray, voxel_size: float):
+    """(M, 3) points -> (flat voxel key per point, number of cells) on the points' bounding grid.
+    Grid ALIGNED to multiples of voxel_size (floor of absolute coords), so a threshold that is a
+    multiple of the voxel size falls exactly on a cell edge."""
+    v = np.floor(p / voxel_size).astype(np.int64)      # divide (not * reciprocal): same rounding as before
+    v -= v.min(axis=0)
+    dims = v.max(axis=0) + 1
+    key = (v[:, 0] * dims[1] + v[:, 1]) * dims[2] + v[:, 2]
+    return key, int(dims[0] * dims[1] * dims[2])
+
+
 def remove_outliers_voxel(
     points: np.ndarray,
     valid: np.ndarray,
@@ -63,10 +74,76 @@ def remove_outliers_voxel(
         idx = np.where(out[i])[0]
         if idx.size == 0:
             continue
-        vox = np.floor(points[i, idx] / voxel_size).astype(np.int64)      # (Ni, 3)
-        _, inv, counts = np.unique(vox, axis=0, return_inverse=True, return_counts=True)
-        sparse = counts[np.ravel(inv)] < min_neighbors                    # (Ni,)
-        out[i, idx[sparse]] = False
+        # Dense count per voxel over the cloud's bounding grid: one flat int key per point +
+        # bincount (O(M)), instead of np.unique over (M, 3) integer rows (a sort; ~10x slower).
+        key, ncell = _voxel_keys(points[i, idx], voxel_size)
+        counts = np.bincount(key, minlength=ncell)
+        out[i, idx[counts[key] < min_neighbors]] = False
+    return points, out
+
+
+def remove_ground_residual(
+    points: np.ndarray,
+    valid: np.ndarray,
+    voxel_size: float,
+    z_max: float,
+    min_frac: float,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Drop small LOW connected components: sensor residue / crumbs near the table that
+    ``remove_outliers_voxel`` keeps (they are compact, so they have neighbours).
+
+    Per env: label 26-connected components on a ``voxel_size`` grid over the valid points;
+    a component is removed iff its max z <= ``z_max`` AND its point count is below
+    ``min_frac * n_valid``. Height exempts anything that reaches above ``z_max`` (arm, finger
+    tips joined to the finger body, held objects, a tofu whose top is 54 mm); the size term
+    exempts genuinely small objects on the board (a 2 cm raspberry is ~5% of the cloud vs
+    residue <= 0.7%). A fraction, not a count, so the rule holds at full resolution (before
+    the subsample) and on a stored 1024-point cloud alike.
+
+    Args:
+        points:     (num_envs, M, 3) float32.
+        valid:      (num_envs, M) bool.
+        voxel_size: component connectivity grid edge (m); 1 cm measured best (2 cm merges
+                    residue that sits just under a held object, without reconnecting edges).
+        z_max:      a component whose highest point is above this is never touched (m).
+        min_frac:   remove low components smaller than this fraction of the valid points.
+
+    Returns:
+        points: unchanged; valid: updated (num_envs, M) bool.
+    """
+    from scipy import ndimage
+    out = valid.copy()
+    struct = np.ones((3, 3, 3), dtype=bool)
+    top_layer = int(np.floor(z_max / voxel_size))   # voxel z-index whose lower edge is >= z_max
+    for i in range(points.shape[0]):
+        idx = np.where(out[i])[0]
+        if idx.size == 0:
+            continue
+        p = points[i, idx]
+        # Only the slab up to ONE voxel layer above z_max is needed: a low component that connects
+        # to anything higher must pass through that layer, and touching it exempts the component.
+        # With the grid aligned to voxel multiples, "has a point above z_max" == "occupies a voxel
+        # with z-index >= top_layer" exactly (for z_max a multiple of voxel_size).
+        slab = np.where(p[:, 2] < (top_layer + 1) * voxel_size)[0]
+        if slab.size == 0 or not (p[slab, 2] <= z_max).any():
+            continue
+        v = np.floor(p[slab] / voxel_size).astype(np.int64)
+        zmin_i = int(v[:, 2].min())                        # absolute z-index of the slab's lowest layer
+        v -= v.min(axis=0)
+        grid = np.zeros(v.max(axis=0) + 1, dtype=bool)
+        grid[v[:, 0], v[:, 1], v[:, 2]] = True
+        labels, n = ndimage.label(grid, structure=struct)
+        pl = labels[v[:, 0], v[:, 1], v[:, 2]]                             # component id per slab point
+        sizes = np.bincount(pl, minlength=n + 1)
+        # component exempt if any of its VOXELS lies in the top layer (z-index >= top_layer)
+        reaches_up = np.zeros(n + 1, dtype=bool)
+        hi_z = top_layer - zmin_i
+        if hi_z < grid.shape[2]:
+            reaches_up[np.unique(labels[:, :, hi_z:])] = True
+        bad = ~reaches_up & (sizes < min_frac * idx.size)
+        bad[0] = False
+        out[i, idx[slab[bad[pl]]]] = False
     return points, out
 
 

@@ -331,6 +331,9 @@ def main() -> None:
                    help="(absolute mode only) hard per-tick cap, meters PER AXIS, on how far "
                         "the commanded position may move from the previous command — a slew-"
                         "rate limiter, independent of/in addition to --smooth-alpha. None = off.")
+    p.add_argument("--record-rgb", nargs="?", const="cam_ext", default=None, metavar="CAM",
+                   help="with --record: also save this camera's raw RGB per step as "
+                        "<record>/videos/ep_NNN.mp4 (presentation only; default cam_ext when bare)")
     p.add_argument("--record", type=Path, default=None,
                    help="save the run in the demo pickle schema (for sim2real obs comparison). "
                         "With --shard-size>0 this is a DIRECTORY of shard_XXXX.pkl instead of one pkl")
@@ -408,7 +411,7 @@ def main() -> None:
                     pose_scale=args.pose_scale, record_path=args.record,
                     shard_size=args.shard_size, action_config=action_config,
                     smooth_alpha=args.smooth_alpha, max_pos_step_m=args.max_pos_step_m,
-                    gripper_offset_m=args.gripper_offset_m)
+                    gripper_offset_m=args.gripper_offset_m, record_rgb=args.record_rgb)
 
 
 if __name__ == "__main__":
