@@ -37,7 +37,7 @@ z 0.015–0.50), `dr` (pose/shape/material randomisation + start modes), `augmen
    approach in two legs at 2.4 mm/step — to a **standoff** on the grasp's approach axis at the start's own axial distance clamped to 4–10 cm (no up-then-down from a start already near the axis), then
    straight along the axis into the grasp (open fingers straddle the object: no diagonal collisions) —
    settle 1 → close at **2.2 mm/step** (the measured real teleop rate) to the planned width **− 0.8 mm**
-   → dwell 2 → lift 0.2 m → hold 20 (FROZEN 2026-09-06; the trailing hold is never trimmed since 2026-09-06 — it is the only
+   → dwell 2 → lift 0.2 m → hold 10 (FROZEN 2026-09-06, user's choice; the trailing hold is never trimmed since 2026-09-06 — it is the only
    supervision for "arrived: keep commanding this pose, gripper closed"; 12 trimmed to 4 caused mid-air reopens). `disturbance_prob` (default 10 %; CONDITIONAL on the start mode not being `above_object` — the two never
    combine, 2026-09-06): a 4-step lateral drag on the
    OBJECT during the approach; after 16 settle steps the grasp is re-targeted by the object's xy
