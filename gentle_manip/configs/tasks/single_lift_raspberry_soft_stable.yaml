@@ -5,7 +5,7 @@
 # ── OBJECT-SPECIFIC ──
 object_name: "raspberry"
 object_type: "soft"
-sim_substeps: 560
+sim_substeps: 560    # original; NaN-free at E=1e5. (760 was for the cherry-level-E diagnostic; the _smooth meshes now carry the anti-shatter load — DEVLOG 2026-09-06)
 mpm_grid_density: 600
 object_spawn_z: 0.037   # board + half-diagonal x max scale 1.49 + 5 mm. A/B tested at 0.05 (2026-09-06, job 2080773): NO effect, 0/30 either way -- the object is NOT buried, it SHATTERS on spawn impact (MPM plastic flow; suspects: substeps 560 vs ~580 required by the mushroom-calibrated GH200 CFL scaling grid*sqrt(E), lowest-in-set yield 15 kPa, lobed thin-neck mesh). Fix under user design; raising spawn only adds impact speed.
 

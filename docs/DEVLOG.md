@@ -9596,3 +9596,19 @@ mushroom-calibrated substeps ~ grid x sqrt(E) GH200 scaling vs configured 560).
 **Conclusion: raspberry's 0% is INTEGRATION STABILITY at grid 600, not material weakness.** The
 new material values are fine but need sim_substeps ~760 to go with them (config change, untested
 — pending user/local-agent decision).
+
+**2026-09-06 night — raspberry PARKED (user decision) after option C also failed.** Smoothed
+size-preserving meshes (necks voxel-closed/dilated, watertight, bbox to 0.1mm —
+raspberryN_smooth.obj + .agent_tmp-era pipeline now at scripts/arrhenius/simplify_raspberry_mesh.py)
+with ORIGINAL material (E=1e5/yield=1.5e4) and substeps 560: no NaNs, CSV metrics looked healthier
+(sigma/yield 0.59-0.99 vs 1.0-1.27), but the user's video read: STILL SHATTERS; 0/10, ever=0.
+Full negative-results trail this session: spawn 0.037->0.05 (no effect), E/yield raise x1.6/x1.33
+(NaN at 560 substeps), cherry-level E=4e5 + substeps 760 (still NaN; needs ~1120 by the
+raspberry-anchored CFL scaling), smooth meshes (above). Registry reverted to the original meshes;
+material/DR/substeps/spawn all back at original values. Open leads if ever resumed: substeps
+~1120 at low E (cost), grid reduction WITH the smooth mesh, per-particle-mass/coupling-side fixes
+in Genesis, or dropping raspberry from the object set. Cost note: raspberry executes at 0.46
+FPS/env on GH200 (grid-600 bill, ~7x the local reference) -> ~15-20 min/batch.
+**Resolution (user): raspberry will be COLLECTED ON THE LOCAL DEVICE**, where the recipe held —
+consistent with the GH200-vs-local MPM instability precedent (mushroom fragments/NaNs on GH200 at
+settings that worked locally). Cluster raspberry collection is off the table for now.

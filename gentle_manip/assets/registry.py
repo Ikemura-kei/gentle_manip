@@ -133,6 +133,9 @@ OBJECT_MAP: dict[str, ObjectDef] = {
     "cherry_tomato5": ObjectDef("cherry_tomato5", MATERIALS["cherry_tomato"], object_type="soft",
                         size=(0.0198, 0.025, 0.0198), default_pos=(0.47, 0.0, 0.0113),
                         mesh_path=str(_OBJ_DIR / "cherry_tomato5.obj")),
+    # raspberry is PARKED (2026-09-06): shatters on spawn in MPM across every tried fix — spawn
+    # height, cherry-level material (+substeps 760: NaN), and smoothed neck-free meshes
+    # (raspberryN_smooth.obj, kept beside the originals) all failed; full trail in DEVLOG.
     "raspberry1": ObjectDef("raspberry1", MATERIALS["raspberry"], object_type="soft",
                         size=(0.0154, 0.0153, 0.0154), default_pos=(0.47, 0.0, 0.0087),
                         mesh_path=str(_OBJ_DIR / "raspberry1.obj")),
