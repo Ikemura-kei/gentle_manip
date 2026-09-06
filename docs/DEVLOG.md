@@ -9372,3 +9372,141 @@ plane, 29.8 mm on the board). Kinematic pairing quality: EE ≤ 1.5 mm, quat ≤
   deploy (same obs crop + z15 action yaml, 20 trials/ckpt, sweep 750/1000/1500: val loss is not predictive).
   New: cfg dir `gentle_manip/dppo/cfg/single_lift_tofu_sim2real_v1/` (pre + eval, `PairedRegDiffusionModel`
   wired, aux heads off) and `gentle_manip/dppo/build_paired_npz.py` (no builder existed; the 08-23 file was ad hoc).
+
+### 2026-09-06 — Train-time cloud augmentation (the collector never applied `augmentation:`) + first tofu sim2real run
+- **Finding (config-system hole):** `collect_demos_synth_v4.py` bypasses `PolicyEnv`, so the experiment's sim-only
+  `augmentation: d435i_noise` never reached the recorded demos (it honours task / obs / action / dr — only this leg was
+  missing). Every DPPO policy so far trained on geometrically perfect sim clouds; `d435i_noise.yaml` only ever acted in
+  the sim server / sim deploy paths. The DPPO PointNet had no train-time augmentation either.
+- **Adopted (dataloader-side, NOT re-collecting):** `PairedRegDiffusionModel(pc_aug=<augmentation yaml>, pc_offset=m)`
+  applies the SAME yaml ONCE per batch inside `p_losses` (training mode only; val/eval/deploy clean) to the BC clouds and
+  to the paired sim twins (real side already carries the camera noise), plus a per-sample rigid offset U(±pc_offset)/axis
+  on the BC clouds. Torch port of `ObsAugmentor._point_cloud` = `pointcloud_dataset.sensor_noise` (vectorized dropout).
+  Offset 8 mm is sized by `scripts/final/analyze_play_shift.sh` (`paired_cloud_shift.py --plot`): real−sim shift
+  ≈ −7 mm in x for BOTH arm and object, y/z ≈ 0 → a common rigid shift, i.e. cloud-vs-proprio disagreement the policy
+  can resolve from the visible fingers (relative geometry). Rig kept as is (user decision: no extrinsic shift).
+- **Lesson:** the first version applied the noise per SAMPLE in `__getitem__` → 6.8 s/epoch vs 2.2 s batched in the
+  loss (GPU 60 % busy, 128× ~10 tiny kernels per batch). Augment where the batch already exists.
+- **Anchor script:** `gentle_manip/scripts/final/train_dppo_dp3.sh` (env vars DATASET / EXPERIMENT / EPOCHS / PAIRED_W /
+  PC_AUG / CLOUD_OFFSET / SEED; cfg `dppo/cfg/sim2real_v1` is object-agnostic; `--config-path` must be ABSOLUTE — hydra
+  resolves relative paths against the dppo fork's script dir). Eval cfg reads `env_name`/`experiment` from the
+  checkpoint's own `.hydra/config.yaml` (`${run_cfg:…}` resolver). Provenance for mixed datasets: converter writes
+  `<dataset>/sources.yaml` + `launch_command.sh`, merge writes the union, the snapshot callback copies it to
+  `<run>/config/dataset_sources.yaml`; `EXPERIMENT` at training is provenance + default eval target only.
+- **Run:** `covel` (`logs/dppo/dppo-pretrain/single_lift_tofu_sim2real_v1/covel`, 100 demos = run 26-09-05-jvt only —
+  `nri`/`ryh` were unfinished, snapshot-less and reproduce each other's scenarios; 3000 ep, paired 0.5, pc_aug on,
+  offset 8 mm, seed 42; ~1.8 h). Paired file: 1031 pairs, centroid offset real−sim median 11.6 mm.
+- **Bug (conversion, mine):** `covel` scored 0/20 in a state_1500 teaser — the gripper closed ~2 cm beside the tofu.
+  Root cause: the plan's `convert_demos --derive-source-action abs_pose_abs_gripper.yaml` decodes the collector's 10-D
+  rot6d record with the OLD bounds (x ≤ 0.59, z ≥ 0.003) while the collector encoded with the z15 bounds (x ≤ 0.55,
+  z ≥ 0.015): decoded targets vs `ee_pos`(+4 steps) median 14.9 mm / p90 24.2 mm; through the z15 bounds 3.5 / 4.3 mm.
+  Fix: new leaf `configs/action/abs_pose_abs_gripper_z15.yaml` (rot6d + z15 bounds) as the source; plan doc corrected;
+  `covel` marked invalid. Lesson: the source yaml of a conversion must be the one the demos were ENCODED with — run the
+  decode-vs-ee_pos check before training (a few mm, not cm). Augmentation was NOT the cause (0/20 is a placement error).
+- **Run `tzdhk`** (covel's recipe on the re-converted data; stopped at ep 2000 by user, val min 0.00526 @ ep 750): sim
+  teaser state_1500, 20 eps → **success 0.15, ever 0.50**, stress max mean 16 kPa. Clips: 8/17 failures lift cleanly then
+  LOWER and release (hold deficit — the executor's 12-step hold is trimmed to 4 identical frames by `_trim_long_holds`, the
+  eval needs a sustained hold: same mechanism as the v3.1 `fleli` HOLD deficit, fix candidate `augment_hold_tail` K=10);
+  9/17 approach 1–2 cm beside the tofu and hover. 100 demos vs the 300-demo mushroom baseline (0.77). Real deploy next
+  (user). Teaser ≠ canonical eval (200 eps) — do not put it in the results table.
+- **Mid-air reopen on the robot (tzdhk, 2 recordings) — diagnosed + `ground_residual` filter (real-only).**
+  Offline replay of the recorded frames through the deployed checkpoint (paired diffusion seeds, `stray_test.py` in
+  the session scratchpad; as-recorded output reproduces the sent command to 0.2 mm): 9 stray board points under the
+  held tofu shift the gripper command +2 mm at step 0 / up to +7 mm in the chunk toward open; injecting 5 synthetic
+  board points under a clean hold shifts it +4/+7 mm and SATURATES at 5 points (PointNet max-pool: one point can own a
+  channel). The reopen timeline (t368: 2 low points -> cmd 38.9->41.2; t372: 0 points but width proprio 43.8 -> cmd
+  keeps ramping) = residue as the trigger + the hold-deficit fragility + the width-proprio ramp shortcut. The residue
+  is NOT board noise at the crop floor (<=20 mm band is ~empty) but compact clusters at 25-50 mm (crumbs?) that survive
+  the voxel outlier filter (they have >=23 neighbours); worst frames 15-22 points in 2-3 clusters on the board.
+  **Filter** (`pointcloud_ops.remove_ground_residual`, `PointCloudConfig.ground_residual`, applied after outlier
+  removal / before object focus + subsample): drop 26-connected components (1 cm voxels) whose max z <= 50 mm AND size
+  < 1.2% of valid points. Tofu on the board is exempt by height (top 54 mm), a raspberry by size (~5% vs residue
+  <= 0.7%), finger tips by connectivity to the body. Prototype on tzdhk_2000 ep0: removes 1.4 pts/frame mean, 22 max,
+  the 6 under the held tofu at t140 and the 2 at t368; nothing attached to fingers/object. Verified bit-identical
+  between the prototype and the pipeline op. Real-only yaml `point_cloud_1cam_armfocus_gr.yaml`; sim untouched
+  (no residue) -> the existing checkpoint deploys against it. Live A/B: `pre_deploy_check.sh` (key **M** toggles the
+  filter; `PerceptionPipeline.ground_residual_enabled`). Still to measure on the rig: a raspberry's component size vs
+  the 1.2% line. Deploy switch to the `_gr` yaml pending the visual check. Hold deficit remains (augment_hold_tail).
+- **Perception filter speed (2026-09-06):** the deploy loop had grown to ~55 ms/step with the new filter on. Profiling
+  on a 115k-point synthetic full-res crop: `remove_outliers_voxel` (the OLD, shared filter) 56 ms, `remove_ground_residual`
+  7.7 ms. Both rewritten on a dense bounded voxel grid with a flat int key + `np.bincount` (no `np.unique` over integer
+  rows), and the residue op now labels only the slab up to one voxel above z_max (touching that layer == reaches up;
+  exact on the aligned grid): **56 -> 4.9 ms and 7.7 -> 2.0 ms**, bit-identical outputs (40 random clouds, ep0 968/968
+  removed). Pipeline tests pass. Lesson: `np.unique(axis=0)` on (M,3) int rows is a sort — never in a per-step path.
+- **ground_residual default ON for the real rig:** block folded into the deploy twins `point_cloud_1cam_armfocus.yaml`
+  and `_rgb.yaml` (the separate `_gr` yaml is gone); sim/training configs unchanged (no block = filter absent). Verified
+  live by the user on tofu and raspberry (key M A/B). Next: redeploy tzdhk with it and compare the mid-air reopen rate.
+- **Hold tail is now a COLLECTION default + residue augmentation (2026-09-06).** (a) Collector: `N_HOLD` 12 -> 30 and
+  `_trim_long_holds(keep_tail=True)` never trims the run that ends the episode (the final hold) — the trailing hold was
+  the only "arrived: stay closed" supervision and was being cut to 4 frames (demos ended a median 1 frame after max
+  height). Post-collection for the existing tofu set: `augment_hold_tail` K=30 -> `dataset/dppo/single_lift_tofu_sim2real_v1_tail30`
+  (tool now carries sources.yaml + launch_command.sh and records `hold_tail_k`). Train cfg / anchor script default to it.
+  (b) Leaked-table-residue augmentation, sim-only, from the characterization of the 280 components the deploy filter
+  removed on tzdhk_2000 ep0: 1-12 pts (median 3), 1-4 mm thick, 4-13 mm across, ALL at 19-29 mm, 1-3 per frame in 34 %
+  of frames, anywhere on the board. `AugmentationConfig.pc_residue_*` (numpy, PolicyEnv rollouts/eval) + torch port
+  `dppo/cloud_aug.py::residue_torch` (training, batched, also on the paired sim twins); ON in `d435i_noise.yaml`
+  (prob 0.5, 1-3 clusters, 1-8 pts, z 19-32 mm). Generated vs measured: size p50 5/3, p90 8/7, max 13/12; zmax 27/22,
+  max 33/29 mm; extent 6/4, 11/13 mm. Rationale: the real filter removes most residue; this makes the policy indifferent
+  to what it cannot remove (5 points moved the gripper command 4-7 mm). Acceptance test after retraining: replay held
+  frames with 5/20/60 injected board points — command should stay within ~1 mm. Torch cloud aug moved to the fork-free
+  `dppo/cloud_aug.py` (tests run from envs/sim).
+- **Round-2 training recipe prepared (2026-09-06 evening, NOT launched — user to inspect `train_dppo_dp3.sh`):**
+  (1) hold tail K=60 (2 s) post hoc -> `dataset/dppo/single_lift_tofu_sim2real_v1_tail60`; collector `N_HOLD` = 60 +
+  `keep_tail=True`, so future collections carry the hold natively. (2) leaked-residue augmentation in `d435i_noise`
+  (p 0.5). (3) NEW clean-vs-perturbed ENCODER consistency term in `PairedRegDiffusionModel`
+  (`consistency_weight` 0.3, half of every batch, stop-grad on the clean embedding, perturbed view =
+  `configs/augmentation/d435i_noise_strong.yaml`: noise x1.5, 10 % dropout + an occlusion patch (new `pc_patch_*` augmentation, numpy + torch;
+  radius <= 1 cm and ONLY above z = 10 cm so it can never swallow the object — user constraint), residue on every view, + rigid offset U(+-12 mm); rotation deliberately excluded).
+  All perturbations are label-preserving; it is the paired real-sim term with unlimited sim pairs. Smoke: loss
+  composes (diffusion + paired + consistency), backbone grads flow, eval mode adds nothing; 464 tests pass. Torch
+  cloud aug lives in fork-free `dppo/cloud_aug.py`. Acceptance after training: injected-residue replay flat (<1 mm),
+  sim SR on clean clouds not below the no-consistency run, raspberry check, paired loss lower than tzdhk.
+- **wandb loss components (fork `agent/pretrain/train_diffusion_agent.py`, 2026-09-06):** logs EPOCH MEANS per loss
+  component split by pass — `train/loss_diffusion`, `train/loss_paired`, `train/loss_consistency`, and `val/<k>` for
+  the components the eval-mode pass produces (no `val/loss_consistency`: training-only term). Previously the `aux - *`
+  keys were the LAST step's dict, which on val epochs was the last VAL batch mislabelled as training. Verified with an
+  offline 3-epoch smoke. Enable wandb by NOT passing `wandb=null` (cfg default on; entity = logged-in default
+  Co-Design-Deformable or `DPPO_WANDB_ENTITY`; project `gentle-manip-<dataset>`).
+- **Round-2 speed (2026-09-06):** measured in the REAL loop, idle GPU, 3-epoch runs: bare BC 1.5 s/epoch (round-1 data
+  1.4), + BC aug 1.8, + paired 3.0, + consistency 3.9 s/epoch -> 1500 epochs ~1.6 h. The 13 s/epoch the user (and my
+  offline smoke) saw was GPU CONTENTION with another process, not the code: vectorizing the residue/patch loops
+  (done anyway, 6x on CPU, sub-ms on GPU) changed nothing. Lesson: check `nvidia-smi --query-compute-apps` before
+  reading an epoch time. Full step under profile: 19 ms (fwd 8.8 / bwd 10.3), LayerNorm backward is the top kernel.
+- **GPU leak lesson:** killing `serl_sim_server` (or an eval that spawned it) with `pkill` leaves its spawned Genesis
+  child (`python -c "from multiprocessing.spawn import spawn_main..."`, ~1.9 GB, intermittently busy) ORPHANED — four
+  of them from today's evals were the "13 s/epoch". Kill the server's PROCESS GROUP (`setsid` at launch, `kill -- -PGID`)
+  and check `nvidia-smi --query-compute-apps` before timing anything.
+- **Round 2 run `qzhek` done (17:13-18:52, 1500 ep, 3.8 s/ep):** val min 0.00468 @ 1340 vs round-1 tzdhk 0.00526 @ 750; round 2's
+  val stays flat ~0.0051 from ep ~900 where round 1's climbed to 0.0085-0.0092. **Injected-residue acceptance: PASS** — real
+  stray points now move the gripper command 0.5 mm (was 4-7), injected 5/20/60 board points 0.8/1.5/1.6 mm (was 7 mm, saturating
+  at 5). Sim teaser on state_1500 pending.
+- **Round-2 teaser (qzhek state_1500, 20 eps): success 0.20 / ever 0.20** (round 1: 0.15 / 0.50). Lift-then-release 8 -> 0 (hold tail
+  works); never-reached 9 -> 16, and the clips show a NEW mode: close at the tofu, lift EMPTY, re-approach (grasp closure/precision),
+  vs round 1's hover-beside. Consistency loss grows 80x over training (0.00005 -> 0.004; steps at ep 850/1200) while the acceptance
+  replay still passes at 1500. Candidates for the precision regression: (a) 24 % of frames are now static hold frames (tail K=60),
+  (b) the consistency/offset invariance blurring finger-object alignment, (c) 20-episode noise. Not attributable without a
+  CONS_W=0 ablation (same data) and a state_750 teaser — NOT launched (user instruction). No GPU leftovers this time.
+- **qzhek state_750 teaser: 0.35 / 0.40** (state_1500: 0.20 / 0.20; round 1 tzdhk_1500: 0.15 / 0.50). Earlier checkpoint clearly better
+  than the final one (val min was at 1340 — val loss again not predictive). 12/20 still never reach; user observes approaches to a
+  position where the object is not. Two things to check next: (1) the sim eval now carries synthetic residue (d435i_noise gained
+  residue p 0.5 today) — round 1's teaser did not, so the comparison is not like-for-like; (2) residue-as-decoy during the approach
+  (offline replay: inject one cluster into clean approach frames, see whether the position target moves toward it). Offset-invariance
+  hypothesis withdrawn: a whole-cloud shift preserves the finger-object vector.
+- **Fair evals + signal plots (2026-09-06 evening).** Sim server gained `--augmentation NAME|none`; `d435i_noise.yaml` is now sensor
+  noise only (= rollout/eval default = round-1 condition), residue moved to `d435i_noise_train.yaml` (training cfg / PC_AUG default;
+  robustness evals opt in). Harness writes per-episode COMMAND-vs-STATE plots + npz (`<eval>/signals/`, `evaluation/signals.py`;
+  proprio de-normalized from the venv's `state`) with a per-chunk residue-injected count (augmentor -> PolicyEnv info -> rpc -> venv).
+  **qzhek state_750, same 20 scenarios: CLEAN 0.50 / 0.50 (round 1: 0.15 / 0.50), RESIDUE 0.40 / 0.45**; 18/20 outcomes identical, the
+  2 flips = delayed re-open after a missed first grasp (residue confounds the "object still low" cue) — a small effect. **The dominant
+  failure (10/20, both conditions): close on nothing, lift, hold the empty grasp to the end, never re-open.** Round 1 re-opened in
+  that situation (its lift-then-release WAS the retry). The K=60 tail taught "closed + high -> stay closed" unconditionally; no demo
+  shows "closed + high + object on the board -> re-open". Fix candidates: shorter tail (K=20, user), explicit failed-grasp + regrasp
+  demos (CLAUDE.md executor ideas 2/3), or a tail only on episodes where the object is verifiably in hand (it always is in demos —
+  the missing examples are the failures). Retry probe on real post-drop frames: all checkpoints still command a descent (round 2
+  ~15 % slower), so the re-approach itself is intact; what is lost is the re-OPEN while holding empty.
+- **FROZEN for the cluster collection (2026-09-06): collector `N_HOLD = 20`** (trailing hold never trimmed). 60 was too much
+  (empty-grasp hold, see above); 20 = 5 chunks of "arrived, stay closed". Everything else in the collector unchanged since the
+  2026-09-05 freeze. Remaining issues are augmentation/training-side, not data-side.
+- **Collector: `above_object` start and disturbance never combine (2026-09-06, user):** the disturbance draw is skipped for
+  envs whose start mode is `above_object`, so `disturbance_prob` is the probability conditional on the other modes. One `continue`;
+  every other env's draw and RNG consumption unchanged. Frozen with N_HOLD=20.
