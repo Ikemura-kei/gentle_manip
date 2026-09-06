@@ -10,7 +10,7 @@
 #SBATCH -e logs/mesh_from_photos/sync-%j.out
 set -euo pipefail
 source scripts/mesh_from_photos_env.sh
-cd "$PROJ"
+cd "${SLURM_SUBMIT_DIR:-$PROJ}"
 echo "host=$(hostname) arch=$(uname -m)"
 uv sync --project envs/triposg_arrhenius
 echo "=== SYNC OK ==="

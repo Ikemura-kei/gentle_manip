@@ -15,7 +15,7 @@ set -uo pipefail
 OBJ="${OBJ:?set OBJ}"
 SEEDS="${SEEDS:-0 1 2}"
 source scripts/mesh_from_photos_env.sh
-cd "$PROJ"
+cd "${SLURM_SUBMIT_DIR:-$PROJ}"
 RUN="uv run --project envs/triposg_arrhenius python"
 RUNS="obj_meshes/$OBJ/runs"
 MEAS="obj_images/$OBJ/measurements.json"
