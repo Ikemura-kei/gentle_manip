@@ -9,6 +9,7 @@ from typing import Optional, Set
 SAVE = "save"
 DISCARD = "discard"
 QUIT = "quit"
+TOGGLE_FILTER = "toggle_filter"     # key M in KeyboardTeleop: live on/off of the ground_residual cloud filter
 
 
 class PygameKeyboard:

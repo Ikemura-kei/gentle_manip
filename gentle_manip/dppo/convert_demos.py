@@ -38,14 +38,30 @@ STATE_VIEW_FULL = ["ee_pos", "ee_quat", "gripper_width",
 PROPRIO_VIEW = ["ee_pos", "ee_quat", "gripper_width"]
 
 
+def _source_manifest(paths: Sequence[Path], n_episodes: Sequence[int]) -> list:
+    """One entry per demo file: where it came from and which experiment collected it, read from
+    the run dir's config.yaml (collector) / <stem>_config.yaml (real teleop). A dataset may mix
+    objects or sim+real, so THIS — not a single `experiment` — is the training run's provenance
+    (the ExperimentSnapshot callback copies it into <run>/config/dataset_sources.yaml)."""
+    import yaml
+    out = []
+    for pth, n in zip(paths, n_episodes):
+        cfgs = [pth.parent / "config.yaml", pth.with_name(pth.stem + "_config.yaml")]
+        cfg = next((yaml.safe_load(c.read_text()) or {} for c in cfgs if c.exists()), {})
+        out.append(dict(path=str(pth), n_episodes=int(n),
+                        experiment=cfg.get("experiment"), task_name=cfg.get("task_name"),
+                        git_commit=cfg.get("git_commit")))
+    return out
+
+
 def _load_episodes(paths: Sequence[Path]) -> list:
-    episodes = []
+    episodes, counts = [], []
     for p in paths:
         d = pickle.load(open(p, "rb"))
-        episodes.extend(d["episodes"])
+        episodes.extend(d["episodes"]); counts.append(len(d["episodes"]))
     if not episodes:
         raise ValueError(f"no episodes found in {list(map(str, paths))}")
-    return episodes
+    return episodes, counts
 
 
 def _episode_state(ep: dict, obs_keys: Sequence[str]) -> np.ndarray:
@@ -69,7 +85,7 @@ def convert(demo_paths: Sequence[Path], out_dir: Path, obs_keys: Sequence[str] =
             val_split: float = 0.1, seed: int = 0,
             derive_action_config=None, derive_lookahead: int = 1,
             derive_source_config=None) -> dict:
-    episodes = _load_episodes(demo_paths)
+    episodes, per_file = _load_episodes(demo_paths)
     states = [_episode_state(ep, obs_keys) for ep in episodes]
     if derive_action_config is not None:                  # derive delta/absolute from the pose traj
         from gentle_manip.actions.derive import derive_action_set
@@ -164,6 +180,12 @@ def convert(demo_paths: Sequence[Path], out_dir: Path, obs_keys: Sequence[str] =
         norm["aux_object_pos_min"] = op_min
         norm["aux_object_pos_max"] = op_max
     np.savez_compressed(out_dir / "normalization.npz", **norm)
+    import yaml
+    from gentle_manip.utils.run_paths import save_launch_command
+    save_launch_command(out_dir)                              # -> <out>/launch_command.sh (exact command)
+    with open(out_dir / "sources.yaml", "w") as f:            # provenance manifest (see _source_manifest)
+        yaml.safe_dump(dict(sources=_source_manifest(demo_paths, per_file), obs_keys=list(obs_keys),
+                            n_episodes=int(n), val_split=float(val_split)), f, sort_keys=False)
 
     meta = dict(obs_keys=list(obs_keys), obs_dim=int(obs_dim), action_dim=int(act_dim),
                 n_episodes=n, n_train_traj=n_tr, n_val_traj=n_va,

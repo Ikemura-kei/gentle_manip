@@ -499,7 +499,10 @@ def _down_quat_euler(yaw: float) -> np.ndarray:
 
 
 # ── Search constants ──────────────────────────────────────────────────────────
-BBOX_MARGIN  = 1.2       # xy search box = this x the object's bbox, centred on the COM
+BBOX_MARGIN  = 1.3       # xy search box = this x the object's bbox, centred on the BBOX CENTRE
+                         # (was 1.2 and COM-centred: a bent object's COM sits off the bbox centre,
+                         # so extremity grasps fell OUTSIDE the box and crashed the CMA init —
+                         # 3/8 objects on the 2026-09-06 cluster profiling; user-approved change)
 Z_LIFT_HI    = 0.12      # tz upper bound above the COM (m)
 CMA_STEP     = [0.002, 0.002, 0.002, np.radians(5), np.radians(5), np.radians(5), 0.002]
                          # per-coordinate initial step: 2 mm, 5 deg, 2 mm (the 7-vector mixes m and rad)
@@ -573,16 +576,21 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                             "stress": float(st) if (st is not None and np.isfinite(st)) else None})
         return -res["score"]
 
-    # CMA search box (also the rotation filter): xy about the COM, tz, roll/pitch/yaw, width
+    # CMA search box (also the rotation filter): xy about the world BBOX CENTRE, tz,
+    # roll/pitch/yaw, width. Local frame origin is the COM (world = com + Robj·local, see
+    # anchor_w / the SDF query), so the world bbox centre = com + rotated-verts bbox centre.
+    # Centring on the bbox (not the COM) keeps every surface point coverable for asymmetric
+    # objects — a bent banana's COM is off-centre and extremity grasps fell outside the box.
     q = np.asarray(obj_quat_wxyz, float)
     Robj = Rot.from_quat([q[1], q[2], q[3], q[0]])
     vw_xy = Robj.apply(obj.verts)[:, :2]
+    ctr_xy = com[:2] + 0.5 * (vw_xy.max(0) + vw_xy.min(0))
     half_xy = np.maximum(0.5 * BBOX_MARGIN * (vw_xy.max(0) - vw_xy.min(0)), 0.01)
     tz_lo = max(com[2] + FINGER_TO_TCP_Z - 0.04, tcp_z_min)       # tcp_z_min: the action box / real EE clip
     tz_hi = com[2] + Z_LIFT_HI
     _r, _p, _y = np.radians([ROLL_MAX_DEG, PITCH_MAX_DEG, YAW_MAX_DEG])
-    lb = [com[0] - half_xy[0], com[1] - half_xy[1], tz_lo, np.pi - _r, -_p, -_y, WIDTH_MIN]
-    ub = [com[0] + half_xy[0], com[1] + half_xy[1], tz_hi, np.pi + _r,  _p,  _y, WIDTH_MAX]
+    lb = [ctr_xy[0] - half_xy[0], ctr_xy[1] - half_xy[1], tz_lo, np.pi - _r, -_p, -_y, WIDTH_MIN]
+    ub = [ctr_xy[0] + half_xy[0], ctr_xy[1] + half_xy[1], tz_hi, np.pi + _r,  _p,  _y, WIDTH_MAX]
     Robj_inv = Robj.inv()
 
     def _local_width(point, closing_axis_world, indent=1.5e-3):
@@ -704,11 +712,31 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
 
     # ── Step 5: CMA-ES from each of the top-K seeds (small budget, small step) ──
     t0 = time.perf_counter(); cur_round[0] = 1
+    # FAILSAFE 1 — cap every seed into the box: `cma`'s bound transform requires x0 strictly
+    # within [lb, ub] and hard-raises otherwise (killed 3/8 objects on the 2026-09-06 cluster
+    # profiling). The filters check only rotation + z-low, so xy/z-high/width can be outside.
+    _lb, _ub = np.asarray(lb, float), np.asarray(ub, float)
+    for sd in top:
+        _xc = np.clip(np.asarray(sd["x"], float), _lb + 1e-6, _ub - 1e-6)
+        if not np.array_equal(_xc, np.asarray(sd["x"], float)):
+            _mv = np.abs(_xc - np.asarray(sd["x"], float))
+            print(f"  [grasp] seed capped into the CMA box (max move {1e3 * _mv[:3].max():.1f} mm / "
+                  f"{np.degrees(_mv[3:6].max()):.1f} deg / {1e3 * _mv[6]:.1f} mm width)", flush=True)
+        sd["x"] = _xc
     cost_batch([sd["x"] for sd in top])                         # the seeds are the incumbents
-    ess = [cma.CMAEvolutionStrategy(list(sd["x"]), 1.0,
-                                    {"CMA_stds": CMA_STEP, "maxfevals": CMA_BUDGET_PER_SEED,
-                                     "bounds": [lb, ub], "seed": seed + i, "verbose": -9})
-           for i, sd in enumerate(top)]
+    # FAILSAFE 2 — a seed whose CMA init still fails for ANY reason is dropped, not fatal;
+    # the remaining runs (or, if none survive, the SYNTH-FAILED path) carry on.
+    ess, _top_ok = [], []
+    for i, sd in enumerate(top):
+        try:
+            ess.append(cma.CMAEvolutionStrategy(list(sd["x"]), 1.0,
+                                                {"CMA_stds": CMA_STEP, "maxfevals": CMA_BUDGET_PER_SEED,
+                                                 "bounds": [lb, ub], "seed": seed + i, "verbose": -9}))
+            _top_ok.append(sd)
+        except Exception as e:
+            print(f"  [grasp] CMA init failed for seed {i} ({type(e).__name__}: {e}) — seed dropped",
+                  flush=True)
+    top = _top_ok
     per_run = [[] for _ in top]                                  # feasible (x, score, res) per run
     while any(not es.stop() for es in ess):                      # lockstep: one batched score per generation
         live = [i for i, es in enumerate(ess) if not es.stop()]

@@ -16,6 +16,9 @@ import torch
 from agent.dataset.sequence import Batch, StitchedSequenceDataset
 
 
+from gentle_manip.dppo.cloud_aug import load_pc_aug, sensor_noise, residue_torch  # noqa: F401 (re-exported)
+
+
 class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
     def __init__(self, dataset_path, horizon_steps=64, cond_steps=1, pc_cond_steps=1,
                  max_n_episodes=10000, device="cuda:0",

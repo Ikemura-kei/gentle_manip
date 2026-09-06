@@ -19,7 +19,7 @@ object_axis_scale: [0.95, 1.15]
 object_bend_deg: [-25, 25]
 object_twist_deg: [-20, 20]
 object_taper: [-0.15, 0.15]
-object_E: [0.8e5, 1.2e5]
+object_E: [1.28e5, 1.92e5]  # centred on the new registry E=1.6e5 (was centred 1e5), same +-20%
 object_nu: [0.36, 0.44]
 object_rho: [850, 950]
 object_mesh_pool: [raspberry1, raspberry2, raspberry3, raspberry4, raspberry5]

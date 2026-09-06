@@ -1,19 +1,13 @@
-# [dppo cfg] v5 payoff run: 7d EULER absolute action (abs_pose_euler_abs_gripper, carries
-# the euler_frame_offset_deg seam fix), rate-bounded + azimuth-bounded v5 demonstrations.
-# Cloned from single_lift_mushroom_soft_abs_pcd_rot6d with obs_dim 10->8, action_dim 10->7.
-# Dataset: dataset/dppo/single_lift_mushroom_soft_v7_7dc (convert_demos --derive-action).
-# [dppo-eval] Evaluate the ABS-action PointNet diffusion policy (BC base or finetuned) on live sim.
-# Used by: third_party/dppo/script/run.py (EvalHarnessAgent) via gentle_manip.dppo.train
-# Status: experimental (DPPO step-2 eval: point-cloud student on the abs-action FEM-gentleness policy)
-#
-# Soft twin of single_lift_mushroom_soft_pcd/eval_diffusion_pointnet.yaml with action_dim=10 (abs) and
-# the soft_abs paths. Routes through the SHARED canonical harness (gentle_manip.evaluation.run_eval):
+# [dppo-eval] sim->real study (2026-09), OBJECT-AGNOSTIC twin of pre_diffusion_pointnet.yaml: evaluates a
+# BC checkpoint on live sim through the SHARED canonical harness (gentle_manip.evaluation.run_eval):
 # fixed EvalSpec (n_episodes=200, num_envs=5, deterministic per-batch DR seed) -> summary.json +
 # episodes.csv + env-config snapshot + per-episode videos, into <base_policy_run>/eval/<datetime>/.
+# `env_name` (dataset) and `experiment` are READ FROM THE CHECKPOINT's training config (run_cfg
+# resolver), so the only CLI arg is base_policy_path; both stay overridable (env_name=... experiment=...).
 # scene_group_size>0 rebuilds geometry every K batches, so the server MUST be --subprocess:
-#   serl_sim_server --experiment single_lift_tofu_soft_abs_action_armfocus_7d_realws --view student \
-#                   --num-envs 5 --render-rgb --subprocess --port 5570
-# Run with envs/dppo.
+#   serl_sim_server --experiment <same experiment> --view student --num-envs 5 --render-rgb --subprocess --port 5570
+# Used by: gentle_manip.dppo.train (EvalHarnessAgent), envs/dppo. See docs/training_plan_sim2real_2026-09.md.
+# Status: active
 defaults:
   - _self_
 hydra:
@@ -24,12 +18,12 @@ _target_: gentle_manip.dppo.eval_agent.EvalHarnessAgent
 name: ${env_name}_eval_diffusion_pointnet_ta${horizon_steps}_td${denoising_steps}
 logdir: ${eval_base:${base_policy_path}}/eval/${now:%Y-%m-%d}_${now:%H-%M-%S}
 base_policy_path: ???        # set on CLI: the pre_diffusion_pointnet (BC) checkpoint (state_700.pt)
-normalization_path: ${oc.env:DPPO_DATA_DIR}/single_lift_tofu_sim2real_v1/normalization.npz
-experiment: single_lift_tofu_soft_abs_action_armfocus_7d_realws  # realws eval (policy trained on realws data; DEVLOG eval-protocol rule)
+normalization_path: ${oc.env:DPPO_DATA_DIR}/${env_name}/normalization.npz
+experiment: ${run_cfg:${base_policy_path},experiment}   # the experiment the policy was trained on (DEVLOG eval-protocol rule)
 
 seed: 42
 device: cuda:0
-env_name: single_lift_tofu_sim2real_v1
+env_name: ${run_cfg:${base_policy_path},env}       # dataset name = the checkpoint's log-dir leaf
 obs_dim: 8                     # proprio only (ee_pos3 + ee_quat4 + gripper1); cloud is separate
 action_dim: 7                 # abs pos3 + euler3 (frame-offset encoded) + gripper1
 denoising_steps: 20

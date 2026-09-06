@@ -27,7 +27,7 @@ z 0.015–0.50), `dr` (pose/shape/material randomisation + start modes), `augmen
      top-down), finger–object penetration ≤ 10 mm, TCP z ≥ 15 mm (= the action box / real EE clip).
    - Score (batched GPU FEM, displacement-controlled contact on the pad footprint): gates for table,
      penetration, indentation ≤ 10 mm, force holdability 2µN ≥ m(g+9.81), torsion, yield; score =
-     −top-10 % von-Mises stress − 0.1·contact pressure. Top-10 seeds → CMA-ES (400 evals each, steps
+     −top-10 % von-Mises stress − 0.1·contact pressure. Top-6 seeds (`TOP_K`) → CMA-ES (400 evals each, steps
      2 mm / 5° / 2 mm) → ±3 mm width refine → argmax.
    - No feasible grasp → "SYNTH FAILED" fallback (45 mm top-down); such episodes are never saved.
 5. **Start condition** (`dr.start_modes`, per env): `home` (default 60 %), or teleport to `in_air`
@@ -37,7 +37,9 @@ z 0.015–0.50), `dr` (pose/shape/material randomisation + start modes), `augmen
    approach in two legs at 2.4 mm/step — to a **standoff** on the grasp's approach axis at the start's own axial distance clamped to 4–10 cm (no up-then-down from a start already near the axis), then
    straight along the axis into the grasp (open fingers straddle the object: no diagonal collisions) —
    settle 1 → close at **2.2 mm/step** (the measured real teleop rate) to the planned width **− 0.8 mm**
-   → dwell 2 → lift 0.2 m → hold 12. `disturbance_prob` (default 10 %): a 4-step lateral drag on the
+   → dwell 2 → lift 0.2 m → hold 20 (FROZEN 2026-09-06; the trailing hold is never trimmed since 2026-09-06 — it is the only
+   supervision for "arrived: keep commanding this pose, gripper closed"; 12 trimmed to 4 caused mid-air reopens). `disturbance_prob` (default 10 %; CONDITIONAL on the start mode not being `above_object` — the two never
+   combine, 2026-09-06): a 4-step lateral drag on the
    OBJECT during the approach; after 16 settle steps the grasp is re-targeted by the object's xy
    displacement and re-approached via the new standoff (recovery demos).
 7. **Saved**: successes only (object above half lift height at the end), `data.pkl` shards, per-attempt

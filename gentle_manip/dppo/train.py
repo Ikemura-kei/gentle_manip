@@ -44,6 +44,19 @@ def _eval_base(ckpt: str) -> str:
     return str(p.parent.parent if p.parent.name == "checkpoint" else p.parent)
 
 
+def _run_cfg(ckpt: str, key: str) -> str:
+    """OmegaConf resolver `${run_cfg:<ckpt>,<key>}`: a top-level key of the checkpoint's OWN
+    training config (<run>/.hydra/config.yaml) — lets an eval cfg derive `env`/`experiment`
+    from the checkpoint instead of pinning one object. Override on the CLI if the run is too
+    old to carry the key."""
+    import yaml
+    f = Path(_eval_base(ckpt)) / ".hydra" / "config.yaml"
+    d = yaml.safe_load(f.read_text()) if f.exists() else {}
+    if key not in d:
+        raise KeyError(f"{f} has no '{key}' — pass {key}=... on the command line")
+    return str(d[key])
+
+
 _EXP_ID: str | None = None
 
 
@@ -65,6 +78,7 @@ def main() -> None:
     from omegaconf import OmegaConf
     OmegaConf.register_new_resolver("eval_base", _eval_base, replace=True)
     OmegaConf.register_new_resolver("exp_id", _exp_id, replace=True)
+    OmegaConf.register_new_resolver("run_cfg", _run_cfg, replace=True)
     runpy.run_path(str(_RUN_PY), run_name="__main__")
 
 

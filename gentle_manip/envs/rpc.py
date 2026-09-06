@@ -154,6 +154,8 @@ def serve_env(env, host: str = "127.0.0.1", port: int = 5555, ready_msg: str = "
                             for key in ("stress_max", "stress_mean", "stress_top10", "stress_top20"):
                                 if key in info[0]:
                                     resp[key] = [float(i[key]) for i in info]
+                        if info and "aug_residue" in info[0]:     # obs augmentation injected residue (diagnostic)
+                            resp["aug_residue"] = [bool(i["aug_residue"]) for i in info]
                         send_msg(conn, resp, _as_arrays(obs))
                     elif cmd == "render":
                         # On-demand RGB for a client that writes its own video (DPPO eval/finetune
@@ -270,6 +272,9 @@ class SimEnvClient:
                 if vals is not None:
                     for k, d in enumerate(info):
                         d[key] = float(vals[k])
+        if header.get("aug_residue") is not None:                           # residue-injected flag
+            for k, d in enumerate(info):
+                d["aug_residue"] = bool(header["aug_residue"][k])
         return obs, reward, done, info
 
     def render(self, all_envs: bool = False):

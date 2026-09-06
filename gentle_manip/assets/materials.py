@@ -53,8 +53,8 @@ MATERIALS: dict[str, Material] = {
     # it bruises at a light squeeze. Softer (E 0.1 MPa) with a lower yield (15 kPa) and lower
     # density (it is largely water in thin-walled drupelets, and juicier/lighter than a mushroom).
     # TODO: calibrate against a real berry; these are literature-plausible, not measured.
-    "raspberry": Material(youngs_modulus=1e5, poisson_ratio=0.4, density=900.0,
-                          von_mises_yield_stress=1.5e4),
+    "raspberry": Material(youngs_modulus=1.6e5, poisson_ratio=0.4, density=900.0,
+                          von_mises_yield_stress=2.0e4),  # 2026-09-06 (user): raised from E=1e5/yield=1.5e4 — spawned berries SHATTERED (plastic flow on impact; see DEVLOG)
     # Banana (Musa, ripe, whole with peel): flesh is very soft (E ~0.1-0.5 MPa); the peel
     # stiffens the whole fruit somewhat. E 0.25 MPa keeps MPM substeps near the mushroom's
     # (substeps ~ sqrt(E)). Bruises readily -> yield 25 kPa. Density just under water.

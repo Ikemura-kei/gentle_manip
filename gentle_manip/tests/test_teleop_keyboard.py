@@ -21,7 +21,7 @@ class FakePygame:
 
     # unique key/event constants
     (K_w, K_s, K_a, K_d, K_r, K_f, K_LEFT, K_RIGHT, K_UP, K_DOWN,
-     K_q, K_e, K_o, K_p, K_SPACE, K_BACKSPACE, K_ESCAPE, KEYDOWN, QUIT) = range(19)
+     K_q, K_e, K_o, K_p, K_SPACE, K_BACKSPACE, K_ESCAPE, KEYDOWN, QUIT, K_m) = range(20)
 
     def __init__(self):
         self._held = set()
@@ -126,3 +126,11 @@ def test_open_close_idempotent():
     t.close()
     t.close()        # second close → no-op
     assert not t._opened
+
+
+def test_m_key_emits_filter_toggle_event():
+    from gentle_manip.demos.keyboard_pygame import TOGGLE_FILTER
+    t, pg = make_teleop()
+    pg.queue_keydown(pg.K_m)
+    assert t.poll() == {TOGGLE_FILTER}
+    assert t.poll() == set()           # edge event, consumed once

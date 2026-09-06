@@ -38,6 +38,31 @@ class AugmentationConfig:
     pc_axial_coeff: float = 0.0            # m per m^2, along the camera ray
     pc_lateral_coeff: float = 0.0          # m per m, perpendicular to the ray
     pc_axial_cam_pos: tuple = (0.0, 0.0, 0.0)
+    # ── Leaked table residue (2026-09-06) ────────────────────────────────────────────────
+    # The real D435i cloud carries small flat clusters just above the board that the voxel outlier
+    # filter keeps (compact crumbs / board residue). Measured on a real deploy (tzdhk_2000 ep0, at the
+    # 1024-point scale, after the deploy filter's own definition): 1-12 points per cluster (median 3),
+    # 1-4 mm thick, 4-13 mm across, ALL between 19 and 29 mm height, 1-3 clusters in 34 % of frames,
+    # anywhere on the board 3-15 cm from the gripper. 5 such points shifted the policy's gripper
+    # command 4-7 mm toward open. The real pipeline now removes most of them (ground_residual), so
+    # this augmentation covers what that filter cannot: the policy must be indifferent to them.
+    # Sim-only; points are REPLACED (cloud size unchanged). Sizes are in points of the stored cloud.
+    pc_residue_prob: float = 0.0           # per-cloud probability of adding residue; 0 = off
+    pc_residue_clusters: tuple = (1, 3)    # clusters per affected cloud (inclusive)
+    pc_residue_points: tuple = (1, 8)      # points per cluster (inclusive); measured median 3, max 12 —
+                                           # neighbouring clusters merge, which supplies the 9-12+ tail
+    pc_residue_z: tuple = (0.019, 0.032)   # height band (m) — generous cap over the measured 29 mm max
+    pc_residue_extent: tuple = (0.004, 0.015)   # cluster footprint across (m)
+    pc_residue_thickness: float = 0.003    # vertical spread (m)
+    pc_residue_xy_min: tuple = (0.22, -0.20)    # placement region (m) — the board inside the crop
+    pc_residue_xy_max: tuple = (0.50, 0.20)
+    # Patch dropout: with pc_patch_prob per cloud, every point within a random sphere (radius drawn in
+    # pc_patch_radius, centred on a random valid point) is replaced by duplicates of other points —
+    # an occlusion / missing-return blob, as opposed to pc_dropout's scattered misses. Sim-only.
+    pc_patch_prob: float = 0.0
+    pc_patch_radius: tuple = (0.005, 0.01)   # max 1 cm (2026-09-06): a 3 cm patch could swallow a small object
+    pc_patch_z_min: float = 0.10             # patch centre AND removed points only above this height (arm body),
+                                             # never the object on the board or a low-held object
     # low-dim state
     ee_pos_std: float = 0.0        # m
     ee_quat_std: float = 0.0       # additive quat noise (renormalized)
@@ -55,7 +80,7 @@ class AugmentationConfig:
 
     def is_noop(self) -> bool:
         return not (self.pc_jitter_std or self.pc_dropout or self.pc_offset_std
-                    or self.pc_axial_coeff or self.pc_lateral_coeff
+                    or self.pc_axial_coeff or self.pc_lateral_coeff or self.pc_residue_prob or self.pc_patch_prob
                     or self.ee_pos_std or self.ee_quat_std or self.gripper_std
                     or self.joint_std or self.quat_sign_flip or self.quat_snap)
 
@@ -71,11 +96,14 @@ class ObsAugmentor:
     def __init__(self, cfg: AugmentationConfig) -> None:
         self.cfg = cfg
         self.rng = np.random.default_rng(cfg.seed)
+        self.last_residue_hit = None      # (N,) bool after each call: envs whose cloud got residue clusters
 
     def __call__(self, obs: dict) -> dict:
         c = self.cfg
+        self.last_residue_hit = None
         if "point_cloud" in obs and (c.pc_jitter_std or c.pc_dropout or c.pc_offset_std
-                                     or c.pc_axial_coeff or c.pc_lateral_coeff):
+                                     or c.pc_axial_coeff or c.pc_lateral_coeff or c.pc_residue_prob
+                                     or c.pc_patch_prob):
             obs["point_cloud"] = self._point_cloud(obs["point_cloud"])
         if "ee_pos" in obs and c.ee_pos_std:
             obs["ee_pos"] = (obs["ee_pos"] + self._n(obs["ee_pos"].shape, c.ee_pos_std)).astype(np.float32)
@@ -120,6 +148,49 @@ class ObsAugmentor:
             pc += self._n(pc.shape, c.pc_jitter_std)
         if c.pc_offset_std > 0:
             pc += self._n((N, 1, 3), c.pc_offset_std)
+        if c.pc_patch_prob > 0:
+            pc = self._patch_dropout(pc)
+        if c.pc_residue_prob > 0:
+            pc = self._residue(pc)
+        return pc
+
+    def _patch_dropout(self, pc: np.ndarray) -> np.ndarray:
+        c, r = self.cfg, self.rng
+        N, P, _ = pc.shape
+        for i in range(N):
+            if r.random() >= c.pc_patch_prob:
+                continue
+            valid = np.nonzero(np.any(pc[i] != 0, axis=1))[0]
+            high = valid[pc[i, valid, 2] > c.pc_patch_z_min]           # candidates: above z_min only
+            if high.size < 2:
+                continue
+            centre = pc[i, r.choice(high)]
+            hit = high[np.linalg.norm(pc[i, high] - centre, axis=1) < r.uniform(*c.pc_patch_radius)]
+            keep = np.setdiff1d(valid, hit)
+            if hit.size and keep.size:
+                pc[i, hit] = pc[i, r.choice(keep, hit.size)]
+        return pc
+
+    def _residue(self, pc: np.ndarray) -> np.ndarray:
+        """Leaked-table-residue clusters (see AugmentationConfig): flat, tiny, low; replace points."""
+        c, r = self.cfg, self.rng
+        N, P, _ = pc.shape
+        hit = np.zeros(N, dtype=bool)
+        for i in range(N):
+            if r.random() >= c.pc_residue_prob:
+                continue
+            hit[i] = True
+            for _ in range(int(r.integers(c.pc_residue_clusters[0], c.pc_residue_clusters[1] + 1))):
+                k = int(r.integers(c.pc_residue_points[0], c.pc_residue_points[1] + 1))
+                center = np.array([r.uniform(c.pc_residue_xy_min[0], c.pc_residue_xy_max[0]),
+                                   r.uniform(c.pc_residue_xy_min[1], c.pc_residue_xy_max[1]),
+                                   r.uniform(*c.pc_residue_z)], np.float32)
+                ext = r.uniform(*c.pc_residue_extent)
+                q = center + np.stack([r.uniform(-ext / 2, ext / 2, k), r.uniform(-ext / 2, ext / 2, k),
+                                       r.uniform(-c.pc_residue_thickness / 2, c.pc_residue_thickness / 2, k)], 1)
+                q[:, 2] = np.clip(q[:, 2], c.pc_residue_z[0], None)
+                pc[i, r.choice(P, size=k, replace=False)] = q.astype(np.float32)
+        self.last_residue_hit = hit
         return pc
 
     def _quat(self, q: np.ndarray) -> np.ndarray:

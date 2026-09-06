@@ -113,6 +113,52 @@ def _policy_columns(policy, n):
         return [{} for _ in range(n)]
 
 
+def _write_signals(out_dir, batch, n, ee_buf, grip_buf, quat_buf, act_buf, flag_buf, venv, experiment_name, spec,
+                   state_buf=None):
+    """<out>/signals/epNNN.{png,npz}: command chunks (derive space via venv._unnorm_action) vs state.
+    The DPPO venv exposes proprio only as the normalized `state` vector (obs_keys order, last cond
+    step); when the ee buffers are empty the state buffer is de-normalized with venv.obs_min/max."""
+    if not experiment_name or not act_buf or not act_buf[0]:
+        return
+    if (not ee_buf[0]) and state_buf and state_buf[0] and hasattr(venv, "obs_min") and hasattr(venv, "obs_keys"):
+        lo, hi = np.asarray(venv.obs_min, float), np.asarray(venv.obs_max, float)
+        keys = list(venv.obs_keys)
+        for j in range(n):
+            st = np.stack(state_buf[j]).reshape(len(state_buf[j]), -1)[:, -lo.size:]     # last cond step
+            raw = (st + 1.0) / 2.0 * (hi - lo + 1e-6) + lo
+            c = 0
+            for k in keys:
+                w = 3 if k == "ee_pos" else 4 if k == "ee_quat" else 6 if k == "ee_rot6d" else 1
+                seg = raw[:, c:c + w]; c += w
+                if k == "ee_pos": ee_buf[j] = list(seg)
+                elif k == "ee_quat": quat_buf[j] = list(seg)
+                elif k == "gripper_width": grip_buf[j] = list(seg[:, 0])
+    if not ee_buf[0]:
+        return
+    from gentle_manip.evaluation.signals import plot_episode
+    from gentle_manip.experiment import Experiment
+    acfg = Experiment.load(experiment_name).action_config
+    sig_dir = Path(out_dir) / "signals"; sig_dir.mkdir(parents=True, exist_ok=True)
+    act_steps = int(getattr(venv, "act_steps", getattr(spec, "act_steps", 4)) or 4)
+    dt = 1.0 / 30.0
+    for j in range(n):
+        raw = np.stack(act_buf[j])                                            # (T, K*A) npz-normalized
+        A = acfg.action_dim
+        chunks = raw.reshape(raw.shape[0], -1, A)
+        if hasattr(venv, "_unnorm_action"):                                  # -> derive space [-1, 1]
+            chunks = np.stack([np.stack([venv._unnorm_action(c[None])[0] for c in ch]) for ch in chunks])
+        ee = np.stack(ee_buf[j]); grip = np.asarray(grip_buf[j]) if grip_buf[j] else np.zeros(len(ee))
+        quat = np.stack(quat_buf[j]) if quat_buf[j] else None
+        flags = {"residue-injected sub-steps": flag_buf[j]} if flag_buf[j] else None
+        k = batch * n + j
+        np.savez_compressed(sig_dir / f"ep{k:03d}.npz", ee_pos=ee, gripper_width=grip,
+                            ee_quat=quat if quat is not None else np.empty((0,)), action_chunks=chunks,
+                            residue_injected=np.asarray(flag_buf[j], float) if flag_buf[j] else np.empty((0,)))
+        plot_episode(sig_dir / f"ep{k:03d}.png", ee=ee, grip=grip, quat=quat, act_chunks=chunks, action_config=acfg,
+                     act_steps=chunks.shape[1], dt=dt, flags=flags,
+                     title=f"eval ep {k} (batch {batch} env {j}): command chunks vs state")
+
+
 def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional[str] = None,
              checkpoint=None, record_batches: Optional[int] = None,
              extra_meta: Optional[dict] = None) -> Dict[str, Any]:
@@ -160,7 +206,7 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
         obs = venv.reset_arg(options)
         policy.reset()
         pcd_buf = [[] for _ in range(n)] if dump_pcd else None    # per-env obs cloud over the episode
-        state_buf = [[] for _ in range(n)] if dump_pcd else None
+        state_buf = [[] for _ in range(n)]              # always: signals.py derives proprio from it
         dr_cols = _scenario_columns(                    # randomization params for this batch
             venv.scenario_params() if hasattr(venv, "scenario_params") else None, n)
 
@@ -180,6 +226,7 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
         # ee_quat carries the pipeline's deliberate quat_noise_std jitter, which would swamp a third
         # derivative. Only meaningful when the venv declares its step period (see policy_dt below).
         ee_buf = [[] for _ in range(n)]
+        quat_buf = [[] for _ in range(n)]; flag_buf = [[] for _ in range(n)]   # signals.py
         grip_buf = [[] for _ in range(n)]
         # ACTION stream per step. Measured separately from the achieved EE path because they answer
         # different questions, and conflating them hides the one that matters for imitation:
@@ -191,13 +238,14 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
         act_buf = [[] for _ in range(n)]
 
         for t in range(spec.max_policy_steps):
+            if isinstance(obs, dict) and "state" in obs:                       # proprio the policy acts on (signals.py)
+                _st = np.asarray(obs["state"])
+                for j in range(n):
+                    state_buf[j].append(_st[j])
             if dump_pcd and isinstance(obs, dict) and "point_cloud" in obs:   # capture the obs the policy ACTS on
                 pc = np.asarray(obs["point_cloud"])                            # (n, [k,] 1024, 3)
-                st = np.asarray(obs["state"]) if "state" in obs else None
                 for j in range(n):
                     pcd_buf[j].append(pc[j])
-                    if st is not None:
-                        state_buf[j].append(st[j])
             if isinstance(obs, dict) and "ee_pos" in obs:      # pre-step: the pose the policy acts on
                 ep = np.asarray(obs["ee_pos"], float).reshape(n, -1)
                 gw = obs.get("gripper_width")
@@ -206,6 +254,11 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
                     ee_buf[j].append(ep[j].copy())
                     if gw is not None:
                         grip_buf[j].append(float(gw[j]))
+                qq = obs.get("ee_quat")
+                if qq is not None:
+                    qq = np.asarray(qq, float).reshape(n, -1)
+                    for j in range(n):
+                        quat_buf[j].append(qq[j].copy())
             action = policy.act(obs)
             _a = np.asarray(action, float)
             if _a.ndim >= 2 and _a.shape[0] == n:
@@ -235,7 +288,19 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
                 oz = np.asarray(oz, float).reshape(n)
                 for j in range(n):
                     z_buf[j].append(float(oz[j]))
+            fr = info.get("aug_residue")                    # per-env: obs augmentation injected residue this step
+            if fr is not None:
+                fr = np.asarray(fr, float).reshape(n)
+                for j in range(n):
+                    flag_buf[j].append(float(fr[j]))
 
+        # Per-episode COMMAND-vs-STATE signals (gentle_manip.evaluation.signals): decoded action chunks
+        # over the sampled state, + binary per-step flags (e.g. residue injected). Best-effort.
+        try:
+            _write_signals(out_dir, i, n, ee_buf, grip_buf, quat_buf, act_buf, flag_buf, venv, experiment_name, spec,
+                           state_buf=state_buf)
+        except Exception as _e:                                  # noqa: BLE001
+            print(f"  [signals] skipped for batch {i}: {_e}", flush=True)
         if dump_pcd:                                   # save one npz per episode (batch i, env j)
             for j in range(n):
                 np.savez_compressed(

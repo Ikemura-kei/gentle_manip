@@ -71,9 +71,15 @@ def main() -> None:
         np.savez_compressed(args.out / f"{split}.npz", **arrs)
     np.savez_compressed(args.out / "normalization.npz", obs_min=obs_min, obs_max=obs_max,
                         action_min=act_min, action_max=act_max)
-    with open(args.out / "SOURCES.txt", "w") as f:
-        f.write("\n".join(str(d) for d in args.datasets) + "\n")
-    print(f"saved {args.out} (joint renormalized; sources in SOURCES.txt)")
+    import yaml
+    srcs = []                                        # union of the inputs' provenance manifests
+    for d in args.datasets:
+        m = d / "sources.yaml"
+        srcs += (yaml.safe_load(m.read_text()) or {}).get("sources", []) if m.exists() \
+            else [dict(path=str(d), n_episodes=None, experiment=None, task_name=None, git_commit=None)]
+    with open(args.out / "sources.yaml", "w") as f:
+        yaml.safe_dump(dict(sources=srcs, merged_from=[str(d) for d in args.datasets]), f, sort_keys=False)
+    print(f"saved {args.out} (joint renormalized; provenance in sources.yaml)")
 
 
 if __name__ == "__main__":
