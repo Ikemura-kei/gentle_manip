@@ -9356,3 +9356,36 @@ plane, 29.8 mm on the board). Kinematic pairing quality: EE ≤ 1.5 mm, quat ≤
   axis, clamped to [`STANDOFF_MIN` 4 cm, `STANDOFF_MAX` 10 cm]: a start near the axis gets a short lateral
   move onto it then a straight descent; far starts (home, in_air) get a monotonic diagonal to the 10 cm point;
   only a start under 4 cm along the axis lifts (≤ a few cm, collision safety). Same rule for re-targets.
+
+### 2026-09-06 — FROZEN PIPELINE PROFILED ON THE CLUSTER (8 objects, 1 job each): 5 pass strongly, 3 die on ONE latent planner bug
+
+First cluster run of the frozen v4.1 synthesis (master 05f5020). Adaptation of
+`scripts/final/profile_demo_collection.sh`: identical collector flags, ONE SLURM JOB PER OBJECT,
+aggregated after (`scripts/arrhenius/profile_demo_collection_cluster.sh` + `aggregate_profile.py`).
+Full table + failure diagnosis: `logs/profile_demo_collection/260905-2055/summary.md`.
+
+**Results (20 eps x 10 envs, seed 0, table-z 0.0138):** tofu 100%, strawberry 95%, tomato 95%,
+prim_cylinder_mush 95%, mushroom 91% success; sub-yield 97-100%; mean max-stress 0.32-0.61x yield;
+54-80 s/saved episode. Matches or beats the local §3 reference (mushroom 91 vs 80 local).
+
+**⚠ LATENT PLANNER BUG — killed 3/8 objects (banana_chunk, cherry_tomato, raspberry@59min):**
+`plan_finger_grasp` (finger_grasp_final.py:708) passes a top-K seed to `cma.CMAEvolutionStrategy`
+as x0 WITHOUT clamping into the declared bounds -> `ValueError: argument of inverse must be within
+the given bounds`, which bypasses the planner's own SYNTH-FAILED fallback and kills the whole run.
+Trigger is hardware-sensitive (GPU FEM score noise changes which seeds reach top-K; local x86
+never promoted an offending seed) but the missing clamp is latent everywhere. Pipeline FROZEN ->
+NOT fixed; minimal guard (failed CMA init -> existing fallback) awaits user approval.
+
+**pymeshlab on GH200 (RHEL9, glibc 2.34) — fixed by a 2-lib swap.** The only aarch64 wheels
+(>=2025.7) are manylinux_2_35; exactly 2 of 96 bundled libs need GLIBC_2.35 (libpython3.12
+Ubuntu build, libQt5Core 5.15.3), the 94 meshlab libs are clean. Swap: PBS aarch64 libpython
+(GLIBC_2.17) + node system Qt 5.15.9 (PMS libs demand only generic Qt_5) ->
+`scripts/arrhenius/fix_pymeshlab_gh200.sh` (RE-RUN after any pymeshlab reinstall). Validated in
+production: tofu + prim_cylinder_mush (coarse-CAD -> isotropic-remesh path) both profiled clean.
+Blast-radius lesson: "which objects need pymeshlab" is a FACE-COUNT question (<=2000 faces =
+coarse -> needs it; tofu is a 192-face CUBE, not a scan — assumption cost one failed job).
+
+**Other cluster notes:** GH200 ~2x local wall per saved episode (execution/MPM-bound; synthesis
+on par). tomato survived a rigid-settle NaN via the collector's own catch-and-rebuild (v4:952) —
+the hardening works. `envs/sim_arrhenius` gained explicit `fast-simplification` (was transitive)
+and the pymeshlab install/swap doc in its pyproject comment.

@@ -40,6 +40,16 @@ dependencies = [
     "matplotlib",
     "pygame",  # keyboard teleop for the in-process sim viewer (examples/sim_teleop_keyboard.py)
     "cma",     # CMA-ES optimizer for grasp synthesis
+    # direct-tet FEM path (2026-09-05 planner): quadric decimation for scans >2000 faces.
+    # Already present transitively via genesis-world; declared to mirror envs/sim.
+    "fast-simplification>=0.1.13",
+    # pymeshlab: needs the POST-INSTALL LIB SWAP in scripts/arrhenius/fix_pymeshlab_gh200.sh
+    # (run on an aarch64 node after ANY reinstall). Its only aarch64 wheels (>=2025.7) are
+    # manylinux_2_35 vs the GH200's glibc 2.34; exactly two bundled libs need 2.35 and the
+    # script swaps them for cluster-native builds — verified working 2026-09-06 (job 2068123).
+    # NOT declared here so a plain `uv sync` (which would refuse the 2_35 wheel and, if it
+    # succeeded, restore the broken libs) stays predictable; install it with the forced-platform
+    # command in that script. envs/sim's <2025 pin is for the x86 lab box (glibc 2.31 wheels).
     # smgrasp — stress-minimization grasp metric Q_SM (grasp_synthesis/smgrasp):
     # tetgen+trimesh come via gentle-manip[sim]; add the FEM/convex-opt/IO stack here.
     "meshio",
