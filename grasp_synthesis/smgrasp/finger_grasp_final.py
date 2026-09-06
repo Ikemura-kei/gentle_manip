@@ -248,7 +248,7 @@ PEN_TOL      = 0.005     # finger-body penetration allowed before `penetrate`
 TABLE_TOL    = 0.002     # finger may dip this far below the table before `table` (execution is capped at the 15 mm TCP floor anyway)
 
 
-def _pre_fem(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, table_z, obj_sdf):
+def _pre_fem(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, table_z, obj_sdf, pen_tol: float = PEN_TOL):
     """Gates 1-3 of the scorer (no FEM). Returns ("done", res) for a rejected candidate, or
     ("fem", ctx) with everything the FEM stage and `_post_fem` need."""
     half_uv = (pad_geo["half_u1"], pad_geo["half_u2"])
@@ -266,7 +266,7 @@ def _pre_fem(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, table_z, obj_sdf):
     # 2. finger-body penetration
     pts = np.vstack([Lw, Rw])[::3]
     sd = obj_sdf(Rinv.apply(pts - np.asarray(obj_com, float)))
-    deep = float(np.maximum(-sd - PEN_TOL, 0.0).max())
+    deep = float(np.maximum(-sd - pen_tol, 0.0).max())
     if deep > 0.0:
         return "done", {"score": -(PEN_BASE + deep * PEN_SLOPE), "status": "penetrate",
                         "holdable": False, "stress_top10": np.inf}
@@ -285,7 +285,8 @@ def _pre_fem(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, table_z, obj_sdf):
     return "fem", {"bc": bc, "center": center, "axis": axis, "wface": wface, "ph": ph, "Rinv": Rinv, "x": x_tcp}
 
 
-def _post_fem(obj, ctx, prim, *, E, density, mu, yield_stress):
+def _post_fem(obj, ctx, prim, *, E, density, mu, yield_stress, w_press: float = None):
+    w_press = W_PRESS if w_press is None else float(w_press)
     """Gates 4-6 and the score, from a FEM primitive (single or batched — identical code)."""
     center, axis, x_tcp = ctx["center"], ctx["axis"], ctx["x"]
     r = evaluate_grasp(obj, center, axis, pad_half=ctx["ph"], delta=None, E=E, density=density, mu=mu,
@@ -316,7 +317,7 @@ def _post_fem(obj, ctx, prim, *, E, density, mu, yield_stress):
                 "stress_top10": r["stress_top10"], "grip": r["grip"], "min_pad_area": float(min_pad),
                 "twist": float(twist / (cap + 1e-12))}
     # score = bulk gentleness (masked top-decile von Mises) + local contact pressure
-    score = -r["stress_top10"] - W_PRESS * pressure
+    score = -r["stress_top10"] - w_press * pressure
     return {"score": float(score), "status": "ok", "holdable": True,
             "stress_top10": float(r["stress_top10"]), "grip": float(r["grip"]), "align": float(align),
             "pressure": float(pressure), "min_pad_area": float(min_pad), "width_face": ctx["wface"],
@@ -324,7 +325,8 @@ def _post_fem(obj, ctx, prim, *, E, density, mu, yield_stress):
 
 
 def score_finger_grasp(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
-                       table_z: float, obj_sdf, yield_stress=None) -> dict:
+                       table_z: float, obj_sdf, yield_stress=None, pen_tol: float = PEN_TOL,
+                       w_press: float = None) -> dict:
     """Score one 7-DOF TCP grasp `[tx,ty,tz,roll,pitch,yaw,width]` (higher = gentler; MAXIMIZED).
 
     Feasibility gates, cheapest first, each returning a shaped penalty below -PEN_BASE:
@@ -337,7 +339,7 @@ def score_finger_grasp(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, densit
     Score of a feasible grasp:  -stress_top10  -  W_PRESS * (grip / smaller pad contact area).
     `score_finger_grasp_batch` evaluates many candidates with ONE GPU solve; same gates, same score."""
     kind, ctx = _pre_fem(obj, x_tcp, obj_com=obj_com, obj_quat_wxyz=obj_quat_wxyz, pad_geo=pad_geo,
-                         table_z=table_z, obj_sdf=obj_sdf)
+                         table_z=table_z, obj_sdf=obj_sdf, pen_tol=pen_tol)
     if kind == "done":
         return ctx
     bc = ctx["bc"]
@@ -346,16 +348,17 @@ def score_finger_grasp(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, densit
     if not prim["valid"]:
         return {"score": _shaped_penalty("no_contact", 0.02), "status": "no_contact",
                 "holdable": False, "stress_top10": np.inf}
-    return _post_fem(obj, ctx, prim, E=E, density=density, mu=mu, yield_stress=yield_stress)
+    return _post_fem(obj, ctx, prim, E=E, density=density, mu=mu, yield_stress=yield_stress, w_press=w_press)
 
 
 def score_finger_grasp_batch(obj, X, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
-                             table_z: float, obj_sdf, yield_stress=None, max_cols: int = None) -> list:
+                             table_z: float, obj_sdf, yield_stress=None, max_cols: int = None,
+                             pen_tol: float = PEN_TOL, w_press: float = None) -> list:
     """`score_finger_grasp` for a list of candidates with ONE batched GPU solve per chunk. Same gates,
     same score (verified to machine precision). Chunks are sized so W = ndof x columns stays < ~1 GB."""
     from .width_grasp import USE_GPU_SOLVE, width_grasp_stress_batch
     pre = [_pre_fem(obj, x, obj_com=obj_com, obj_quat_wxyz=obj_quat_wxyz, pad_geo=pad_geo,
-                    table_z=table_z, obj_sdf=obj_sdf) for x in X]
+                    table_z=table_z, obj_sdf=obj_sdf, pen_tol=pen_tol) for x in X]
     out = [ctx if kind == "done" else None for kind, ctx in pre]
     fem_idx = [i for i, (kind, _) in enumerate(pre) if kind == "fem"]
     if not fem_idx:
@@ -364,7 +367,7 @@ def score_finger_grasp_batch(obj, X, *, obj_com, obj_quat_wxyz, pad_geo, E, dens
         for i in fem_idx:
             out[i] = score_finger_grasp(obj, X[i], obj_com=obj_com, obj_quat_wxyz=obj_quat_wxyz, pad_geo=pad_geo,
                                         E=E, density=density, mu=mu, table_z=table_z, obj_sdf=obj_sdf,
-                                        yield_stress=yield_stress)
+                                        yield_stress=yield_stress, w_press=w_press)
         return out
     cap = max_cols or max(64, int(1.0e9 / (8 * obj.fem.ndof)))
     start = 0
@@ -374,7 +377,8 @@ def score_finger_grasp_batch(obj, X, *, obj_com, obj_quat_wxyz, pad_geo, E, dens
             chunk.append(fem_idx[start]); cols += len(pre[fem_idx[start]][1]["bc"]["nodes"]); start += 1
         prims = width_grasp_stress_batch(obj, [pre[i][1]["bc"] for i in chunk])
         for i, prim in zip(chunk, prims):
-            out[i] = _post_fem(obj, pre[i][1], prim, E=E, density=density, mu=mu, yield_stress=yield_stress)
+            out[i] = _post_fem(obj, pre[i][1], prim, E=E, density=density, mu=mu, yield_stress=yield_stress,
+                               w_press=w_press)
     return out
 
 
@@ -626,6 +630,7 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
         for w in [w0] + list(w0 - _wrng.uniform(0.0, MEDIAL_WIDTH_SPREAD, MULT_FACTOR - 1)):
             prims.append((c, perp, w, "medial"))
     N = len(prims)
+    n_prims = {"antipodal": sum(1 for p_ in prims if p_[3] == "antipodal"), "medial": sum(1 for p_ in prims if p_[3] == "medial")}   # diagnostic
     anchors = np.array([p[0] for p in prims], float); axes = np.array([p[1] for p in prims], float)
     widths = np.array([p[2] for p in prims], float)
 
@@ -678,121 +683,157 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
     seeds = [{"start": k, "x": X[k].copy(), "kind": prims[k][3]} for k in range(N)]
     if stage_cb is not None:
         stage_cb("seeds", {"seeds": seeds, "medial": medial})
-    # ── Step 2: filter — table clearance, rotation box, then per-finger penetration (one batched
-    #    SDF query over the survivors of the two cheap checks) ──
+    # ── Steps 2-7 run per RELAXATION TIER (2026-09-06, user): tier 0 nominal; tier 1 = everything
+    #    relaxed at once: roll/pitch box +10 deg, yaw box +-80 deg, penetration 20 mm (filter + scorer)
+    #    and NO yield gate (past yield accepted as the last resort). A tier is final as soon as it
+    #    yields a holdable grasp; the result carries `tier`. If none does: the filter survivor whose
+    #    TCP is nearest the COM (tier 3, status "fallback_seed"). Tier-0 draws are bit-identical to before.
     zmin = finger_min_world_z_batch(X, pad_geo)
-    for k, sd in enumerate(seeds):
-        x = sd["x"]
-        sd["table_ok"] = bool(zmin[k] >= table_z - TABLE_TOL and x[2] >= tcp_z_min)
-        sd["rot_ok"] = bool(lb[3] <= x[3] <= ub[3] and lb[4] <= x[4] <= ub[4] and lb[5] <= x[5] <= ub[5])
-        sd["pen_ok"] = None                                      # None = not checked
-    cand = [sd for sd in seeds if sd["table_ok"] and sd["rot_ok"]]
-    if cand:
-        Lw, Rw = finger_world_pts_batch([sd["x"] for sd in cand], pad_geo, step=3)   # (n, P, 3) each
-        worst = np.zeros((len(cand), 2))
-        for f, Pw in enumerate((Lw, Rw)):
-            n_, P_, _ = Pw.shape
-            depth = np.maximum(-obj_sdf(Robj_inv.apply(Pw.reshape(-1, 3) - com)), 0.0).reshape(n_, P_)
-            worst[:, f] = depth.max(1)
-        for i, sd in enumerate(cand):
-            sd["pen_ok"] = bool(worst[i].max() <= SEED_PEN_MAX)
-    kept = [sd for sd in cand if sd["pen_ok"]]
-    if stage_cb is not None:
-        stage_cb("filter", {"seeds": seeds, "kept": kept})
-    # ── Step 3: score the survivors; Step 4: top-K ──
-    t0 = time.perf_counter()
-    for sd, res in zip(kept, score_finger_grasp_batch(obj, [sd["x"] for sd in kept], **_kw)):
-        sd["res"], sd["score"], sd["status"] = res, res["score"], res["status"]
-    kept.sort(key=lambda sd: -sd["score"])
-    if stage_cb is not None:
-        stage_cb("score", {"seeds": seeds, "kept": kept, "secs": time.perf_counter() - t0})
-    top = kept[:TOP_K]
-    if stage_cb is not None:
-        stage_cb("topk", {"top": top})
+    lb0, ub0 = list(lb), list(ub)
+    tier_used, fallback_pool = 0, []
+    for tier in range(3):
+        # tier 1: geometry relaxed (roll/pitch +10 deg, yaw +-80 deg, penetration 20 mm), pressure term x2,
+        #         yield gate KEPT (pinch grasps were the relaxed solutions on banana_chunk);
+        # tier 2: tier 1 with the yield gate off (last resort).
+        relax = np.radians(10.0) if tier >= 1 else 0.0
+        lb = list(lb0); ub = list(ub0)
+        lb[3] -= relax; ub[3] += relax; lb[4] -= relax; ub[4] += relax
+        if tier >= 1:
+            lb[5], ub[5] = -np.radians(80.0), np.radians(80.0)
+        seed_pen_max = 0.020 if tier >= 1 else SEED_PEN_MAX
+        _kw["pen_tol"] = 0.020 if tier >= 1 else PEN_TOL
+        _kw["w_press"] = 2.0 * W_PRESS if tier >= 1 else None
+        _kw["yield_stress"] = None if tier >= 2 else yield_stress
+        tier_used = tier
+        # ── Step 2: filter — table clearance, rotation box, then per-finger penetration (one batched
+        #    SDF query over the survivors of the two cheap checks) ──
+        for k, sd in enumerate(seeds):
+            x = sd["x"]
+            sd["table_ok"] = bool(zmin[k] >= table_z - TABLE_TOL and x[2] >= tcp_z_min)
+            sd["rot_ok"] = bool(lb[3] <= x[3] <= ub[3] and lb[4] <= x[4] <= ub[4] and lb[5] <= x[5] <= ub[5])
+            sd["pen_ok"] = None                                      # None = not checked
+        cand = [sd for sd in seeds if sd["table_ok"] and sd["rot_ok"]]
+        if cand:
+            Lw, Rw = finger_world_pts_batch([sd["x"] for sd in cand], pad_geo, step=3)   # (n, P, 3) each
+            worst = np.zeros((len(cand), 2))
+            for f, Pw in enumerate((Lw, Rw)):
+                n_, P_, _ = Pw.shape
+                depth = np.maximum(-obj_sdf(Robj_inv.apply(Pw.reshape(-1, 3) - com)), 0.0).reshape(n_, P_)
+                worst[:, f] = depth.max(1)
+            for i, sd in enumerate(cand):
+                sd["pen_ok"] = bool(worst[i].max() <= seed_pen_max)
+        kept = [sd for sd in cand if sd["pen_ok"]]
+        fallback_pool = kept or cand or fallback_pool
+        if stage_cb is not None:
+            stage_cb("filter", {"seeds": seeds, "kept": kept})
+        # ── Step 3: score the survivors; Step 4: top-K ──
+        t0 = time.perf_counter()
+        for sd, res in zip(kept, score_finger_grasp_batch(obj, [sd["x"] for sd in kept], **_kw)):
+            sd["res"], sd["score"], sd["status"] = res, res["score"], res["status"]
+        kept.sort(key=lambda sd: -sd["score"])
+        if stage_cb is not None:
+            stage_cb("score", {"seeds": seeds, "kept": kept, "secs": time.perf_counter() - t0})
+        top = kept[:TOP_K]
+        if stage_cb is not None:
+            stage_cb("topk", {"top": top})
 
-    # ── Step 5: CMA-ES from each of the top-K seeds (small budget, small step) ──
-    t0 = time.perf_counter(); cur_round[0] = 1
-    # FAILSAFE 1 — cap every seed into the box: `cma`'s bound transform requires x0 strictly
-    # within [lb, ub] and hard-raises otherwise (killed 3/8 objects on the 2026-09-06 cluster
-    # profiling). The filters check only rotation + z-low, so xy/z-high/width can be outside.
-    _lb, _ub = np.asarray(lb, float), np.asarray(ub, float)
-    for sd in top:
-        _xc = np.clip(np.asarray(sd["x"], float), _lb + 1e-6, _ub - 1e-6)
-        if not np.array_equal(_xc, np.asarray(sd["x"], float)):
-            _mv = np.abs(_xc - np.asarray(sd["x"], float))
-            print(f"  [grasp] seed capped into the CMA box (max move {1e3 * _mv[:3].max():.1f} mm / "
-                  f"{np.degrees(_mv[3:6].max()):.1f} deg / {1e3 * _mv[6]:.1f} mm width)", flush=True)
-        sd["x"] = _xc
-    cost_batch([sd["x"] for sd in top])                         # the seeds are the incumbents
-    # FAILSAFE 2 — a seed whose CMA init still fails for ANY reason is dropped, not fatal;
-    # the remaining runs (or, if none survive, the SYNTH-FAILED path) carry on.
-    ess, _top_ok = [], []
-    for i, sd in enumerate(top):
-        try:
-            ess.append(cma.CMAEvolutionStrategy(list(sd["x"]), 1.0,
-                                                {"CMA_stds": CMA_STEP, "maxfevals": CMA_BUDGET_PER_SEED,
-                                                 "bounds": [lb, ub], "seed": seed + i, "verbose": -9}))
-            _top_ok.append(sd)
-        except Exception as e:
-            print(f"  [grasp] CMA init failed for seed {i} ({type(e).__name__}: {e}) — seed dropped",
-                  flush=True)
-    top = _top_ok
-    per_run = [[] for _ in top]                                  # feasible (x, score, res) per run
-    while any(not es.stop() for es in ess):                      # lockstep: one batched score per generation
-        live = [i for i, es in enumerate(ess) if not es.stop()]
-        asks = [ess[i].ask() for i in live]
-        n0 = len(feasible)
-        costs = cost_batch([np.asarray(x, float) for X in asks for x in X])
-        for i, X in zip(live, asks):
-            ess[i].tell(X, costs[:len(X)]); costs = costs[len(X):]
-        k = n0                                                   # attribute new feasible candidates to their run
-        # (feasible entries are appended in ask order, so walk both lists together)
-        for i, X in zip(live, asks):
-            for x in X:
-                if k < len(feasible) and np.array_equal(feasible[k][0], np.asarray(x, float)):
-                    per_run[i].append(feasible[k]); k += 1
-    runs = []
-    for i, sd in enumerate(top):
-        new = per_run[i]
-        bx, bs, br = max(new, key=lambda t: t[1]) if new else (None, -np.inf, None)
-        if sd["score"] >= bs and sd.get("res") is not None and is_real_grasp(sd["score"]):
-            bx, bs, br = sd["x"], sd["score"], sd["res"]        # the incumbent seed was never beaten
-        runs.append({"seed": sd, "x": bx, "score": bs, "res": br, "n_feasible": len(new)})
-    # the best DISTINCT grasps over everything CMA evaluated (top-scoring, 5 mm / 10 deg apart)
-    distinct = _distinct_tcp_poses(feasible, n=TOP_K_CMA, pos_thr=0.005, ang_thr=np.radians(10))
-    by_x = {np.asarray(x, float).tobytes(): (x, sc, res) for x, sc, res in feasible}
-    best_k = sorted(({"x": x, "score": sc, "res": res} for x, sc, res in
-                     (by_x[np.asarray(xb, float).tobytes()] for xb in distinct)),
-                    key=lambda c: -c["score"])
-    if stage_cb is not None:
-        stage_cb("cma", {"runs": runs, "best": best_k, "evals": n_eval[0], "secs": time.perf_counter() - t0})
+        # ── Step 5: CMA-ES from each of the top-K seeds (small budget, small step) ──
+        t0 = time.perf_counter(); cur_round[0] = 1
+        # FAILSAFE 1 — cap every seed into the box: `cma`'s bound transform requires x0 strictly
+        # within [lb, ub] and hard-raises otherwise (killed 3/8 objects on the 2026-09-06 cluster
+        # profiling). The filters check only rotation + z-low, so xy/z-high/width can be outside.
+        _lb, _ub = np.asarray(lb, float), np.asarray(ub, float)
+        for sd in top:
+            _xc = np.clip(np.asarray(sd["x"], float), _lb + 1e-6, _ub - 1e-6)
+            if not np.array_equal(_xc, np.asarray(sd["x"], float)):
+                _mv = np.abs(_xc - np.asarray(sd["x"], float))
+                print(f"  [grasp] seed capped into the CMA box (max move {1e3 * _mv[:3].max():.1f} mm / "
+                      f"{np.degrees(_mv[3:6].max()):.1f} deg / {1e3 * _mv[6]:.1f} mm width)", flush=True)
+            sd["x"] = _xc
+        cost_batch([sd["x"] for sd in top])                         # the seeds are the incumbents
+        # FAILSAFE 2 — a seed whose CMA init still fails for ANY reason is dropped, not fatal;
+        # the remaining runs (or, if none survive, the SYNTH-FAILED path) carry on.
+        ess, _top_ok = [], []
+        for i, sd in enumerate(top):
+            try:
+                ess.append(cma.CMAEvolutionStrategy(list(sd["x"]), 1.0,
+                                                    {"CMA_stds": CMA_STEP, "maxfevals": CMA_BUDGET_PER_SEED,
+                                                     "bounds": [lb, ub], "seed": seed + i, "verbose": -9}))
+                _top_ok.append(sd)
+            except Exception as e:
+                print(f"  [grasp] CMA init failed for seed {i} ({type(e).__name__}: {e}) — seed dropped",
+                      flush=True)
+        top = _top_ok
+        per_run = [[] for _ in top]                                  # feasible (x, score, res) per run
+        while any(not es.stop() for es in ess):                      # lockstep: one batched score per generation
+            live = [i for i, es in enumerate(ess) if not es.stop()]
+            asks = [ess[i].ask() for i in live]
+            n0 = len(feasible)
+            costs = cost_batch([np.asarray(x, float) for X in asks for x in X])
+            for i, X in zip(live, asks):
+                ess[i].tell(X, costs[:len(X)]); costs = costs[len(X):]
+            k = n0                                                   # attribute new feasible candidates to their run
+            # (feasible entries are appended in ask order, so walk both lists together)
+            for i, X in zip(live, asks):
+                for x in X:
+                    if k < len(feasible) and np.array_equal(feasible[k][0], np.asarray(x, float)):
+                        per_run[i].append(feasible[k]); k += 1
+        runs = []
+        for i, sd in enumerate(top):
+            new = per_run[i]
+            bx, bs, br = max(new, key=lambda t: t[1]) if new else (None, -np.inf, None)
+            if sd["score"] >= bs and sd.get("res") is not None and is_real_grasp(sd["score"]):
+                bx, bs, br = sd["x"], sd["score"], sd["res"]        # the incumbent seed was never beaten
+            runs.append({"seed": sd, "x": bx, "score": bs, "res": br, "n_feasible": len(new)})
+        # the best DISTINCT grasps over everything CMA evaluated (top-scoring, 5 mm / 10 deg apart)
+        distinct = _distinct_tcp_poses(feasible, n=TOP_K_CMA, pos_thr=0.005, ang_thr=np.radians(10))
+        by_x = {np.asarray(x, float).tobytes(): (x, sc, res) for x, sc, res in feasible}
+        best_k = sorted(({"x": x, "score": sc, "res": res} for x, sc, res in
+                         (by_x[np.asarray(xb, float).tobytes()] for xb in distinct)),
+                        key=lambda c: -c["score"])
+        if stage_cb is not None:
+            stage_cb("cma", {"runs": runs, "best": best_k, "evals": n_eval[0], "secs": time.perf_counter() - t0})
 
-    # ── Step 6: width refine — a 1-D scan at each CMA result's pose (widest holdable = gentlest) ──
-    t0, cur_round[0], refined = time.perf_counter(), 2, []
-    X2, owner = [], []
-    for j, c in enumerate(best_k):
-        xb = np.asarray(c["x"], float)
-        for w in np.clip(xb[6] + np.linspace(-REFINE_HALF, REFINE_HALF, REFINE_SCAN), WIDTH_MIN, WIDTH_MAX):
-            x2 = xb.copy(); x2[6] = w; X2.append(x2); owner.append(j)
-    R2 = score_finger_grasp_batch(obj, X2, **_kw)
-    for x2, res in zip(X2, R2):
-        _record(x2, res)
-    for j, c in enumerate(best_k):
-        xb = np.asarray(c["x"], float)
-        rows = [(x2, res) for x2, res, o in zip(X2, R2, owner) if o == j]
-        curve = [(x2[6], res["score"]) for x2, res in rows]
-        cands = [(x2, res["score"], res) for x2, res in rows if is_real_grasp(res["score"])]
-        bx, bs, br = max(cands, key=lambda t: t[1]) if cands else (xb, c["score"], c["res"])
-        if c["score"] >= bs:                                     # the CMA width was already the best
-            bx, bs, br = xb, c["score"], c["res"]
-        refined.append({"from": c, "x": bx, "score": bs, "res": br, "curve": curve})
-    refined.sort(key=lambda r: -r["score"])
-    if stage_cb is not None:
-        stage_cb("refine", {"refined": refined, "secs": time.perf_counter() - t0})
+        # ── Step 6: width refine — a 1-D scan at each CMA result's pose (widest holdable = gentlest) ──
+        t0, cur_round[0], refined = time.perf_counter(), 2, []
+        X2, owner = [], []
+        for j, c in enumerate(best_k):
+            xb = np.asarray(c["x"], float)
+            for w in np.clip(xb[6] + np.linspace(-REFINE_HALF, REFINE_HALF, REFINE_SCAN), WIDTH_MIN, WIDTH_MAX):
+                x2 = xb.copy(); x2[6] = w; X2.append(x2); owner.append(j)
+        R2 = score_finger_grasp_batch(obj, X2, **_kw)
+        for x2, res in zip(X2, R2):
+            _record(x2, res)
+        for j, c in enumerate(best_k):
+            xb = np.asarray(c["x"], float)
+            rows = [(x2, res) for x2, res, o in zip(X2, R2, owner) if o == j]
+            curve = [(x2[6], res["score"]) for x2, res in rows]
+            cands = [(x2, res["score"], res) for x2, res in rows if is_real_grasp(res["score"])]
+            bx, bs, br = max(cands, key=lambda t: t[1]) if cands else (xb, c["score"], c["res"])
+            if c["score"] >= bs:                                     # the CMA width was already the best
+                bx, bs, br = xb, c["score"], c["res"]
+            refined.append({"from": c, "x": bx, "score": bs, "res": br, "curve": curve})
+        refined.sort(key=lambda r: -r["score"])
+        if stage_cb is not None:
+            stage_cb("refine", {"refined": refined, "secs": time.perf_counter() - t0})
 
-    # ── Step 7: selection — the best refined grasp ──
-    sel_x, sel_res = (refined[0]["x"], refined[0]["res"]) if refined else (best["x"], best["res"])
-    if stage_cb is not None:
+        # ── Step 7: selection — the best refined grasp ──
+        sel_x, sel_res = (refined[0]["x"], refined[0]["res"]) if refined else (best["x"], best["res"])
+        if sel_res is not None and sel_res.get("holdable"):
+            break                                                    # this tier produced a holdable grasp
+        if tier < 2:
+            print("  [synth] tier %d: no holdable grasp -> %s" % (tier, "relaxing geometry (roll/pitch +10 deg, yaw +-80 deg, "
+                  "penetration 20 mm), pressure weight x2, yield gate kept" if tier == 0 else "yield gate off"), flush=True)
+    else:                                                            # every tier failed: nearest-COM survivor
+        tier_used = 3
+        if fallback_pool:
+            sd = min(fallback_pool, key=lambda sd: float(np.linalg.norm(np.asarray(sd["x"][:3]) - com)))
+            sel_x, sel_res = sd["x"], {"status": "fallback_seed", "holdable": False, "score": -np.inf,
+                                       "stress_top10": float("inf")}
+            print("  [synth] every tier failed -> nearest-COM filter survivor (fallback_seed)", flush=True)
+    # ONE "final" stage for the viewer, after the tiers (an intermediate tier's None result used to reach
+    # the viewer and crash it before the next tier could run — dev_synth, 2026-09-06).
+    if stage_cb is not None and sel_x is not None:
         stage_cb("final", {"x": sel_x, "res": sel_res, "evals": n_eval[0]})
     r = sel_res or {}
     out = {"x": sel_x if sel_x is not None else best["x"],
@@ -800,10 +841,11 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
            "stress_top10": r.get("stress_top10"), "grip": r.get("grip"), "align": r.get("align"),
            "pressure": r.get("pressure"), "min_pad_area": r.get("min_pad_area"),
            "width_face": r.get("width_face"), "tilt_deg": r.get("tilt_deg"), "twist": r.get("twist"),
-           "status": r.get("status")}
+           "status": r.get("status"), "tier": tier_used}
     if record_history:
         out["history"] = history
         out["seeds"] = seeds
+        out["n_prims"] = n_prims                              # seeds per generator (diagnostic; 0/0 = no primitive found)
     return out
 
 

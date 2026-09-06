@@ -9586,3 +9586,86 @@ sbatch output through `grep | head` without line-buffering — 4KB block bufferi
 until EOF, indistinguishable from the hang it was meant to reveal. (c) the DR-applied spec is
 SimBackend._spec (mesh_path baked); _nominal_spec entries carry mesh_path=None (registry resolves
 at build). Gate-histogram tooling was removed at user request (local agent owns banana now).
+
+**2026-09-06 late — raspberry material A/B VERDICT: numerics, not material.** At E=1.6e5/yield=2e4
+(substeps unchanged at 560) every batch ABORTED with the rigid-solver NaN ("Invalid constraint
+forces causing 'nan'") before saving anything — job 2081797 killed after 3 aborted batches
+(log: rasp_mat_260906-2154/raspberry.log). Progression matches the CFL prediction exactly:
+E=1e5 -> shatter (marginal), E=1.6e5 -> NaN (margin ~30% short; needed ~730-780 by the
+mushroom-calibrated substeps ~ grid x sqrt(E) GH200 scaling vs configured 560).
+**Conclusion: raspberry's 0% is INTEGRATION STABILITY at grid 600, not material weakness.** The
+new material values are fine but need sim_substeps ~760 to go with them (config change, untested
+— pending user/local-agent decision).
+
+**2026-09-06 night — raspberry PARKED (user decision) after option C also failed.** Smoothed
+size-preserving meshes (necks voxel-closed/dilated, watertight, bbox to 0.1mm —
+raspberryN_smooth.obj + .agent_tmp-era pipeline now at scripts/arrhenius/simplify_raspberry_mesh.py)
+with ORIGINAL material (E=1e5/yield=1.5e4) and substeps 560: no NaNs, CSV metrics looked healthier
+(sigma/yield 0.59-0.99 vs 1.0-1.27), but the user's video read: STILL SHATTERS; 0/10, ever=0.
+Full negative-results trail this session: spawn 0.037->0.05 (no effect), E/yield raise x1.6/x1.33
+(NaN at 560 substeps), cherry-level E=4e5 + substeps 760 (still NaN; needs ~1120 by the
+raspberry-anchored CFL scaling), smooth meshes (above). Registry reverted to the original meshes;
+material/DR/substeps/spawn all back at original values. Open leads if ever resumed: substeps
+~1120 at low E (cost), grid reduction WITH the smooth mesh, per-particle-mass/coupling-side fixes
+in Genesis, or dropping raspberry from the object set. Cost note: raspberry executes at 0.46
+FPS/env on GH200 (grid-600 bill, ~7x the local reference) -> ~15-20 min/batch.
+**Resolution (user): raspberry will be COLLECTED ON THE LOCAL DEVICE**, where the recipe held —
+consistent with the GH200-vs-local MPM instability precedent (mushroom fragments/NaNs on GH200 at
+settings that worked locally). Cluster raspberry collection is off the table for now.
+
+- **Round 3 `vigrl` (2026-09-06 20:24-21:26, 1200 ep, 3.0 s/ep): same as round 2 except offsets +-6 mm (was 8/12), consistency frac 0.3
+  (was 0.5), tail K=20 (was 60).** val min 0.00456 @ 670 (round 2: 0.00468 @ 1340). **Consistency loss flat at ~0.00005 for all 1200
+  epochs** — round 2's 80x late drift is gone (smaller offset and/or smaller fraction; not separable here). Acceptance replay at 750
+  passes at ~2x round 2's sensitivity (1.6-2.1 mm vs 0.7-1.0; round 1: 4-7). Clean teasers 750/1200 pending.
+- **Round 3 clean teasers (same scenarios): state_750 4/20 (ever 6), state_1200 7/20 (ever 11) vs round-2 qzhek_750 10/20 (ever 10).**
+  Retry restored (failed episodes re-open: 9-11 vs 2), empty-grasp holds 4-5 vs 8 — the K=20 tail did what it was for — but 4
+  reached-then-lost at 1200 (0 in round 2) and 6 scenarios round 2 solved now slip at lift-off (fingers closed on the tofu, tofu left
+  in place; at 750 the close was 2-3 mm wider, at 1200 not consistently so). 750 -> 1200 still improving (+3 succ, +5 in-band) and the
+  consistency loss is flat (no late drift), so a longer run is safe now. Nothing launched; next-round knobs to choose: epochs 2000,
+  tail K 30-40, consistency frac 0.5. All signal plots in <eval>/signals/.
+- **Synthesis-only diagnosis tool (2026-09-06):** `collect_demos_synth_v4.py --skip-execution` (synthesize, record, reset — nothing
+  executed or saved; `--n-episodes` = attempts) + `scripts/final/synth_diagnose.sh <obj> <attempts> <envs> <seed>`. Per env it records
+  seeds per generator (antipodal/medial), rejections by filter (table/tcp_z, rotation box, penetration), scored statuses and holdable
+  count, CMA evals/holdable/statuses, refine, final status (or FALLBACK) -> `<run>/synth_stats.csv` + a per-batch aggregate. Planner
+  gained one read-only diagnostic field (`n_prims`) under record_history; logic untouched. banana_chunk seed 0, 2 attempts: batch 1
+  (bend -11.5°) 5 holdable of 1647 scored -> ok; batch 2 (bend +5.8°) 4600 seeds, 3008 cut by the ROTATION BOX, 1261 scored with 12
+  `ok` but 0 holdable, CMA 2436 evals 0 holdable -> FALLBACK. So "no solution" = every candidate fails holdability on that draw, not an
+  empty seed pool. Which condition inside `is_real_grasp` fails is the next question (the tool prints statuses, not the holdability sub-reason).
+- **Planner: tiered relaxation when NO holdable grasp exists (2026-09-06, user design):** tier 0 nominal -> tier 1 roll/pitch box
+  +10 deg -> tier 2 additionally penetration 20 mm (seed filter + scorer `pen_tol`, threaded as a kwarg) and yield gate off -> tier 3
+  nearest-COM filter survivor (`fallback_seed`). Steps 2-7 re-run per tier on the same seed pool; the first tier with a holdable
+  grasp wins. A/B on the same two banana_chunk draws: the draw that already had a solution is bit-identical (tcp/width/align/grip
+  equal, stress 11972 vs 11971 Pa = FEM GPU noise); the failing draw (bend +5.8 deg) walked tiers 0-1 empty and found a holdable
+  grasp at tier 2 (0.65 N, 33 mm, 12 kPa — under yield: the PENETRATION cap on width was the binding constraint, not stress).
+  Recorded: `tier` in the planner dict, `synth_tier` per episode in dr_params.csv, `synth_tiers` histogram in stats.yaml,
+  `tier` in synth_stats.csv. NOTE: this is a synthesis-logic change relative to the collector pushed for the cluster.
+- **banana_chunk synth diagnosis, seed 0, 10 attempts, tiered planner: 10/10 solutions (was ~1 per few draws).** Tiers: 6 at tier 0,
+  0 at tier 1, 4 at tier 2 — the +10 deg rotation relaxation alone never produced a holdable grasp; the penetration cap on width was
+  the binding constraint every time (consistent with the friction-gate reasoning). Tier-0 draws that succeeded had as few as 1-2
+  holdable seeds (batches 4/6/7) — banana_chunk sits at the edge of feasibility at nominal settings. Tier-2 grasps: widths 33.3,
+  11.0, 30.9, 22.5 mm at 10-17 kPa (all under yield). CAUTION: the 11 mm grasp (batch 3, scale 1.078) is a ~10 mm/side indent on a
+  ~35 mm chunk — the FEM's indentation model is not validated that deep; consider a tier-2 penetration cap of ~15 mm or a width
+  floor before the cluster adopts this. `synth_stats.csv` rows report the counts of the FINAL tier reached.
+- **Merged the cluster's planner change (origin 0eeed8d: bbox-centred 1.3x CMA box + two CMA-init failsafes) with the local tiered
+  relaxation (2026-09-06 night).** Conflict in `finger_grasp_final.py` resolved by keeping the tier loop and splicing the two failsafes
+  verbatim (indented) into its CMA step; the bbox-centred `lb/ub` feeds the tiers' base bounds. Two-attempt banana_chunk check on
+  the merged planner: both draws resolve (batch 1 at tier 0, batch 2 at tier 2), no failsafe fired. NOTE the selected grasps differ
+  from the pre-merge run on the SAME seeds (batch 1: 28.2 mm @ 20.9 kPa vs 30.6 mm @ 12.0 kPa) — that is the wider, bbox-centred
+  search box, not the tiers (tier 0 draws were bit-identical before the merge). User runs the verification smoke. Uncommitted.
+- **Tiers collapsed to TWO (user, to save time): tier 0 nominal; tier 1 = roll/pitch +10 deg, yaw box +-80 deg (was +-60), penetration
+  20 mm, yield gate off, all at once; nearest-COM survivor = tier 2 (`fallback_seed`).** Viewer fix: the `final` stage is emitted ONCE
+  after the tiers (an intermediate tier's None result crashed dev_synth's viewer before tier 1 could run). Two-attempt banana_chunk
+  check: draw 1 tier 0 (28.2 mm @ 20.9 kPa, same as the merged run), draw 2 tier 1 (18.5 mm @ 13.3 kPa). Supersedes the 3-tier
+  entries above; the 10-attempt 3-tier stats stand as the diagnosis of WHY (penetration cap on width).
+- **Tiers, final form (user): tier 0 nominal; tier 1 geometry relaxed (roll/pitch +10 deg, yaw +-80 deg, penetration 20 mm) with
+  the YIELD GATE KEPT and the pressure term DOUBLED (`w_press` threaded through `_post_fem` and both scorers, default unchanged);
+  tier 2 = tier 1 with yield off; tier 3 nearest-COM survivor.** Motivation: the relaxed solutions on banana_chunk were pinches.
+  Effect on the failing draw: tier 1 now selects a 42.6 mm grasp @ 17.7 kPa, align 0.83, grip 0.37 N — where the yield-off pinch
+  was 18.5 mm, align 0.45. Draw 1 unchanged (tier 0, 28.2 mm). Supersedes the two-tier entry.
+
+### 2026-09-06 (night) — FROZEN v4.2 collector for the cluster campaign
+Frozen state (this commit): collector `N_HOLD = 10` (user's choice; trailing hold never trimmed), disturbance never combined with
+`above_object` starts, planner = cluster's bbox-centred 1.3x CMA box + CMA-init failsafes + tiered relaxation (tier 0 nominal;
+tier 1 geometry relaxed + pressure x2 + yield kept; tier 2 yield off; tier 3 nearest-COM survivor), `synth_tier` recorded per
+episode. Diagnose tool: `scripts/final/synth_diagnose.sh` (`--skip-execution`). No other synthesis/execution change since the
+2026-09-05 freeze. Verified: nominal draws bit-identical to the pre-tier planner; two-attempt banana_chunk check resolves both draws.
