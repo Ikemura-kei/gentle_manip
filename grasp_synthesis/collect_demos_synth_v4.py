@@ -78,7 +78,11 @@ N_SETTLE      = 1           # hold at grasp pose before closing
 N_DWELL       = 2            # hold at the final close width before lifting (MPM contact settles)
 EXEC_EXTRA_CLOSE = 0.0008    # m — execute the PLANNED width minus this (total width; 19.0 mm planned -> 18.2 mm)
 N_LIFT        = 66          # lift steps
-N_HOLD        = 12           # hold at lift height (success eval window)
+N_HOLD        = 20           # hold at lift height, FROZEN 2026-09-06 (user): 20 steps = 5 action chunks of 'arrived,
+                             # stay closed'. 60 (24 % of frames) overwrote re-open-on-empty-grasp; 12 trimmed to 4
+                             # _trim_long_holds -> demos ended at the TOP of the lift (median 1 frame after max
+                             # height): the policy had no data for 'stay closed at height' and re-opened mid-air
+                             # (sim teaser 8/17 lift-then-release; real deploys). The trailing run is now KEPT.
 LIFT_HEIGHT   = 0.2         # metres above grasp position
 
 # ── Action inversion ──────────────────────────────────────────────────────────
@@ -347,9 +351,16 @@ HELD_RUN_EPS  = 1e-5
 
 
 def _trim_long_holds(act_list, *parallel_lists, max_run=HELD_RUN_MAX,
-                     keep=HELD_RUN_KEEP, eps=HELD_RUN_EPS):
+                     keep=HELD_RUN_KEEP, eps=HELD_RUN_EPS, keep_tail=True):
     """Collapse runs of MORE THAN `max_run` consecutive near-identical actions down
     to `keep` frames (keep the first `keep` of the run, discard the rest). The SAME
+    kept-index selection is applied to every list in `parallel_lists`.
+
+    keep_tail=True (default since 2026-09-06): the run that ENDS THE EPISODE (the final
+    hold at lift height) is never trimmed — it is the only supervision for "you have
+    arrived: keep commanding this pose with the gripper closed". Trimming it to 4 frames
+    left the policy with no post-arrival data (hold-tail deficit). Mid-episode runs (the
+    grasp dwell, a stalled approach) are still collapsed as before.
     kept-index selection is applied to every list in `parallel_lists` (obs/rewards/
     frames), so everything stays aligned after trimming.
 
@@ -374,7 +385,7 @@ def _trim_long_holds(act_list, *parallel_lists, max_run=HELD_RUN_MAX,
         same = t < T and np.linalg.norm(acts[t] - acts[run_start]) < eps
         if not same:
             run_len = t - run_start
-            if run_len > max_run:
+            if run_len > max_run and not (keep_tail and t == T):
                 keep_mask[run_start + keep: t] = False   # drop the tail of this run
             run_start = t
 
@@ -1087,6 +1098,8 @@ def main() -> None:
             init_obs_batch = _initial_obs(init_state)
         drags = {}
         for i in range(n):
+            if start_mode[i] == "above_object":          # never together (user, 2026-09-06): disturbance_prob is
+                continue                                  # the probability CONDITIONAL on the start not being above_object
             if start_rng.random() < dr_cfg.disturbance_prob or os.environ.get("GM_DISTURB"):
                 th, sp = start_rng.uniform(0, 2 * np.pi), start_rng.uniform(*DRAG_SPEED)
                 drags[i] = (int(start_rng.integers(DRAG_STEP[0], DRAG_STEP[1] + 1)), np.array([np.cos(th) * sp, np.sin(th) * sp, 0.0], np.float32))
