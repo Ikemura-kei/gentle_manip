@@ -16,6 +16,24 @@ apply it: demos are recorded clean, train-time augmentation lives in the trainin
 real deploy crop **[v4.2]**). Collection, training and eval all load the same file (`Experiment.load`).
 Naming: `single_lift_<object>_soft_abs_action_armfocus_7d_realws`.
 
+## 1b. Worked example: what a tofu collection run actually uses (and does NOT)
+`single_lift_tofu_soft_abs_action_armfocus_7d_realws.yaml` → the collector reads exactly four leaves
+(`exp.task_cfg`, `exp.collection_obs()`, `exp.action_config`, `exp.dr`); `augmentation:` is never read.
+
+| leaf | file | what the collector takes from it |
+|---|---|---|
+| task | `tasks/single_lift_tofu_soft.yaml` | object `tofu`, spawn z 0.062 on the 13.8 mm board (centre 0.41, 0), MPM grid 250 / 235 substeps, `hold_steps` 30, camera at the **2026-09-05 recalibrated extrinsic**: pos (0.780, −0.004, 0.289), lookat (0.259, 0.012, 0.014), fov 43.15° |
+| obs | `obs/superset_soft_armfocus_board.yaml` | crop z ≥ 19 mm (= real deploy), 1024 points, voxel outlier filter (1 cm / 23 neighbours), object focus (z < 12 cm or within 11 cm of the EE), quat jitter 0.003; privileged stress/object-pos/contact labels. **No `ground_residual` block** (that filter is real-only, in `point_cloud_1cam_armfocus.yaml`) |
+| action | `action/abs_pose_euler_abs_gripper_z15.yaml` | TCP box x 0.26–0.55, y ±0.225, z 0.015–0.50; 10-D rot6d actions are RECORDED (gripper last), converted to 7-D euler at training time with this yaml + `abs_pose_abs_gripper_z15.yaml` as the source |
+| dr | `dr/soft_orientation_realws_tofu.yaml` | object xy x 0.30–0.46, y ±0.12; yaw ±180°, pitch/roll ±45°, 25 % flips; scale 0.8–1.4, taper ±0.01; E 3–8e4, ν 0.28–0.38, ρ 900–1100, coupling friction 3.5–4.5; home jitter 2 cm; start modes home 0.6 / in_air 0.15 / above_object 0.15 / mid_approach 0.1; `disturbance_prob` 0.1 (never with above_object) |
+
+**Not used by collection (train-time or real-side only):** the `d435i_noise*` augmentation yamls (sensor
+noise, leaked-residue clusters, occlusion patch), the rigid cloud offset, the encoder consistency and
+paired real–sim terms, the hold-tail post-processing (`augment_hold_tail`; the collector records the hold
+natively), and the real deploy's `ground_residual` filter. The collector and planner reference none of
+these symbols (checked 2026-09-06). Recorded demos are therefore CLEAN sim clouds through the deploy-
+identical crop/filters; every robustness measure is applied afterwards, in the loss or on the rig.
+
 ## 2. Per batch (10 envs, one Genesis scene)
 1. **Scene DR** (every batch): one mesh variant — size (`object_scale`), shape (bend/twist/taper/axis
    scale), material (E, ν, ρ; yield is NOT randomised: registry material) — shared by the 10 envs.
