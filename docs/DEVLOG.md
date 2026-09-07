@@ -9683,3 +9683,36 @@ episode. Diagnose tool: `scripts/final/synth_diagnose.sh` (`--skip-execution`). 
   the LAST column, which since v4.2 is `synth_tier` — column index fixed (-2). Rows of runs collected between e7ca088 and this fix
   have the dataset index in `synth_tier` and an empty `dataset_idx`. Partial run 26-09-06-xxg kept (35 valid episodes, snapshot
   completed by hand, NOTE.txt); collection resumed as a new run with SEED=1 for the remaining 215.
+
+### 2026-09-07 — COLLECTION CAMPAIGN COMPLETE: 20/23 objects at target, ~4,700 demos in ~5h wall
+
+Frozen v4.2 (e7ca088..8109ff4), one job/object, seed 0, cluster; live board + watchdogs (auto
+kill/reseed). Full per-object stats in each run's stats.yaml; board generator in .agent_tmp.
+
+**Main campaign (550/250/50 targets):** tofu 550@98.0%, prim_cylinder 550@97.2%, mushroom
+550@92.7%, prim_ellipsoid 550@82.2% (pitch/roll DR capped at 5 deg — user, anti-penetration),
+prim_cuboid 250@99.6%, prim_sphere 250@92.3%, banana_chunk 250@73.1% (!! was 18% pre-v4.2 —
+the relaxation tiers fixed its no-solution problem), cherry_tomato 50@83.3%, pasta_bundle
+50@79.4% (was ~45% historically).
+
+**PARKED partials (user decision pending, all banked data valid + snapshotted):**
+- tomato 424/550: rigid-solver NaN killed BOTH seeds (chronic GH200 tomato class; likely fix
+  substeps 175->350 per the ss350 eval precedent, but that mixes fidelity mid-dataset).
+- strawberry 77/550: tetgen HANG on both seeds ("Steiner points..." + "input triangles skipped
+  due to self-intersections") — the 28k-face scan's self-intersection blows up direct-tet under
+  deform draws; fix = mesh repair/decimation (mesh-lane).
+
+**Basic-shapes batch (18 GLB primitives + torus, mushroom material, scale [0.9,1.2], extents
+U(2.5,4.5)cm seed 7):** FEM gate (direct-tet + extent-ratio ~1.00) passed 11+torus, EXCLUDED 7
+(bs_cube4/5, cylinder/2, decagon/hexagonal pyramid, pyramid: planner repair inflates extents
+1.04-1.77x). Collected: bs_cube2 100@98, bs_cube3 100@100, bs_cylinder3 100@68, bs_dodecagon
+100@100, bs_icosahedron 100@99, bs_icosphere 100@94, bs_pentagon 100@100, bs_sphere 100@97,
+bs_star 100@74, bs_quadrangular_pyramid 100@47 (under its 250-attempt cap), prim_torus_mush
+50@98 (z-thickened 14->25mm). bs_cube (octahedron) = partial ~10/100: its FEM exploded to 45k
+tets (gate checked ratio, NOT tet count — add that bound) + tier-2 grind/hang; walltime-reaped.
+
+**Ops record:** 2 pre-fix jobs died of the tier-exhaustion print crash? NO — zero hit it (the
+hotfix mattered for the bs batch which launched post-fix). Kills/reseeds: strawberry x2 (hangs),
+tomato x2 (NaNs), all with manual config snapshots; bs caps enforced automatically. Board:
+claude.ai artifact, 30-min refresh + event refreshes; stale-August-glob and grep-c||echo-0
+watchdog bugs found+fixed en route (both B1-class reference errors).
