@@ -412,3 +412,59 @@ Full rationale in `docs/e1_100ep_ablation_design.md`; operational summary:
   occ filter for naive/antipodal/gpd (rigid has it).
 - Analysis: Wilson CIs per cell + McNemar paired tests on the shared 20 geometries for
   the key contrasts (v4.1 vs rigid_v41w, v4.1 vs antipodal, naive−2 vs naive−5).
+
+## 5. Standardized ablation harness (2026-09-07) — `grasp_synthesis/grasp_synth_ablation.py`
+
+E1/E2 re-run under the CURRENT frozen recipe, with the 2026-08-31 machinery generalized into one
+plug-and-play script. **Only grasp pose generation varies**: the script imports the frozen collector
+`collect_demos_synth_v4.py` as a module and rebinds exactly one name at runtime,
+`finger_grasp_final.synthesize_grasp`. Executor FSM, phase timings, hold tail, disturbance draw, DR,
+stress recording, video, `dr_params.csv` / `stats.yaml` schema and the config snapshot are the SAME
+code objects the training data was collected with. `--method ours` applies NO patch at all, so
+"ours is bit identical to data collection" is guaranteed by construction. **No frozen file is edited**
+(collector, `finger_grasp_final.py`, `baseline_synth.py` are all read-only to this harness).
+
+    OBJ=tofu N_EPISODES=16 METHOD=rigid WIDTH_MODE=extent5 bash grasp_synthesis/run_ablation.sh
+
+| `--method` | pose selection | source |
+|---|---|---|
+| `ours` | frozen v4.2 FEM-surrogate CMA-ES + tier ladder | `finger_grasp_final.plan_finger_grasp` |
+| `naive` | top-down at the settled centre, uniform-random yaw | `baseline_synth.naive_topdown` |
+| `antipodal` | surface-pair sampling, Nguyen cone-margin ranking | `baseline_synth.antipodal` |
+| `rigid` | 4000-sample antipodal sweep -> top-K re-ranked by the full geometric scorer (align, pad area, COM lever, holdability) — every term ours uses EXCEPT stress. **This is the "antipodal + rigid quality" baseline.** | `baseline_synth.rigid_planner` |
+| `sdf` | v2's hand-tuned SDF geometric cost, 7-DOF CMA-ES (E2) | `synth_utils.grasp_cost` + `run_cmaes` |
+| `gpd` | GPD (ten Pas et al., IJRR 2017) | `baseline_synth.gpd_planner` + `third_party/gpd` |
+| `gn1b` | GraspNet-baseline (Fang et al., CVPR 2020) | `baseline_synth.gn1b_planner` |
+| `cgn` | Contact-GraspNet — available, not in the paper set | `baseline_synth.cgn_planner` |
+
+**Width (`--width-mode`).** `extent5` (default) = object cross-section along the grasp's closing
+axis, measured in the slab the pads touch, minus `--width-squeeze` (5 mm), applied uniformly so the
+comparison isolates the pose. `extent` = the same with NO squeeze — the reviewer-proof variant if
+subtracting 5 mm is called a handicap; report both. `native` = each generator's own convention
+(GPD aperture, GraspNet width, antipodal pair distance). `fem` = **our FEM surrogate picks the
+width on the baseline's pose**, using the frozen planner's own width-refine stage (1-D scan of
+`REFINE_SCAN` widths over +-`REFINE_HALF`, scored by `score_finger_grasp_batch`, widest holdable
+wins). `gpd/fem` vs `gpd/extent5` factorizes pose choice from width choice.
+
+**Rotation box (`--rot-bound`, default `tier2`).** Every generator that exposes a pose constraint
+gets the frozen planner's TIER-2 (most generous) rotation bound, so all methods search the same
+orientation set: roll pi +- 40 deg, pitch +- 30 deg, yaw +- 80 deg (base 30/20/60 plus the tier >= 1
+relaxation). Applied as `yaw_max_deg = 80` to the E1 baselines and the external planners, and as the
+full roll/pitch/yaw box to `sdf`, whose CMA bounds the harness constructs. Note this TIGHTENS the E1
+baselines' own default (yaw +-90) — deliberate, for a common feasible set.
+
+**Bookkeeping parity.** Whatever produced the pose, the recorded metrics (stress_top10, grip, align,
+pressure, min_pad_area, width_face, tilt_deg) are measured by the FROZEN scorer
+`score_finger_grasp`, so every CSV column means the same thing across methods. Baseline rows carry
+`synth_tier = -1`; `ours` keeps its real tier. Runs land in `dataset/ablation/grasp_synth/` with the
+same config snapshot a collection run writes, plus an `ABLATION` file naming method/width/rot-bound.
+
+**Table height.** The board surface is z = 0.0138 m and `--table-z` is threaded to every generator
+(each clears the table from it), so no constant pose offset is applied; `--pose-z-offset` exists as
+an escape hatch if runtime verification shows a generator ignoring it.
+
+**Status (2026-09-07): implementation complete, runtime verification deferred** (the GPU was busy
+with the generalist training + teaser evals). Non-GPU tests pass: `grasp_synthesis/tests/test_ablation_flags.py`
+(flag parsing + argv passthrough + rejection of invalid values), plus a source-level check that every
+frozen attribute the harness references exists. A chained verification runs synthesis-only probes for
+every method, then two tiny executed runs, as soon as the training/eval chain reports done.
