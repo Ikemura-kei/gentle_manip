@@ -9728,3 +9728,12 @@ re-collection of the remaining 475 gated then launched. (3) bs_cube: 10-episode 
 MC mesh (hence 45k tets); now decimated to 6.1k faces, re-gated with the NEW TET CAP (<=3x target,
 documented in adding_new_objects.md §2 with the tetgen-hang symptom note). (4) the 7 gate-excluded
 bs shapes stay parked (user: revisit later).
+
+**2026-09-07 (day) — the 7 gate-excluded bs shapes FIXED and collecting.** Root cause confirmed for
+all seven: the original prep's watertight-decimation silently fell back to dense marching-cubes
+meshes (bs_cylinder 39.8k faces, bs_pyramid 17k, ...) -> planner-side repair inflated extents
+1.04-1.77x. The bs_cube recipe (coarse voxel remesh, pitch bounded by the thinnest axis, ->900
+uniform faces, exact extent restore) fixed every one: regate 7/7 PASS at ratio 1.000, tets
+1.8k-3.5k. All launched at 100 eps / 200-attempt cap. bs_cube itself completed 100@95.2% on the
+same recipe (was a 45k-tet hang at 10/100). Lesson -> a failed `watertight_decimate` must FAIL
+LOUDLY, never silently keep the dense mesh.
