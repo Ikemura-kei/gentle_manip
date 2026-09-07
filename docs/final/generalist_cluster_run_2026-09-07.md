@@ -86,6 +86,17 @@ convergent):
   Sequence: 20-episode teaser first (plumbing only; teasers cannot rank — local lesson), then the
   canonical 200-episode eval per run on mushroom, tofu and banana_chunk at the final + one mid
   checkpoint.
+- **The teasers are pre-submitted with `--dependency=afterok:<train job>`** (2128166/7/8 for
+  G1/G0/G2, 20 eps × 3 objects), so they fire unattended the moment each run succeeds. The eval
+  script therefore takes `TRAIN_JID` instead of a checkpoint path and DISCOVERS the run dir from the
+  training log, picking the newest checkpoint with `sort -V` (plain `sort -t_ -k2 -n` splits the
+  path on every underscore and picks `state_5` over `state_46` — the local run's chain hit exactly
+  this and teasered the wrong epoch). A failed training run leaves its eval in
+  `DependencyNeverSatisfied`, which the eval watchdog reports and cancels rather than leaving queued.
+- **Queue reality at launch**: 346 jobs pending cluster-wide; SLURM estimated these three to start
+  03:37–03:55 on 2026-09-08 (~6.5 h run → finishing mid-morning). Kept the 12 h walltime rather than
+  trimming it for backfill, because GH200 node speed varies up to ~2× and a walltime kill would cost
+  more than the queue wait.
 - **Local twin**: the local agent launched `wiayg` = G1 on the 4090 at the same 1M target and derived
   the SAME schedule (120 epochs, warmup 6, ckpt 20, EMA 1, val 5) independently — so G1 has a
   free hardware/seed replicate, and the schedule-scaling arithmetic is confirmed by two derivations.
