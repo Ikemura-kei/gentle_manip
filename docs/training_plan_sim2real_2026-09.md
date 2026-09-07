@@ -62,6 +62,9 @@ Expect ~1000 pairs, centroid offset real−sim ≤ ~1–2 cm (it prints both). D
 that was the L515-era correction; the D435i correction lives in `WORLD_T_CAM_EXT`.
 
 ## 4. Train (envs/dppo; cfg `gentle_manip/dppo/cfg/sim2real_v1/`, object-agnostic)
+> **Superseded (2026-09-07):** the current recipe (v5), knob defaults and the 380k-gradient-step epoch rule are in
+> `docs/final/dppo_dp3_training.md`. The values below are the round-1/2 defaults, kept for the history.
+
 Always launch through the anchor script — it pins the cfg and exposes only the per-run knobs:
 ```bash
 export DPPO_WANDB_ENTITY=...   # or append wandb=null
