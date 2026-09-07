@@ -85,7 +85,16 @@ have been saved. Warm-up was scaled to the same ~5 % of the run as round 4.
    current all-on-GPU dataset class.
 3. **Val loss did not separate from train**, unlike every 100-demo round. Val loss is still not a robot-performance
    predictor (xagzg lesson), but the absence of the overfit knee is new information about this data scale.
-4. **Teasers remain 20-episode reads.** 11/20 vs 6–10/20 is not a ranking; the canonical 200-episode eval on `state_46`
+4. **Cherry tomato fails by UNDER-CLOSING, not by missing.** Teaser 1/20 (ever 1/20) on the smallest object (25 mm). The
+   clips and `signals/` show a correct retry loop — descend to z≈25 mm over the cherry, close, reopen, lift, re-descend, three
+   times per episode — but every close stops at 24–32 mm (median 28 mm), while the cherry demos close to 21–23 mm (p10 15,
+   p90 25). A 25 mm object needs ≥2 mm of squeeze, so 28 mm touches nothing; the retry repeats the same width. Not a clamp:
+   the merged normalization allows 7–80 mm and the tomato teaser closes to 38–63 mm on its 60 mm object. The policy's
+   close width regresses toward the population (tofu closes at 30 mm) on the one object with zero width tolerance — a
+   size-precision error that 500 cherry episodes (8 % of the data) and 46 epochs did not resolve. Candidates, untested:
+   longer training (width precision is the last thing to converge), a gripper-width loss weight or aux width head, and
+   checking whether the ±5 mm cloud offset / residue augmentations blur the size cue for 25 mm objects.
+5. **Teasers remain 20-episode reads.** 11/20 vs 6–10/20 is not a ranking; the canonical 200-episode eval on `state_46`
    and the real tofu deploy are the tests that count. A `deploy_dppo.sh` entry is a one-line addition.
 
 ## 5. Tooling lessons (recorded so they are not re-learned)
