@@ -52,14 +52,13 @@ convergent):
 
 ## 4. Open decisions at the time of writing
 
-- **`TARGET_STEPS`**: 380,000 (the original setting; `bqvzh` showed val still falling at the LR floor —
-  each sample seen only 46×) vs an extended ~1,000,000 (~119 epochs, ~6.5 h/run on GH200 at the measured
-  ~20–23 ms/step). The local run's finding: the 380k target is a 100-demo-era number. USER DECIDING.
-- **Optional G1b** (`PAIRED_W=0.1`, extended budget): a third point on the paired-weight axis, motivated
-  by the concern that 1,031 pairs seen ~60k× under an extended budget could overfit the paired term.
-  Counter-arguments recorded: pair exposure was already ~23k× in `bqvzh` (best teaser to date), and
-  cosine consistency saturates benignly (gradient vanishes at alignment). G0's log-only paired curve vs
-  G1's optimized one is the direct probe either way.
+- **`TARGET_STEPS` = 1,000,000 (user-approved 2026-09-07)** — ~120 epochs, ~6.5 h/run on GH200 at the
+  measured ~20–23 ms/step. Rationale: `bqvzh` showed the 380k target is a 100-demo-era number (val still
+  falling at the LR floor, each sample seen only 46×). Secondary knobs at this length: warmup 5 % (≈6),
+  ckpt every 20 (≈6 kept), val every 5 (matches the local run's grid).
+- **G1b (`PAIRED_W=0.1`) DISCARDED (user)** — the paired-overfit question is answered by G0's log-only
+  paired curve vs G1's optimized one (recorded counter-arguments: pair exposure was already ~23k× in
+  `bqvzh`, the campaign-best teaser, and cosine consistency saturates benignly).
 
 ## 5. Ops (cluster specifics)
 
