@@ -65,7 +65,21 @@ def main():
     ap.add_argument("--sim-substeps", type=int, default=210)
     ap.add_argument("--mpm-grid-density", type=float, default=250.0)
     ap.add_argument("--cam-fov", type=float, default=46.0)
+    ap.add_argument("--object-xy", default="", metavar="X,Y",
+                    help="PIN the object world xy (m) instead of inferring it from the fingertip's "
+                         "lowest point. Use whenever the real placement is KNOWN -- the inference "
+                         "is only a proxy and was ~40 mm off in x on the 2026-09-03 cube episodes.")
+    ap.add_argument("--task-config", type=Path, default=None,
+                    help="task YAML (configs/tasks/*.yaml) — the SINGLE SOURCE for board, camera "
+                         "pose/fov/up and object spawn. CLI --object/--cam-fov/--sim-substeps/"
+                         "--mpm-grid-density still override individual keys when given.")
     ap.add_argument("--obs", default="point_cloud_1cam")
+    ap.add_argument("--action-config", default="delta_pose_delta_gripper_fast_rot.yaml",
+                    help="action config FILENAME under configs/action/ — use "
+                         "abs_pose_euler_abs_gripper.yaml for demos recorded with "
+                         "--record-action-config (7d euler ABSOLUTE actions)")
+    ap.add_argument("--save-clouds", action="store_true",
+                    help="dump paired {real,sim} clouds npz (PairedRegDiffusionModel format)")
     ap.add_argument("--augmentation", type=Path, default=None,
                     help="sim-only obs augmentation config (e.g. configs/augmentation/quat_snap.yaml)")
     ap.add_argument("--max-steps", type=int, default=0, help="0 = whole episode")
@@ -103,16 +117,35 @@ def main():
 
     obs_cfg = ObsConfig.from_dict(yaml.safe_load((_CFG / "obs" / f"{args.obs}.yaml").read_text()))
     act_cfg = ActionConfig.from_dict(
-        yaml.safe_load((_CFG / "action" / "delta_pose_delta_gripper_fast_rot.yaml").read_text()))
+        yaml.safe_load((_CFG / "action" / args.action_config).read_text()))
     aug_cfg = None
     if args.augmentation is not None:
         aug_path = args.augmentation if args.augmentation.is_file() else _CFG.parent / args.augmentation
         aug_cfg = AugmentationConfig.from_dict(yaml.safe_load(aug_path.read_text()))
         print(f"augmentation: {aug_cfg}", flush=True)
-    task = SingleLiftTask({"object_name": args.object, "object_type": args.object_type,
-                           "sim_substeps": args.sim_substeps,
-                           "mpm_grid_density": args.mpm_grid_density, "cam_fov": args.cam_fov})
-    default_xy = np.array(get_object_def(args.object).default_pos[:2], dtype=np.float32)
+    # Task config first (board / camera pose+up / spawn xy live there), then CLI overrides for
+    # anything the user passed EXPLICITLY. argparse defaults must not silently clobber the YAML,
+    # so only override when the flag differs from its default.
+    _tc = {}
+    if args.task_config is not None:
+        _p = args.task_config if args.task_config.is_file() else _CFG / "tasks" / args.task_config.name
+        _tc = dict(yaml.safe_load(_p.read_text()))
+        print(f"task config: {_p}", flush=True)
+    _defaults = {"object": "red_cube", "object_type": "soft", "sim_substeps": 210,
+                 "mpm_grid_density": 250.0, "cam_fov": 46.0}
+    for _cli, _key in (("object", "object_name"), ("object_type", "object_type"),
+                       ("sim_substeps", "sim_substeps"),
+                       ("mpm_grid_density", "mpm_grid_density"), ("cam_fov", "cam_fov")):
+        _v = getattr(args, _cli)
+        if _key not in _tc or _v != _defaults[_cli]:
+            _tc[_key] = _v
+    task = SingleLiftTask(_tc)
+    _obj_name = _tc.get("object_name", args.object)
+    _spawn = _tc.get("object_spawn_xy")
+    default_xy = (np.asarray(_spawn, dtype=np.float32) if _spawn is not None
+                  else np.array(get_object_def(_obj_name).default_pos[:2], dtype=np.float32))
+    print(f"object={_obj_name} type={_tc.get('object_type')} spawn_xy={default_xy} "
+          f"board={_tc.get('board_thickness', 0.0)}", flush=True)
     fov = task.scene_spec.cameras[0].fov
 
     backend = SimBackend(task.scene_spec, 1, config={"sim": {"settle_steps": 20}}, use_subprocess=False)
@@ -154,6 +187,7 @@ def main():
 
     summary = []
     videos_made = 0
+    paired_real, paired_sim = [], []
     for ep_idx in picks:
         ep = eps[ep_idx]
         actions = ep["actions"].astype(np.float32)
@@ -164,9 +198,11 @@ def main():
         re_gw = ep["observations"]["gripper_width"][:T, 0]
         re_pc = ep["observations"]["point_cloud"]
 
-        # Cube xy ~ fingertip at the lowest point of the real trajectory (the grasp).
-        grasp_t = int(np.argmin(re_ee[:, 2]))
-        cube_xy = re_ee[grasp_t, :2]
+        # Cube xy: PINNED when known (--object-xy), else inferred from the fingertip at the
+        # lowest point of the real trajectory -- a proxy for the grasp, good to a few cm only.
+        grasp_t = int(np.argmin(re_ee[:, 2]))       # always needed downstream (grasp-time slices)
+        cube_xy = (np.asarray([float(v) for v in args.object_xy.split(",")], dtype=np.float32)
+                   if args.object_xy.strip() else re_ee[grasp_t, :2])
         obs = env.reset(object_dxy=(cube_xy - default_xy)[None, :])
         sim = [obs]
         for t in range(T - 1):
@@ -189,6 +225,9 @@ def main():
         gw_err = float(np.abs(sim_gw - re_gw).mean())
         zoff = float(np.abs(sim_zm - re_zm).mean())
         summary.append((ep_idx, ee_err, quat_ang_err, quat_elem_mean, gw_err, zoff))
+        if args.save_clouds:
+            paired_real.append(re_pc[:T])
+            paired_sim.append(np.stack([sim[t]["point_cloud"][0] for t in range(T)]))
 
         print(f"ep {ep_idx}: T={T} cube_xy={cube_xy.round(3)} "
               f"ee_err(mm)={(ee_err*1000).round(1)} "
@@ -332,6 +371,11 @@ def main():
 
     env.close()
     print("\n=== summary (fov={}) ===".format(fov), flush=True)
+    if args.save_clouds and paired_real:
+        pr = np.concatenate(paired_real).astype(np.float32)
+        ps = np.concatenate(paired_sim).astype(np.float32)
+        np.savez_compressed(out / "paired_clouds.npz", real=pr, sim=ps)
+        print(f"paired clouds: {pr.shape} -> {out / 'paired_clouds.npz'}")
     for ep_idx, ee_err, quat_ang_err, quat_elem_mean, gw_err, zoff in summary:
         print(
             f"  ep {ep_idx:2d}: "
