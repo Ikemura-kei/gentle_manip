@@ -791,6 +791,9 @@ def main() -> None:
     p.add_argument("--dev-viz", action="store_true",
                    help="STANDALONE step-through window (not Genesis) for ENV 0 of each batch: each synthesis "
                         "stage is drawn and BLOCKS until you press q (GM_DEV_VIZ_AUTOADVANCE=<s> auto-plays).")
+    p.add_argument("--max-attempts", type=int, default=0,
+                   help="stop after this many synthesis+execution ATTEMPTS (envs) even if --n-episodes successes were not "
+                        "reached (0 = unlimited). A budget cap for hard objects; nothing else changes.")
     p.add_argument("--skip-execution", action="store_true",
                    help="DEBUG: synthesize only — record per-env synthesis statistics (seeds rejected by reason, scored "
                         "statuses, CMA feasibility, fallback) to <run>/synth_stats.csv and reset without executing. "
@@ -957,6 +960,9 @@ def main() -> None:
     consec_batch_aborts = 0        # unstable-scene batch discards (see execute_and_collect guard)
 
     while total_saved < args.n_episodes:
+        if args.max_attempts and _n_attempt >= args.max_attempts:
+            print(f"  [budget] {_n_attempt} attempts >= --max-attempts {args.max_attempts}: stopping with {total_saved} saved", flush=True)
+            break
         batch_idx += 1
         n = args.n_envs
 
@@ -1167,6 +1173,7 @@ def main() -> None:
             total_saved += n                        # counts ATTEMPTS so the loop terminates; nothing is saved
             _n_attempt += n
             continue
+        _n_attempt += n
         rec_this_batch = args.record_video > 0 and total_saved < args.record_video
         print(f"  Executing …")
         try:

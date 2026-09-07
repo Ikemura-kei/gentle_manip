@@ -162,3 +162,15 @@ N episodes, N_train_steps, n_epochs, paired weight, checkpoints tried; sim SR / 
    `[pc_aug] train-time cloud noise d435i_noise` (on) and `model.pc_offset: 0.008` in the run's saved hydra
    config. Val/eval/deploy clouds stay clean.
 
+## Round history of the anchor script (moved out of train_dppo_dp3.sh on 2026-09-07)
+All on the 100 tofu demos (run 26-09-05-jvt), clean sim eval on the same 20 scenarios; success / ever-in-band.
+| round | run | data | BC aug | consistency | epochs | best clean teaser |
+|---|---|---|---|---|---|---|
+| 1 | covel (invalid conversion), tzdhk | no tail | none | none (paired 0.5 only) | 2000 (stopped) | 3/20, 10/20 @1500 |
+| 2 | qzhek | tail K=60 | noise + residue 0.5 + offset 8 mm | w0.3 frac0.5, strong view, offset 12 mm | 1500 | **10/20, 10/20 @750** |
+| 3 | vigrl | tail K=20 | offset 6 mm | frac 0.3, offset 6 mm | 1200 | 7/20, 11/20 @1200 |
+| 4 | yuoqe | tail K=10 | offset 6 mm | no offset | 2000 | 6/20, 10/20 @1000 |
+Round 4 = 280,000 gradient steps (140 batches/epoch x 2000). Verdict so far: round 2's 60-frame tail gave the only run with zero
+hold losses; 20-episode teasers cannot rank the recipes (3 -> 6 spread within one run). Large-dataset recipe (above, in the
+script): residue p 0.15 (BC) / 0.30 (consistency view), per-axis offset x 5 / y 3.5 / z 1.5 mm, no consistency offset, EPOCHS
+from a target of 380,000 gradient steps at batch 128 (`EPOCHS=auto` in the script computes it from train.npz).
