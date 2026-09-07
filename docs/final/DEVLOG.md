@@ -9738,6 +9738,14 @@ uniform faces, exact extent restore) fixed every one: regate 7/7 PASS at ratio 1
 same recipe (was a 45k-tet hang at 10/100). Lesson -> a failed `watertight_decimate` must FAIL
 LOUDLY, never silently keep the dense mesh.
 
+### 2026-09-07 21:20 — `wiayg` launched: G1 (recipe v5, TARGET_STEPS=1M) run locally as the cluster's twin
+Same npz as bqvzh; EPOCHS=auto -> 120 (8,393 batches/epoch, 1,007,160 steps, ~5.6 h at 20 ms/step); schedule scaling per
+`docs/final/generalist_cluster_run_2026-09-07.md` §3/§4, verified against the script's formula: warmup 6, ckpt every 20, EMA from 1,
+val every 5; wandb `gentle_manip_generalist/runs/exsm418h`. Motivation: bqvzh under-trained (val still falling; cherry under-closes
+by ~6 mm). bqvzh teasers on state_46 (20 ep, d435i_noise): tofu 11/20, mushroom 9/20, banana_chunk 12/20, tomato 16/20,
+cherry_tomato 1/20 (retry loop correct, closes to 24-32 mm on a 25 mm object; demos close to 21-23 mm; not a clamp) — details in
+`docs/final/generalist_v5_local_run_2026-09-07.md`.
+
 ### 2026-09-07 (evening) — GENERALIST v5 trained LOCALLY on the cluster campaign data: `bqvzh`, teaser 11/20 (ever 14/20)
 **Data:** cluster list `TRAINING_RUNS_2026-09-07.txt` (31 runs / 5,870 episodes: 20 objects incl. 18 bs_* primitives, merged
 tomato 420 + strawberry 75; frozen collector v4.2) downloaded without videos (15 GB, rsync from arrhenius1) PLUS our 4 local runs
