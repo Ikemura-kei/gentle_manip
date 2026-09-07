@@ -9738,6 +9738,60 @@ uniform faces, exact extent restore) fixed every one: regate 7/7 PASS at ratio 1
 same recipe (was a 45k-tet hang at 10/100). Lesson -> a failed `watertight_decimate` must FAIL
 LOUDLY, never silently keep the dense mesh.
 
+### 2026-09-07 21:30 — CLUSTER generalist matrix launched: G1/G0/G2, TARGET_STEPS=1M, after the dataset arrival gate
+Three GH200 runs on the SAME transferred npz as `bqvzh`/`wiayg` (pinned val split → directly comparable), seed 42, wandb project
+`gentle_manip_generalist`, submitted G1 `2127880` (paired 0.5 / cons 0.3 = recipe v5 exact), G0 `2127881` (paired **1e-8**
+log-only / cons 0.3), G2 `2127882` (paired 0.5 / cons **1e-8** log-only). Setup + matrix rationale:
+`docs/final/generalist_cluster_run_2026-09-07.md`.
+
+**The ε log-only trick** (reusable): both encoder regularizers are gated `if weight > 0.0` and log their RAW unweighted loss, so
+`w = 1e-8` computes and logs a term identically to an optimized run while contributing gradients ~7 orders below BC. That turns
+"ablate a term" into "observe the term un-optimized" with zero code changes — G0 shows what the real–sim feature distance does
+when nothing pulls it closed. Setting the weight to 0.0 instead would have made the curve disappear (the npz is not even loaded).
+
+**Schedule scaling converged independently with the local agent** — cluster wrapper and `wiayg` both resolved EPOCHS 120,
+warmup 6, ckpt every 20, EMA from epoch 1, val every 5 from the same formula. Two agents, same numbers, no coordination.
+
+**Arrival-gate lessons (both cost a false FAIL / a timeout before being understood):**
+1. **A stored cloud's raw min z is `0.00000` and that is CORRECT** — converter zero-padding for frames whose board crop left
+   fewer than 1024 points (0.0039 % of points; 61 of 119,716 val frames; median 43 padded points where present). Excluding exact
+   `(0,0,0)` rows gives min z = **0.01900 m exactly**, the 19 mm board crop. Any crop-invariant check MUST drop padded rows first
+   or it fails a clean dataset.
+2. **Never `np.load` an 11.7 GB npz whole on a login node** — it timed out at 2 min once and was killed a second time. Read the
+   member in 64 MB chunks out of the npz zip (`zipfile` + `numpy.lib.format` header, then `f.read(n*row)`): ~2 min, flat memory.
+   `.agent_tmp/verify_transfer2.py` is the working pattern. Note `numpy.lib.format._read_array_header` is private and absent in
+   newer numpy — use `read_array_header_1_0`.
+
+### 2026-09-07 21:20 — `wiayg` launched: G1 (recipe v5, TARGET_STEPS=1M) run locally as the cluster's twin
+Same npz as bqvzh; EPOCHS=auto -> 120 (8,393 batches/epoch, 1,007,160 steps, ~5.6 h at 20 ms/step); schedule scaling per
+`docs/final/generalist_cluster_run_2026-09-07.md` §3/§4, verified against the script's formula: warmup 6, ckpt every 20, EMA from 1,
+val every 5; wandb `gentle_manip_generalist/runs/exsm418h`. Motivation: bqvzh under-trained (val still falling; cherry under-closes
+by ~6 mm). bqvzh teasers on state_46 (20 ep, d435i_noise): tofu 11/20, mushroom 9/20, banana_chunk 12/20, tomato 16/20,
+cherry_tomato 1/20 (retry loop correct, closes to 24-32 mm on a 25 mm object; demos close to 21-23 mm; not a clamp) — details in
+`docs/final/generalist_v5_local_run_2026-09-07.md`.
+
+### 2026-09-07 (evening) — GENERALIST v5 trained LOCALLY on the cluster campaign data: `bqvzh`, teaser 11/20 (ever 14/20)
+**Data:** cluster list `TRAINING_RUNS_2026-09-07.txt` (31 runs / 5,870 episodes: 20 objects incl. 18 bs_* primitives, merged
+tomato 420 + strawberry 75; frozen collector v4.2) downloaded without videos (15 GB, rsync from arrhenius1) PLUS our 4 local runs
+(cherry_tomato xxg+kfx 250, prim capsule/hexprism/frustum 150, user's choice) = **6,270 episodes, 1,193,991 steps**. Staged as
+hardlinked `data.pkl` files under `dataset/demos_staging/generalist_v5/` (the converter recurses on data.pkl and would otherwise
+double-count the merged runs' `parts/` shards and DROP shard-only runs; the partial cherry run xxg was consolidated into one
+data.pkl first). One `convert_demos` call (tofu experiment, student view, z15 derive + source yamls, val 0.1) ->
+`dataset/dppo/single_lift_generalist_soft_v5` (5,643 train / 627 val trajectories; sources.yaml + MANIFEST.txt).
+**Training:** `train_dppo_dp3.sh` recipe v5, `EPOCHS=auto` -> 46 (8,393 batches/epoch, target 380k steps). Run-length scaling
+approved by the user for a ~46-epoch run: warmup 3 epochs, checkpoint every 5, EMA from epoch 1, val every 5; wandb project
+`gentle_manip_generalist` (run 67qce45j). **2 h 16 min for 386k steps = 20 ms/step — identical per-step cost to round 4**
+(round 4 = 2.8 s/epoch x 140 batches); wall time is set by the step target, not the dataset size (an earlier "5 h" estimate
+of mine used a stale 46 ms/step from a contended round — wrong). Final train 0.00149 / val 0.00157, tracked within ~5 % throughout.
+**Teaser (20 ep, tofu, d435i_noise, the same 20 scenarios as rounds 1-4): state_46 = 11/20 success, ever 14/20** — the campaign's
+best sim teaser (round 2 qzhek_750 10/20 ever 12; round 4 yuoqe_2000 6/20 ever 9); 3 hold losses, 6 never grasped. Same caveat as
+before: 20 episodes cannot rank recipes; a canonical 200-episode eval + the real tofu deploy are what count.
+**Lessons:** (1) chain script picked `state_5` as the "latest" checkpoint (`sort -t_ -k2 -n` on a PATH splits on every underscore)
+-> use `sort -V`; the mis-selected teaser (25 %) is kept in the run's eval dir and EXPERIMENT.md. (2) A `tail -F | grep | awk`
+Monitor emitted nothing for 8 matching lines; a poll loop that greps the log every 60 s worked — prefer polling for long jobs.
+(3) `append_experiment_note` errors were hidden by `2>/dev/null`; the DPPO callback does not create EXPERIMENT.md, so write it
+with `write_experiment_md` first. Disk: pre-2026-09-01 datasets + logs deleted on the user's request (66 + 11 GB), 195 GB free.
+
 ### 2026-09-07 — three new primitives (local collection, user): prim_capsule / prim_hexprism / prim_frustum (`_mush`)
 Per `docs/adding_new_objects.md`. Meshes generated with trimesh, centred, metres, 3 cm nominal max extent (user):
 capsule 30 x 18 x 18 mm lying (long axis x), hexagonal prism 30 mm across corners x 25 mm tall, frustum 30 mm base /
