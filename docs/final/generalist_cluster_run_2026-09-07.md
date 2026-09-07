@@ -11,8 +11,18 @@ Identical to the local run — the SAME converted npz set, transferred from the 
 (`dataset/dppo/single_lift_generalist_soft_v5/`), so the val split is pinned and cluster/local runs are
 directly comparable: **6,270 episodes / 1,193,991 steps (5,643 train / 627 val trajectories), 36 sources**
 (31 cluster campaign runs per `dataset/demos/TRAINING_RUNS_2026-09-07.txt` + 5 local-bundle runs;
-provenance in the dataset's `sources.yaml`). Verification gate on arrival: episode total 6,270,
-action dim 7, sources count 36, stored-cloud min z ≥ 19 mm (board-crop invariant).
+provenance in the dataset's `sources.yaml`). **Arrival gate PASSED 2026-09-07 21:2x**
+(`.agent_tmp/verify_transfer2.py`): 5,643 train + 627 val = 6,270 trajectories (1,074,275 +
+119,716 = 1,193,991 steps), action dim 7 in both splits, `sources.yaml` 36 entries with its own
+`n_episodes: 6270`, and stored-cloud min z **0.01900 m exactly** — the 19 mm board crop, hit on the
+nose.
+
+Two gate mechanics worth keeping: (1) the raw array min z is `0.00000`, which is *zero-padding*, not
+a crop violation — the converter zero-fills frames whose crop left fewer than 1024 points (4,830
+points = 0.0039 %, in 61 of 119,716 val frames, median 43 padded points where affected); the gate
+must exclude exact `(0,0,0)` rows before taking the min, or it fails a clean dataset. (2) Loading the
+11.7 GB `train.npz` whole times out / risks an OOM on the login node; read the `point_cloud` member
+in 64 MB chunks straight out of the npz zip instead (the script does this, ~2 min, flat memory).
 
 ## 2. The run matrix
 
