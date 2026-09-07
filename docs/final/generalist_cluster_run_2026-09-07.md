@@ -78,9 +78,17 @@ convergent):
   (absence = trained on clean clouds = off-plan), resolved EPOCHS/warmup echoed by the wrapper,
   run ID + wandb project from the resolved config. Stall detector (log silent > 30 min), error
   signatures (Traceback / OOM / NaN), hourly progress events.
-- Eval on completion: 20-episode teaser first (plumbing; teasers cannot rank — local lesson), then the
-  canonical 200-episode eval per run on a representative object subset (mushroom, tofu, banana_chunk)
-  at the final + one mid checkpoint, through the doc §4 two-process pattern wrapped in one sbatch.
+- Eval on completion: `.agent_tmp/eval_g.sbatch` (doc §4 two-process pattern, GH200 env names
+  substituted; `CKPT`/`OBJECTS`/`NEPS`/`TAG` in, one sim server per object on a job-derived port,
+  torn down by **process group** — a plain kill leaves genesis `spawn_main` children on the GPU).
+  It waits on the server's `SIM_SERVER_READY` marker (`envs/rpc.py::serve_env`) and aborts that object
+  if the server dies or never binds, rather than running a client against a dead port.
+  Sequence: 20-episode teaser first (plumbing only; teasers cannot rank — local lesson), then the
+  canonical 200-episode eval per run on mushroom, tofu and banana_chunk at the final + one mid
+  checkpoint.
+- **Local twin**: the local agent launched `wiayg` = G1 on the 4090 at the same 1M target and derived
+  the SAME schedule (120 epochs, warmup 6, ckpt 20, EMA 1, val 5) independently — so G1 has a
+  free hardware/seed replicate, and the schedule-scaling arithmetic is confirmed by two derivations.
 - Live status: the Harvest Board artifact carries a Training section (run IDs, epoch progress, state).
 
 ## 6. What happened
