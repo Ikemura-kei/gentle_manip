@@ -9716,3 +9716,15 @@ hotfix mattered for the bs batch which launched post-fix). Kills/reseeds: strawb
 tomato x2 (NaNs), all with manual config snapshots; bs caps enforced automatically. Board:
 claude.ai artifact, 30-min refresh + event refreshes; stale-August-glob and grep-c||echo-0
 watchdog bugs found+fixed en route (both B1-class reference errors).
+
+**2026-09-07 follow-up (user directives):** (1) tomato STOPPED at 420 episodes — consolidated to
+single_lift_tomato_soft/26-09-07-merged/data.pkl (parts preserved inside; 4 tail episodes lost to
+unflushed sub-5-ep shards, expected). (2) strawberry: 75 pre-fix episodes consolidated the same
+way (to be combined with post-fix collection); strawberry.obj REPAIRED IN PLACE — voxel remesh at
+~0.27mm, 28.4k->9k faces, extents exact, volume ratio 0.996 (original at
+obj_meshes/backup_strawberry_scan_orig.obj) — kills the self-intersection that hung tetgen;
+re-collection of the remaining 475 gated then launched. (3) bs_cube: 10-episode partial DISCARDED
+(user); root cause found — its earlier decimation had silently failed manifold, leaving a 32.6k-face
+MC mesh (hence 45k tets); now decimated to 6.1k faces, re-gated with the NEW TET CAP (<=3x target,
+documented in adding_new_objects.md §2 with the tetgen-hang symptom note). (4) the 7 gate-excluded
+bs shapes stay parked (user: revisit later).
