@@ -1,5 +1,5 @@
-# [dr] prim_torus_mush: realws pose/shape/material DR. Deformation block = prim_sphere_mush (user 2026-09-07);
-# Used by: the prim_torus_mush experiment yaml
+# [dr] bs_sphere: realws pose/shape/material DR. Deformation block = prim_sphere_mush (user 2026-09-07);
+# Used by: the bs_sphere experiment yaml
 # Status: active
 object_pos_x: [0.30, 0.46]
 object_pos_y: [-0.12, 0.12]

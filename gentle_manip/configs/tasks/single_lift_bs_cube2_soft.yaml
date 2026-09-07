@@ -1,11 +1,11 @@
-# [task] prim_torus_mush (basic-shapes GLB, 2026-09-07): mushroom material, board rig. SHARED block = prim_sphere_mush.
+# [task] bs_cube2 (basic-shapes GLB, 2026-09-07): mushroom material, board rig. SHARED block = prim_sphere_mush.
 # Used by: collect_demos_synth_v4 / training / eval via the experiment yaml
 # Status: active
-object_name: "prim_torus_mush"
+object_name: "bs_cube2"
 object_type: "soft"
 sim_substeps: 235
 mpm_grid_density: 250
-object_spawn_z: 0.0594   # board + max(h/2*1.26+20mm, diag/2*1.26+5mm); h=25.0mm diag=64.4mm
+object_spawn_z: 0.0632   # board + max(h/2*1.26+20mm, diag/2*1.26+5mm); h=42.9mm diag=70.5mm
 success_z_min: 0.175
 success_z_max: 0.275
 hold_steps: 30

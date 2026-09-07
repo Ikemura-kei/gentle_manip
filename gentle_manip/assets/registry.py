@@ -311,6 +311,71 @@ OBJECT_MAP.update({
                         mesh_path=str(_OBJ_DIR / "letter_z.obj")),
 })
 
+# ── basic-shapes batch + torus (2026-09-07): 18 primitives from the basic_shapes GLB
+# (repaired watertight, rescaled to U(2.5,4.5)cm seed 7; GLB node names kept — some are
+# misleading: bs_cube is an octahedron) + prim_torus_mush (prim_torus z-thickened to 25mm).
+# Mushroom material, prim_sphere_mush-style DR. ADDITIVE per docs/adding_new_objects.md. ──
+OBJECT_MAP.update({
+    "bs_cube": ObjectDef("bs_cube", MATERIALS["mushroom"], object_type="soft",
+                    size=(0.03738, 0.0375, 0.03728), default_pos=(0.47, 0.0, 0.0196),
+                    mesh_path=str(_OBJ_DIR / "bs_cube.obj")),
+    "bs_cube2": ObjectDef("bs_cube2", MATERIALS["mushroom"], object_type="soft",
+                    size=(0.03585, 0.04294, 0.04287), default_pos=(0.47, 0.0, 0.0224),
+                    mesh_path=str(_OBJ_DIR / "bs_cube2.obj")),
+    "bs_cube3": ObjectDef("bs_cube3", MATERIALS["mushroom"], object_type="soft",
+                    size=(0.04049, 0.04051, 0.04051), default_pos=(0.47, 0.0, 0.0213),
+                    mesh_path=str(_OBJ_DIR / "bs_cube3.obj")),
+    "bs_cube4": ObjectDef("bs_cube4", MATERIALS["mushroom"], object_type="soft",
+                    size=(0.02942, 0.02138, 0.0295), default_pos=(0.47, 0.0, 0.0158),
+                    mesh_path=str(_OBJ_DIR / "bs_cube4.obj")),
+    "bs_cube5": ObjectDef("bs_cube5", MATERIALS["mushroom"], object_type="soft",
+                    size=(0.01882, 0.031, 0.02404), default_pos=(0.47, 0.0, 0.013),
+                    mesh_path=str(_OBJ_DIR / "bs_cube5.obj")),
+    "bs_cylinder": ObjectDef("bs_cylinder", MATERIALS["mushroom"], object_type="soft",
+                    size=(0.04055, 0.04247, 0.03494), default_pos=(0.47, 0.0, 0.0185),
+                    mesh_path=str(_OBJ_DIR / "bs_cylinder.obj")),
+    "bs_cylinder2": ObjectDef("bs_cylinder2", MATERIALS["mushroom"], object_type="soft",
+                    size=(0.01184, 0.02511, 0.01309), default_pos=(0.47, 0.0, 0.0075),
+                    mesh_path=str(_OBJ_DIR / "bs_cylinder2.obj")),
+    "bs_cylinder3": ObjectDef("bs_cylinder3", MATERIALS["mushroom"], object_type="soft",
+                    size=(0.01881, 0.04142, 0.02143), default_pos=(0.47, 0.0, 0.0117),
+                    mesh_path=str(_OBJ_DIR / "bs_cylinder3.obj")),
+    "bs_decagon_pyramid": ObjectDef("bs_decagon_pyramid", MATERIALS["mushroom"], object_type="soft",
+                    size=(0.02177, 0.04094, 0.02389), default_pos=(0.47, 0.0, 0.0129),
+                    mesh_path=str(_OBJ_DIR / "bs_decagon_pyramid.obj")),
+    "bs_dodecagon_sphere": ObjectDef("bs_dodecagon_sphere", MATERIALS["mushroom"], object_type="soft",
+                    size=(0.03436, 0.03419, 0.03434), default_pos=(0.47, 0.0, 0.0182),
+                    mesh_path=str(_OBJ_DIR / "bs_dodecagon_sphere.obj")),
+    "bs_hexagonal_pyramid": ObjectDef("bs_hexagonal_pyramid", MATERIALS["mushroom"], object_type="soft",
+                    size=(0.02457, 0.03106, 0.02097), default_pos=(0.47, 0.0, 0.0115),
+                    mesh_path=str(_OBJ_DIR / "bs_hexagonal_pyramid.obj")),
+    "bs_icosahedron": ObjectDef("bs_icosahedron", MATERIALS["mushroom"], object_type="soft",
+                    size=(0.03057, 0.03026, 0.02997), default_pos=(0.47, 0.0, 0.016),
+                    mesh_path=str(_OBJ_DIR / "bs_icosahedron.obj")),
+    "bs_icosphere": ObjectDef("bs_icosphere", MATERIALS["mushroom"], object_type="soft",
+                    size=(0.02866, 0.0301, 0.03009), default_pos=(0.47, 0.0, 0.016),
+                    mesh_path=str(_OBJ_DIR / "bs_icosphere.obj")),
+    "bs_pentagon": ObjectDef("bs_pentagon", MATERIALS["mushroom"], object_type="soft",
+                    size=(0.0339, 0.02747, 0.03239), default_pos=(0.47, 0.0, 0.0172),
+                    mesh_path=str(_OBJ_DIR / "bs_pentagon.obj")),
+    "bs_pyramid": ObjectDef("bs_pyramid", MATERIALS["mushroom"], object_type="soft",
+                    size=(0.03509, 0.02733, 0.03503), default_pos=(0.47, 0.0, 0.0185),
+                    mesh_path=str(_OBJ_DIR / "bs_pyramid.obj")),
+    "bs_quadrangular_pyramid": ObjectDef("bs_quadrangular_pyramid", MATERIALS["mushroom"], object_type="soft",
+                    size=(0.03015, 0.03607, 0.03535), default_pos=(0.47, 0.0, 0.0187),
+                    mesh_path=str(_OBJ_DIR / "bs_quadrangular_pyramid.obj")),
+    "bs_sphere": ObjectDef("bs_sphere", MATERIALS["mushroom"], object_type="soft",
+                    size=(0.04479, 0.04464, 0.04491), default_pos=(0.47, 0.0, 0.0235),
+                    mesh_path=str(_OBJ_DIR / "bs_sphere.obj")),
+    "bs_star": ObjectDef("bs_star", MATERIALS["mushroom"], object_type="soft",
+                    size=(0.04085, 0.03905, 0.03885), default_pos=(0.47, 0.0, 0.0204),
+                    mesh_path=str(_OBJ_DIR / "bs_star.obj")),
+    "prim_torus_mush": ObjectDef("prim_torus_mush", MATERIALS["mushroom"], object_type="soft",
+                    size=(0.042, 0.042, 0.025), default_pos=(0.47, 0.0, 0.0135),
+                    mesh_path=str(_OBJ_DIR / "prim_torus_mush.obj")),
+})
+
+
 def get_object_def(name: str) -> ObjectDef:
     if name not in OBJECT_MAP:
         raise KeyError(f"Unknown object {name!r}; known objects: {sorted(OBJECT_MAP)}")
