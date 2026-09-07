@@ -9737,3 +9737,36 @@ uniform faces, exact extent restore) fixed every one: regate 7/7 PASS at ratio 1
 1.8k-3.5k. All launched at 100 eps / 200-attempt cap. bs_cube itself completed 100@95.2% on the
 same recipe (was a 45k-tet hang at 10/100). Lesson -> a failed `watertight_decimate` must FAIL
 LOUDLY, never silently keep the dense mesh.
+
+### 2026-09-07 — three new primitives (local collection, user): prim_capsule / prim_hexprism / prim_frustum (`_mush`)
+Per `docs/adding_new_objects.md`. Meshes generated with trimesh, centred, metres, 3 cm nominal max extent (user):
+capsule 30 x 18 x 18 mm lying (long axis x), hexagonal prism 30 mm across corners x 25 mm tall, frustum 30 mm base /
+18 mm top x 25 mm tall. FEM-aware check: all direct tet (2089 / 2512 / 2294 tets), extent ratio 0.99-1.00. Registry:
+additive `<name>_mush` entries with MATERIALS["mushroom"], default_pos z = h/2 + 1 mm. Configs cloned from the
+prim_ellipsoid_mush trio (shared blocks untouched); object-specific: spawn_z 0.045 / 0.049 / 0.049 (guideline formula
+with scale max 1.2), grasp_gate 0.060 / 0.063 / 0.065, DR scale [0.9, 1.2] (user), mushroom material ranges
+(E 2-3e5, nu 0.32-0.38, rho 900-1000), small shape DR as the ellipsoid. Collection: 50 saved each, `--max-attempts 100`
+(new collector CLI knob, default unlimited = unchanged; template passes `EXTRA_ARGS`).
+**Results (02:26): all three reached 50 saved in 60 attempts each, every grasp at the nominal tier, 100 % sub-yield.**
+capsule 98 % / ever 100 % / stress-yield mean 0.57 / 12.7 min (`26-09-07-ycm`); hexprism 98 % / 100 % / 0.56 / 13.7 min
+(`26-09-07-klj`); frustum 96 % / 98 % / 0.60 / 13.4 min (`26-09-07-fzg`). ~7.7 s execution + 3-4 s synthesis per attempt.
+Committed 2026-09-07 with the user's go-ahead (3 meshes, registry, 9 config yamls, collector `--max-attempts`, template `EXTRA_ARGS`).
+- **cherry_tomato local collection done (2026-09-07 01:45): 215 saved / 228 attempts (94.3 %), ever 97 %, 78.7 min, seed 1, run
+  `26-09-07-kfx`** (+ the 35-episode partial `26-09-06-xxg`, seed 0 = 250 total). sub-yield 57 % (known cherry gentleness).
+  Tiers: 121 nominal, 31 tier 1, 76 tier 2 (yield off!), 2 fallback_seed — on cherry the relaxed yield-off tier carries a third of the
+  demos; worth a look at those episodes' stress before training on them. Two settle retries (bounded resilience), no crash; the
+  two fallback_seed draws exercised the hotfix. Lesson: NEVER edit a bash launcher while an invocation of it is running — bash reads
+  the file incrementally; the template edit at 00:30 made the 00:26 invocation exit 127 after the collector finished (data intact,
+  snapshot redone by hand).
+- **Round 4 `yuoqe` (2026-09-07, 2000 ep): round 3 minus the consistency-view offset, tail K=10. Clean teasers: 1000 -> 6/20 (ever 10),
+  1500 -> 3/20 (8), 2000 -> 6/20 (9).** vs round 2 qzhek_750 10/20 and round 3 vigrl_1200 7/20. Consistency loss flat at 4e-5 all run;
+  acceptance replay passes (0.7-1.5 mm). Failure profile = round 3's (retries that do not land, 3-4 holds lost), not round 2's
+  (empty-grasp holds, no losses). So the consistency offset was not what cost round 3 its precision; the remaining differences to
+  round 2 are the tail length (60 vs 10/20) and the consistency fraction/offsets in the BC path (8 vs 6 mm). Checkpoint-to-checkpoint
+  spread (3 -> 6 within one run) is as large as the between-round differences: 20-episode teasers cannot rank these recipes — a
+  canonical 200-episode eval on the 2-3 candidate checkpoints is the next step before any more recipe changes.
+- **Large-dataset training recipe fixed (user, 2026-09-07):** `train_dppo_dp3.sh` now holds ONE recipe (round history moved to the
+  training plan doc): BC aug residue p 0.15, PER-AXIS rigid offset U(+-5, +-3.5, +-1.5 mm) (`model.pc_offset` accepts a float or a
+  3-list), consistency view residue p 0.30 and no offset, paired 0.5, consistency w 0.3 / frac 0.3; DATASET/EXPERIMENT/EPOCHS are
+  required env vars; EPOCHS=auto derives the epoch count from a TARGET of 380,000 gradient steps at batch 128 (user; round 4
+  reference = 280,000: 140 batches/epoch x 2000). Verified: per-axis shift bounded at 5 / 3.5 / 1.5 mm and rigid within each cloud.

@@ -23,7 +23,7 @@ experiment: single_lift_tofu_soft_abs_action_armfocus_7d_realws
 
 seed: 42
 device: cuda:0
-env: single_lift_tofu_sim2real_v1_tail20   # hold-tail dataset (augment_hold_tail K=20 = the frozen collector's hold); set per run via train_dppo_dp3.sh DATASET=
+env: single_lift_tofu_sim2real_v1_tail10   # set per run via train_dppo_dp3.sh DATASET= (cluster data carries its 10-step hold natively)
 obs_dim: 8                     # proprio only (ee_pos3 + ee_quat4 + gripper1); cloud is separate
 action_dim: 7                 # abs pos3 + euler3 (frame-offset) + gripper1 — afucm twin
 denoising_steps: 20
@@ -40,7 +40,7 @@ wandb:                          # enabled; disable per-run with `wandb=null`, or
   group: dppo-pretrain
 
 train:
-  n_epochs: 3000                # SET per dataset size: ~3000 x 29.6k / N_train_steps, clamp [800, 3000]
+  n_epochs: 3000                # SET per dataset: train_dppo_dp3.sh derives it from a 380k gradient-step target (EPOCHS=auto)
   batch_size: 128
   learning_rate: 1e-4
   weight_decay: 1e-6
@@ -63,7 +63,7 @@ model:
   # it bypasses PolicyEnv, so the experiment's `augmentation:` never reached the demos). Same noise on the
   # BC clouds and the paired sim twins; offset on the BC clouds only. Val/deploy clean.
   pc_aug: d435i_noise_train       # configs/augmentation/<name>.yaml: measured stereo noise + dropout; "" = off
-  pc_offset: 0.006                # per-sample rigid offset U(+-6 mm)/axis (round 3; was 8): the measured real-vs-sim x shift is
+  pc_offset: [0.005, 0.0035, 0.0015]   # per-sample rigid offset, PER AXIS U(+-x, +-y, +-z) (large-dataset recipe, user 2026-09-07): the measured real-vs-sim x shift is
                                   # ~7 mm (arm AND object together, paired_cloud_shift.py) -> tolerate cloud/proprio
                                   # disagreement of that size instead of correcting the extrinsic again.
   # Clean-vs-perturbed ENCODER consistency (2026-09-06): on a random half of every batch, cos-distance between
@@ -72,7 +72,7 @@ model:
   consistency_weight: 0.3         # 0 = off (baseline-identical); watch sim SR on clean clouds if raised
   consistency_frac: 0.3           # round 3 (was 0.5)
   consistency_aug: d435i_noise_strong
-  consistency_offset: 0.006       # round 3 (was 0.012)
+  consistency_offset: 0.0         # round 4: none (feature-level shift invariance blinds a PointNet to position; round 3: 0.006)
   aux_contact_weight: 0.0          # aux heads OFF
   aux_object_pos_weight: 0.0
   aux_grasp_width_weight: 0.0

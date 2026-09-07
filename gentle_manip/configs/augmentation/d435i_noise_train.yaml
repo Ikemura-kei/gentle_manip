@@ -17,7 +17,7 @@ pc_dropout: 0.03
 # (tzdhk_2000 ep0: 1-12 pts, median 3; 1-4 mm thick; 4-13 mm across; 19-29 mm high; 1-3 per frame in 34 %
 # of frames). The real pipeline's ground_residual filter removes most of them; this makes the policy
 # indifferent to the rest (5 such points moved the gripper command 4-7 mm toward open). Sim-only.
-pc_residue_prob: 0.5
+pc_residue_prob: 0.15   # large-dataset recipe (user, 2026-09-07): was 0.5 in rounds 2-4
 pc_residue_clusters: [1, 3]
 pc_residue_points: [1, 8]      # measured median 3 / max 12; merged neighbours give the tail
 pc_residue_z: [0.019, 0.032]

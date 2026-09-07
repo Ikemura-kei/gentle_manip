@@ -1,5 +1,5 @@
 #! /bin/bash
-# Collect ONE synth demo set for one object (template: OBJ / N_EPISODES / SEED env vars, or edit obj / n_episodes).
+# Collect ONE synth demo set for one object (template: OBJ / N_EPISODES / SEED / EXTRA_ARGS env vars, or edit obj / n_episodes).
 # Stamp    = time + host + git sha, written into the run's config.yaml (--description) and STAMP file.
 # Run dir  = the collector's own <out>/<task>/<yy-mm-dd>-<abc>/ (random 3-letter suffix -> parallel-safe;
 #            do NOT nest a stamp dir above it, --task-name already adds one level).
@@ -26,7 +26,7 @@ OMP_NUM_THREADS=8 MUJOCO_GL=egl uv run --project envs/sim python grasp_synthesis
   --out-dir    "$out" \
   --table-z 0.0138 \
   --n-episodes ${n_episodes} --n-envs 10 --seed ${seed} --scene-dr-every 1 --record-video 25 \
-  --description "stamp=${stamp}" 2>&1 | tee "$log"
+  --description "stamp=${stamp}" ${EXTRA_ARGS:-} 2>&1 | tee "$log"
 
 # ── resolved config snapshot + log into the run dir ──
 run=$(grep -o 'Data   → .*/data.pkl' "$log" | head -1 | sed 's/Data   → //; s#/data.pkl$##')
