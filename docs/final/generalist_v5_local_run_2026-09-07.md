@@ -68,6 +68,7 @@ have been saved. Warm-up was scaled to the same ~5 % of the run as round 4.
   | tofu (`single_lift_tofu_soft_abs_action_armfocus_7d_realws`) | **11/20** | 14/20 | `eval/2026-09-07_19-38-41` |
   | mushroom (`single_lift_mushroom_soft_abs_action_armfocus_7d_realws`) | **9/20** | 11/20 | `eval/2026-09-07_20-27-22` |
   | banana_chunk (`single_lift_banana_chunk_soft_abs_action_armfocus_7d_realws`) | **12/20** | 15/20 | `eval/2026-09-07_20-38-17` |
+  | tomato (`single_lift_tomato_soft_abs_action_armfocus_7d_realws`) | **16/20** | 19/20 | `eval/2026-09-07_20-47-45` |
 
   Tofu is the campaign's best sim teaser (round 2 `qzhek_750` 10/20 ever 12; round 4 `yuoqe_2000` 6/20 ever 9); 3 holds
   lost after a grasp, 6 never grasped. `eval/2026-09-07_19-29-51` is a mis-selected `state_5.pt` (5/20) — see §5.
