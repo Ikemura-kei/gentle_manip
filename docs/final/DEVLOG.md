@@ -9738,6 +9738,30 @@ uniform faces, exact extent restore) fixed every one: regate 7/7 PASS at ratio 1
 same recipe (was a 45k-tet hang at 10/100). Lesson -> a failed `watertight_decimate` must FAIL
 LOUDLY, never silently keep the dense mesh.
 
+### 2026-09-07 21:30 — CLUSTER generalist matrix launched: G1/G0/G2, TARGET_STEPS=1M, after the dataset arrival gate
+Three GH200 runs on the SAME transferred npz as `bqvzh`/`wiayg` (pinned val split → directly comparable), seed 42, wandb project
+`gentle_manip_generalist`, submitted G1 `2127880` (paired 0.5 / cons 0.3 = recipe v5 exact), G0 `2127881` (paired **1e-8**
+log-only / cons 0.3), G2 `2127882` (paired 0.5 / cons **1e-8** log-only). Setup + matrix rationale:
+`docs/final/generalist_cluster_run_2026-09-07.md`.
+
+**The ε log-only trick** (reusable): both encoder regularizers are gated `if weight > 0.0` and log their RAW unweighted loss, so
+`w = 1e-8` computes and logs a term identically to an optimized run while contributing gradients ~7 orders below BC. That turns
+"ablate a term" into "observe the term un-optimized" with zero code changes — G0 shows what the real–sim feature distance does
+when nothing pulls it closed. Setting the weight to 0.0 instead would have made the curve disappear (the npz is not even loaded).
+
+**Schedule scaling converged independently with the local agent** — cluster wrapper and `wiayg` both resolved EPOCHS 120,
+warmup 6, ckpt every 20, EMA from epoch 1, val every 5 from the same formula. Two agents, same numbers, no coordination.
+
+**Arrival-gate lessons (both cost a false FAIL / a timeout before being understood):**
+1. **A stored cloud's raw min z is `0.00000` and that is CORRECT** — converter zero-padding for frames whose board crop left
+   fewer than 1024 points (0.0039 % of points; 61 of 119,716 val frames; median 43 padded points where present). Excluding exact
+   `(0,0,0)` rows gives min z = **0.01900 m exactly**, the 19 mm board crop. Any crop-invariant check MUST drop padded rows first
+   or it fails a clean dataset.
+2. **Never `np.load` an 11.7 GB npz whole on a login node** — it timed out at 2 min once and was killed a second time. Read the
+   member in 64 MB chunks out of the npz zip (`zipfile` + `numpy.lib.format` header, then `f.read(n*row)`): ~2 min, flat memory.
+   `.agent_tmp/verify_transfer2.py` is the working pattern. Note `numpy.lib.format._read_array_header` is private and absent in
+   newer numpy — use `read_array_header_1_0`.
+
 ### 2026-09-07 21:20 — `wiayg` launched: G1 (recipe v5, TARGET_STEPS=1M) run locally as the cluster's twin
 Same npz as bqvzh; EPOCHS=auto -> 120 (8,393 batches/epoch, 1,007,160 steps, ~5.6 h at 20 ms/step); schedule scaling per
 `docs/final/generalist_cluster_run_2026-09-07.md` §3/§4, verified against the script's formula: warmup 6, ckpt every 20, EMA from 1,
