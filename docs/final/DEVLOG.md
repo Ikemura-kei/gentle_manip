@@ -9669,3 +9669,104 @@ Frozen state (this commit): collector `N_HOLD = 10` (user's choice; trailing hol
 tier 1 geometry relaxed + pressure x2 + yield kept; tier 2 yield off; tier 3 nearest-COM survivor), `synth_tier` recorded per
 episode. Diagnose tool: `scripts/final/synth_diagnose.sh` (`--skip-execution`). No other synthesis/execution change since the
 2026-09-05 freeze. Verified: nominal draws bit-identical to the pre-tier planner; two-attempt banana_chunk check resolves both draws.
+- **raspberry local smoke (2026-09-06 23:27, frozen v4.2, seed 0, 10 envs): 0/10, reproduces the cluster's failure LOCALLY.** The
+  body has already spread at settle — `[proj]` particle span 23-24 mm vs FEM span 17 mm before any contact; the failure clip shows a
+  flat splat of particles from the first frame; coupling force during the close climbs to ~2000 N (debris). Same on mesh variant 5
+  at scale 1.08-1.12 in both batches. The "raspberry 16/16" DEVLOG entry predates the mesh pool and the frozen collector; the 05
+  profiling never included raspberry — so "the recipe held locally" was never verified for this object. The `_smooth` meshes have the
+  same extents (only half the faces), and the cluster already reported option C failing, so no local smooth-mesh run was made.
+  Raspberry is NOT collectable with the frozen recipe on this machine; parked here too pending a user decision (drop it, or a
+  dedicated stability recipe: coarser grid / more substeps / stiffer yield). Cherry tomato smoke started instead.
+- **v4.2 HOTFIX (2026-09-07 00:30) — two bugs found by the first local cherry_tomato collection (crashed at batch 6, 38 saved):**
+  (1) the tier-3 `fallback_seed` result carried no grip/align, so the collector's result print raised on the first draw where BOTH
+  relaxed tiers failed (never hit in the smokes) — placeholders added; (2) `dr_params.csv`: the save loop stamped `dataset_idx` into
+  the LAST column, which since v4.2 is `synth_tier` — column index fixed (-2). Rows of runs collected between e7ca088 and this fix
+  have the dataset index in `synth_tier` and an empty `dataset_idx`. Partial run 26-09-06-xxg kept (35 valid episodes, snapshot
+  completed by hand, NOTE.txt); collection resumed as a new run with SEED=1 for the remaining 215.
+
+### 2026-09-07 — COLLECTION CAMPAIGN COMPLETE: 20/23 objects at target, ~4,700 demos in ~5h wall
+
+Frozen v4.2 (e7ca088..8109ff4), one job/object, seed 0, cluster; live board + watchdogs (auto
+kill/reseed). Full per-object stats in each run's stats.yaml; board generator in .agent_tmp.
+
+**Main campaign (550/250/50 targets):** tofu 550@98.0%, prim_cylinder 550@97.2%, mushroom
+550@92.7%, prim_ellipsoid 550@82.2% (pitch/roll DR capped at 5 deg — user, anti-penetration),
+prim_cuboid 250@99.6%, prim_sphere 250@92.3%, banana_chunk 250@73.1% (!! was 18% pre-v4.2 —
+the relaxation tiers fixed its no-solution problem), cherry_tomato 50@83.3%, pasta_bundle
+50@79.4% (was ~45% historically).
+
+**PARKED partials (user decision pending, all banked data valid + snapshotted):**
+- tomato 424/550: rigid-solver NaN killed BOTH seeds (chronic GH200 tomato class; likely fix
+  substeps 175->350 per the ss350 eval precedent, but that mixes fidelity mid-dataset).
+- strawberry 77/550: tetgen HANG on both seeds ("Steiner points..." + "input triangles skipped
+  due to self-intersections") — the 28k-face scan's self-intersection blows up direct-tet under
+  deform draws; fix = mesh repair/decimation (mesh-lane).
+
+**Basic-shapes batch (18 GLB primitives + torus, mushroom material, scale [0.9,1.2], extents
+U(2.5,4.5)cm seed 7):** FEM gate (direct-tet + extent-ratio ~1.00) passed 11+torus, EXCLUDED 7
+(bs_cube4/5, cylinder/2, decagon/hexagonal pyramid, pyramid: planner repair inflates extents
+1.04-1.77x). Collected: bs_cube2 100@98, bs_cube3 100@100, bs_cylinder3 100@68, bs_dodecagon
+100@100, bs_icosahedron 100@99, bs_icosphere 100@94, bs_pentagon 100@100, bs_sphere 100@97,
+bs_star 100@74, bs_quadrangular_pyramid 100@47 (under its 250-attempt cap), prim_torus_mush
+50@98 (z-thickened 14->25mm). bs_cube (octahedron) = partial ~10/100: its FEM exploded to 45k
+tets (gate checked ratio, NOT tet count — add that bound) + tier-2 grind/hang; walltime-reaped.
+
+**Ops record:** 2 pre-fix jobs died of the tier-exhaustion print crash? NO — zero hit it (the
+hotfix mattered for the bs batch which launched post-fix). Kills/reseeds: strawberry x2 (hangs),
+tomato x2 (NaNs), all with manual config snapshots; bs caps enforced automatically. Board:
+claude.ai artifact, 30-min refresh + event refreshes; stale-August-glob and grep-c||echo-0
+watchdog bugs found+fixed en route (both B1-class reference errors).
+
+**2026-09-07 follow-up (user directives):** (1) tomato STOPPED at 420 episodes — consolidated to
+single_lift_tomato_soft/26-09-07-merged/data.pkl (parts preserved inside; 4 tail episodes lost to
+unflushed sub-5-ep shards, expected). (2) strawberry: 75 pre-fix episodes consolidated the same
+way (to be combined with post-fix collection); strawberry.obj REPAIRED IN PLACE — voxel remesh at
+~0.27mm, 28.4k->9k faces, extents exact, volume ratio 0.996 (original at
+obj_meshes/backup_strawberry_scan_orig.obj) — kills the self-intersection that hung tetgen;
+re-collection of the remaining 475 gated then launched. (3) bs_cube: 10-episode partial DISCARDED
+(user); root cause found — its earlier decimation had silently failed manifold, leaving a 32.6k-face
+MC mesh (hence 45k tets); now decimated to 6.1k faces, re-gated with the NEW TET CAP (<=3x target,
+documented in adding_new_objects.md §2 with the tetgen-hang symptom note). (4) the 7 gate-excluded
+bs shapes stay parked (user: revisit later).
+
+**2026-09-07 (day) — the 7 gate-excluded bs shapes FIXED and collecting.** Root cause confirmed for
+all seven: the original prep's watertight-decimation silently fell back to dense marching-cubes
+meshes (bs_cylinder 39.8k faces, bs_pyramid 17k, ...) -> planner-side repair inflated extents
+1.04-1.77x. The bs_cube recipe (coarse voxel remesh, pitch bounded by the thinnest axis, ->900
+uniform faces, exact extent restore) fixed every one: regate 7/7 PASS at ratio 1.000, tets
+1.8k-3.5k. All launched at 100 eps / 200-attempt cap. bs_cube itself completed 100@95.2% on the
+same recipe (was a 45k-tet hang at 10/100). Lesson -> a failed `watertight_decimate` must FAIL
+LOUDLY, never silently keep the dense mesh.
+
+### 2026-09-07 — three new primitives (local collection, user): prim_capsule / prim_hexprism / prim_frustum (`_mush`)
+Per `docs/adding_new_objects.md`. Meshes generated with trimesh, centred, metres, 3 cm nominal max extent (user):
+capsule 30 x 18 x 18 mm lying (long axis x), hexagonal prism 30 mm across corners x 25 mm tall, frustum 30 mm base /
+18 mm top x 25 mm tall. FEM-aware check: all direct tet (2089 / 2512 / 2294 tets), extent ratio 0.99-1.00. Registry:
+additive `<name>_mush` entries with MATERIALS["mushroom"], default_pos z = h/2 + 1 mm. Configs cloned from the
+prim_ellipsoid_mush trio (shared blocks untouched); object-specific: spawn_z 0.045 / 0.049 / 0.049 (guideline formula
+with scale max 1.2), grasp_gate 0.060 / 0.063 / 0.065, DR scale [0.9, 1.2] (user), mushroom material ranges
+(E 2-3e5, nu 0.32-0.38, rho 900-1000), small shape DR as the ellipsoid. Collection: 50 saved each, `--max-attempts 100`
+(new collector CLI knob, default unlimited = unchanged; template passes `EXTRA_ARGS`).
+**Results (02:26): all three reached 50 saved in 60 attempts each, every grasp at the nominal tier, 100 % sub-yield.**
+capsule 98 % / ever 100 % / stress-yield mean 0.57 / 12.7 min (`26-09-07-ycm`); hexprism 98 % / 100 % / 0.56 / 13.7 min
+(`26-09-07-klj`); frustum 96 % / 98 % / 0.60 / 13.4 min (`26-09-07-fzg`). ~7.7 s execution + 3-4 s synthesis per attempt.
+Committed 2026-09-07 with the user's go-ahead (3 meshes, registry, 9 config yamls, collector `--max-attempts`, template `EXTRA_ARGS`).
+- **cherry_tomato local collection done (2026-09-07 01:45): 215 saved / 228 attempts (94.3 %), ever 97 %, 78.7 min, seed 1, run
+  `26-09-07-kfx`** (+ the 35-episode partial `26-09-06-xxg`, seed 0 = 250 total). sub-yield 57 % (known cherry gentleness).
+  Tiers: 121 nominal, 31 tier 1, 76 tier 2 (yield off!), 2 fallback_seed — on cherry the relaxed yield-off tier carries a third of the
+  demos; worth a look at those episodes' stress before training on them. Two settle retries (bounded resilience), no crash; the
+  two fallback_seed draws exercised the hotfix. Lesson: NEVER edit a bash launcher while an invocation of it is running — bash reads
+  the file incrementally; the template edit at 00:30 made the 00:26 invocation exit 127 after the collector finished (data intact,
+  snapshot redone by hand).
+- **Round 4 `yuoqe` (2026-09-07, 2000 ep): round 3 minus the consistency-view offset, tail K=10. Clean teasers: 1000 -> 6/20 (ever 10),
+  1500 -> 3/20 (8), 2000 -> 6/20 (9).** vs round 2 qzhek_750 10/20 and round 3 vigrl_1200 7/20. Consistency loss flat at 4e-5 all run;
+  acceptance replay passes (0.7-1.5 mm). Failure profile = round 3's (retries that do not land, 3-4 holds lost), not round 2's
+  (empty-grasp holds, no losses). So the consistency offset was not what cost round 3 its precision; the remaining differences to
+  round 2 are the tail length (60 vs 10/20) and the consistency fraction/offsets in the BC path (8 vs 6 mm). Checkpoint-to-checkpoint
+  spread (3 -> 6 within one run) is as large as the between-round differences: 20-episode teasers cannot rank these recipes — a
+  canonical 200-episode eval on the 2-3 candidate checkpoints is the next step before any more recipe changes.
+- **Large-dataset training recipe fixed (user, 2026-09-07):** `train_dppo_dp3.sh` now holds ONE recipe (round history moved to the
+  training plan doc): BC aug residue p 0.15, PER-AXIS rigid offset U(+-5, +-3.5, +-1.5 mm) (`model.pc_offset` accepts a float or a
+  3-list), consistency view residue p 0.30 and no offset, paired 0.5, consistency w 0.3 / frac 0.3; DATASET/EXPERIMENT/EPOCHS are
+  required env vars; EPOCHS=auto derives the epoch count from a TARGET of 380,000 gradient steps at batch 128 (user; round 4
+  reference = 280,000: 140 batches/epoch x 2000). Verified: per-axis shift bounded at 5 / 3.5 / 1.5 mm and rigid within each cloud.

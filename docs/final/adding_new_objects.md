@@ -23,6 +23,14 @@ Real objects are what the sim must match; check `trimesh.load(mesh).extents` aga
   `smgrasp.finger_grasp_final.build_grasp_fem(path)` and compare extents; `meta["direct_tet"]` must
   be `True` and the extent ratio ≈ 1.00 (see the 2026-09-05 table in the DEVLOG: 30/31 objects direct).
   If it prints `[fem] ... voxel remesh fallback (dilates)` the surface self-intersects: fix the mesh.
+  **Also bound the TET COUNT: `meta["tets"]` must stay ≲ 3× `target_tets` (i.e. ≤ ~4,500 at the
+  1,500 default).** A sharp/degenerate surface can make tetgen's quality refinement explode
+  (2026-09-07: a 5,000-face octahedron produced 45k tets → every FEM score ~30× cost, the tier
+  cascade ground to an effective hang, and the collection job died on walltime at 10/100). The fix
+  is mesh-side: decimate toward the shape's true face count / remesh smoother, then re-check. A
+  latent self-intersection can also pass this check at the NOMINAL mesh yet HANG tetgen ("Steiner
+  points…" forever) under deform-DR draws at collection scale (2026-09-07: strawberry, 2/2 seeds) —
+  if a collection job freezes inside tetgen, suspect the source mesh, not the sampler.
 - Put it in `gentle_manip/assets/objects/<name>.obj`. Registry meshes are the only files you add.
 
 ## 3. Registry (`gentle_manip/assets/registry.py`) — ADDITIVE

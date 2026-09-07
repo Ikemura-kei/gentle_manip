@@ -1,5 +1,5 @@
 #! /bin/bash
-# Collect ONE synth demo set for one object (template: edit obj / n_episodes / SEED).
+# Collect ONE synth demo set for one object (template: OBJ / N_EPISODES / SEED / EXTRA_ARGS env vars, or edit obj / n_episodes).
 # Stamp    = time + host + git sha, written into the run's config.yaml (--description) and STAMP file.
 # Run dir  = the collector's own <out>/<task>/<yy-mm-dd>-<abc>/ (random 3-letter suffix -> parallel-safe;
 #            do NOT nest a stamp dir above it, --task-name already adds one level).
@@ -9,8 +9,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/../../.."
 
-n_episodes=100
-obj=tofu
+n_episodes=${N_EPISODES:-100}   # or edit here
+obj=${OBJ:-tofu}                # or edit here
 seed=${SEED:-0}                 # parallel jobs on the same object MUST use different seeds (DR + CMA streams)
 exp=single_lift_${obj}_soft_abs_action_armfocus_7d_realws
 task=single_lift_${obj}_soft
@@ -26,7 +26,7 @@ OMP_NUM_THREADS=8 MUJOCO_GL=egl uv run --project envs/sim python grasp_synthesis
   --out-dir    "$out" \
   --table-z 0.0138 \
   --n-episodes ${n_episodes} --n-envs 10 --seed ${seed} --scene-dr-every 1 --record-video 25 \
-  --description "stamp=${stamp}" 2>&1 | tee "$log"
+  --description "stamp=${stamp}" ${EXTRA_ARGS:-} 2>&1 | tee "$log"
 
 # ── resolved config snapshot + log into the run dir ──
 run=$(grep -o 'Data   → .*/data.pkl' "$log" | head -1 | sed 's/Data   → //; s#/data.pkl$##')

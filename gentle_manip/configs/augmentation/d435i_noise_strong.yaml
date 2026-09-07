@@ -11,7 +11,7 @@ pc_dropout: 0.10                 # scattered misses (measured real frame: 9.8 % 
 pc_patch_prob: 1.0               # one occlusion blob, radius 0.5-1 cm, ONLY above 10 cm (arm body) — never the object
 pc_patch_radius: [0.005, 0.01]
 pc_patch_z_min: 0.10
-pc_residue_prob: 1.0             # leaked table residue on EVERY perturbed view
+pc_residue_prob: 0.30            # leaked table residue on 30 % of perturbed views (user, 2026-09-07; was every view)
 pc_residue_clusters: [1, 5]
 pc_residue_points: [1, 12]
 pc_residue_z: [0.019, 0.035]

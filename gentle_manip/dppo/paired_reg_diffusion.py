@@ -32,7 +32,7 @@ from gentle_manip.dppo.aux_diffusion import AuxDiffusionModel
 class PairedRegDiffusionModel(AuxDiffusionModel):
     def __init__(self, *args, paired_npz: str = "", paired_consistency_weight: float = 0.0,
                  paired_batch: int = 64, paired_metric: str = "cosine",
-                 pc_aug: str = "", pc_offset: float = 0.0,
+                 pc_aug: str = "", pc_offset=0.0,
                  consistency_weight: float = 0.0, consistency_frac: float = 0.5,
                  consistency_aug: str = "", consistency_offset: float = 0.012, **kwargs):
         super().__init__(*args, **kwargs)
@@ -55,13 +55,14 @@ class PairedRegDiffusionModel(AuxDiffusionModel):
             print(f"[consistency] clean-vs-perturbed encoder term: w={self.consistency_weight} frac={self.consistency_frac} "
                   f"aug={consistency_aug} offset +-{self.consistency_offset} m (stop-grad on clean)", flush=True)
         self._pc_aug = None
-        self.pc_offset = float(pc_offset)
+        # rigid cloud offset U(+-o) per axis; a float applies to x/y/z alike, a 3-list is per axis (x, y, z)
+        self.pc_offset = self._offset_vec(pc_offset)
         if pc_aug:
             from gentle_manip.dppo.cloud_aug import load_pc_aug
             self._pc_aug = load_pc_aug(pc_aug, self.device)                # (cfg, cam)
             c = self._pc_aug[0]
             print(f"[pc_aug] train-time cloud noise {pc_aug}: axial {c.pc_axial_coeff} lateral "
-                  f"{c.pc_lateral_coeff} dropout {c.pc_dropout} | rigid offset +-{self.pc_offset} m "
+                  f"{c.pc_lateral_coeff} dropout {c.pc_dropout} | rigid offset +-{[round(float(x), 4) for x in self.pc_offset]} m (x,y,z) "
                   f"(BC clouds + paired twins noised; val/deploy clean)", flush=True)
         self.paired_consistency_weight = float(paired_consistency_weight)
         self.paired_batch = int(paired_batch)
@@ -75,15 +76,22 @@ class PairedRegDiffusionModel(AuxDiffusionModel):
             self._paired_sim = torch.from_numpy(d["sim"]).float().to(self.device)
             assert self._paired_real.shape == self._paired_sim.shape
 
-    def _augment(self, pc: torch.Tensor, offset: bool, aug=None, offset_m: float = None) -> torch.Tensor:
+    @staticmethod
+    def _offset_vec(o):
+        import numpy as np
+        v = np.asarray(o, dtype=float).reshape(-1)
+        return (np.repeat(v, 3) if v.size == 1 else v)[:3]
+
+    def _augment(self, pc: torch.Tensor, offset: bool, aug=None, offset_m=None) -> torch.Tensor:
         """(B, Tpc, N, 3) or (K, N, 3) -> same shape; batched sensor noise (+ per-sample rigid offset)."""
         from gentle_manip.dppo.cloud_aug import sensor_noise
         aug = self._pc_aug if aug is None else aug
-        offset_m = self.pc_offset if offset_m is None else offset_m
+        offset_m = self.pc_offset if offset_m is None else self._offset_vec(offset_m)
         shp = pc.shape
         pc = sensor_noise(pc.reshape(-1, shp[-2], 3), *aug).view(shp)
-        if offset and offset_m > 0:
-            t = (torch.rand(shp[0], *([1] * (pc.dim() - 2)), 3, device=pc.device) * 2 - 1) * offset_m
+        if offset and float(max(offset_m)) > 0:
+            o = torch.as_tensor(offset_m, dtype=pc.dtype, device=pc.device)                  # (3,) per-axis half-widths
+            t = (torch.rand(shp[0], *([1] * (pc.dim() - 2)), 3, device=pc.device) * 2 - 1) * o
             pc = pc + t * (pc.abs().sum(-1, keepdim=True) > 0).float()   # padded rows stay zero
         return pc
 
