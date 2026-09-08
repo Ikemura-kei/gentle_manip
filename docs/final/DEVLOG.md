@@ -10028,3 +10028,81 @@ sourcing+filter pass over the 130-category pool is running now. Pilot mesh-prep 
 register -> 5-episode collection on the first accepted batch is next (thin-shell objects, e.g.
 wineglass/mug, get an explicit graspability + MPM-stability check as a special case per the user's
 open question — no prior wine-glass/thin-shell discussion existed in this repo before now).
+
+### 2026-09-08 (cont.) — Cluster infra: two checkouts, disk-full incident, GPU queue reality
+
+Mid-expansion-work discoveries worth banking so the next session doesn't re-derive them.
+
+**Two separate checkouts of this repo exist on the arrhenius HPC cluster, and they matter:**
+- `/home/yifeid/git/gentle_manip` (this session's default cwd) — a secondary/scratch clone.
+  Home quota is only **30 GB** (Lustre per-user fileset quota; `df -h /home` shows the whole
+  pool's petabyte scale, NOT the per-user 30GB cap — check `df -h /home/$USER` specifically,
+  not bare `/home`, or the quota looks fine when it is not).
+- `/nobackup/proj/disk/softenable-codesign26/personal/yifeid/gentle_manip` — the REAL,
+  long-running project checkout: full git history, `experiments.csv`, actual collected
+  datasets, wandb runs, and the aarch64-native `envs/sim_arrhenius`/`envs/dppo_arrhenius`
+  environments the cluster's GPU nodes actually need. `/nobackup/proj/disk` has ~27 PB free
+  under the `pg_softenable-codesign26` group; this is where anything large belongs.
+  A parallel `ikemura` personal dir sits next to it (permission denied to read — separate
+  collaborator's space, don't expect access).
+  Both checkouts share the same `origin` (github.com:Ikemura-kei/gentle_manip) but were on
+  DIFFERENT branches (this session's `expand-categories-30` vs the nobackup checkout's
+  `cross-category-dp`) — reconciled by fetching + checking out a new local
+  `expand-categories-30` branch in the nobackup checkout, tracking origin, leaving
+  `cross-category-dp` untouched. **Lesson: always check `git remote -v` + `git branch` in
+  BOTH locations before assuming which one is "the" checkout for a given task.**
+
+**Disk-full incident:** `uv sync --project envs/sim` + the manual torch install in THIS
+session's `/home` checkout filled the 30GB home quota to 100%, which silently crashed the
+first sourcing run mid-batch (a `.write()` on the CSV lands in a Python IO buffer; the
+process doesn't necessarily crash the INSTANT the disk fills, so the failure surfaced later
+and confusingly). Fix: `uv cache clean` freed 18.9 GB instantly (the uv package cache, not
+project files, was 22GB of the 30GB used) restoring 15GB free. **Lesson: `uv`/`pip` caches
+are large and grow silently; `uv cache clean` is the first thing to try on any HPC home-quota
+emergency before deleting real work.** Also: the x86_64 `envs/sim` venv built in this
+session's checkout is USELESS for actual compute anyway (see next point), so it was deleted
+outright rather than kept.
+
+**GPU architecture mismatch:** the login node's own GPU (`nvidia-smi` shows an L40) has
+**Compute Mode: Prohibited** — no CUDA context can be created there, by policy (confirmed via
+a direct `torch.randn(..., device='cuda')` call: `CUDA error: device(s) is/are busy or
+unavailable`, even though `torch.cuda.is_available()` misleadingly returns True — that call
+only checks driver/device enumeration, not whether a context can actually be created).
+Real GPU compute happens on the `gpu` SLURM partition's nodes, which are **aarch64 GH200**
+(`scontrol show node n21` -> `Arch=aarch64`, `Gres=gpu:nvidia_gh200_120gb:4`) — a DIFFERENT
+CPU architecture than the x86_64 login node. An x86_64-built venv (`envs/sim`) cannot run
+there at all (`Exec format error`); the cluster's `envs/sim_arrhenius` etc. are aarch64-native
+builds for exactly this reason, and can only be invoked from within a submitted SLURM job.
+**Lesson: any GPU/genesis work on this cluster MUST go through `sbatch` from the nobackup
+checkout using the `_arrhenius` environments — there is no way to smoke-test genesis
+interactively on the login node.**
+
+**GPU queue depth:** the `gpu` partition had ~1,100 queued jobs at submission time; SLURM's
+own estimate for a 1-GPU / 4-hour job (`gentle_manip/scripts/arrhenius/object_expansion_pilot.sbatch`,
+job 2161446) was **~3 hours** before it would even start (`scontrol show job` -> `StartTime`).
+Backfill can beat that estimate but budget for it being roughly accurate. **Lesson: kick off
+the SLURM job as early as possible and do all the CPU-only pipeline work (sourcing, geometry
+filtering, mesh prep) while it queues — don't block other progress waiting on it.**
+
+**What IS CPU-only and can run directly on the login node (no sbatch needed):** the geometry
+filter, mesh_prep repair/rescale, and (in principle) `fem_gate_check.py` — its whole import
+chain (`smgrasp/{finger_grasp_final,geometry,preprocess,width_grasp}.py`) is numpy/scipy/
+trimesh + lazily-imported `tetgen`/`pymeshlab` (checked via grep across the package), no torch
+anywhere. Attempted a local install of `tetgen`+`pymeshlab` into a scratch venv for this but
+hit a `numpy` ABI mismatch specific to that scratch venv's old pip/Python 3.9 combo (not a
+real blocker, just not worth fighting given the SLURM job will run this stage correctly
+regardless) — worth revisiting with a proper Python 3.11+ venv if a login-node FEM pre-check
+becomes valuable later.
+
+**MetaFood3D (Purdue ViperLab) added as a second sourcing pipeline** (user, 2026-09-08):
+`https://lorenz.ecn.purdue.edu/~food3d/` — real scanned food meshes with texture, a good
+complement to Objaverse's more generic/toy-like shapes. The site's "password" gate
+(`ViperLab%123!`) is plaintext in the public page source (a click-through/terms-of-use
+formality, not real auth) — downloaded the same way a legitimate site visitor would.
+`3D_Mesh.tar.gz` is 11.8GB, ~100+ food categories, laid out as
+`3D_Mesh/<FoodName(container)>/<instance>/<instance>.obj`. Downloaded + extracted to
+`/nobackup/proj/disk/softenable-codesign26/personal/yifeid/object_expansion_sources/metafood3d/`
+(NOT `/home` — see the disk-full lesson above). New
+`gentle_manip/scripts/object_expansion/source_metafood3d.py` runs the SAME `geom_filter.py`
+against it, writing `dataset/object_expansion/candidates_metafood3d.csv` in parallel with the
+Objaverse `candidates.csv`.
