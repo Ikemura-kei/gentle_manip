@@ -1,13 +1,19 @@
 """Does the policy predict the right moment to STOP closing, and the right width to stop at?
 
-`probe_action_sensitivity.py` showed the cloud moves the commanded width by <1 mm at any single
-step — but at horizon 4 a chunk spans only ~18 % of a 22-step close, so the final width is never
-inside one prediction and that number cannot see the object-dependence. This probe looks at the one
-place the decision IS inside a chunk: the samples whose chunk CONTAINS the end of closing, where the
-width ramp stops and plateaus.
+THE standard acceptance probe for a generalist run (user, 2026-09-09). Run it on every new
+checkpoint alongside the teasers — it is CPU-only, takes a few minutes, and measures the thing the
+teasers cannot: whether the policy picks the right grasp width for the object in front of it.
 
-Selection: per episode, `t*` = the last step whose commanded width drops > 0.5 mm. A sample is kept
-if its chunk covers `t*`, so the chunk contains both closing steps and the plateau after them.
+Design (this matters — an earlier pooled version got the OPPOSITE answer and was discarded):
+ONE sample per episode, the chunk starting at `t*` = that episode's last closing step, so the chunk
+contains the stop and the plateau after it. Each episode is labelled with its object (from the
+dataset's sources.yaml plus the deterministic train/val split), and the headline number is the
+correlation BETWEEN OBJECT MEANS.
+
+Why not pool chunks: the val object mix is skewed (mushroom 63 ... torus 2), and a residual like
+`stop - current width` is dominated by WHERE IN THE RAMP the chunk sits rather than by which object
+it is. Pooled, that reads ~0.2 and looks like "the policy ignores object size"; per object it reads
+0.99 and the policy plainly does read it. Same checkpoint, opposite conclusion.
 
 Reported:
     stop-width error        |predicted final width − demo final width|, mm
@@ -24,7 +30,12 @@ Reported:
 CPU by default so it cannot disturb a training job.
 
     uv run --project envs/dppo python -m gentle_manip.scripts.final.probe_stop_width \\
-        --run downloaded_runs/ttukt [--n 128]
+        --run logs/dppo/dppo-pretrain/<dataset>/<id> [--epoch N]
+
+Reference (all three recipe-v5 arms, state_120 — the numbers a new run is compared against):
+    corr between objects  +0.99   slope 0.81-0.82   corr within object +0.78   plateau 33-37 %
+A better run should move the SLOPE toward 1.0 (0.82 = the range is compressed, over-open on small
+objects and under-close on large) and the PLATEAU RATE up from ~35 % (demos: 100 %).
 """
 from __future__ import annotations
 
@@ -60,13 +71,9 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--action-config", type=Path,
                     default=Path("gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml"))
-    ap.add_argument("--per-object", action="store_true",
-                    help="ONE sample per episode (the chunk that ends the close), labelled by object, "
-                         "then correlate BETWEEN object means. The unlabelled version pools many "
-                         "chunks from a skewed object mix (val is mushroom 63 ... torus 2) and its "
-                         "residual is dominated by WHERE in the ramp the chunk sits, not by which "
-                         "object it is — so it cannot answer 'does it pick a wider width for a "
-                         "bigger object'. This mode can.")
+    ap.add_argument("--pooled", action="store_true",
+                    help="DISCARDED design, kept only to reproduce the earlier mistake: pool many "
+                         "chunks around the close from a skewed object mix. Do not use for results.")
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
 
@@ -115,7 +122,7 @@ def main() -> None:
 
     H = int(model.horizon_steps)
     rng = np.random.default_rng(args.seed)
-    if args.per_object:
+    if not args.pooled:
         # object label per VAL episode: sources.yaml + the deterministic split convert_demos uses
         srcs = yaml.safe_load(open(npz.parent / "sources.yaml"))["sources"]
         labels = []

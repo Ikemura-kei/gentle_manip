@@ -9830,61 +9830,54 @@ would create two collection regimes. **The real gap is grasp TIGHTNESS, not spee
 (~27 mm). Caveat: sim cherry carries scale DR 0.9-1.2, the physical tomato is one size, and the real
 p10-p90 (21.8-26.5 mm) overlaps sim. That is an operator instruction, not a parameter.
 
-### 2026-09-09 (night) — three offline probes: what the cosine losses mean, and whether the policy reads object size
-Written while G3 trained; all CPU-only so the GPU run was never touched. Scripts:
-`gentle_manip/scripts/final/probe_{feature_geometry,action_sensitivity,stop_width}.py`.
+### 2026-09-09 (night) — the stop-width probe: the policy DOES read object size; the defect is a compressed range
+`gentle_manip/scripts/final/probe_stop_width.py` — **the standard acceptance probe for every future
+generalist run** (user, 2026-09-09). CPU-only, a few minutes, measures what teasers cannot: does the
+policy pick the right grasp width for the object in front of it.
 
-**1. The cosine-regularizer numbers were ~all shared component.** Raw `1-cos` for the paired and
-consistency terms sits at 1e-5, which looks like "perfectly aligned" against the textbook 1.0 for
-random 512-d vectors. But the encoder's OWN unrelated inputs are nowhere near 1.0: two clouds from
-different episodes read 2.4 deg apart in G2 (11.9 in G1, 24.8 in G0). Subtract the sample-mean
-feature and they read **89.6 deg** — the random reference — while the consistency pair goes 0.28 ->
-9.8 deg. So the raw values were measuring a shared component, not scene geometry. It is NOT the
-LayerNorm bias (||bias|| 1.4 vs ||weight|| 6.5, far too small); the pooled feature itself barely
-varies with the scene. Scale-free (`1-cos` as a fraction of an unrelated pair) each ablated term IS
-loosest in its own row — consistency 0.010 (on) vs 0.043 (off), paired 0.015 (on) vs 0.029 (off) —
-so both terms work, but they tighten an already-tight alignment (~1-4 % of "unrelated"), not rescue a
-collapse. **Also: cosine is scale-invariant, so feature MAGNITUDE is unconstrained and drifts 9x
-across the three arms** (||f|| 1.03 / 2.60 / 9.16), changing the visual:proprio ratio entering the
-head from 0.5 to 4.5. Nothing in the objective controls that.
+Design: ONE sample per episode — the chunk starting at that episode's LAST closing step, so the stop
+and the plateau after it are both inside the chunk — labelled by object from the dataset's
+`sources.yaml` plus the deterministic split, then correlate BETWEEN OBJECT MEANS.
 
-**2. Action sensitivity, proprio held fixed.** A strong cloud perturbation moves the commanded action
-0.3-0.8 % of the demo spread; a whole different episode's cloud moves it 3-7.5 %. The 10:1 ordering is
-the robustness we want. The consistency term buys ACTION-space robustness too (perturbation moves
-width 0.025 mm with it on vs 0.10 mm off; roll 0.02 deg vs 1.44 deg) — the first evidence that term
-changes what the policy does, not just what the encoder represents.
+**Reference numbers, all three recipe-v5 arms at state_120 (identical, so this is a property of the
+recipe, not of an arm):**
 
-**3. Stop-width probe — and a FLAWED first version, corrected.** v1 pooled many chunks around the end
-of closing and reported "residual correlation 0.22", read as "the policy barely adapts width to the
-object". **That was wrong on two counts** (user caught it): the val object mix is skewed (mushroom 63
-... torus 2), and the residual `stop - current width` is dominated by WHERE IN THE RAMP the chunk sits,
-not by which object it is. Corrected design — ONE sample per episode (the chunk starting at the last
-closing step), labelled by object via sources.yaml + the deterministic split, correlate BETWEEN object
-means:
+| | G1 `bmbrv` | G2 `ttukt` | G0 `fdcjk` |
+|---|---|---|---|
+| corr between objects | +0.993 | +0.992 | +0.991 |
+| slope | 0.817 | 0.818 | 0.811 |
+| corr within object (scale DR) | +0.786 | +0.781 | +0.783 |
+| stop-width error | 2.91 mm | 2.82 | 2.89 |
+| plateau detected in chunk | 32.7 % | 37.0 % | 37.0 % (demos: 100 %) |
 
-| | G2 `ttukt` |
-|---|---|
-| corr between object means | **+0.992** (slope 0.82) |
-| corr within object (scale DR) | +0.78 (data ceiling ~0.85) |
-| plateau detected in chunk | 37 % vs 100 % in demos |
-| cherry_tomato demo vs predicted stop | 22.3 vs 24.5 mm |
-| tomato demo vs predicted stop | 59.7 vs 56.1 mm |
+**The policy reads object size well** (cherry stop 22.3 demo vs 24.5 predicted; tomato 59.7 vs 56.1).
+The defect is the **slope of 0.82** — the range is compressed, over-open on small objects and
+under-close on large — plus it does not commit to a stop inside the chunk. Neither regularizer
+touches either number, which is consistent with five failed width mechanisms and explains why the
+three arms were indistinguishable on teasers.
 
-**The policy DOES read object size** (0.99 between objects; the user had observed this in sim). The
-defect is a **compressed range, slope 0.82** — over-open on small objects, under-close on large — plus
-it does not commit to a stop inside the chunk. At horizon 4 a chunk spans only 18 % of a 22-step,
-41 mm close, so the stop is never inside one prediction; at horizon 16 it spans 73 %. That is a
-direct argument for G3 and gives it a sharp acceptance test: slope -> 1 and plateau rate up.
+**Structural cause, and G3's acceptance test:** at horizon 4 a chunk spans only 18 % of a 22-step,
+41 mm close, so the stop is never inside one prediction; at horizon 16 it spans 73 %. A better run
+should move the SLOPE toward 1.0 and the PLATEAU RATE up from ~35 %.
 
-**4. Closed-loop confirmation, from eval `signals/` we already had.** Per-episode min width vs success
-on wiayg teasers: cherry 25.1 mm (success) vs 27.2 (fail); tofu 28.4 vs 32.6; mushroom 31.5 vs 29.1.
-**2-4 mm of width error separates success from failure**, in both directions. And failures show ~2x
-the closing steps (cherry 21.1 vs 12.3; tofu 18.3 vs 9.1) — the retry spiral. Correlational, not
-causal: forcing a width and observing the outcome needs the simulator in the loop.
+**Closed-loop confirmation, from eval `signals/` already on disk.** Per-episode min width vs success
+on the wiayg teasers: cherry 25.1 mm (success) vs 27.2 (fail); tofu 28.4 vs 32.6; mushroom 31.5 vs
+29.1. **2-4 mm of width error separates success from failure**, in both directions, and failures show
+~2x the closing steps (cherry 21.1 vs 12.3) — the retry spiral. Correlational; forcing a width and
+observing the outcome needs the simulator in the loop.
 
-**Method lesson:** a proprio-matched, single-step counterfactual UNDERSTATES trajectory-level
-behaviour, because at matched state the correct next action is similar whatever the object. Group by
-object and take one sample per episode when the question is "does it adapt to the object".
+**Method lesson (this probe was WRONG on its first design and the flawed version is deleted).** v1
+pooled many chunks around the close and reported a "residual correlation" of 0.22, read as "the
+policy barely adapts width to the object" — the opposite of the truth. Two faults: the val object mix
+is skewed (mushroom 63 ... torus 2), and the residual `stop - current width` is dominated by WHERE IN
+THE RAMP the chunk sits rather than by which object it is. **A proprio-matched or pooled single-step
+counterfactual understates trajectory-level behaviour**, because at a matched state the correct next
+action is similar whatever the object. Group by object, one sample per episode. Two companion probes
+from the same night (`probe_feature_geometry.py`, `probe_action_sensitivity.py`) shared the flaw and
+were deleted with it; their one durable finding is recorded here: the cosine-regularizer losses are
+dominated by a shared feature component (unrelated clouds read 2.4 deg apart raw, 89.6 deg centred),
+so raw `1-cos` values are not interpretable on their own, and cosine leaves feature MAGNITUDE
+unconstrained — it drifts 9x across the three arms.
 
 ### 2026-09-08 — the point-cloud encoder is NOT decoration (fixed-noise cloud-ablation probe)
 User's test: on a trained checkpoint, measure val denoising loss with (a) the real cloud, (b) a fixed
