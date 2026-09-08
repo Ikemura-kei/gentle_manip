@@ -124,6 +124,11 @@ and 7-D actions — the pinned split, matching `bqvzh`/`wiayg` exactly.
 `[consistency] … w=1e-08 frac=0.3 aug=d435i_noise_strong` — the term is CONSTRUCTED and will compute
 and log, where `w=0` would have skipped it outright. That is the property the ablation depends on.
 
+**Measured speed: ~250 s/epoch → ~8.3 h for 120 epochs** (epoch 1: `train loss 0.20874905 | t:249.9`),
+i.e. ~30 ms/step, not the ~20–23 ms/step seen on the 4090 and in cluster history. This retroactively
+validates keeping the 12 h walltime: the 8 h option considered at submit would have left almost no
+margin and 6 h would have killed the runs outright. Projected finish ~13:15–13:20.
+
 (to be filled as runs complete: wall clock, loss curves incl. the raw paired/consistency log-only
 curves, teaser + canonical eval numbers, checkpoints kept)
 

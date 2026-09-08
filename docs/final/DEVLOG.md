@@ -9738,6 +9738,22 @@ uniform faces, exact extent restore) fixed every one: regate 7/7 PASS at ratio 1
 same recipe (was a 45k-tet hang at 10/100). Lesson -> a failed `watertight_decimate` must FAIL
 LOUDLY, never silently keep the dense mesh.
 
+### 2026-09-08 05:10 — MONITORING LESSON: a watchdog that greps only stdout is half-blind
+Watchdog v1 on the three generalist runs reported `STARTUP-BAD … wandb_proj=0` for all three while the runs were
+perfectly healthy: the wandb banner is written to **stderr**, and sbatch sends `%j.out` and `%j.err` to separate
+files, so a `grep` of the .out file alone found nothing. Harmless as a false positive — but the same bug sat on the
+ERROR check, where it is not harmless: **Python tracebacks go to stderr**, so a crashed run would have produced NO
+error event and looked exactly like a healthy silent one. Stall detection had the same flaw (it stat'd only .out,
+so a job still writing to .err would read as stalled).
+
+**Rule: any log check on an sbatch job must scan `.out` AND `.err`** (`cat "$L/$J.out" "$L/$J.err"`), and staleness
+must take the NEWER of the two mtimes. `.agent_tmp/train_watchdog2.sh` is the corrected pattern. This is the
+"silence is not success" trap from the Monitor guidance, arriving through a stream split rather than a narrow regex.
+
+Also: **never edit a running bash script in place** — bash reads a script incrementally by byte offset, so an edit
+can corrupt the parse of a long-running loop. Write a new file and restart the monitor (done here for both).
+
+
 ### 2026-09-07 21:30 — CLUSTER generalist matrix launched: G1/G0/G2, TARGET_STEPS=1M, after the dataset arrival gate
 Three GH200 runs on the SAME transferred npz as `bqvzh`/`wiayg` (pinned val split → directly comparable), seed 42, wandb project
 `gentle_manip_generalist`, submitted G1 `2127880` (paired 0.5 / cons 0.3 = recipe v5 exact), G0 `2127881` (paired **1e-8**
