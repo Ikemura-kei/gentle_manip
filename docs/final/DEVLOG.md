@@ -10144,3 +10144,56 @@ before it reaches expensive MPM. Will report the actual outcome once the SLURM j
 **Lesson for future scratch/ad-hoc venvs (not full `uv sync`) doing trimesh multi-body work:**
 add `networkx` explicitly -- `pip install trimesh` alone is not sufficient for
 `mesh.split(only_watertight=False)` on complex/multi-part meshes.
+
+### 2026-09-08 (cont.) — Two more real bugs caught: uv arch-shadowing, trimesh's stale networkx check
+
+**SLURM job 2163478 failed instantly**: `/home/yifeid/.local/bin/uv: cannot execute binary
+file: Exec format error`. Root cause: this account's `~/.local/bin/uv` was installed from the
+x86_64 login node; `export PATH="$HOME/.local/bin:$PATH"` (copied from the other `.sbatch`
+files in this repo, which presumably work because THEIR authors' `~/.local/bin/uv` happens to
+be aarch64) puts that x86_64 binary ahead of anything usable on the aarch64 GH200 compute
+node. Fixed `object_expansion_pilot.sbatch` by fetching the aarch64 uv release
+(`uv-aarch64-unknown-linux-gnu.tar.gz` from the astral-sh/uv GitHub releases) to
+`$REPO/.uv_aarch64/uv` and pointing PATH at that instead, independent of `$HOME/.local/bin`.
+**The other `.sbatch` files in this repo likely carry the same latent bug for any account
+whose `~/.local/bin/uv` is x86_64** — not fixed here (out of scope), but worth knowing if a
+job ever fails this exact way.
+
+**MetaFood3D sourcing silently produced ZERO accepts (212/212 reject)** even minutes after
+`pip install networkx` had fixed the exact same bug for the (separately-launched) thin-shell
+retry job. Root cause: trimesh checks networkx availability ONCE, at trimesh's own import
+time within a process (a module-level try/except that caches the result, not a per-call
+check) — so a LONG-RUNNING process that imported trimesh before the fix keeps using the
+"networkx unavailable" path for its entire lifetime; installing the package on disk
+afterward does nothing for that already-running process. **Lesson: after fixing a missing
+optional dependency, kill and RESTART any long-running process that already imported the
+library in question — `pip install` mid-run is not enough.** Also bumped
+`source_metafood3d.py`'s per-item timeout 40s -> 60s: MetaFood3D's real photogrammetry
+scans are denser than most Objaverse toy assets and were timing out more often (a legitimate
+cost, not a bug — real scans have more geometry to hull/analyze).
+
+Both fixed; the SLURM pilot resubmitted (job 2176626) and MetaFood3D sourcing restarted
+fresh, both incorporating the fixes.
+
+### 2026-09-08 (cont.) — MetaFood3D sourcing parked: SIGALRM can't preempt stuck C calls
+
+`source_metafood3d.py` hung twice: first run (pre-networkx-fix data, discarded), second
+clean run got only 5 rows in before ballooning to **48GB RSS and ~10 CPU-hours on a single
+item** (right after `Almonds/almond_2`, itself a recorded 60s timeout — so the per-item
+SIGALRM fired for THAT item but then apparently failed to preempt whatever came next).
+Killed both times rather than let it consume shared-machine memory further.
+
+**Root cause (likely): SIGALRM only fires between Python bytecode instructions.** A C
+extension call that doesn't yield back to the interpreter for a long stretch (trimesh's
+OBJ parsing via a C loader, or qhull/voxelization on a pathological mesh) can suppress
+signal delivery until it returns — so the same `signal.alarm()` guard that worked fine for
+Objaverse's GLBs (smaller, more uniform) isn't a reliable hard cap for MetaFood3D's real
+photogrammetry scans, some of which are apparently much heavier than their reported extents
+suggest. A proper fix would isolate each item in its own subprocess with a hard
+`SIGKILL`-on-timeout (e.g. `multiprocessing.Process` + `.join(timeout)` + `.terminate()`),
+not a same-process alarm — not implemented (time-boxed out of this session).
+
+**Decision: parked MetaFood3D for now** rather than keep re-running it into shared-machine
+memory pressure. The Objaverse + thin-shell-retry pool (70+ accepted candidates) is enough
+to validate and run the pipeline; MetaFood3D can be resumed later with the subprocess-
+isolation fix, ideally sourced from a compute node rather than the shared login node.
