@@ -27,12 +27,28 @@ cd "$(dirname "$0")/../../.."
 # ── tofu sim2real round 4, run yuoqe (2026-09-07): 100 demos + hold tail K=10, BC aug (noise + residue p0.5 + offset 6 mm),
 #    paired 0.5, encoder consistency w0.3/frac0.3 WITHOUT offset; 2000 epochs. Clean sim teasers: 2000 -> 6/20, 1000 -> 6/20.
 #    Real obs yaml carries the ground_residual filter (default ON). Alternatives on disk: state_1000 / state_1500.
-ckpt=logs/dppo/dppo-pretrain/single_lift_tofu_sim2real_v1_tail10/yuoqe/checkpoint/state_2000.pt
-normalization=dataset/dppo/single_lift_tofu_sim2real_v1_tail10/normalization.npz
+# ckpt=logs/dppo/dppo-pretrain/single_lift_tofu_sim2real_v1_tail10/yuoqe/checkpoint/state_2000.pt
+# normalization=dataset/dppo/single_lift_tofu_sim2real_v1_tail10/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
+#   --act-steps 4 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/tofu_sim2real_r4_yuoqe_2000 --shard-size 10 --record-rgb \
+#   --max-steps 5000 "$@"
+
+# ── GENERALIST v5, run wiayg (2026-09-08): the 1M-gradient-step run — 6,270 sim demos over 20+ objects
+#    (31 cluster campaign runs + 4 local), recipe v5 (BC aug d435i_noise_train residue p0.15 + per-axis offset
+#    5/3.5/1.5 mm, paired 0.5, encoder consistency w0.3/frac0.3 no offset), 120 epochs.
+#    Sim teasers on state_120 (20 ep, clean): tofu 14/20, mushroom 17/20, banana_chunk 13/20, cherry_tomato 3/20.
+#    NOTE the normalization comes from the GENERALIST dataset, not the tofu one — a mismatch here silently
+#    rescales every action. Alternatives on disk: state_80 (matched tofu+mushroom in the sweep) / state_100.
+ckpt=logs/dppo/dppo-pretrain/single_lift_generalist_soft_v5/wiayg/checkpoint/state_120.pt
+normalization=dataset/dppo/single_lift_generalist_soft_v5/normalization.npz
 uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
   --act-steps 4 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/tofu_sim2real_r4_yuoqe_2000 --shard-size 10 --record-rgb \
+  --record dataset/real_deploy/generalist_v5_wiayg_120 --shard-size 10 --record-rgb \
   --max-steps 5000 "$@"
