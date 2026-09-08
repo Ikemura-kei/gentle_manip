@@ -26,6 +26,7 @@ build/
 .venv/
 venv/
 env/
+debug/
 
 # Pytest
 .pytest_cache/

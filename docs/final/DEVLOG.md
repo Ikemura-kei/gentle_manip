@@ -9945,3 +9945,86 @@ Committed 2026-09-07 with the user's go-ahead (3 meshes, registry, 9 config yaml
   3-list), consistency view residue p 0.30 and no offset, paired 0.5, consistency w 0.3 / frac 0.3; DATASET/EXPERIMENT/EPOCHS are
   required env vars; EPOCHS=auto derives the epoch count from a TARGET of 380,000 gradient steps at batch 128 (user; round 4
   reference = 280,000: 140 batches/epoch x 2000). Verified: per-axis shift bounded at 5 / 3.5 / 1.5 mm and rigid within each cloud.
+
+### 2026-09-08 — Registry inventory and web object atlas
+
+After merging origin/master (78fb0c5) into expand-categories-30, the live registry
+contains 95 entries, including 9 canonical food target types and 25 food entries
+when numbered mesh variants are included. Canonical food types: tofu, mushroom,
+cherry_tomato, tomato, banana_chunk, pasta_bundle, raspberry, banana, strawberry.
+Grouping banana forms gives 8 food families. Raspberry remains parked; registration
+does not imply simulation validation. Gelatin/sponge development presets and
+synthetic/calibration objects are outside this food count. The old fixed vocabulary
+in dppo/category_embedding.py is not an inventory of currently registered assets.
+
+Added `tools/object_viewer/serve.py` and a local Three.js atlas: actual OBJ geometry,
+metric dimensions, registry material presets, variant/group/search controls,
+orbit/zoom, wireframe, and auto-rotation. Run `python3 tools/object_viewer/serve.py`
+and open http://localhost:8765. All registered mesh paths exist and their HTTP
+endpoints were checked successfully.
+
+### 2026-09-08 — 200-object expansion: sourcing/filtering/registration pipeline
+
+Started the 30-to-200 object expansion (branch `expand-categories-30`, user directive): source
+diverse-geometry everyday-object meshes from online 3D datasets (Objaverse-LVIS first; ShapeNet/GSO
+not yet wired), filter for gripper graspability, prep + register + smoke-test + pilot-collect each,
+visualize new objects and their grasps in the web atlas. New pipeline lives entirely under
+`gentle_manip/scripts/object_expansion/` (5 stages: `categories.py` curated LVIS shortlist ->
+`source_and_filter.py` download+geometry filter -> `mesh_prep.py` repair/rescale/centre ->
+`fem_gate_check.py` (wraps `smgrasp.finger_grasp_final.build_grasp_fem`, the ss2 gate from
+`adding_new_objects.md`) -> `register_object.py` (registry + task/dr/experiment yaml, templated
+off the `bs_cube` precedent) -> `batch_expand.py` orchestrates all of it + a pilot
+`collect_demos_synth_v4` run per object). `objaverse` added to `envs/sim/pyproject.toml`.
+
+**Gripper max width, double-checked (user asked):** the number actually enforced by the frozen
+planner is **`WIDTH_MAX = 0.079` m (79 mm)**, `grasp_synthesis/smgrasp/finger_grasp_final.py:515`
+— NOT the "~8cm" figure floating around. The raw URDF pad-to-pad travel at fully open is 88.9 mm
+(`xarm7_config.GRIPPER_CALIB_SEP[0] - GRIPPER_PAD_OFFSET`), but 79 mm is the planner's own
+safety-derated search bound and is what actually gates a synthesizable grasp, so it's what the new
+filter uses (with margin: default target nominal min-width is 40 mm, see below).
+
+**Graspability filter** (`geom_filter.py`): approximates the TRUE minimum width of a mesh (not
+just its axis-aligned bbox) by scanning convex-hull face normals + a 400-direction Fibonacci
+sweep and taking the smallest support-width — a valid sufficient test (existence of ONE feasible
+gripper axis is all that's needed, doesn't need the exact global minimum). Also flags "flat/disk
+like" candidates (thin axis ~= grasp axis, e.g. a coin) as borderline rather than auto-rejecting,
+since the existing DR (pitch/roll +-45deg, 25% flips) may still present a graspable pose.
+
+**Bug found + fixed before wasting a full sourcing run:** the first pass hard-rejected almost every
+candidate ("non-watertight, N bodies") — raw Objaverse GLBs are essentially always multi-part
+(separate mesh per material), which is a normal raw-download state, not a defect; repair happens
+downstream in `mesh_prep.py`. First fix attempt ("keep the largest part by surface area") was
+ALSO wrong: it was picking flat background planes/pedestals bundled into the GLB scene instead of
+the actual object (near-zero volume, huge area). Real fix: keep every component within 2% of the
+biggest one BY CONVEX-HULL VOLUME (not area) and union them — correctly keeps genuine multi-part
+objects (a mug's handle, scissors' two blades) while dropping decorative junk. Lesson for next
+time: `body.area` is a bad proxy for "is this the real object" in scene-bundled downloads;
+`convex_hull.volume` is far more robust against flat scene dressing.
+
+**Stronger domain randomization (user, 2026-09-08), applied to the DR template every new object
+uses**: `object_scale` widened 0.9-1.2x -> **0.6-1.6x**, `object_axis_scale` (independent per-axis
+stretch — e.g. a cylinder gets independently varied diameter vs height) 0.95-1.05x -> **0.6-1.6x**,
+material `E` 2-3e5 -> **1.5-5e5 Pa**, `nu` 0.32-0.38 -> **0.28-0.42**, `rho` 900-1000 ->
+**700-1300 kg/m3**. The geometry filter's nominal target min-width was correspondingly tightened
+55mm -> **40mm** so `40mm * 1.6 = 64mm` still clears the 79mm cap at the new DR upper bound
+(previously 55mm * 1.2 = 66mm under the old narrower band). Also added `tomato` back into the
+sourcing category list per the user's ask, to pull extra shape variants from Objaverse on top of
+the existing TripoSG photo-reconstructed variants (tomato/tomato1/3/4/5).
+
+**Curated candidate pool:** 130 LVIS categories (`categories.py`, grouped into 10 shape buckets —
+compact_blobby, elongated_rope_stick, tall_narrow, thin_shell_hollow, flat_thin, complex_concave,
+small_tools_office, toys_misc, kitchen_containers, bath_personal) spanning ~4,600 candidate uids;
+`--per-category 3` for the first sourcing pass -> ~390 candidate downloads.
+
+**Web atlas extended** (`tools/object_viewer/`): `serve.py` now serves `/api/runs/<name>` (recent
+`collect_demos_synth_v4` run stats + video/final-grasp-PNG gallery per object) and groups
+`EXPANSION_LOG.csv`-listed names under a new "Object expansion" filter, separate from Food /
+Development. `index.html` gets a "Grasp trials" panel with an embedded video gallery so newly
+added objects AND their synthesized grasps/demo trajectories are reviewable in one page for manual
+accept/reject, per the user's ask.
+
+**Status at time of writing:** pipeline built and unit-tested on cached files; the first full
+sourcing+filter pass over the 130-category pool is running now. Pilot mesh-prep -> FEM-gate ->
+register -> 5-episode collection on the first accepted batch is next (thin-shell objects, e.g.
+wineglass/mug, get an explicit graspability + MPM-stability check as a special case per the user's
+open question — no prior wine-glass/thin-shell discussion existed in this repo before now).

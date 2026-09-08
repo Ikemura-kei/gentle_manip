@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gentle Manip · Object atlas</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#10191e;color:#e7eee9;font:15px system-ui}header{padding:25px 30px;border-bottom:1px solid #304047}h1{font-size:27px;margin:5px 0 10px}p{color:#a6b9bc;margin:6px 0;line-height:1.5}.eyebrow{color:#70d9b3;font-size:11px;letter-spacing:3px}main{display:grid;grid-template-columns:290px 1fr;height:calc(100vh - 157px);min-height:550px}aside{padding:20px;overflow:auto;border-right:1px solid #304047}input,select,button{font:inherit;color:inherit;background:#1d2b32;border:1px solid #40545e;border-radius:8px;padding:9px}input,select{width:100%;margin-bottom:10px}button{cursor:pointer}button:hover,button.selected{border-color:#70d9b3;background:#253f40}.item{display:block;width:100%;text-align:left;margin:6px 0}.item small{display:block;color:#9eb2b9;margin-top:4px}section{position:relative;min-width:0}#canvas{width:100%;height:100%;display:block}.toolbar{position:absolute;top:15px;left:18px;display:flex;gap:8px}.info{position:absolute;bottom:20px;left:20px;right:20px;background:#10191eea;padding:18px;border:1px solid #304047;border-radius:12px;pointer-events:none}.info h2{margin:0 0 8px;font-size:23px}.info p{font-size:13px}#error{color:#ffbd91}label{display:flex;align-items:center;gap:5px;font-size:13px}label input{width:auto;margin:0}#count{font-size:12px;margin:5px 0 14px}@media(max-width:650px){header{padding:16px}main{grid-template-columns:160px 1fr;height:75vh}aside{padding:10px}.toolbar{flex-wrap:wrap}.info{left:10px;right:10px;padding:10px}}
+.runs{position:absolute;top:60px;right:15px;width:min(430px,90%);max-height:calc(100% - 90px);overflow:auto;background:#10191ef5;border:1px solid #304047;border-radius:12px;padding:16px}.runs h3{margin:0 0 8px;font-size:16px}.runs .run{border-top:1px solid #26363d;padding:10px 0}.runs .run:first-child{border-top:none}.runs .stat{font-size:12px;color:#a6b9bc;margin:2px 0}.gallery{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.gallery video,.gallery img{width:96px;height:72px;object-fit:cover;border-radius:6px;border:1px solid #304047;cursor:pointer}.expmeta{font-size:12px;color:#9eb2b9;margin-top:4px;padding:8px;background:#1d2b32;border-radius:8px}
+</style>
+<script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script></head>
+<body><header><div class="eyebrow">GENTLE MANIP / ASSET EXPLORER</div><h1>Fragile object atlas</h1><p>9 food target types · 8 food families when banana forms are grouped · actual registered geometry</p><p style="font-size:12px">Raspberry is parked in simulation. Development objects and mesh variants are counted separately.</p></header>
+<main><aside><input id="search" placeholder="Find an object…" aria-label="Search objects"><select id="filter" aria-label="Object group"><option value="Food">Food targets</option><option value="all">All registered objects</option><option value="Object expansion">Object expansion (new)</option><option value="Development / synthetic">Development / synthetic</option></select><label><input type="checkbox" id="variants"> Show mesh variants</label><p id="count"></p><div id="list"></div></aside><section><canvas id="canvas"></canvas><div class="toolbar"><button id="reset">Reset view</button><button id="spin">Auto-rotate: off</button><button id="wire">Wireframe: off</button><button id="runsBtn">Grasp trials ▾</button></div><div class="info"><h2 id="title">Loading objects…</h2><p id="details"></p><p id="material"></p><p id="error"></p><p>Drag to orbit · scroll to zoom · right-drag to pan · grid spacing 1 cm</p></div><div class="runs" id="runsPanel" hidden></div></section></main>
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from './vendor/OrbitControls.js';
+import {OBJLoader} from './vendor/OBJLoader.js';
+const $=id=>document.getElementById(id);
+const renderer=new THREE.WebGLRenderer({canvas:$('canvas'),antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+const scene=new THREE.Scene();scene.background=new THREE.Color('#15232b');
+const camera=new THREE.PerspectiveCamera(42,1,.0001,10);camera.up.set(0,0,1);
+const controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=true;
+scene.add(new THREE.HemisphereLight(0xe2f5ff,0x544738,2.6));
+const light=new THREE.DirectionalLight(0xffffff,3);light.position.set(.1,-.1,.2);scene.add(light);
+const fill=new THREE.DirectionalLight(0x9fcfff,1.5);fill.position.set(-.1,.1,.1);scene.add(fill);
+const grid=new THREE.GridHelper(.30,30,0x5e8588,0x2e464e);grid.rotation.x=Math.PI/2;scene.add(grid);
+const colors={tofu:'#efdfb8',mushroom:'#d5b693',cherry_tomato:'#e85b45',tomato:'#dd5542',banana:'#f1d05e',banana_chunk:'#efdf98',raspberry:'#c83e66',strawberry:'#eb6571',pasta_bundle:'#deb76c'};
+let all=[],current=null,object=null,request=0,wire=false,extent=.05;
+const pretty=s=>s.replaceAll('_',' ').replace(/\b\w/g,c=>c.toUpperCase());
+function reset(){camera.position.set(extent*1.65,-extent*2.1,extent*1.6);controls.target.set(0,0,extent*.35);controls.update();}
+async function select(item){current=item;const ticket=++request;renderList();$('title').textContent=pretty(item.name);$('details').textContent='Loading geometry…';$('material').textContent='';$('error').textContent='';
+if(object){scene.remove(object);object.traverse(n=>{if(n.isMesh){n.geometry.dispose();n.material.dispose();}});object=null;}
+try{if(item.missing)throw Error('Registered mesh is missing from this checkout.');
+const mesh=item.mesh?await new OBJLoader().loadAsync(item.mesh):new THREE.Mesh(new THREE.BoxGeometry(...item.size));
+if(ticket!==request)return;
+mesh.traverse(n=>{if(n.isMesh){n.material=new THREE.MeshStandardMaterial({color:colors[item.category]||'#75c8bb',roughness:.7,metalness:.04,side:THREE.DoubleSide,wireframe:wire});n.geometry.computeVertexNormals();}});
+const box=new THREE.Box3().setFromObject(mesh),size=box.getSize(new THREE.Vector3()),center=box.getCenter(new THREE.Vector3());mesh.position.sub(new THREE.Vector3(center.x,center.y,box.min.z));
+object=mesh;scene.add(mesh);extent=Math.max(size.x,size.y,size.z);reset();
+$('details').textContent=`${item.mesh?'Registered mesh':'Primitive box'} · ${[size.x,size.y,size.z].map(v=>(v*1000).toFixed(1)).join(' × ')} mm · ${item.object_type}`;
+const m=item.material;$('material').textContent=`Stiffness ${(m.youngs_modulus/1000).toFixed(0)} kPa · yield ${(m.von_mises_yield_stress/1000).toFixed(0)} kPa · density ${m.density} kg/m³`;
+$('error').textContent=item.parked?'Parked: documented MPM fragmentation / instability.':'';
+if(item.expansion_meta){const em=item.expansion_meta;const d=document.createElement('p');d.className='expmeta';d.textContent=`Object-expansion source: ${em.category||'?'} (${em.bucket||'?'}) · ${em.source_uid||''} · verdict ${em.geom_verdict||'?'}`;$('material').after(d);}
+$('runsPanel').hidden=true;loadRuns(item.name);
+}catch(e){$('details').textContent='Geometry unavailable';$('error').textContent=e.message;}}
+async function loadRuns(name){
+try{const r=await fetch('/api/runs/'+encodeURIComponent(name));if(!r.ok)return;const runs=await r.json();
+if(!runs.length){$('runsPanel').innerHTML='<p class="stat">No collected grasp runs yet for this object.</p>';return;}
+const html=runs.map(run=>{const s=run.stats||{};const pct=v=>v==null?'—':(100*v).toFixed(0)+'%';
+const vids=run.videos.map(v=>`<video src="${v}" muted loop onmouseover="this.play()" onmouseout="this.pause()" onclick="this.requestFullscreen&&this.requestFullscreen()"></video>`).join('');
+const imgs=run.images.map(p=>`<img src="${p}" onclick="window.open('${p}','_blank')">`).join('');
+return `<div class="run"><b>${run.run_dir}</b>
+<p class="stat">success ${pct(s.success_rate)} · ever-lifted ${pct(s.ever_success_rate)} · sub-yield ${pct(s.sub_yield_frac)} · saved ${s.episodes_saved??'?'}/${s.total_attempts??'?'}</p>
+<div class="gallery">${vids}${imgs}</div></div>`;}).join('');
+$('runsPanel').innerHTML=`<h3>Grasp trials — ${pretty(name)}</h3>`+html;
+}catch(e){$('runsPanel').innerHTML=`<p class="stat">${e.message}</p>`;}}
+$('runsBtn').onclick=()=>{$('runsPanel').hidden=!$('runsPanel').hidden;};
+function renderList(){const query=$('search').value.toLowerCase();const items=all.filter(o=>($('filter').value==='all'||o.group===$('filter').value)&&($('variants').checked||o.group!=='Food'||o.name===o.category)&&o.name.includes(query));$('count').textContent=`${items.length} shown · ${all.length} registry entries`;$('list').replaceChildren();for(const o of items){const b=document.createElement('button');b.className='item'+(current?.name===o.name?' selected':'');b.textContent=pretty(o.name);const s=document.createElement('small');s.textContent=o.parked?'Parked in simulation':o.group;b.append(s);b.onclick=()=>select(o);$('list').append(b);}}
+$('search').oninput=renderList;$('filter').onchange=renderList;$('variants').onchange=renderList;$('reset').onclick=reset;
+$('spin').onclick=()=>{controls.autoRotate=!controls.autoRotate;$('spin').textContent='Auto-rotate: '+(controls.autoRotate?'on':'off');};
+$('wire').onclick=()=>{wire=!wire;object?.traverse(n=>{if(n.isMesh)n.material.wireframe=wire});$('wire').textContent='Wireframe: '+(wire?'on':'off');};
+new ResizeObserver(()=>{const c=$('canvas');renderer.setSize(c.clientWidth,c.clientHeight,false);camera.aspect=c.clientWidth/c.clientHeight;camera.updateProjectionMatrix();}).observe($('canvas').parentElement);
+renderer.setAnimationLoop(()=>{controls.update();renderer.render(scene,camera);});
+try{const response=await fetch('/api/objects');if(!response.ok)throw Error('Catalog request failed');all=await response.json();renderList();await select(all.find(o=>o.name==='mushroom'));}catch(e){$('error').textContent=e.message;}
+</script></body></html>
