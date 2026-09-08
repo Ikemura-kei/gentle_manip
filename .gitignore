@@ -142,3 +142,6 @@ docs/Screenshot from 2026-09-04 21-03-55.png
 examples/demo_analysis/figures/
 examples/sim2real_diagnose/item1_cube3_gap_analysis.py
 grasp_synthesis/collect_demos_synth_v4_backup.py
+
+# aarch64 uv binary fetched locally per-checkout (arrhenius sbatch PATH fix, see DEVLOG)
+.uv_aarch64/

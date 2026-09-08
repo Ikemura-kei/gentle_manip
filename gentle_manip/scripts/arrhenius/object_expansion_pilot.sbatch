@@ -20,9 +20,15 @@
 #SBATCH --error=/nobackup/proj/disk/softenable-codesign26/personal/yifeid/gentle_manip/logs/slurm_logs/%j.err
 
 set -euo pipefail
-export PATH="$HOME/.local/bin:$PATH"
 REPO=/nobackup/proj/disk/softenable-codesign26/personal/yifeid/gentle_manip
 cd "$REPO"
+# NOT `export PATH="$HOME/.local/bin:$PATH"` (the pattern other .sbatch files in this repo
+# use): $HOME/.local/bin/uv on THIS account is an x86_64 binary (installed from the login
+# node), and $HOME is the SAME path on the aarch64 GH200 compute nodes, so it would shadow
+# any usable uv with one that fails "Exec format error" (hit exactly this in job 2163478).
+# Use a dedicated aarch64 uv binary instead (downloaded from astral-sh/uv releases,
+# uv-aarch64-unknown-linux-gnu.tar.gz) so this never depends on what's in $HOME/.local/bin.
+export PATH="$REPO/.uv_aarch64:$PATH"
 
 N_OBJECTS=${N_OBJECTS:-5}
 PER_CATEGORY=${PER_CATEGORY:-1}
