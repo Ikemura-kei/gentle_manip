@@ -107,7 +107,7 @@ few parameters.
 | checkpoints | every 20 epochs (6 kept) |
 | validation | every 5 epochs |
 | seed | 42 |
-| wall clock | ~5.6 h on a 4090 at ~21 ms/gradient step (local twin `wiayg`) |
+| wall clock | **G1 `bmbrv` 8 h 41 m, G2 `ttukt` 7 h 30 m** (GH200, ~260 / ~237 s per epoch = ~31 / ~28 ms per gradient step; the spread is node-to-node variation, not a setting). Local twin `wiayg`: 5 h 38 m on a 4090 at ~21 ms/step — the 4090 is ~1.4× faster per step than a GH200 node here |
 
 Epoch count is derived from a target of 1,000,000 gradient steps, not chosen directly:
 `epochs = ceil(target / ceil(train_steps / batch))`. The schedule knobs above are scaled to the run
@@ -143,6 +143,34 @@ Plus a per-sample rigid offset of the whole cloud, uniform in ±5 mm (x), ±3.5 
 with proprioception left untouched, so the policy tolerates cloud-versus-proprio disagreement of the
 size measured between real and sim.
 
+## 7b. What the runs actually produced (for calibrating any tuning decision)
+
+Final epoch 120, all three cluster arms:
+
+| run | train | val | `loss_paired` | `loss_consistency` | `loss_diffusion` |
+|---|---|---|---|---|---|
+| G1 `bmbrv` | 0.00109 | 0.00120 | 2.49e-5 | 5.74e-5 | 1.056e-3 |
+| G2 `ttukt` | **0.00102** | **0.00115** | 1.58e-5 | **3.10e-5** (ablated) | 1.011e-3 |
+| G0 `fdcjk` | 0.00110 | 0.00120 | **1.74e-3** (ablated) | 1.03e-4 | 1.068e-3 |
+
+Two results bear directly on tuning:
+
+- **The paired real–sim term is doing heavy lifting.** Un-optimized (G0) the real–sim feature distance
+  ends **70× higher** than optimized (1.74e-3 vs 2.49e-5; 80× on val), and the gap *widened* over
+  training — from 2.6× at epoch 11. The encoder does not merely fail to close the sim/real gap on its
+  own, it drifts further apart while fitting sim. Do not weaken this term.
+- **The consistency term may be counter-productive, but it is NOT yet established.** G2, which only
+  observes the term, ends ~1.9× BETTER on the very quantity the objective minimizes (3.10e-5 vs
+  5.74e-5) and has the best train, val and diffusion loss of the three. **Caveat that blocks the
+  conclusion:** G1 and G0 differ only in the *paired* weight yet their consistency losses differ by
+  1.8× — cross-run variation is the same size as the claimed effect. The clean test is `ttukt` vs
+  `bmbrv`, both cluster, same seeds, at 200 episodes.
+
+**Val plateaus from ~epoch 110 in all three runs** (G2: 0.00114 → 0.00116 → 0.00115 over epochs
+110/115/120) with no overfit knee. So **1M gradient steps is at the point of diminishing returns for
+this dataset — more steps is NOT the lever.** The local checkpoint sweep agrees from the success side:
+epoch 80 already matched epoch 120 (31/40 both), though that comparison sits inside teaser noise.
+
 ## 8. Known open questions for a reviewer
 
 - **Capacity split.** 94 % of parameters are in the denoiser, 6 % in the perception encoder, while
@@ -157,3 +185,67 @@ size measured between real and sim.
   stride (predict 4, execute 1 or 2) would help has not been tested here.
 - **Denoising steps.** 20 at both train and eval; no DDIM acceleration is used, so inference cost is
   20 network passes per chunk.
+
+## 9. How our setup compares to the literature (survey, 2026-09-08)
+
+Our hyperparameters against published diffusion-policy work. **Nothing here has been changed** — this
+is a survey to rank what is worth trying next.
+
+| | ours (G1/G2) | DP (Chi 2023) | DP3 (Ze 2024) | Data-Scaling-Laws (Lin 2024) | Octo | π0 |
+|---|---|---|---|---|---|---|
+| lr | 1e-4 cosine → 1e-5 | 1e-4 | 1e-4, 500-step warmup, cosine | 3e-4 denoiser / **3e-5 encoder** | inverse-sqrt | 2.5e-5 → 2.5e-6 |
+| batch | **128** | 64–256 | 128–2048 | 256 | 2048 | 256 |
+| optimizer | AdamW, wd 1e-6 | AdamW | AdamW | AdamW β 0.95/0.999 | AdamW, wd **0.1**, clip 1.0 | AdamW |
+| steps | 1.0 M | — | — | 5×10⁵ (largest set, 75 epochs) | 300 k | 500 k |
+| predict / execute | **4 / 4** | 10–16 / **8** | 4 / 4 | 16 / 8 (temporal ensemble) | 4 | 50 |
+| denoise steps | **20 / 20 (no DDIM)** | 100 train / 10 DDIM | 100 train / **2 DDIM** | 16 | — | flow |
+
+**Where we are conventional:** lr 1e-4 with cosine decay, AdamW, EMA, and a warmup fraction are all
+squarely standard; DP3 uses the identical lr and schedule shape. Our 1 M gradient steps is at the high
+end (Octo 300 k, π0 500 k). **Optimization is not where the headroom is** — and §7b's val plateau at
+epoch ~110 says the same thing from our own data.
+
+**Where we differ, in rough order of expected value:**
+
+1. **Inference denoising: 20 full steps, no DDIM.** DP3 runs 2 DDIM steps at inference from a
+   100-step training schedule; [HDP3](https://arxiv.org/html/2605.01581v4) proves why — robot
+   trajectories are low-frequency-dominant (first two DCT modes carry 98.5 % of energy), so denoising
+   error saturates almost immediately, ~0.25 % relative error at 2 steps, and reports 4.5 ms vs DP3's
+   51.4 ms. We pay 20 network passes per chunk. **This is testable on the existing checkpoints with
+   no retraining** — `use_ddim`/`ddim_steps` are already wired in `eval_diffusion_pointnet.yaml`
+   (currently `use_ddim: False`). Directly relevant to real-robot control rate.
+2. **Action horizon 4 predicted / 4 executed.** DP's ablation puts the optimum at **execute 8 from a
+   10–16 prediction**, i.e. predict long, execute a fraction (receding horizon): a horizon > 1 gives
+   temporally consistent actions, but executing the whole prediction costs reaction time. We are short
+   on prediction AND execute the entire chunk — the one combination the DP ablation argues against.
+3. **Capacity split, 94 % denoiser / 6 % encoder.** Two literature results cut in opposite directions
+   and together are informative. [ScaleDP](https://arxiv.org/html/2409.14411v1) found naively
+   deepening the denoiser *hurts* (80.1 % → 74.6 %, 8 → 14 layers, from gradient instability in
+   observation fusion), and HDP3 argues the DP3-family denoiser is over-parameterized for
+   low-frequency trajectories. So **do not widen the denoiser.** But our total is only 2.89 M — HDP3's
+   own "right-sized" model is 2.52 M — so we are not in the bloated regime by absolute size; the
+   question is only the *split*. Given the measured cloud-ablation result (+880 % val loss on a wrong
+   cloud, and reliance *grew* with more steps), the encoder is load-bearing at ~175 k parameters, and
+   widening it is the cheap direction.
+4. **Global max-pool may be what caps size precision.** The encoder compresses 1024 points to one
+   512-d vector by max-pooling; max-pool keeps the strongest activation per channel and is known to
+   discard fine geometric detail. The cherry-tomato failure is exactly a fine-size read (closes to
+   ~27 mm on a 25 mm object, unmoved by 2.6× more steps). Cheap probes, in increasing cost:
+   **(a) turn on the aux width head** — `aux_grasp_width_weight` is already implemented in
+   `aux_diffusion.py` (with an `aux_width_blind` variant) and merely set to 0.0, so this is a config
+   change, not code; (b) mean-pool ⊕ max-pool concat; (c) wider encoder.
+5. **Data composition beats data volume.** Lin et al. find generalization follows a power law in
+   **environment and object diversity** and correlates only weakly with demonstration count
+   (r −0.62…−0.79), saturating around **50 demos per environment-object pair**. We have 550 for each
+   of the five largest objects — likely well past saturation — 100 for each of the 18 basic shapes,
+   and **one environment**. This predicts that rebalancing toward more objects at ~50–100 each, and
+   adding scene/workspace variation, buys more than more episodes of the same objects. It also makes
+   the untouched 11:1 class imbalance (cherry is 8 % of data) worth a balanced-sampling test.
+6. **Batch 128 is at the low end** (literature 256–2048) and weight decay 1e-6 is very light next to
+   Octo's 0.1. Both are plausible mild wins but neither addresses a plateaued val loss, and batch is
+   constrained by the ~14 GB train tensor being GPU-resident. Low priority.
+
+**One caution on the encoder-LR idea:** Lin et al. use a 10× *lower* lr for their vision encoder, but
+theirs is a pretrained DINOv2 being fine-tuned. Ours is a small PointNet trained from scratch, where
+the argument runs the other way — so their number is not transferable, and a separate encoder lr would
+be a speculative experiment rather than a literature-backed setting.
