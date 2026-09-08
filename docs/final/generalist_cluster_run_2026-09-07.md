@@ -104,8 +104,28 @@ convergent):
 
 ## 6. What happened
 
-(to be filled as runs complete — per-run: dataset steps, EPOCHS, wall clock, loss curves incl. the raw
-paired/consistency log-only curves, teaser + canonical eval numbers, checkpoints kept)
+**All three started 2026-09-08 04:58–05:01** (queued ~7.6 h; the account's fair-share had dropped to
+0.20 after the collection campaign's ~51 node-hours, leaving us behind 360 of 379 pending GPU jobs —
+tested and confirmed unfixable: walltime 12→2 h, `--mem=0`→60 G and fewer cores all gave an identical
+`--test-only` start estimate, and a fresh submission was ~30 h worse than our queued position).
+
+| run | id | job | node | wandb | paired | consistency |
+|---|---|---|---|---|---|---|
+| G1 | `bmbrv` | 2127880 | n113 | `8sp0ux7e` | 0.5 | 0.3 |
+| G0 | `fdcjk` | 2127881 | n168 | `wzgv7zks` | **1e-8 log-only** | 0.3 |
+| G2 | `ttukt` | 2127882 | n179 | `1gcxc31k` | 0.5 | **1e-8 log-only** |
+
+Startup gate passed on all three, identically: `EPOCHS=120 warmup=6 ema_start=1`; the
+`[pc_aug] train-time cloud noise d435i_noise_train` line present with offset ±[5, 3.5, 1.5] mm (its
+absence would mean training on clean clouds); dataset 5,643 train / 627 val episodes with 8-D proprio
+and 7-D actions — the pinned split, matching `bqvzh`/`wiayg` exactly.
+
+**The ε trick verified in the logs, not just in the source**: G2 prints
+`[consistency] … w=1e-08 frac=0.3 aug=d435i_noise_strong` — the term is CONSTRUCTED and will compute
+and log, where `w=0` would have skipped it outright. That is the property the ablation depends on.
+
+(to be filled as runs complete: wall clock, loss curves incl. the raw paired/consistency log-only
+curves, teaser + canonical eval numbers, checkpoints kept)
 
 ## 7. Findings
 
