@@ -162,9 +162,20 @@ Expected at start: train 1,141,991 steps (1,074,275 + 12 × 5,643) → 8,922 bat
 Watcher `.agent_tmp/g5_watch.sh` reports the dataset build + verification gate (trajectory and step
 counts against the expected +12/episode) and the job's startup line.
 
+### Started 2026-09-08 23:12, running
+
 | | |
 |---|---|
-| job | `2186541` |
-| dataset | `single_lift_generalist_soft_v5_tail22` (K=12, built on the login node) |
-| run id / wandb | (filled at start) |
-| wall clock / results | (filled at completion) |
+| job / run id | `2188035` / **`fsynt`** (node n200) |
+| wandb | `gentle_manip_generalist/runs/szch7bdh` |
+| dataset | `single_lift_generalist_soft_v5_tail22` — train 5,643 eps / **1,141,991** steps, val 627 / **127,240** (both exactly +12 frames per episode; normalization copied verbatim) |
+| resolved | `horizon=16 pooling=meanmax EPOCHS=113 warmup=5 ema_start=1` |
+| startup gate | `[pc_aug] d435i_noise_train` present with ±[5, 3.5, 1.5] mm offset; `[consistency] w=1e-08` (ablated, still logged); actions (1141991, 7); 0 error signatures |
+
+**Parameter count confirms both changes landed**: 2,890,828 (G1/G2) → **3,194,016**, i.e. +303,188 =
++131,072 (pooling: `Linear(256→512)` → `Linear(512→512)`) + 172,116 (horizon 4→16: denoiser input
+572→656, output 28→112). An exact match, so neither change silently failed to apply.
+
+The job started at 23:12 — again well ahead of its 00:06 estimate — and the new wait-guard held for
+**150 s** until `val.npz` and `normalization.npz` landed, then proceeded. That 150 s is precisely what
+the first attempt lost an entire allocation to.
