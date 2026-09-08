@@ -313,15 +313,28 @@ def synthesize_grasp(obj, pad_geo, obj_com, obj_quat_wxyz, **kw):
     print(f"    [ablation] {METHOD}/{WIDTH_MODE}: w={1e3 * x[6]:.1f}mm "
           f"yaw={np.degrees(x[5]):+.1f}deg | {wnote} | scorer status={res.get('status')} "
           f"holdable={res.get('holdable')}", flush=True)
-    out = {"x": x, "score": res.get("score"), "evals": 0,
-           "stress_top10": res.get("stress_top10"), "grip": res.get("grip"),
-           "align": res.get("align"), "pressure": res.get("pressure"),
-           "min_pad_area": res.get("min_pad_area"), "width_face": res.get("width_face"),
-           "tilt_deg": res.get("tilt_deg"), "twist": res.get("twist"),
-           "status": res.get("status"), "tier": -1}
-    if res.get("stress_top10") is None:      # the collector treats this as a synthesis failure
-        out["stress_top10"] = float(res.get("stress_top10") or np.inf)
-    return out
+
+    # The scorer's verdict is DATA, not a veto: a gentleness-blind baseline that picks a
+    # non-compressing width (`no_contact`, routine in `extent` mode) must still be EXECUTED — the
+    # MPM decides whether it lifts, not our surrogate. So every field the frozen collector formats
+    # or rounds is made finite here: `stress_top10 = None`/inf would either trip v4's
+    # synthesis-failure branch (substituting ITS default grasp, measuring v4 instead of the
+    # baseline) or raise OverflowError in `synth_stats_row`'s round(). 0.0 is the physically
+    # correct surrogate stress for jaws that never compress the object; `status` carries the
+    # scorer's real verdict into the CSV.
+    def _num(v):
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return 0.0
+        return f if np.isfinite(f) else 0.0
+
+    return {"x": x, "score": _num(res.get("score")), "evals": 0,
+            "stress_top10": _num(res.get("stress_top10")), "grip": _num(res.get("grip")),
+            "align": _num(res.get("align")), "pressure": _num(res.get("pressure")),
+            "min_pad_area": _num(res.get("min_pad_area")), "width_face": res.get("width_face"),
+            "tilt_deg": _num(res.get("tilt_deg")), "twist": _num(res.get("twist")),
+            "status": res.get("status"), "tier": -1}
 
 
 FG.synthesize_grasp = synthesize_grasp       # the ONE substitution (C.fg IS this module object)

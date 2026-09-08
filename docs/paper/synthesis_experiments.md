@@ -463,8 +463,32 @@ same config snapshot a collection run writes, plus an `ABLATION` file naming met
 (each clears the table from it), so no constant pose offset is applied; `--pose-z-offset` exists as
 an escape hatch if runtime verification shows a generator ignoring it.
 
-**Status (2026-09-07): implementation complete, runtime verification deferred** (the GPU was busy
-with the generalist training + teaser evals). Non-GPU tests pass: `grasp_synthesis/tests/test_ablation_flags.py`
-(flag parsing + argv passthrough + rejection of invalid values), plus a source-level check that every
-frozen attribute the harness references exists. A chained verification runs synthesis-only probes for
-every method, then two tiny executed runs, as soon as the training/eval chain reports done.
+**Status (2026-09-08 03:53): VERIFIED end to end** on tofu (4 envs/probe, `--skip-execution`, plus two
+executed runs), after the generalist training and teasers freed the GPU.
+
+| method | extent5 | extent | fem | notes |
+|---|---|---|---|---|
+| `ours` | 4/4 | — | — | prints the no-patch banner, then the frozen pipeline (4,600 seeds/env through the real filter ladder + scorer) = the collector verbatim |
+| `naive` | 4/4 | 4/4 | 4/4 | |
+| `antipodal` | 4/4 | 4/4 | 4/4 | |
+| `rigid` | 4/4 | 4/4 | 4/4 | |
+| `sdf` | 4/4 | 4/4 | 4/4 | v2 cost on the FEM boundary surface |
+| `gpd` | 2/4 | — | — | GPD's own yield: 2 envs got no candidate past the validity ladder (handled, not a crash) |
+| `gn1b` | 4/4 | — | — | |
+| `cgn` | 0/4 | — | — | runs, returns no pose on tofu; OUTSIDE the paper set — investigate only if wanted |
+
+Executed runs (2 episodes each, frozen executor): `ours` and `rigid` both saved 2/2 with video and
+stats, so pose -> execution -> save -> `stats.yaml` works through the substituted synthesizer.
+
+**Bug found and fixed by this verification** (`grasp_synth_ablation.py`, 03:38): when a baseline picks a
+non-compressing width — routine in `extent` (no-squeeze) mode — the frozen scorer returns `no_contact`
+with no stress value. Passing `inf` raised `OverflowError` in the collector's `synth_stats_row` round();
+passing `None` would have been worse, since v4 reads that as a synthesis failure and substitutes ITS OWN
+default grasp (measuring our planner instead of the baseline). Now every numeric field is coerced finite,
+with `stress_top10 = 0.0` for jaws that never compress the object (physically correct for zero
+indentation) and the scorer's real verdict carried in `status`. The three probes that had already run
+pre-fix were re-run and pass. **The scorer's verdict is data, never a veto: baseline poses are always
+executed and the MPM decides.**
+
+Non-GPU tests: `grasp_synthesis/tests/test_ablation_flags.py` (flag parsing, argv passthrough, rejection
+of invalid values) plus a source-level check that every frozen attribute the harness references exists.

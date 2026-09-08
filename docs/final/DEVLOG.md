@@ -9762,6 +9762,20 @@ warmup 6, ckpt every 20, EMA from epoch 1, val every 5 from the same formula. Tw
    `.agent_tmp/verify_transfer2.py` is the working pattern. Note `numpy.lib.format._read_array_header` is private and absent in
    newer numpy — use `read_array_header_1_0`.
 
+### 2026-09-08 03:53 — grasp-synthesis ablation harness VERIFIED (`grasp_synth_ablation.py`)
+All 8 methods x their width modes probed on tofu through the FROZEN v4.2 executor: ours / naive /
+antipodal / rigid / sdf / gn1b give 4/4 poses in every mode; gpd 2/4 (its own yield — 2 envs had no
+candidate past the validity ladder, handled gracefully); cgn 0/4 (runs, finds nothing on tofu; outside
+the paper set). Executed runs: ours and rigid both 2/2 saved with video+stats. Full table + the
+`--width-mode`/`--rot-bound` semantics: `docs/paper/synthesis_experiments.md` §5.
+**Bug the verification caught:** a baseline width that does not compress the object (routine in the
+no-squeeze `extent` mode) makes the frozen scorer return `no_contact` with no stress; `inf` crashed
+`synth_stats_row`'s round(), and `None` would have been worse — v4 reads it as a synthesis failure and
+substitutes its OWN default grasp, i.e. it would have silently measured our planner instead of the
+baseline. Fixed: all numeric fields coerced finite, `stress_top10 = 0.0` for zero indentation (correct,
+not a fudge), scorer verdict kept in `status`. Lesson: **a surrogate's verdict is data, never a veto** —
+the baseline's pose must always reach the MPM.
+
 ### 2026-09-08 — `wiayg`: recipe v5 at 1M gradient steps (the cluster's G1, run locally) — teasers up across the board
 Same npz as `bqvzh` (6,270 eps), `TARGET_STEPS=1000000` -> 120 epochs (8,393 batches/epoch), schedule scaled per
 `docs/final/generalist_cluster_run_2026-09-07.md` (warmup 6, ckpt every 20, EMA from 1, val every 5). 5 h 38 min at
