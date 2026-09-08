@@ -120,4 +120,24 @@ error (loud, unlike the `predict_epsilon` trap in `G3_G4_training_setup.md` §4,
 
 ## 5. Run record
 
-(filled at launch — job id, run id, wandb id, resolved EPOCHS, wall clock, results)
+**Submitted 2026-09-08 22:20 as SLURM job `2186541`** (`.agent_tmp/train_g5.sbatch`), 12 h walltime.
+
+Queue reality: a job submitted now is estimated to start **~38 h out** — the account's fair-share is
+0.20 after ~83 node-hours in three days, putting us behind ~240 pending GPU jobs, and walltime makes
+no difference (probed 12 h / 8 h / 4 h / 2 h / 30 min, all identical start estimates). So the job was
+submitted *before* the dataset finished building: the tail-22 npz only has to exist when the job
+STARTS, and the wrapper fails loudly with a clear message if it does not, rather than letting an empty
+`EPOCHS` become an obscure hydra error.
+
+Expected at start: train 1,141,991 steps (1,074,275 + 12 × 5,643) → 8,922 batches/epoch →
+**EPOCHS ≈ 113** at the 1 M target, warmup 5 (≈5 %).
+
+Watcher `.agent_tmp/g5_watch.sh` reports the dataset build + verification gate (trajectory and step
+counts against the expected +12/episode) and the job's startup line.
+
+| | |
+|---|---|
+| job | `2186541` |
+| dataset | `single_lift_generalist_soft_v5_tail22` (K=12, built on the login node) |
+| run id / wandb | (filled at start) |
+| wall clock / results | (filled at completion) |
