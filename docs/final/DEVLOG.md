@@ -10197,3 +10197,27 @@ not a same-process alarm — not implemented (time-boxed out of this session).
 memory pressure. The Objaverse + thin-shell-retry pool (70+ accepted candidates) is enough
 to validate and run the pipeline; MetaFood3D can be resumed later with the subprocess-
 isolation fix, ideally sourced from a compute node rather than the shared login node.
+
+### 2026-09-08 (cont.) — Time-boxed: broad category sourcing (787 cats, 6-way parallel) + 2 parallel GPU jobs
+
+User directive: prioritize reaching the 200-category x 20-demo target under time pressure.
+Pivoted from hand-curated category buckets (`categories.py`, 130 cats) to an EXCLUSION-based
+filter over the full 1156-category LVIS vocabulary (`categories_broad.py`): drop people,
+animals, vehicles, furniture/large appliances, buildings/architecture, and clothing (a
+different sim regime -- cloth, not lumped-MPM-solid) -- everything else survives (787 cats).
+Rationale: the geometry filter is what actually decides graspability; this stage only needs
+to not waste downloads on things that categorically can never be small graspable objects.
+
+Split into 6 chunks (~131 cats each), running as 6 parallel `source_and_filter.py` processes
+on the login node (CPU-only, `--download-processes 4` each = 24 total, memory watched --
+stayed under 505GB/755GB system-wide throughout) while the GPU jobs queue -- the "parallelize
+what you can on login-node CPU while waiting on GPU" directive.
+
+Also submitted a SECOND GPU pilot job (2184137, 20 objects from the full accepted pool) IN
+PARALLEL with the first (2179147, 6 thin-shell-focused objects) rather than waiting serially
+for one to validate before submitting the next -- whichever backfills first gives validation
+data sooner, and if both come back clean that's stronger confidence to go straight to a much
+larger production batch (`N_EPISODES=20` instead of the 5-episode smoke-test count, since
+`collect_demos_synth_v4` already targets N SAVED/successful episodes with an attempt cap, so
+there's no need for a separate smoke-test-then-full-collect round trip once the pipeline is
+validated -- going straight to 20 saves a queue round trip per object).
