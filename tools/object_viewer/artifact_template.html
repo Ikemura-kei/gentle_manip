@@ -1,0 +1,282 @@
+<title>Grasp Specimen Catalog</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#f6f3ee; --surface:#ffffff; --surface-2:#efe9e0; --line:#ddd3c4;
+  --ink:#211d17; --ink-dim:#6b6255; --ink-faint:#a89d8a;
+  --accent:#b5763a; --accent-ink:#4a3016;
+  --accept:#4f7d54; --accept-bg:#e6efe1; --reject:#a1503b; --reject-bg:#f3e3dd;
+  --border-fair:#c8bca6;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#1a1712; --surface:#221e18; --surface-2:#2a251d; --line:#3c352a;
+    --ink:#ece6da; --ink-dim:#a99e8c; --ink-faint:#786e5d;
+    --accent:#d99a54; --accent-ink:#f6dcb8;
+    --accept:#7bb280; --accept-bg:#22301f; --reject:#c67662; --reject-bg:#33221c;
+    --border-fair:#4a4133;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#1a1712; --surface:#221e18; --surface-2:#2a251d; --line:#3c352a;
+  --ink:#ece6da; --ink-dim:#a99e8c; --ink-faint:#786e5d;
+  --accent:#d99a54; --accent-ink:#f6dcb8;
+  --accept:#7bb280; --accept-bg:#22301f; --reject:#c67662; --reject-bg:#33221c;
+  --border-fair:#4a4133;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font:15px/1.5 "IBM Plex Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+h1,h2,h3{font-family:"IBM Plex Serif",Georgia,serif;font-weight:600;text-wrap:balance;margin:0}
+header{padding:28px 32px 22px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;justify-content:space-between;gap:24px;flex-wrap:wrap}
+.brand{display:flex;flex-direction:column;gap:4px}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.14em;color:var(--accent);text-transform:uppercase}
+h1{font-size:26px;color:var(--ink)}
+.subtitle{color:var(--ink-dim);font-size:13.5px;max-width:56ch}
+.statstrip{display:flex;gap:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface)}
+.stat{padding:10px 18px;text-align:right;border-left:1px solid var(--line)}
+.stat:first-child{border-left:none}
+.stat .n{font-family:"IBM Plex Mono",monospace;font-size:20px;font-weight:500;color:var(--ink)}
+.stat .l{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
+nav.tabs{display:flex;gap:2px;padding:0 32px;border-bottom:1px solid var(--line);background:var(--surface-2)}
+nav.tabs button{font:500 13px "IBM Plex Sans",sans-serif;color:var(--ink-dim);background:none;border:none;border-bottom:2px solid transparent;padding:12px 6px;margin-right:22px;cursor:pointer}
+nav.tabs button.active{color:var(--ink);border-bottom-color:var(--accent)}
+main{padding:24px 32px 48px}
+section[hidden]{display:none!important}
+.panel-title{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 10px}
+/* Specimens view */
+.specimens{display:grid;grid-template-columns:270px 1fr 300px;gap:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface);height:min(640px,72vh)}
+.railcol{border-right:1px solid var(--line);display:flex;flex-direction:column;min-width:0}
+.railcol .head{padding:14px 16px 10px}
+input[type=text],select{font:inherit;color:var(--ink);background:var(--surface-2);border:1px solid var(--border-fair);border-radius:7px;padding:8px 10px;width:100%}
+input[type=text]:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.rail-list{overflow-y:auto;flex:1;padding:0 8px 12px}
+.rail-item{display:block;width:100%;text-align:left;background:none;border:none;border-radius:8px;padding:9px 10px;cursor:pointer;color:var(--ink)}
+.rail-item:hover{background:var(--surface-2)}
+.rail-item.sel{background:var(--surface-2);box-shadow:inset 3px 0 0 var(--accent)}
+.rail-item .nm{font-size:13.5px;font-weight:500}
+.rail-item .meta{font-size:11.5px;color:var(--ink-faint);font-family:"IBM Plex Mono",monospace}
+.viewport{position:relative;background:var(--surface-2)}
+#canvas{width:100%;height:100%;display:block}
+.vp-toolbar{position:absolute;top:12px;left:12px;display:flex;gap:6px}
+.vp-toolbar button{font:500 12px "IBM Plex Sans",sans-serif;background:var(--surface);color:var(--ink-dim);border:1px solid var(--border-fair);border-radius:6px;padding:6px 10px;cursor:pointer}
+.vp-toolbar button:hover,.vp-toolbar button.on{color:var(--ink);border-color:var(--accent)}
+.detail{padding:18px 18px 16px;overflow-y:auto}
+.detail h3{font-size:18px;margin-bottom:2px}
+.detail .cat{font-size:12px;color:var(--ink-faint);text-transform:capitalize;margin-bottom:14px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px;margin-bottom:14px}
+.kv dt{color:var(--ink-faint)}
+.kv dd{margin:0;font-family:"IBM Plex Mono",monospace;text-align:right}
+.gaugewrap{margin-top:16px}
+.gaugelabel{display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink-dim);margin-bottom:4px}
+.gauge{height:7px;border-radius:4px;background:var(--surface-2);border:1px solid var(--line);overflow:hidden}
+.gauge > i{display:block;height:100%;background:var(--accept);border-radius:4px 0 0 4px}
+.badge{display:inline-block;font-size:11px;font-weight:500;padding:3px 9px;border-radius:99px}
+.badge.accept{background:var(--accept-bg);color:var(--accept)}
+.badge.reject{background:var(--reject-bg);color:var(--reject)}
+.badge.borderline{background:var(--surface-2);color:var(--accent)}
+.noyet{color:var(--ink-faint);font-size:13px;font-style:italic;margin-top:10px}
+/* Table view */
+.tablewrap{border:1px solid var(--line);border-radius:12px;background:var(--surface);overflow:hidden}
+.tabletools{display:flex;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tabletools input,.tabletools select{width:auto;min-width:140px}
+.tablescroll{overflow:auto;max-height:min(600px,68vh)}
+table{border-collapse:collapse;width:100%;font-size:13px}
+thead th{position:sticky;top:0;background:var(--surface-2);text-align:left;padding:9px 14px;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-faint);border-bottom:1px solid var(--line);cursor:pointer;white-space:nowrap}
+thead th:hover{color:var(--ink)}
+tbody td{padding:8px 14px;border-bottom:1px solid var(--line);white-space:nowrap}
+tbody tr:hover{background:var(--surface-2)}
+td.num{font-family:"IBM Plex Mono",monospace;text-align:right}
+td.cat{text-transform:capitalize}
+footer{padding:20px 32px 40px;color:var(--ink-faint);font-size:12px;border-top:1px solid var(--line);margin-top:8px}
+footer a{color:var(--accent)}
+@media(max-width:900px){.specimens{grid-template-columns:1fr;height:auto}.railcol,.detail{max-height:280px}.viewport{height:340px}}
+</style>
+<header>
+  <div class="brand">
+    <div class="eyebrow">Gentle Manip · Object-Set Expansion</div>
+    <h1>Grasp Specimen Catalog</h1>
+    <p class="subtitle">Every mesh sourced from Objaverse-LVIS / MetaFood3D, filtered for graspability under the xArm7's 79&nbsp;mm jaw span, and every object that has cleared repair + FEM tetrahedralization into the registry.</p>
+  </div>
+  <div class="statstrip mono" id="statstrip"></div>
+</header>
+<nav class="tabs">
+  <button class="active" data-tab="specimens">Registered specimens</button>
+  <button data-tab="table">Sourced candidates</button>
+</nav>
+<main>
+  <section id="tab-specimens">
+    <p class="panel-title">Registered objects — geometry + material + collected grasp trials</p>
+    <div class="specimens">
+      <div class="railcol">
+        <div class="head"><input type="text" id="regSearch" placeholder="Search specimens…"></div>
+        <div class="rail-list" id="regList"></div>
+      </div>
+      <div class="viewport">
+        <canvas id="canvas"></canvas>
+        <div class="vp-toolbar">
+          <button id="btnReset">Reset view</button>
+          <button id="btnSpin">Auto-rotate</button>
+          <button id="btnWire">Wireframe</button>
+        </div>
+      </div>
+      <div class="detail" id="regDetail"></div>
+    </div>
+  </section>
+  <section id="tab-table" hidden>
+    <p class="panel-title">Every sourced candidate — geometry filter verdict, before mesh repair / registration</p>
+    <div class="tablewrap">
+      <div class="tabletools">
+        <input type="text" id="candSearch" placeholder="Search category or reason…">
+        <select id="candVerdict"><option value="all">All verdicts</option><option value="accept">Accept</option><option value="borderline">Borderline</option><option value="reject">Reject</option></select>
+        <select id="candSource"><option value="all">All sources</option></select>
+      </div>
+      <div class="tablescroll"><table id="candTable">
+        <thead><tr>
+          <th data-k="category">Category</th><th data-k="bucket">Shape bucket</th><th data-k="source">Source</th>
+          <th data-k="verdict">Verdict</th><th data-k="min_width_scaled_mm">Min width</th>
+          <th data-k="max_extent_scaled_mm">Max extent</th><th data-k="thin_axis_scaled_mm">Thin axis</th><th>Reason</th>
+        </tr></thead>
+        <tbody id="candBody"></tbody>
+      </table></div>
+    </div>
+  </section>
+</main>
+<footer>Gripper cap 79&nbsp;mm (planner-enforced, <code>finger_grasp_final.py:515</code>) · height floor 20&nbsp;mm · data embedded at publish time from the object-expansion pipeline running on the arrhenius cluster.</footer>
+<script type="importmap">{"imports":{"three":"https://cdnjs.cloudflare.com/ajax/libs/three.js/r150/three.module.min.js"}}</script>
+<script id="payload" type="application/json">__DATA_JSON__</script>
+<script type="module">
+import * as THREE from 'three';
+const $=id=>document.getElementById(id);
+const DATA = JSON.parse(document.getElementById('payload').textContent);
+const REG = DATA.registered, CAND = DATA.candidates;
+const pretty = s => (s||'').replaceAll('_',' ').replace(/\(.*?\)/g,'').trim().replace(/\b\w/g,c=>c.toUpperCase());
+
+// ── stat strip ──
+const nAccept = CAND.filter(c=>c.verdict==='accept').length;
+const nCats = new Set(CAND.filter(c=>c.verdict==='accept').map(c=>c.category)).size;
+const nGrasped = REG.filter(r=>r.grasp).length;
+$('statstrip').innerHTML = [
+  [REG.length,'Registered'],[CAND.length,'Candidates seen'],[nAccept,'Geometry-accepted'],
+  [nCats,'Accepted categories'],[nGrasped,'With grasp trials']
+].map(([n,l])=>`<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('');
+
+// ── tabs ──
+document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav.tabs button').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  $('tab-specimens').hidden = b.dataset.tab!=='specimens';
+  $('tab-table').hidden = b.dataset.tab!=='table';
+});
+
+// ── 3D viewport ──
+const renderer=new THREE.WebGLRenderer({canvas:$('canvas'),antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+const scene=new THREE.Scene();
+function paintBg(){const dark=matchMedia('(prefers-color-scheme: dark)').matches;const explicit=document.documentElement.getAttribute('data-theme');const isDark=explicit?explicit==='dark':dark;scene.background=new THREE.Color(isDark?'#2a251d':'#efe9e0');}
+paintBg();
+const camera=new THREE.PerspectiveCamera(42,1,.0005,20);camera.up.set(0,0,1);
+let dragging=false,lastX=0,lastY=0,az=0.8,el=0.55,dist=0.2,target=new THREE.Vector3();
+function applyCam(){const x=target.x+dist*Math.cos(el)*Math.cos(az),y=target.y+dist*Math.cos(el)*Math.sin(az),z=target.z+dist*Math.sin(el);camera.position.set(x,y,z);camera.lookAt(target);}
+const canvas=$('canvas');
+canvas.addEventListener('pointerdown',e=>{dragging=true;lastX=e.clientX;lastY=e.clientY;canvas.setPointerCapture(e.pointerId);});
+canvas.addEventListener('pointerup',()=>dragging=false);
+canvas.addEventListener('pointermove',e=>{if(!dragging)return;az-=(e.clientX-lastX)*0.006;el=Math.max(-1.3,Math.min(1.3,el+(e.clientY-lastY)*0.006));lastX=e.clientX;lastY=e.clientY;applyCam();});
+canvas.addEventListener('wheel',e=>{e.preventDefault();dist=Math.max(0.02,Math.min(4,dist*(1+e.deltaY*0.001)));applyCam();},{passive:false});
+scene.add(new THREE.HemisphereLight(0xe2f5ff,0x544738,2.6));
+const light=new THREE.DirectionalLight(0xffffff,3);light.position.set(.3,-.3,.5);scene.add(light);
+const fill=new THREE.DirectionalLight(0x9fcfff,1.3);fill.position.set(-.3,.3,.2);scene.add(fill);
+const grid=new THREE.GridHelper(.3,30,0x8a7c62,0x5c5340);grid.rotation.x=Math.PI/2;scene.add(grid);
+let mesh=null,wire=false,spin=false,extent=.05;
+function reset(){target.set(0,0,extent*0.4);dist=extent*2.4;az=0.8;el=0.55;applyCam();}
+function showMesh(geomData){
+  if(mesh){scene.remove(mesh);mesh.geometry.dispose();mesh.material.dispose();mesh=null;}
+  if(!geomData)return;
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute(geomData.v,3));
+  g.setIndex(geomData.f);
+  g.computeVertexNormals();
+  const mat=new THREE.MeshStandardMaterial({color:'#c9a876',roughness:.78,metalness:.03,side:THREE.DoubleSide,wireframe:wire});
+  mesh=new THREE.Mesh(g,mat);
+  const box=new THREE.Box3().setFromObject(mesh),size=box.getSize(new THREE.Vector3()),center=box.getCenter(new THREE.Vector3());
+  mesh.position.set(-center.x,-center.y,-box.min.z);
+  scene.add(mesh);
+  extent=Math.max(size.x,size.y,size.z,0.01);
+  reset();
+}
+$('btnReset').onclick=reset;
+$('btnSpin').onclick=()=>{spin=!spin;$('btnSpin').classList.toggle('on',spin);};
+$('btnWire').onclick=()=>{wire=!wire;$('btnWire').classList.toggle('on',wire);if(mesh)mesh.material.wireframe=wire;};
+new ResizeObserver(()=>{const c=canvas.parentElement;renderer.setSize(c.clientWidth,c.clientHeight,false);camera.aspect=c.clientWidth/Math.max(1,c.clientHeight);camera.updateProjectionMatrix();}).observe(canvas.parentElement);
+renderer.setAnimationLoop(()=>{if(spin){az+=0.004;applyCam();}renderer.render(scene,camera);});
+
+// ── specimen rail + detail ──
+let regSel=null;
+function renderRegList(){
+  const q=$('regSearch').value.toLowerCase();
+  const items=REG.filter(r=>r.name.toLowerCase().includes(q));
+  $('regList').innerHTML='';
+  for(const r of items){
+    const b=document.createElement('button');b.className='rail-item'+(regSel===r.name?' sel':'');
+    b.innerHTML=`<div class="nm">${pretty(r.name)}</div><div class="meta">${r.object_type} · ${r.size_mm.map(v=>v.toFixed(0)).join('×')}mm</div>`;
+    b.onclick=()=>selectReg(r.name);$('regList').appendChild(b);
+  }
+}
+function selectReg(name){
+  regSel=name;renderRegList();
+  const r=REG.find(x=>x.name===name);if(!r)return;
+  showMesh(r.geom);
+  const m=r.material;
+  let html=`<h3>${pretty(r.name)}</h3><p class="cat">${r.object_type} · soft MPM body</p>`;
+  html+=`<dl class="kv">
+    <dt>Extents</dt><dd>${r.size_mm.map(v=>v.toFixed(1)).join(' × ')} mm</dd>
+    <dt>Stiffness (E)</dt><dd>${(m.youngs_modulus/1000).toFixed(0)} kPa</dd>
+    <dt>Poisson ν</dt><dd>${m.poisson_ratio}</dd>
+    <dt>Yield</dt><dd>${(m.von_mises_yield_stress/1000).toFixed(0)} kPa</dd>
+    <dt>Density</dt><dd>${m.density} kg/m³</dd>
+  </dl>`;
+  if(r.grasp){
+    const g=r.grasp,pct=v=>v==null?'—':Math.round(100*v);
+    html+=`<div class="gaugewrap"><div class="gaugelabel"><span>Grasp success</span><span class="mono">${pct(g.success_rate)}%</span></div>
+    <div class="gauge"><i style="width:${pct(g.success_rate)}%"></i></div></div>
+    <dl class="kv" style="margin-top:10px">
+      <dt>Ever lifted</dt><dd>${pct(g.ever_success_rate)}%</dd>
+      <dt>Sub-yield (gentle)</dt><dd>${pct(g.sub_yield_frac)}%</dd>
+      <dt>Episodes saved</dt><dd>${g.episodes_saved??'—'} / ${g.total_attempts??'—'}</dd>
+    </dl>`;
+  } else {
+    html+=`<p class="noyet">No grasp trials collected yet for this specimen.</p>`;
+  }
+  $('regDetail').innerHTML=html;
+}
+$('regSearch').oninput=renderRegList;
+
+// ── candidates table ──
+const sources=[...new Set(CAND.map(c=>c.source||'objaverse'))].sort();
+for(const s of sources){const o=document.createElement('option');o.value=s;o.textContent=pretty(s);$('candSource').appendChild(o);}
+let candSort={k:'category',dir:1};
+function renderCandTable(){
+  const q=$('candSearch').value.toLowerCase(),v=$('candVerdict').value,s=$('candSource').value;
+  let rows=CAND.filter(c=>(v==='all'||c.verdict===v)&&(s==='all'||(c.source||'objaverse')===s)&&
+    ((c.category||'').toLowerCase().includes(q)||(c.reason||'').toLowerCase().includes(q)));
+  rows.sort((a,b)=>{const av=a[candSort.k]??'',bv=b[candSort.k]??'';const an=parseFloat(av),bn=parseFloat(bv);
+    if(!isNaN(an)&&!isNaN(bn))return(an-bn)*candSort.dir;return String(av).localeCompare(String(bv))*candSort.dir;});
+  rows=rows.slice(0,400);
+  $('candBody').innerHTML=rows.map(c=>`<tr>
+    <td class="cat">${pretty(c.category)}</td><td>${pretty(c.bucket||'—')}</td><td>${pretty(c.source||'objaverse')}</td>
+    <td><span class="badge ${c.verdict}">${c.verdict}</span></td>
+    <td class="num">${c.min_width_scaled_mm?c.min_width_scaled_mm+' mm':'—'}</td>
+    <td class="num">${c.max_extent_scaled_mm?c.max_extent_scaled_mm+' mm':'—'}</td>
+    <td class="num">${c.thin_axis_scaled_mm?c.thin_axis_scaled_mm+' mm':'—'}</td>
+    <td style="white-space:normal;max-width:340px;color:var(--ink-dim);font-size:12px">${c.reason||''}</td>
+  </tr>`).join('');
+}
+document.querySelectorAll('#candTable thead th[data-k]').forEach(th=>th.onclick=()=>{
+  const k=th.dataset.k;candSort.dir=(candSort.k===k)?-candSort.dir:1;candSort.k=k;renderCandTable();
+});
+$('candSearch').oninput=renderCandTable;$('candVerdict').onchange=renderCandTable;$('candSource').onchange=renderCandTable;
+
+renderRegList();
+if(REG.length)selectReg((REG.find(r=>r.geom)||REG[0]).name);
+renderCandTable();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',paintBg);
+</script>
