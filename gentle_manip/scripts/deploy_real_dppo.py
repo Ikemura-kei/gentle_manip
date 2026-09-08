@@ -108,7 +108,7 @@ class DPPOPolicyAdapter:
                  action_config=None, warmup_steps: int = 0,
                  visual: str = "pointcloud", img_cond_steps: int = 1, image_size: int = 96,
                  image_key: str = "image_cam_ext", vit_cfg: "dict | None" = None,
-                 spatial_emb: int = 128,
+                 spatial_emb: int = 128, ddim_steps: int = 0,
                  device: str = "cuda:0") -> None:
         import torch  # noqa: F401
         from model.diffusion.diffusion_eval import DiffusionEval
@@ -164,11 +164,23 @@ class DPPOPolicyAdapter:
                 activation_type="ReLU", residual_style=True,
                 pointnet=pointnet or {"in_channels": 3, "use_layernorm": True, "final_norm": "layernorm"})
         # Same construction as cfg/.../eval_diffusion_pointnet.yaml (network_path loads weights).
+        # DDIM at INFERENCE (--ddim-steps N > 0): sample with N steps instead of all `denoising_steps`.
+        # Both reference implementations do this — DP3 trains 100 / infers 10, DPPO's robomimic image
+        # configs train 100 / infer 5 (use_ddim: True). We defaulted to full denoising, which is fine at
+        # 20 steps (13 ms) but costs 63 ms at 100, half the 133 ms budget of act_steps 4 at 30 Hz.
+        # Default 0 = OFF, so every existing entry keeps its exact behaviour.
+        _ddim = int(ddim_steps) > 0
+        if _ddim and int(denoising_steps) % int(ddim_steps):
+            raise SystemExit(f"--ddim-steps {ddim_steps} must divide denoising_steps {denoising_steps} "
+                             f"(DDIM uses a uniform stride: step_ratio = denoising_steps // ddim_steps)")
         self.model = DiffusionEval(
-            network_path=str(ckpt), ft_denoising_steps=int(ft_denoising_steps), use_ddim=False,
+            network_path=str(ckpt), ft_denoising_steps=int(ft_denoising_steps), use_ddim=_ddim,
             network=net, predict_epsilon=True, denoised_clip_value=1.0, randn_clip_value=3,
-            ddim_steps=int(ft_denoising_steps), horizon_steps=horizon_steps, obs_dim=obs_dim,
+            ddim_steps=(int(ddim_steps) if _ddim else int(ft_denoising_steps)),
+            horizon_steps=horizon_steps, obs_dim=obs_dim,
             action_dim=action_dim, denoising_steps=denoising_steps, device=device).eval()
+        if _ddim:
+            print(f"[policy] DDIM sampling: {ddim_steps} of {denoising_steps} denoising steps", flush=True)
 
         stats = np.load(normalization_path)
         self.obs_min = stats["obs_min"].astype(np.float32)
@@ -289,6 +301,10 @@ def main() -> None:
     p.add_argument("--ckpt", type=Path, required=True, help="a ft_ppo_diffusion_pointnet or BC checkpoint")
     p.add_argument("--ft-denoising-steps", type=int, default=10,
                    help="10 for a finetuned checkpoint, 0 for a BC (pretrained) checkpoint")
+    p.add_argument("--ddim-steps", type=int, default=0,
+                   help="DDIM sampling at inference with this many steps (0 = off, full denoising). "
+                        "Must divide the checkpoint's denoising_steps. Used for the RGB policies, whose "
+                        "100 training steps cost 63 ms per re-plan against a 133 ms budget.")
     p.add_argument("--normalization", type=Path,
                    default=_REPO / "dataset/dppo/single_lift_mushroom_soft_abs_pcd_rot6d/normalization.npz",
                    help="normalization.npz from the SAME converted dataset the ckpt trained on "
@@ -399,7 +415,7 @@ def main() -> None:
         visual=arch.get("visual", "pointcloud"),
         img_cond_steps=arch.get("img_cond_steps", 1), image_size=arch.get("image_size", 96),
         image_key=args.image_key, vit_cfg=arch.get("vit_cfg"),
-        spatial_emb=arch.get("spatial_emb", 128),
+        spatial_emb=arch.get("spatial_emb", 128), ddim_steps=args.ddim_steps,
         horizon_steps=arch.get("horizon_steps", 4),
         denoising_steps=arch.get("denoising_steps", 20),
         ft_denoising_steps=args.ft_denoising_steps,

@@ -9,6 +9,8 @@
 # (point_cloud_1cam_armfocus == superset_soft_armfocus_board: same crop z>=19 mm, 1024 pts, outlier + object focus;
 #  plus the REAL-ONLY ground_residual filter, default ON since 2026-09-06),
 # action config = the SAME yaml the demos were converted with (z15), normalization = the training dataset's.
+# --ddim-steps N: DDIM sampling at inference (RGB entries only). DP3 trains 100 / infers 10, DPPO's image
+# configs train 100 / infer 5; we ran full denoising, which costs 59 ms at 100 steps vs 8 ms at DDIM-10.
 # --record-rgb: also saves cam_ext RGB per step to <record>/videos/ep_NNN.mp4 (presentation only, never policy input).
 # Visualize a recording afterwards: bash gentle_manip/scripts/final/viz_deploy.sh <record dir>
 # Before the first deploy of the day: uv run --project envs/deploy python -m gentle_manip.diagnostics.drift_check
@@ -101,7 +103,7 @@ cd "$(dirname "$0")/../../.."
 #   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
 #   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus_rgb.yaml \
 #   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
-#   --act-steps 4 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --act-steps 4 --ddim-steps 10 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
 #   --record dataset/real_deploy/real6_bc_rgb_tawuv_200 --shard-size 10 --record-rgb \
 #   --max-steps 5000 "$@"
 
@@ -116,7 +118,7 @@ cd "$(dirname "$0")/../../.."
 #   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
 #   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus_rgb.yaml \
 #   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
-#   --act-steps 4 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --act-steps 4 --ddim-steps 10 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
 #   --record dataset/real_deploy/real6_bc_rgb_aug_xkhrc_1200 --shard-size 10 --record-rgb \
 #   --max-steps 5000 "$@"
 
@@ -132,6 +134,6 @@ uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.p
   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus_rgb.yaml \
   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
-  --act-steps 4 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+  --act-steps 4 --ddim-steps 10 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
   --record dataset/real_deploy/real6_bc_rgb_dppo_fuuoy_1350 --shard-size 10 --record-rgb \
   --max-steps 5000 "$@"
