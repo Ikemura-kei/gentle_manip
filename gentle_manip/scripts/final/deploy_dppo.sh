@@ -11,6 +11,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../../.."
 
+# ============================================================================================================
 # ── generalist v5 LOCAL, wiayg (2026-09-08), 1M steps. Sim teasers: tofu 14/20, mushroom 17/20, banana 13/20, cherry 3/20.
 # ckpt=logs/dppo/dppo-pretrain/single_lift_generalist_soft_v5/wiayg/checkpoint/state_120.pt
 # normalization=dataset/dppo/single_lift_generalist_soft_v5/normalization.npz
@@ -22,6 +23,7 @@ cd "$(dirname "$0")/../../.."
 #   --record dataset/real_deploy/generalist_v5_wiayg_120 --shard-size 10 --record-rgb \
 #   --max-steps 5000 "$@"
 
+# ============================================================================================================
 # ── G0 = fdcjk (cluster): recipe v5 with the PAIRED real-sim term ablated (w=1e-8, log-only). Not yet evaluated.
 # ckpt=downloaded_runs/fdcjk/checkpoint/state_120.pt
 # normalization=downloaded_runs/fdcjk/normalization.npz
@@ -33,6 +35,7 @@ cd "$(dirname "$0")/../../.."
 #   --record dataset/real_deploy/generalist_v5_fdcjk_G0_120 --shard-size 10 --record-rgb \
 #   --max-steps 5000 "$@"
 
+# ============================================================================================================
 # ── G2 = ttukt (cluster): recipe v5 with the ENCODER CONSISTENCY term ablated (w=1e-8, log-only). Not yet evaluated.
 # ckpt=downloaded_runs/ttukt/checkpoint/state_120.pt
 # normalization=downloaded_runs/ttukt/normalization.npz
@@ -44,6 +47,7 @@ cd "$(dirname "$0")/../../.."
 #   --record dataset/real_deploy/generalist_v5_ttukt_G2_120 --shard-size 10 --record-rgb \
 #   --max-steps 5000 "$@"
 
+# ============================================================================================================
 # ── G1 = bmbrv (cluster): recipe v5 EXACT, the cluster twin of wiayg. Same dataset + val split. Not yet evaluated.
 # ckpt=downloaded_runs/bmbrv/checkpoint/state_120.pt
 # normalization=downloaded_runs/bmbrv/normalization.npz
@@ -55,6 +59,7 @@ cd "$(dirname "$0")/../../.."
 #   --record dataset/real_deploy/generalist_v5_bmbrv_G1_120 --shard-size 10 --record-rgb \
 #   --max-steps 5000 "$@"
 
+# ============================================================================================================
 # ── REAL-only BC = jiupy (2026-09-08): trained on 110 real teleop eps (6 objects), no sim data, no aug.
 #    state_500 = val minimum (0.0099; val rises after — see EXPERIMENT.md). NORMALIZATION IS THE REAL SET.
 # ckpt=logs/dppo/dppo-pretrain/single_lift_real6_bc_v1/jiupy/checkpoint/state_1500.pt
@@ -67,14 +72,28 @@ cd "$(dirname "$0")/../../.."
 #   --record dataset/real_deploy/real6_bc_jiupy_1500 --shard-size 10 --record-rgb \
 #   --max-steps 5000 "$@"
 
+# ============================================================================================================
 # ── REAL-only BC, RGB = tawuv (2026-09-08): same 110 real eps, ViT on cam_ext RGB instead of the cloud.
 #    state_400 = 220 epochs past the val bottom (ep 180); val loss is not predictive here, so this tests it.
-ckpt=logs/dppo/dppo-pretrain/single_lift_real6_bc_rgb_v1/tawuv/checkpoint/state_200.pt
+# ckpt=logs/dppo/dppo-pretrain/single_lift_real6_bc_rgb_v1/tawuv/checkpoint/state_200.pt
+# normalization=dataset/dppo/single_lift_real6_bc_rgb_v1/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus_rgb.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
+#   --act-steps 4 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/real6_bc_rgb_tawuv_200 --shard-size 10 --record-rgb \
+#   --max-steps 5000 "$@"
+
+# ============================================================================================================
+# ── REAL-only BC, RGB + AUGMENTATION = xkhrc (2026-09-08): RandomShiftsAug(pad=4) on the RGB input.
+#    Val 0.0104 @ep820 vs 0.0176 without aug (cloud run: 0.0099). state_1200 = last (stopped there).
+ckpt=logs/dppo/dppo-pretrain/single_lift_real6_bc_rgb_v1/xkhrc/checkpoint/state_1200.pt
 normalization=dataset/dppo/single_lift_real6_bc_rgb_v1/normalization.npz
 uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus_rgb.yaml \
   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
   --act-steps 4 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/real6_bc_rgb_tawuv_200 --shard-size 10 --record-rgb \
+  --record dataset/real_deploy/real6_bc_rgb_aug_xkhrc_1200 --shard-size 10 --record-rgb \
   --max-steps 5000 "$@"
