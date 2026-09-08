@@ -9762,6 +9762,45 @@ warmup 6, ckpt every 20, EMA from epoch 1, val every 5 from the same formula. Tw
    `.agent_tmp/verify_transfer2.py` is the working pattern. Note `numpy.lib.format._read_array_header` is private and absent in
    newer numpy — use `read_array_header_1_0`.
 
+### 2026-09-08 03:53 — grasp-synthesis ablation harness VERIFIED (`grasp_synth_ablation.py`)
+All 8 methods x their width modes probed on tofu through the FROZEN v4.2 executor: ours / naive /
+antipodal / rigid / sdf / gn1b give 4/4 poses in every mode; gpd 2/4 (its own yield — 2 envs had no
+candidate past the validity ladder, handled gracefully); cgn 0/4 (runs, finds nothing on tofu; outside
+the paper set). Executed runs: ours and rigid both 2/2 saved with video+stats. Full table + the
+`--width-mode`/`--rot-bound` semantics: `docs/paper/synthesis_experiments.md` §5.
+**Bug the verification caught:** a baseline width that does not compress the object (routine in the
+no-squeeze `extent` mode) makes the frozen scorer return `no_contact` with no stress; `inf` crashed
+`synth_stats_row`'s round(), and `None` would have been worse — v4 reads it as a synthesis failure and
+substitutes its OWN default grasp, i.e. it would have silently measured our planner instead of the
+baseline. Fixed: all numeric fields coerced finite, `stress_top10 = 0.0` for zero indentation (correct,
+not a fudge), scorer verdict kept in `status`. Lesson: **a surrogate's verdict is data, never a veto** —
+the baseline's pose must always reach the MPM.
+
+### 2026-09-08 — `wiayg`: recipe v5 at 1M gradient steps (the cluster's G1, run locally) — teasers up across the board
+Same npz as `bqvzh` (6,270 eps), `TARGET_STEPS=1000000` -> 120 epochs (8,393 batches/epoch), schedule scaled per
+`docs/final/generalist_cluster_run_2026-09-07.md` (warmup 6, ckpt every 20, EMA from 1, val every 5). 5 h 38 min at
+21 ms/step, no interruption. **Final train 0.00107 / val 0.00118 vs bqvzh's 0.00149 / 0.00157** — val fell monotonically
+to the end, train/val gap only 5-7 %: still NO overfit knee at this data scale, i.e. 380k really was a 100-demo-era number.
+
+**Teasers, state_120, 20 ep, `d435i_noise`, same 20 scenarios (wiayg vs bqvzh):** tofu **14/20** (ever 14) vs 11 (14);
+mushroom **17/20** (17) vs 9 (11); banana_chunk **13/20** (13) vs 12 (15); cherry_tomato **3/20** (3) vs 1 (1). Over the four
+comparable objects **47/80 vs 33/80**. tomato crashed mid-batch-2 (sim server "socket closed mid-message" — the tomato
+class's known rigid-solver instability, the same failure that killed its cluster collection twice; batch 1 was at 0.60); a
+single retry ALSO failed the same way (worker exits with no error line, ~800 steps into batch 1); not retried a third time.
+Cause unproven from the logs, but same object + same silent death + tomato's documented NaN history, while every other object
+evaluated fine minutes earlier. Best datum: attempt 1's batch 1 = 0.60/0.60 (12/20 pace). The cluster's noted fix (sim_substeps
+175 -> 350) changes fidelity mid-dataset, so it is the user's call.
+
+**The whole gain is HOLDING, not grasping.** Every wiayg object has success == ever (zero hold losses), where bqvzh lost 3
+on each of tofu/mushroom/banana. Ever-grasp itself moved 14->14, 11->17, 15->13. So more gradient steps bought grip
+quality/stability, not better approach.
+
+**Cherry is a bias, not a convergence deficit.** Median close width 26.9 mm (bqvzh 28.0) on a 25 mm object; the demos close
+to 21.3 mm (p10 14.9). 2.6x the steps moved it ~1 mm. A targeted fix is needed — gripper-width loss weight or an aux width
+head, and check whether the +-5/3.5/1.5 mm cloud offset + residue augmentation blur the size cue at 25 mm.
+
+**Recommendation:** the cluster's G1/G0/G2 should use the same 1M-step target; 380k under-trains this dataset.
+
 ### 2026-09-07 21:20 — `wiayg` launched: G1 (recipe v5, TARGET_STEPS=1M) run locally as the cluster's twin
 Same npz as bqvzh; EPOCHS=auto -> 120 (8,393 batches/epoch, 1,007,160 steps, ~5.6 h at 20 ms/step); schedule scaling per
 `docs/final/generalist_cluster_run_2026-09-07.md` §3/§4, verified against the script's formula: warmup 6, ckpt every 20, EMA from 1,
