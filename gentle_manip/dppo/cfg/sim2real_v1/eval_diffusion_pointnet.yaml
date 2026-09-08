@@ -32,8 +32,9 @@ cond_steps: 2
 pc_cond_steps: 1
 n_points: 1024
 visual_feature_dim: 512
-horizon_steps: 4
-act_steps: 4
+horizon_steps: ${run_cfg:${base_policy_path},horizon_steps}   # FROM THE CKPT: a horizon-16 policy
+                                                             # built as horizon 4 would mis-shape the net
+act_steps: 4          # EXECUTED steps — independent of the horizon (predict 16 / execute 4)
 use_ddim: False              # full 20-step denoising for an honest BC eval
 ddim_steps: ${ft_denoising_steps}
 
@@ -75,7 +76,7 @@ wandb: null
 model:
   _target_: model.diffusion.diffusion_eval.DiffusionEval
   ft_denoising_steps: ${ft_denoising_steps}
-  predict_epsilon: True
+  predict_epsilon: ${run_cfg:${base_policy_path},model.predict_epsilon}   # from the ckpt: a sample-prediction ckpt decoded as epsilon fails SILENTLY
   denoised_clip_value: 1.0
   randn_clip_value: 3
   use_ddim: ${use_ddim}

@@ -84,9 +84,15 @@ worst-conditioned at the LOW-noise end of the schedule, which is exactly where f
 approach precision are decided. DP3 uses sample prediction for its headline results; DPPO uses
 epsilon everywhere. The two references disagree, so it is an empirical question.
 
-⚠ **Two hardcoded lines must be fixed before any sample-prediction checkpoint is evaluated or
-deployed**: `predict_epsilon: True` in `cfg/sim2real_v1/eval_diffusion_pointnet.yaml:78` and in
-`scripts/deploy_real_dppo.py:178`. A mismatch does not raise — it silently decodes wrong actions.
+✅ **DONE (2026-09-09 01:30)** — both places now READ `predict_epsilon` from the checkpoint's own
+config instead of hardcoding `True`, so a G4 sample-prediction checkpoint cannot be silently decoded
+as epsilon. The `run_cfg` resolver gained dotted-key support and now preserves the value's type
+(`str(False)` would have come back as the truthy string `"False"` — the very bug being closed).
+
+⚠ **Found while testing that fix:** the eval config also hardcoded `horizon_steps: 4`, so tonight's
+G3 teasers would have built a horizon-4 network for a horizon-16 checkpoint. It now reads the horizon
+from the checkpoint too; `act_steps` stays 4, since executed steps are a separate choice. Verified to
+resolve correctly for both a horizon-4 (`ttukt`) and a horizon-16 (`mmgyy`) checkpoint.
 
 ### Conditional only: FiLM / AdaLN conditioning
 
@@ -148,7 +154,19 @@ recipe with only the tail correction.
 
 Predicting 16 and executing 4 means four overlapping predictions cover every timestep; averaging
 them with exponential weights (the ACT recipe) is a direct smoothness win at contact and needs **no
-training run**. Implemented deploy-side and mirrored in the eval adapter so sim and robot agree.
+training run**.
+
+✅ **IMPLEMENTED (2026-09-09 01:30)** in `scripts/deploy_real_dppo.py`: `--temporal-ensemble`
+(+ `--ensemble-m`, ACT's `w_i = exp(-m*i)`, i = 0 oldest, default 0.01). **Default OFF**, so every
+existing deploy entry is byte-identical. It refuses to start when horizon <= act-steps, where nothing
+overlaps. Averaging is done in the NORMALIZED action space — linear for position and gripper, and
+safe for the euler dims only because `euler_frame_offset_deg` keeps the top-down pose away from the
++-pi seam.
+
+Verified offline on G3's `state_40` (CPU, training untouched): the first chunk is bit-identical to
+the non-ensembled path (only one prediction covers it), later chunks blend up to 4, and the
+step-to-step command change drops **45 %**. Still to do: mirror it in the eval adapter so a sim
+number reflects the deployed behaviour.
 
 It likely **replaces** the `--smooth-alpha 0.6` command smoothing rather than stacking with it —
 both smooth the same signal, and running both would double-smooth and could blunt the fast close.

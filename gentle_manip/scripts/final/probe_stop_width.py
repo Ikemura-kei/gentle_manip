@@ -71,6 +71,13 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--action-config", type=Path,
                     default=Path("gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml"))
+    ap.add_argument("--stop-offset", type=int, default=2,
+                    help="start the chunk this many steps BEFORE the last closing step, and read the "
+                         "prediction AT that step. Two reasons, both about cross-horizon fairness: "
+                         "(a) starting AT the stop makes it a hold task, since proprio already carries "
+                         "the answer; (b) reading the chunk's LAST step asks h4 to hold 3 steps and "
+                         "h16 to hold 15 — different questions. With an offset, every horizon is asked "
+                         "the same thing at the same physical moment. Must be < horizon.")
     ap.add_argument("--pooled", action="store_true",
                     help="DISCARDED design, kept only to reproduce the earlier mistake: pool many "
                          "chunks around the close from a skewed object mix. Do not use for results.")
@@ -134,11 +141,17 @@ def main() -> None:
         val_ep = sorted(perm_all[max(1, int(round(ne * 0.9))):].tolist())
         assert len(val_ep) == len(tl), "val split does not match sources.yaml"
         ep_label = [labels[i] for i in val_ep]
-        first = {}                       # ONE sample per episode: the chunk starting at t*
-        for i in range(len(ds)):
-            st_i = ds.indices[i][0]
-            e = int(ep_of_step[st_i])
-            if ends.get(e) == st_i:
+        K = int(args.stop_offset)
+        if K >= H:
+            raise SystemExit(f"--stop-offset {K} must be < horizon {H}")
+        by_start = {ds.indices[i][0]: i for i in range(len(ds))}
+        # `ends[e]` is the last step whose width DROPS, so the SETTLED width is at ends+1. Anchor on
+        # that: the chunk starts K steps before it, and chunk index K is the settled width itself.
+        first = {}
+        for e, t in ends.items():
+            st0 = t + 1 - K
+            i = by_start.get(st0)
+            if i is not None and int(ep_of_step[st0]) == e:
                 first[e] = i
         keep = np.array([first[e] for e in sorted(first)])
         obj = np.array([ep_label[e] for e in sorted(first)])
@@ -159,6 +172,8 @@ def main() -> None:
     state = torch.stack([b.conditions["state"] for b in batch]).to(args.device)
     cloud = torch.stack([b.conditions["point_cloud"] for b in batch]).to(args.device)
     demo = a2mm(np.stack([b.actions.cpu().numpy() for b in batch])[:, :, -1])   # (N, H) mm
+    # index into the chunk that IS the stop step (same physical moment for every horizon)
+    SI = int(args.stop_offset) if not args.pooled else -1
     cur = o2mm(state[:, -1, 7].cpu().numpy())                                   # current width, mm
 
     def act(c, bs=128):
@@ -186,16 +201,21 @@ def main() -> None:
     p = pred["reference"]
     corr = lambda a, b: float(np.corrcoef(a, b)[0, 1])
     out = {"checkpoint": str(ck), "n": int(len(keep)),
-           "demo_stop_mm": {"mean": float(demo[:, -1].mean()), "sd": float(demo[:, -1].std())},
-           "stop_width_abs_err_mm": float(np.abs(p[:, -1] - demo[:, -1]).mean()),
-           "plateau_rate_pred": float((np.abs(p[:, -1] - p[:, -2]) < 0.5).mean()),
-           "plateau_rate_demo": float((np.abs(demo[:, -1] - demo[:, -2]) < 0.5).mean()),
-           "corr_raw": corr(p[:, -1], demo[:, -1]),
-           "corr_residual": corr(p[:, -1] - cur, demo[:, -1] - cur),
-           "further_to_close_mm": {"demo": float((cur - demo[:, -1]).mean()),
-                                   "pred": float((cur - p[:, -1]).mean())}}
+           "demo_stop_mm": {"mean": float(demo[:, SI].mean()), "sd": float(demo[:, SI].std())},
+           "stop_width_abs_err_mm": float(np.abs(p[:, SI] - demo[:, SI]).mean()),
+           # plateau needs a step AFTER the stop inside the chunk; at horizon 4 with the stop at the last
+           # index there is none, and clamping would trivially report 100 %. NaN says "not expressible".
+           "plateau_rate_pred": (float((np.abs(p[:, SI + 1] - p[:, SI]) < 0.5).mean())
+                                 if SI + 1 < p.shape[1] else float("nan")),
+           "plateau_rate_demo": (float((np.abs(demo[:, SI + 1] - demo[:, SI]) < 0.5).mean())
+                                 if SI + 1 < demo.shape[1] else float("nan")),
+           "hold_drift_mm": float(np.abs(p[:, -1] - p[:, SI]).mean()),
+           "corr_raw": corr(p[:, SI], demo[:, SI]),
+           "corr_residual": corr(p[:, SI] - cur, demo[:, SI] - cur),
+           "further_to_close_mm": {"demo": float((cur - demo[:, SI]).mean()),
+                                   "pred": float((cur - p[:, SI]).mean())}}
     for k in ("perturbation", "scene swap"):
-        out[f"stop_shift_{k.replace(' ', '_')}_mm"] = float(np.abs(pred[k][:, -1] - p[:, -1]).mean())
+        out[f"stop_shift_{k.replace(' ', '_')}_mm"] = float(np.abs(pred[k][:, SI] - p[:, SI]).mean())
 
     print(f"\n  demo stop width          {out['demo_stop_mm']['mean']:6.2f} mm  (sd {out['demo_stop_mm']['sd']:.2f} across samples)")
     print(f"  predicted stop error     {out['stop_width_abs_err_mm']:6.2f} mm")
@@ -211,14 +231,14 @@ def main() -> None:
         by = collections.defaultdict(list)
         for k, o in enumerate(obj):
             by[o].append(k)
-        rows = [(o, demo[ix, -1].mean(), p[ix, -1].mean(), len(ix)) for o, ix in by.items() if len(ix) >= 3]
+        rows = [(o, demo[ix, SI].mean(), p[ix, SI].mean(), len(ix)) for o, ix in by.items() if len(ix) >= 3]
         rows.sort(key=lambda r: r[1])
         dm = np.array([r[1] for r in rows]); pm = np.array([r[2] for r in rows])
         out["per_object"] = {r[0]: {"demo_stop_mm": round(float(r[1]), 2),
                                     "pred_stop_mm": round(float(r[2]), 2), "n": r[3]} for r in rows}
         out["corr_between_objects"] = corr(pm, dm)
         out["slope_between_objects"] = float(np.polyfit(dm, pm, 1)[0])
-        within = [corr(p[ix, -1], demo[ix, -1]) for o, ix in by.items() if len(ix) >= 8]
+        within = [corr(p[ix, SI], demo[ix, SI]) for o, ix in by.items() if len(ix) >= 8]
         out["corr_within_object_mean"] = float(np.mean(within)) if within else float("nan")
         print(f"\n  BETWEEN objects ({len(rows)} objects with >=3 episodes):")
         print(f"    {'object':26s} {'demo stop':>10s} {'pred stop':>10s} {'n':>4s}")

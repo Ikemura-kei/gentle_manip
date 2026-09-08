@@ -66,6 +66,7 @@ def _load_net_arch(ckpt: Path) -> dict:
         "action_dim":         cfg.get("action_dim"),
         "cond_steps":         cfg.get("cond_steps"),
         "horizon_steps":      cfg.get("horizon_steps"),
+        "arch_predict_epsilon": ((cfg.get("model") or {}).get("predict_epsilon")),
         "denoising_steps":    cfg.get("denoising_steps"),
         "visual_feature_dim": cfg.get("visual_feature_dim", net.get("visual_feature_dim")),
         "pc_cond_steps":      cfg.get("pc_cond_steps", net.get("pc_cond_steps")),
@@ -109,6 +110,8 @@ class DPPOPolicyAdapter:
                  visual: str = "pointcloud", img_cond_steps: int = 1, image_size: int = 96,
                  image_key: str = "image_cam_ext", vit_cfg: "dict | None" = None,
                  spatial_emb: int = 128, ddim_steps: int = 0,
+                 temporal_ensemble: bool = False, ensemble_m: float = 0.01,
+                 arch_predict_epsilon: bool = True,
                  device: str = "cuda:0") -> None:
         import torch  # noqa: F401
         from model.diffusion.diffusion_eval import DiffusionEval
@@ -169,13 +172,21 @@ class DPPOPolicyAdapter:
         # configs train 100 / infer 5 (use_ddim: True). We defaulted to full denoising, which is fine at
         # 20 steps (13 ms) but costs 63 ms at 100, half the 133 ms budget of act_steps 4 at 30 Hz.
         # Default 0 = OFF, so every existing entry keeps its exact behaviour.
+        self._ensemble = bool(temporal_ensemble)
+        self._ensemble_m = float(ensemble_m)
+        self._t, self._preds = 0, []
+        if self._ensemble and int(horizon_steps) <= int(act_steps):
+            raise SystemExit(f"--temporal-ensemble needs horizon ({horizon_steps}) > act-steps "
+                             f"({act_steps}); with horizon == act_steps nothing overlaps")
         _ddim = int(ddim_steps) > 0
         if _ddim and int(denoising_steps) % int(ddim_steps):
             raise SystemExit(f"--ddim-steps {ddim_steps} must divide denoising_steps {denoising_steps} "
                              f"(DDIM uses a uniform stride: step_ratio = denoising_steps // ddim_steps)")
         self.model = DiffusionEval(
             network_path=str(ckpt), ft_denoising_steps=int(ft_denoising_steps), use_ddim=_ddim,
-            network=net, predict_epsilon=True, denoised_clip_value=1.0, randn_clip_value=3,
+            # READ from the ckpt's own config: a sample-prediction checkpoint (predict_epsilon False,
+            # G4) loaded into an epsilon decoder does NOT raise, it silently produces wrong actions.
+            network=net, predict_epsilon=bool(arch_predict_epsilon), denoised_clip_value=1.0, randn_clip_value=3,
             ddim_steps=(int(ddim_steps) if _ddim else int(ft_denoising_steps)),
             horizon_steps=horizon_steps, obs_dim=obs_dim,
             action_dim=action_dim, denoising_steps=denoising_steps, device=device).eval()
@@ -268,6 +279,8 @@ class DPPOPolicyAdapter:
         self._steps_emitted = 0
         self._last_obs = obs
         self._hist = deque([self._modalities(obs)], maxlen=self._cond_steps + 1)
+        self._t = 0                 # global step index the next chunk starts at
+        self._preds = []            # temporal ensembling: [(start_step, traj (H, A))], oldest first
 
     def push(self, obs: dict) -> None:
         self._last_obs = obs
@@ -279,7 +292,36 @@ class DPPOPolicyAdapter:
                 for k, v in self._stacked().items()}
         with torch.no_grad():
             traj = self.model(cond=cond, deterministic=True).trajectories.cpu().numpy()
-        chunk = traj[0, : self.n_action_steps]        # (act_steps, action_dim) normalized [-1, 1]
+        full = traj[0]                               # (horizon, action_dim) normalized [-1, 1]
+        if self._ensemble:
+            # ACT-style temporal ensembling. Predicting `horizon` but executing `act_steps` means each
+            # timestep is covered by up to horizon/act_steps overlapping predictions; average them with
+            # w_i = exp(-m * i), i = 0 for the OLDEST (the paper's convention; small m ~ uniform).
+            # Averaging happens in the NORMALIZED action space — linear for position and gripper, and
+            # safe for the euler dims because euler_frame_offset_deg keeps the top-down pose far from
+            # the +/-pi seam (without that offset this would be wrong).
+            self._preds.append((self._t, full))
+            keep = int(np.ceil(len(full) / max(1, self.n_action_steps))) + 1
+            self._preds = self._preds[-keep:]
+            rows, wts = [], []
+            for k in range(self.n_action_steps):
+                tgt = self._t + k
+                acc, wsum = None, 0.0
+                for i, (s0, tr) in enumerate(self._preds):          # i = 0 is the oldest kept
+                    j = tgt - s0
+                    if 0 <= j < len(tr):
+                        w = float(np.exp(-self._ensemble_m * i))
+                        acc = tr[j] * w if acc is None else acc + tr[j] * w
+                        wsum += w
+                rows.append(acc / wsum if wsum else full[k])
+                wts.append(wsum)
+            chunk = np.stack(rows).astype(np.float32)
+            n_used = sum(1 for (s0, tr) in self._preds if 0 <= self._t - s0 < len(tr))
+            print(f"[policy] temporal ensemble: {n_used} overlapping prediction(s), m={self._ensemble_m}",
+                  flush=True)
+        else:
+            chunk = full[: self.n_action_steps]       # (act_steps, action_dim) normalized [-1, 1]
+        self._t += self.n_action_steps
         if self._steps_emitted < self._warmup_steps:
             self._steps_emitted += self.n_action_steps
             held = self._stay_put()
@@ -301,6 +343,12 @@ def main() -> None:
     p.add_argument("--ckpt", type=Path, required=True, help="a ft_ppo_diffusion_pointnet or BC checkpoint")
     p.add_argument("--ft-denoising-steps", type=int, default=10,
                    help="10 for a finetuned checkpoint, 0 for a BC (pretrained) checkpoint")
+    p.add_argument("--temporal-ensemble", action="store_true",
+                   help="average the overlapping predictions that cover each executed step (ACT). "
+                        "Needs a checkpoint whose horizon > --act-steps. Smooths the command at "
+                        "contact; likely REPLACES --smooth-alpha rather than stacking with it.")
+    p.add_argument("--ensemble-m", type=float, default=0.01,
+                   help="ACT's exponential weight m (w_i = exp(-m*i), i=0 oldest). Small m ~ uniform.")
     p.add_argument("--ddim-steps", type=int, default=0,
                    help="DDIM sampling at inference with this many steps (0 = off, full denoising). "
                         "Must divide the checkpoint's denoising_steps. Used for the RGB policies, whose "
@@ -416,6 +464,8 @@ def main() -> None:
         img_cond_steps=arch.get("img_cond_steps", 1), image_size=arch.get("image_size", 96),
         image_key=args.image_key, vit_cfg=arch.get("vit_cfg"),
         spatial_emb=arch.get("spatial_emb", 128), ddim_steps=args.ddim_steps,
+        temporal_ensemble=args.temporal_ensemble, ensemble_m=args.ensemble_m,
+        arch_predict_epsilon=arch.get("arch_predict_epsilon", True),
         horizon_steps=arch.get("horizon_steps", 4),
         denoising_steps=arch.get("denoising_steps", 20),
         ft_denoising_steps=args.ft_denoising_steps,

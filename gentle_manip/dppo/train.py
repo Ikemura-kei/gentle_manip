@@ -52,9 +52,14 @@ def _run_cfg(ckpt: str, key: str) -> str:
     import yaml
     f = Path(_eval_base(ckpt)) / ".hydra" / "config.yaml"
     d = yaml.safe_load(f.read_text()) if f.exists() else {}
-    if key not in d:
-        raise KeyError(f"{f} has no '{key}' — pass {key}=... on the command line")
-    return str(d[key])
+    node = d
+    for part in str(key).split("."):          # dotted keys, e.g. model.predict_epsilon
+        if not isinstance(node, dict) or part not in node:
+            raise KeyError(f"{f} has no '{key}' — pass {key}=... on the command line")
+        node = node[part]
+    # keep the VALUE's type: `str(False)` would come back as the truthy string "False", which is
+    # exactly the silent mis-decode this resolver exists to prevent.
+    return node if isinstance(node, (bool, int, float)) else str(node)
 
 
 _EXP_ID: str | None = None
