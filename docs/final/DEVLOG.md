@@ -10221,3 +10221,49 @@ larger production batch (`N_EPISODES=20` instead of the 5-episode smoke-test cou
 `collect_demos_synth_v4` already targets N SAVED/successful episodes with an attempt cap, so
 there's no need for a separate smoke-test-then-full-collect round trip once the pipeline is
 validated -- going straight to 20 saves a queue round trip per object).
+
+### 2026-09-08 (cont.) — CRITICAL: stale genesis submodule was crashing every single collection
+
+The FIRST 5 objects that made it all the way through mesh_prep + FEM gate to actual
+collection (bowl, basketball_backboard, clementine, +2 more) all crashed identically:
+
+```
+AttributeError: 'RigidEntity' object has no attribute 'get_links_net_coupling_force'.
+Did you mean: 'get_links_net_contact_force'?
+  at gentle_manip/robot/xarm7_sim.py:214, gripper_coupling_force()
+```
+
+This is NOT an object-expansion bug -- it's core simulation infrastructure
+(`xarm7_sim.py`'s soft-body contact label, added by commit 87f0dc9 "use ACTUAL MPM->gripper
+coupling force"), called unconditionally on every soft-body `reset()`. **It would have
+crashed collection for ANY object, old or new**, on this exact checkout.
+
+Root cause: `third_party/genesis` submodule pointer drift. The nobackup checkout's working
+tree had genesis checked out at `5b13c609` (missing `get_links_net_coupling_force` entirely)
+while the branch's recorded pointer is `d63b703` (has it) -- `git diff --submodule` showed
+this explicitly as a "rewind" with `< expose MPM->rigid coupling force per link for
+soft-body contact detection` as one of the missing commits. Likely cause: switching branches
+in that checkout (`git checkout -b expand-categories-30 origin/expand-categories-30`, earlier
+today) changed the recorded submodule pointer but didn't auto-update the submodule's own
+working tree (git doesn't do this by default; needs an explicit `git submodule update`).
+
+**Fixed**: `git submodule update third_party/genesis` (fast-forward, no `--init` needed).
+Genesis is installed editable (`path = "../../third_party/genesis"`), so this took effect
+immediately with no `uv sync` needed. **Also hardened `object_expansion_pilot.sbatch`** to
+run this sync at the start of every job -- cheap, and this exact class of bug (a checkout's
+submodule silently drifting from its recorded pointer) is exactly the kind of thing that
+would otherwise cost hours of wasted GPU time on jobs that are 100% guaranteed to crash at
+the collection stage, discovered only after burning the queue wait.
+
+Cancelled all 5 running production jobs (2184137, 2184762-2184766) rather than let them keep
+processing candidates that would ALL hit this same guaranteed crash at the collection step --
+wasted GPU-minutes are cheap to avoid once the root cause is understood, expensive to keep
+paying while it isn't. Their partial progress is not lost: `register()` runs BEFORE
+`collect`, so bowl/basketball_backboard/clementine (and a good number of mesh_prep/fem_gate
+attempts across all 5) are still correctly registered with valid configs -- they just need a
+collection-only re-run once resubmitted, which the fix now makes possible.
+
+**Lesson: after switching branches in a checkout with submodules, always `git submodule
+update` before trusting the working tree** -- `git status` DOES flag the drift (`M
+third_party/genesis`) but it's easy to read past a one-line submodule diff when scanning for
+regular file changes, especially under time pressure.

@@ -22,6 +22,12 @@
 set -euo pipefail
 REPO=/nobackup/proj/disk/softenable-codesign26/personal/yifeid/gentle_manip
 cd "$REPO"
+# Guard against submodule pointer drift (2026-09-08: third_party/genesis was checked out at
+# an OLDER commit than this branch's recorded pointer -- missing get_links_net_coupling_force,
+# which crashed every single soft-body collection attempt with an AttributeError. `git
+# submodule update` is a fast, safe sync (no --init needed, submodule already exists) so do
+# it every run rather than trust the working tree state.
+git submodule update third_party/genesis 2>&1 | sed 's/^/[sbatch] submodule: /' || true
 # NOT `export PATH="$HOME/.local/bin:$PATH"` (the pattern other .sbatch files in this repo
 # use): $HOME/.local/bin/uv on THIS account is an x86_64 binary (installed from the login
 # node), and $HOME is the SAME path on the aarch64 GH200 compute nodes, so it would shadow
