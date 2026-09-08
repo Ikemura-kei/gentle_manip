@@ -40,8 +40,25 @@ def yup_to_zup(mesh):
 def repair_watertight(mesh, *, voxel_div: int = 160, max_faces: int = 6000, force_remesh: bool = False):
     import trimesh
     if mesh.body_count > 1:
-        parts = mesh.split(only_watertight=False)
-        mesh = max(parts, key=lambda p: p.area)
+        # Largest by CONVEX-HULL VOLUME, unioning every component within 2% of the biggest --
+        # NOT "just the single largest part by area" (that was a real bug, ported in from the
+        # same fix in geom_filter.py: a flat background plane/pedestal bundled into the source
+        # asset can have huge AREA but ~zero volume, and area-based picking grabbed it instead
+        # of the actual object, then failed to repair because it wasn't a sensible solid to
+        # begin with -- this was silently killing 5/6 candidates in the object-expansion pilot,
+        # 2026-09-08). A real multi-part object (mug body + handle) needs every meaningful part
+        # kept, so this unions rather than picking one.
+        parts = [p for p in mesh.split(only_watertight=False) if len(p.vertices) >= 4 and len(p.faces) >= 4]
+        if parts:
+            def _hull_vol(p):
+                try:
+                    return float(p.convex_hull.volume)
+                except Exception:
+                    return 0.0
+            vols = [(_hull_vol(p), p) for p in parts]
+            vmax = max(v for v, _ in vols)
+            kept = [p for v, p in vols if vmax > 0 and v >= 0.02 * vmax]
+            mesh = trimesh.util.concatenate(kept) if len(kept) > 1 else (kept[0] if kept else parts[0])
     if not mesh.is_watertight or force_remesh:
         mesh.merge_vertices()
         mesh.update_faces(mesh.unique_faces())
@@ -67,6 +84,23 @@ def repair_watertight(mesh, *, voxel_div: int = 160, max_faces: int = 6000, forc
     if not mesh.is_watertight:
         raise RuntimeError("repair failed: mesh still not watertight after voxel-remesh fallback "
                             "(FAILS LOUDLY per the 2026-09-07 DEVLOG lesson -- do not silently ship this)")
+    # Unconditional face-count cap: an ALREADY-watertight source mesh skips the voxel-remesh
+    # branch above entirely, so without this a dense scan sails through untouched (2026-09-08
+    # pilot: zucchini's already-watertight 73,598-face mesh reached the FEM gate at 5,748 tets,
+    # over the 4,500 cap in adding_new_objects.md ss2, because nothing had decimated it).
+    if len(mesh.faces) > max_faces:
+        try:
+            import fast_simplification
+            v, f = fast_simplification.simplify(
+                np.asarray(mesh.vertices, np.float32), np.asarray(mesh.faces, np.int32),
+                target_reduction=1.0 - max_faces / len(mesh.faces))
+            mesh = trimesh.Trimesh(vertices=v, faces=f)
+        except ImportError:
+            mesh = mesh.simplify_quadric_decimation(max_faces)
+        trimesh.repair.fix_normals(mesh)
+        if not mesh.is_watertight:
+            raise RuntimeError("repair failed: post-decimation mesh lost watertightness "
+                                "(FAILS LOUDLY per the 2026-09-07 DEVLOG lesson)")
     return mesh
 
 
