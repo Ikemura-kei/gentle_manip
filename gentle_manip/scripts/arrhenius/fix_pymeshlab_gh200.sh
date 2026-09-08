@@ -15,10 +15,29 @@
 set -euo pipefail
 R=$(cd "$(dirname "$0")/../../.." && pwd)
 LIB=$R/envs/sim_arrhenius/.venv/lib/python3.12/site-packages/pymeshlab/lib
-PBSPY=$HOME/.local/share/uv/python/cpython-3.12.13-linux-aarch64-gnu/lib/libpython3.12.so.1.0
 [ "$(uname -m)" = aarch64 ] || { echo "run on an aarch64 node"; exit 1; }
 [ -f /usr/lib64/libQt5Core.so.5.15.9 ] || { echo "node image lacks system Qt5Core"; exit 1; }
-[ -f "$PBSPY" ] || { echo "PBS aarch64 libpython not found at $PBSPY"; exit 1; }
+# PBSPY: a python-build-standalone (uv's "uv python install") aarch64 CPython 3.12 build --
+# these are compiled against an OLD glibc (~2.17) for portability, unlike the manylinux_2_35
+# pymeshlab wheel's bundled libpython. The exact patch version / install path is whatever
+# THIS account happens to have installed via `uv python install`, so search for it instead
+# of hardcoding one account's path (2026-09-08: hardcoded path didn't exist for a different
+# account, hard-failing the whole fix -- see DEVLOG).
+PBSPY=""
+for cand in "$HOME"/.local/share/uv/python/cpython-3.12*-linux-aarch64-gnu*/lib/libpython3.12.so.1.0             "$R"/.uv_python/cpython-3.12*-linux-aarch64-gnu*/lib/libpython3.12.so.1.0; do
+    [ -f "$cand" ] && { PBSPY="$cand"; break; }
+done
+if [ -z "$PBSPY" ]; then
+    echo "no PBS aarch64 libpython found -- installing one via uv python install"
+    UV_BIN="$R/.uv_aarch64/uv"
+    [ -x "$UV_BIN" ] || UV_BIN=uv
+    "$UV_BIN" python install --install-dir "$R/.uv_python" cpython-3.12 || true
+    for cand in "$R"/.uv_python/cpython-3.12*-linux-aarch64-gnu*/lib/libpython3.12.so.1.0                 "$HOME"/.local/share/uv/python/cpython-3.12*-linux-aarch64-gnu*/lib/libpython3.12.so.1.0; do
+        [ -f "$cand" ] && { PBSPY="$cand"; break; }
+    done
+fi
+[ -n "$PBSPY" ] && [ -f "$PBSPY" ] || { echo "PBS aarch64 libpython not found (searched + installed, still missing)"; exit 1; }
+echo "using PBS libpython: $PBSPY"
 for f in libpython3.12.so.1.0 libQt5Core.so.5; do
   [ -f "$LIB/$f.glibc235.bak" ] || cp "$LIB/$f" "$LIB/$f.glibc235.bak"
 done
