@@ -271,6 +271,63 @@ makes capacity, not schedule, the interesting axis.
    Octo's 0.1. Both are plausible mild wins but neither addresses a plateaued val loss, and batch is
    constrained by the ~14 GB train tensor being GPU-resident. Low priority.
 
+## 10. Large-scale POINT-CLOUD policy training specifically (survey, 2026-09-08)
+
+The §9 references are mostly RGB. These are the point-cloud line our architecture descends from, and
+they change two of §9's recommendations.
+
+| | points | encoder | data | batch | steps |
+|---|---|---|---|---|---|
+| **ours** | **1024**, 1 view | MLP PointNet, from scratch, **LayerNorm**, global max-pool | 6,270 eps | **128** | 1.0 M |
+| DP3 (2024) | 512–1024 | MLP PointNet, from scratch | 10–100 demos/task | 128–2048 | — |
+| iDP3 (IROS 2025) | **4096** | **pyramid convolutional** encoder (replaces the MLP) | real humanoid, 2000+ eval trials | — | — |
+| [FP3](https://arxiv.org/abs/2503.08950) (2025) | **4000 per view × 2** (3rd-person + wrist) | **pretrained Uni3D ViT, fine-tuned** (not frozen) | **60 k trajectories** (DROID, 86 tasks), 1.3 B params | **128** | 3 M, 8× A800, ~48 h |
+| [R3D](https://arxiv.org/html/2604.15281v1) | 1024 / 8192 | ViT-tiny / ViT-small, **LayerNorm**, structured N×C tokens | RoboTwin | 256 | 1000 epochs |
+
+**1. Batch 128 is settled — it is not a lever.** FP3 pre-trains a **1.3 B**-parameter policy on 60 k
+trajectories at **batch 128**. Our 128 on a 2.89 M model is in good company; drop this from the list.
+
+**2. "Lightweight PointNet is enough" is a BatchNorm ARTEFACT, and it is the belief our architecture
+inherited.** DP3's "scaling paradox" — stronger encoders performing *worse* — was traced by R3D to
+**BatchNorm degradation**, not an architectural ceiling. With LayerNorm, Uni3D encoders
+**significantly outperform** PointNet (64.7 % vs 59.6 % on RoboTwin). The whole field trend agrees:
+DP3 → iDP3 → FP3 moves from a from-scratch MLP to a pyramid conv encoder to a pretrained ViT.
+**Good news for us: our encoder already uses LayerNorm, not BatchNorm**, so we never had the bug — but
+we did inherit the conclusion it produced, and a stronger encoder is therefore a legitimate lever
+rather than a refuted one.
+
+**3. …but R3D gives a pairing rule that CONSTRAINS that lever, and it lands exactly on us.** Encoder
+capacity must scale *with point density*: at **1024 points ViT-tiny is optimal (83.8 %)**, at 8192
+points ViT-small is preferred, and **larger encoders UNDERPERFORM at a fixed point count**. We are at
+1024 points. So **widening the encoder alone is predicted not to help** — this supersedes §9 lever 3's
+"widening it is the cheap direction". More encoder capacity only pays if point count rises with it.
+
+**4. ⚠ And point count is capped by the DATA, not the model.** Our demos store the cloud **already
+farthest-point-sampled to 1024 points, and no depth images are retained** (verified: episode obs are
+`ee_pos, ee_quat, gripper_width, point_cloud (T,1024,3), priv_*`). Going to 4096 points the way iDP3
+did is therefore a **re-collection decision, not a config change** — the information is gone from the
+stored dataset. Same for R3D's FPS-randomization augmentation, which needs a larger stored cloud to
+resample from. Worth knowing before anyone plans an encoder-scaling experiment.
+
+**5. The one encoder change that IS available at 1024 points: stop collapsing to a global vector.**
+R3D keeps **structured N×C tokens** rather than pooling to one global feature; we max-pool 1024 points
+into a single 512-d vector. Max-pool keeps only the strongest activation per channel, which is exactly
+the operation that would discard a few-millimetre size difference — and the cherry-tomato failure is a
+few-millimetre size read that 2.6× more gradient steps did not fix. This needs **no extra points and
+no re-collection**, so it is the highest-value encoder experiment available on the current dataset
+(cheapest first: mean-pool ⊕ max-pool concat; then the aux width head, already implemented at weight
+0.0; then structured tokens with a small attention pool).
+
+**6. Do not grow the denoiser — three independent sources now agree.** R3D uses a 4-block decoder
+against ManiFlow's 12; HDP3 shows trajectories are low-frequency-dominant so heavy denoisers are
+wasted; ScaleDP found naive deepening *hurts*. Our 94 % denoiser share should shrink or stay, not grow.
+
+**7. Augmentation is load-bearing at scale.** R3D reports that without augmentation (FPS
+randomization, dropout, Gaussian noise) learning curves fluctuate and success drops markedly — an
+independent confirmation of what our own G2-vs-G1 result hints at, namely that the BC-path
+augmentation is doing the robustness work. We have noise/dropout/offset; we lack FPS randomization
+(blocked by item 4).
+
 **One caution on the encoder-LR idea:** Lin et al. use a 10× *lower* lr for their vision encoder, but
 theirs is a pretrained DINOv2 being fine-tuned. Ours is a small PointNet trained from scratch, where
 the argument runs the other way — so their number is not transferable, and a separate encoder lr would
