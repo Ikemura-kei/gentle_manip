@@ -129,8 +129,30 @@ i.e. ~30 ms/step, not the ~20–23 ms/step seen on the 4090 and in cluster histo
 validates keeping the 12 h walltime: the 8 h option considered at submit would have left almost no
 margin and 6 h would have killed the runs outright. Projected finish ~13:15–13:20.
 
-(to be filled as runs complete: wall clock, loss curves incl. the raw paired/consistency log-only
-curves, teaser + canonical eval numbers, checkpoints kept)
+### 6.1 The ε log-only trick verified end-to-end (epoch ~11, first read)
+
+`wandb-summary.json` for all three runs carries **`train/loss_paired`, `train/loss_consistency`,
+`val/loss_paired`** — so the ablated terms really are computed and logged, not skipped. The ablation
+instrument works, and it is already showing signal:
+
+| term (train, epoch ~11) | G1 (both optimized) | G0 (paired log-only) | G2 (cons log-only) |
+|---|---|---|---|
+| `loss_paired` | **4.996e-5** | **1.319e-4** | 4.633e-5 |
+| `loss_consistency` | **9.023e-5** | 1.584e-4 | **9.780e-5** |
+| `loss_diffusion` | 4.296e-3 | 4.304e-3 | 3.903e-3 |
+
+- **The paired term does measurable work**: un-optimized (G0) the real–sim feature distance sits
+  **2.6× higher** than when optimized (G1) — 1.32e-4 vs 5.00e-5, and the same ratio holds on val
+  (8.29e-5 vs 2.92e-5). So the term is not merely riding along on a distance the BC objective would
+  have closed anyway.
+- **The consistency term looks much weaker so far**: un-optimized (G2) it is only **8 % higher**
+  than optimized (G1) — 9.78e-5 vs 9.02e-5. If that gap stays this small, it says BC augmentation
+  alone already buys nearly all of the encoder invariance the consistency objective is meant to add,
+  which is exactly the question G2 was built to answer. **Early and provisional**: epoch 11 of 120,
+  one snapshot, and cosine consistency saturates — revisit at the end.
+
+(to be filled as runs complete: wall clock, full loss curves, teaser + canonical eval numbers,
+checkpoints kept)
 
 ## 7. Findings
 
