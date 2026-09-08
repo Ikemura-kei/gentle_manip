@@ -120,7 +120,27 @@ error (loud, unlike the `predict_epsilon` trap in `G3_G4_training_setup.md` §4,
 
 ## 5. Run record
 
-**Submitted 2026-09-08 22:20 as SLURM job `2186541`** (`.agent_tmp/train_g5.sbatch`), 12 h walltime.
+**Job `2188035`** (`.agent_tmp/train_g5.sbatch`), 12 h walltime. The first submission, `2186541`,
+**FAILED after 5 s** — see the lesson below.
+
+### The first attempt lost its slot to a hard dataset check (2026-09-08 23:05)
+
+`2186541` was submitted at 22:20 with the tail-22 dataset still building on the login node, on the
+reasoning that the npz only needs to exist when the job STARTS and the scheduler estimated 00:42 —
+about 1.5 h of margin. **The job started at 23:05:50, 1 h 37 m EARLIER than its own estimate**, in the
+very minute `train.npz` finished writing. Only `val.npz` was outstanding; the wrapper's hard check
+fired and the job exited in 5 seconds, burning the allocation for want of ~3 minutes.
+
+The check itself behaved correctly — a clean, legible `[wrap] FATAL ... val.npz missing` beats an
+obscure hydra error from an empty `EPOCHS`. The mistake was the *policy*: this page had already
+recorded that queue estimates move by hours and that the fix is a bounded wait or `scontrol hold`,
+and the estimate was trusted anyway.
+
+**Fixed in the wrapper: it now WAITS** up to 1 h for the three npz files, and additionally requires
+`val.npz` to stop growing between two checks 20 s apart, so it cannot load a half-written file.
+With 12 h of walltime against ~8 h of work there is ample room to wait. **General rule: a queued job
+must never race a background build — wait, don't assert.** (And note editing the `.sbatch` after
+submission changes nothing: SLURM copies the script at submit time, so a fix means cancel + resubmit.)
 
 Submitted *before* the tail-22 dataset finished building, deliberately: the npz only has to exist
 when the job STARTS, and the wrapper checks for it and fails loudly rather than letting an empty
