@@ -9772,7 +9772,10 @@ to the end, train/val gap only 5-7 %: still NO overfit knee at this data scale, 
 mushroom **17/20** (17) vs 9 (11); banana_chunk **13/20** (13) vs 12 (15); cherry_tomato **3/20** (3) vs 1 (1). Over the four
 comparable objects **47/80 vs 33/80**. tomato crashed mid-batch-2 (sim server "socket closed mid-message" — the tomato
 class's known rigid-solver instability, the same failure that killed its cluster collection twice; batch 1 was at 0.60); a
-single retry is queued behind the ablation verification so they never share the GPU.
+single retry ALSO failed the same way (worker exits with no error line, ~800 steps into batch 1); not retried a third time.
+Cause unproven from the logs, but same object + same silent death + tomato's documented NaN history, while every other object
+evaluated fine minutes earlier. Best datum: attempt 1's batch 1 = 0.60/0.60 (12/20 pace). The cluster's noted fix (sim_substeps
+175 -> 350) changes fidelity mid-dataset, so it is the user's call.
 
 **The whole gain is HOLDING, not grasping.** Every wiayg object has success == ever (zero hold losses), where bqvzh lost 3
 on each of tofu/mushroom/banana. Ever-grasp itself moved 14->14, 11->17, 15->13. So more gradient steps bought grip
