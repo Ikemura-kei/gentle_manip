@@ -10106,3 +10106,41 @@ formality, not real auth) — downloaded the same way a legitimate site visitor 
 `gentle_manip/scripts/object_expansion/source_metafood3d.py` runs the SAME `geom_filter.py`
 against it, writing `dataset/object_expansion/candidates_metafood3d.csv` in parallel with the
 Objaverse `candidates.csv`.
+
+### 2026-09-08 (cont.) — Thin-shell/hollow objects: geometry PASSES, MPM feasibility still open
+
+First real signal on the user's explicit wine-glass/thin-shell question. Ran a targeted
+re-source (`--categories wineglass mug cup teapot bowl vase ...`) through the geometry
+filter and initially got 100% failure with `ModuleNotFoundError: No module named 'networkx'`
+for every one — a bug, not a real verdict: `trimesh.split(only_watertight=False)` (used by
+both `geom_filter.py` and `mesh_prep.py` for the largest-component-by-volume logic) needs
+`networkx` for its connected-components graph, which is a TRANSITIVE dependency normally
+resolved automatically by `uv sync` (confirmed present in both `envs/sim`'s and the cluster's
+`envs/sim_arrhenius`'s lock files/installed venvs) but was silently missing from the scratch
+`pip install trimesh scipy numpy objaverse` venv used for interactive CPU-side sourcing on
+the login node (pip doesn't resolve soft/optional transitive deps the way a uv lockfile
+does). **Fixed** (`pip install networkx` into the scratch venv) and re-ran — real verdicts:
+
+| category | geometry-filter verdict | min-width (mm) |
+|---|---|---|
+| wineglass | accept (4/4 draws) | 21.5-40.0 |
+| mug | accept (3/4; 1 timed out on load) | 40.0 |
+| cup | accept (4/4) | 40.0 |
+| teapot | accept (4/4) | 40.0 |
+
+So geometrically these ARE graspable after the standard rescale (a real wine glass's bowl is
+already close to the 79mm cap, and its stem/base give a legitimate <=40mm grasp axis in some
+orientation) — no surprise, thin-shell objects are usually not too WIDE, the open question was
+always whether MPM can handle the WALL THICKNESS. **That question is still open**: it needs
+the FEM gate (`fem_gate_check.py`, tetrahedralization of the actual shell) and a real MPM
+collection run, both queued behind the ~3hr GPU wait (job 2161446). Prediction going in: a
+thin shell will either (a) tetrahedralize fine if the source mesh already models real wall
+thickness (many Objaverse "game-ready" props do, since a truly zero-thickness single surface
+isn't game-engine-collidable), or (b) blow up the tet count / hit the "sharp/degenerate
+surface" tetgen explosion documented in `adding_new_objects.md` if the wall is thin relative
+to the target_tets resolution -- exactly the failure mode that gate is designed to catch
+before it reaches expensive MPM. Will report the actual outcome once the SLURM job runs.
+
+**Lesson for future scratch/ad-hoc venvs (not full `uv sync`) doing trimesh multi-body work:**
+add `networkx` explicitly -- `pip install trimesh` alone is not sufficient for
+`mesh.split(only_watertight=False)` on complex/multi-part meshes.
