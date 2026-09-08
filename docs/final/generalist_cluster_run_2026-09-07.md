@@ -209,7 +209,20 @@ result (70×) is far outside that band and is safe; the consistency result is su
 **The teaser/canonical evals decide it** — and per the `xagzg` lesson, val loss is not a
 robot-performance predictor here regardless.
 
-(to be filled: teaser + canonical eval numbers)
+### 6.4 Evaluation moved to the LOCAL machine (user, 2026-09-08)
+
+The three pre-submitted cluster teaser evals (2142815/6/7) were **cancelled unrun** — evaluation and
+real-robot deployment happen locally instead. Pull a run with the existing
+`gentle_manip/scripts/pull_run.sh <id> --ckpt 120,80` (verified against these runs: all three resolve
+via `experiments.csv`, `.hydra/config.yaml` carries `env: single_lift_generalist_soft_v5` so the
+script finds the matching `normalization.npz`, and `EXPERIMENT.md` — written by hand here, since the
+DPPO hydra callback does not create one — is picked up).
+
+**Suggested priority for the real rig:** `bmbrv` (G1) is recipe v5 exact and the one to ship;
+`ttukt` (G2) has the best val loss; and **`fdcjk` (G0) is the sharp test** — its real–sim feature
+distance ended 70× G1's, so if the paired term does what §6.3 says, G0 should degrade visibly on the
+real robot. A real-robot G0-vs-G1 gap is far stronger evidence for the paired term than any sim
+number, and it is the one comparison sim cannot make.
 
 ## 7. Findings
 
