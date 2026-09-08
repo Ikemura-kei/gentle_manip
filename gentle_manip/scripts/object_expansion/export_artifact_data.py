@@ -16,7 +16,8 @@ import json
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+import os
+REPO_ROOT = Path(os.environ["OBJEXP_REPO_ROOT"]) if os.environ.get("OBJEXP_REPO_ROOT") else Path(__file__).resolve().parents[3]
 
 
 def _voxel_decimate(m, target_tris: int):
