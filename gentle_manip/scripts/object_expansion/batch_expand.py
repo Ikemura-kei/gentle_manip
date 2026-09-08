@@ -42,8 +42,8 @@ LOG_FIELDS = ["name", "category", "bucket", "source_uid", "geom_verdict", "sugge
               "ever_success_rate", "sub_yield_frac", "episodes_saved", "stage", "note", "timestamp"]
 
 
-def load_candidates() -> list[dict]:
-    with open(CANDIDATES_CSV) as f:
+def load_candidates(path: Path = CANDIDATES_CSV) -> list[dict]:
+    with open(path) as f:
         return list(csv.DictReader(f))
 
 
@@ -234,9 +234,14 @@ def main() -> None:
     ap.add_argument("--material", default="soft_shape")
     ap.add_argument("--skip-collect", action="store_true", help="register only, no pilot run (fast pass)")
     ap.add_argument("--only-categories", nargs="*", default=None)
+    ap.add_argument("--candidates-csv", type=Path, default=CANDIDATES_CSV,
+                    help="override the candidates.csv location -- e.g. sourcing ran in a "
+                         "different checkout/filesystem than this batch is executing from "
+                         "(this pipeline currently spans a login-node checkout for CPU-only "
+                         "sourcing and a separate aarch64 cluster checkout for GPU stages)")
     args = ap.parse_args()
 
-    rows = load_candidates()
+    rows = load_candidates(args.candidates_csv)
     if args.only_categories:
         rows = [r for r in rows if r["category"] in args.only_categories]
     batch = pick_batch(rows, args.n_objects, per_category=args.per_category)
