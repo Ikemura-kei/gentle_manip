@@ -75,24 +75,70 @@ def closing_stats(width_m: np.ndarray, rate: float) -> dict:
     return out
 
 
-def sim_reference(dataset: Path, rate: float, max_eps: int | None) -> dict:
-    """Closing stats over every episode of the converted sim training set (states[:, 7] = width)."""
+def _sim_labels(dataset: Path, n_train: int) -> list[str] | None:
+    """Object label per TRAIN trajectory of the converted set, or None if it cannot be reconstructed.
+
+    `convert_demos` concatenates sources in sorted order, then splits by trajectory with
+    `default_rng(seed=0).permutation(n)` and writes the train indices ASCENDING — all deterministic,
+    so the mapping trajectory -> source object is reproducible from sources.yaml alone.
+    """
+    import yaml
+
+    man = dataset / "sources.yaml"
+    if not man.exists():
+        return None
+    src = yaml.safe_load(man.read_text())["sources"]
+    labels = []
+    for entry in src:
+        name = entry.get("task_name")
+        if not name:                                             # merged runs carry no task_name
+            name = Path(str(entry.get("path", "?"))).parts[-3] if entry.get("path") else "?"
+        name = str(name).replace("single_lift_", "").replace("_soft", "")
+        labels += [name] * int(entry.get("n_episodes") or 0)
+    n = len(labels)
+    idx = sorted(np.random.default_rng(0).permutation(n)[:max(1, int(round(n * 0.9)))].tolist())
+    if len(idx) != n_train:
+        return None                                              # split assumptions do not hold
+    return [labels[i] for i in idx]
+
+
+def sim_reference(dataset: Path, rate: float, max_eps: int | None, obj: str | None = None) -> dict:
+    """Closing stats over the converted sim training set (states[:, 7] = width).
+
+    `obj` (substring) restricts the reference to matching source objects — use it whenever the real
+    set is ONE object, since travel and final width are object-size dependent and a 33-object average
+    is not a like-for-like baseline for them (closing SPEED is comparable either way).
+    """
     z = np.load(dataset / "train.npz", allow_pickle=False)
     n = np.load(dataset / "normalization.npz")
     lo, hi = float(n["obs_min"][7]), float(n["obs_max"][7])
     w_norm = z["states"][:, 7].astype(np.float64)
     w = (w_norm + 1) / 2 * (hi - lo + 1e-6) + lo                 # -> metres
     lens = z["traj_lengths"].astype(int)
+    keep = None
+    if obj:
+        labels = _sim_labels(dataset, len(lens))
+        if labels is None:
+            print(f"  [warn] cannot map trajectories to objects; --sim-object {obj} ignored")
+        else:
+            keep = [i for i, l in enumerate(labels) if obj in l]
+            if not keep:
+                print(f"  [warn] no sim source matches '{obj}'; using all objects")
+                keep = None
+            else:
+                print(f"  sim reference restricted to '{obj}': {len(keep)} of {len(lens)} train episodes")
     if max_eps:
         lens = lens[:max_eps]
+    keep_set = set(keep) if keep is not None else None
     per, off = [], 0
-    for L in lens:
-        st = closing_stats(w[off:off + L], rate)
-        if st:
-            per.append(st)
+    for i, L in enumerate(lens):
+        if keep_set is None or i in keep_set:
+            st = closing_stats(w[off:off + L], rate)
+            if st:
+                per.append(st)
         off += L
     return {"n_episodes": len(per), "gripper_range_m": [lo, hi],
-            "per_episode": per, "mean_len": float(lens.mean())}
+            "per_episode": per, "mean_len": float(lens.mean()), "object_filter": obj}
 
 
 def _agg(rows: list, key: str) -> dict:
@@ -111,6 +157,9 @@ def main() -> None:
                     default=Path("dataset/dppo/single_lift_generalist_soft_v5"),
                     help="converted sim set for the closing-speed reference ('' to skip)")
     ap.add_argument("--sim-max-episodes", type=int, default=0, help="0 = all")
+    ap.add_argument("--sim-object", default=None,
+                    help="restrict the sim reference to sources whose object name contains this "
+                         "(default: inferred from the real task name, e.g. cherry_tomato)")
     ap.add_argument("--out", type=Path, default=None, help="default: <run>/checks")
     args = ap.parse_args()
 
@@ -176,10 +225,15 @@ def main() -> None:
               "real": {k: _agg(real, k) for k in real[0]}}
 
     if str(args.sim_dataset):
-        sim = sim_reference(args.sim_dataset, rate, args.sim_max_episodes or None)
+        obj = args.sim_object
+        if obj is None:                       # infer from single_lift_<obj>_real
+            t = str(meta.get("task") or "")
+            obj = t.replace("single_lift_", "").replace("_real", "") or None
+        sim = sim_reference(args.sim_dataset, rate, args.sim_max_episodes or None, obj)
         result["sim_reference"] = {"dataset": str(args.sim_dataset), "n_episodes": sim["n_episodes"],
                                    **{k: _agg(sim["per_episode"], k) for k in sim["per_episode"][0]}}
-        print(f"\n── vs SIM demos ({sim['n_episodes']} episodes, {args.sim_dataset.name}) ──")
+        tag = f"object '{obj}'" if sim.get("object_filter") else "ALL objects"
+        print(f"\n── vs SIM demos ({sim['n_episodes']} episodes, {tag}) ──")
         print(f"{'metric':22s} {'REAL':>10s} {'SIM':>10s} {'real/sim':>10s}")
         for key, name in (("peak_mm_s", "peak speed [mm/s]"), ("active_mm_s", "active speed [mm/s]"),
                           ("close_duration_s", "main close [s]"), ("close_travel_mm", "close travel [mm]"),
