@@ -1,15 +1,22 @@
-# G3 / G4 — the next two generalist runs (planned 2026-09-08 evening)
+# G3 / G4 — the next two generalist runs (2026-09-08 evening)
 
 Two training slots before a 2026-09-09 15:00 meeting. This page records **what we decided to run,
 what we decided NOT to run, and the evidence behind each call** — so the choices can be audited
 later and so a negative result is not re-tried a third time.
+
+**G3 as launched** (2026-09-08 22:14): run `mmgyy`, dataset
+`single_lift_generalist_soft_v5_tail22`, 122 epochs = 1,007,842 gradient steps (8,261 batches/epoch
+at batch 128), `horizon_steps=16`, G2's recipe otherwise (paired 0.5, `pc_aug` d435i_noise_train,
+per-axis offset, consistency 1e-8 = log-only), warmup 6, checkpoint every 20, EMA from epoch 1, val
+every 5, seed 42. 3,062,944 parameters (+6 % over horizon 4: only the denoiser's input and output
+layers grow). 171 s/epoch measured → ~5.8 h. wandb `gentle_manip_generalist/runs/6z8x27f9`.
 
 Baseline for both: **G2 = `ttukt`** (cluster, recipe v5 with the encoder-consistency term ablated),
 and its local twin `wiayg`. Setup reference: `docs/final/G1_G2_training_setup.md`.
 
 | run | what it changes vs G2 | why |
 |---|---|---|
-| **G3** | action horizon 4 → **16**, executed steps stay **4**; hold tail 10 → **22** | the only untested change with two independent reference implementations behind it |
+| **G3** = `mmgyy` (RUNNING, launched 22:14) | action horizon 4 → **16**, executed steps stay **4**; hold tail 10 → **22** | the only untested change with two independent reference implementations behind it |
 | **G4** | G3 **+ sample prediction** (`predict_epsilon: False`); FiLM head only if G3's teaser says the conditioning path is the problem | one further change, attributable given G3 |
 
 ## 1. Where the baseline actually stands
@@ -123,7 +130,10 @@ Tail 22 reproduces today's numbers *exactly* (both counts depend only on `K − 
 24 %, six times today's dose — tail 22 is nowhere near it. **Rule: keep `tail − horizon = 6`.**
 
 No re-collection: `gentle_manip/dppo/augment_hold_tail.py` appends the 12 extra frames to the
-converted npz (+8 % data, ~14 GB, minutes) and records `hold_tail_k` for provenance.
+converted npz and records `hold_tail_k` for provenance. **Built and verified** as
+`dataset/dppo/single_lift_generalist_soft_v5_tail22`: 5,643 episodes, 1,074,275 → 1,141,991 steps,
+and the chunk counts came out exactly as predicted — 1,057,346 chunks and 39,501 all-hold, identical
+to today's horizon-4 numbers.
 
 ## 4. G4 — sample prediction on top of G3
 
@@ -168,14 +178,16 @@ that needs recovery demonstrations, which is a collection change and out of scop
 
 ## 7. Schedule and evaluation
 
+Actual, from G3's measured 171 s/epoch:
+
 | | | |
 |---|---|---|
-| G3 | 21:15 → 03:00 | 1M gradient steps, ~5.7 h measured |
-| teasers G3 | 03:00 → 03:30 | cherry, mushroom, tofu — read as DIAGNOSIS |
-| G4 | 03:30 → 09:15 | |
-| teasers G4 | 09:15 → 09:45 | |
-| canonical evals | 09:45 → 12:45 | 100 episodes, cherry + mushroom, baseline and winner |
-| buffer / write-up | 12:45 → 15:00 | |
+| G3 | **22:14 → ~04:00** | 122 epochs, 1,007,842 steps |
+| teasers G3 | 04:00 → 04:30 | cherry, mushroom, tofu — read as DIAGNOSIS |
+| G4 | 04:30 → ~10:20 | |
+| teasers G4 | 10:20 → 10:50 | |
+| canonical evals | 10:50 → 13:50 | 100 episodes, cherry + mushroom, baseline and winner |
+| buffer / write-up | 13:50 → 15:00 | |
 
 **Evaluation protocol: 100 episodes, not 200.** `EvalSpec` declares `n_episodes = 100` as the FIXED
 canonical value; the 200 in `eval_diffusion_pointnet.yaml` is the deviation. 100 halves each eval to
