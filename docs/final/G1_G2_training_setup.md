@@ -257,9 +257,12 @@ makes capacity, not schedule, the interesting axis.
    512-d vector by max-pooling; max-pool keeps the strongest activation per channel and is known to
    discard fine geometric detail. The cherry-tomato failure is exactly a fine-size read (closes to
    ~27 mm on a 25 mm object, unmoved by 2.6× more steps). Cheap probes, in increasing cost:
-   **(a) turn on the aux width head** — `aux_grasp_width_weight` is already implemented in
-   `aux_diffusion.py` (with an `aux_width_blind` variant) and merely set to 0.0, so this is a config
-   change, not code; (b) mean-pool ⊕ max-pool concat; (c) wider encoder.
+   (a) mean-pool ⊕ max-pool concat; (b) structured tokens / attention pool; (c) wider encoder —
+   but see §10.3, which shows (c) is predicted NOT to help at 1024 points.
+   ⚠ **The aux width head is NOT a candidate**: `aux_grasp_width_weight` is implemented and merely
+   set to 0.0, but it was **already tried and did not help** (user, 2026-09-08). It predates the
+   camera move (horizontal → diagonal), so the null is not strictly binding now, but a prior negative
+   on the same architecture outweighs any inference from loss curves.
 5. **Data composition beats data volume.** Lin et al. find generalization follows a power law in
    **environment and object diversity** and correlates only weakly with demonstration count
    (r −0.62…−0.79), saturating around **50 demos per environment-object pair**. We have 550 for each
@@ -338,8 +341,20 @@ into a single 512-d vector. Max-pool keeps only the strongest activation per cha
 the operation that would discard a few-millimetre size difference — and the cherry-tomato failure is a
 few-millimetre size read that 2.6× more gradient steps did not fix. This needs **no extra points and
 no re-collection**, so it is the highest-value encoder experiment available on the current dataset
-(cheapest first: mean-pool ⊕ max-pool concat; then the aux width head, already implemented at weight
-0.0; then structured tokens with a small attention pool).
+**mean⊕max concat first, attention pooling second.** The asymmetry matters: concatenating mean to
+max is representationally a SUPERSET of max (max survives in the vector, the network can ignore the
+rest), so it risks only mild overfitting, whereas attention *replaces* max — it is a soft-argmax that
+approximates max only in the low-temperature limit and must learn to, so it can genuinely regress.
+**Attention pooling is not strictly better than max:** max is a parameter-free detector with a real
+inductive bias (PointNet's universal-approximation result is proved with max), and most published
+wins for attentive pooling are dense segmentation tasks rather than single-vector regression. Any
+mean- or attention-based variant **must mask the padded points** (§10.4b) or it will pool over zeros,
+which max is naturally immune to — skipping that would look like "attention didn't help".
+Evidence that pooling is the right axis at all: [Equivariant vs. Invariant
+Layers](https://arxiv.org/abs/2306.05553) (ICML 2024) finds complex pooling most helps SIMPLE
+backbones (ours is a 3-layer MLP), that pooling choice can matter MORE than backbone width and depth
+(converging with R3D's "don't widen at 1024 points"), and that pairwise pooling COMBINATIONS
+significantly improve a fixed backbone — a direct endorsement of mean⊕max.
 
 **6. Do not grow the denoiser — three independent sources now agree.** R3D uses a 4-block decoder
 against ManiFlow's 12; HDP3 shows trajectories are low-frequency-dominant so heavy denoisers are
