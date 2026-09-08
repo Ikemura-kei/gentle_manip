@@ -57,12 +57,24 @@ cd "$(dirname "$0")/../../.."
 
 # ── REAL-only BC = jiupy (2026-09-08): trained on 110 real teleop eps (6 objects), no sim data, no aug.
 #    state_500 = val minimum (0.0099; val rises after — see EXPERIMENT.md). NORMALIZATION IS THE REAL SET.
-ckpt=logs/dppo/dppo-pretrain/single_lift_real6_bc_v1/jiupy/checkpoint/state_500.pt
-normalization=dataset/dppo/single_lift_real6_bc_v1/normalization.npz
+# ckpt=logs/dppo/dppo-pretrain/single_lift_real6_bc_v1/jiupy/checkpoint/state_1500.pt
+# normalization=dataset/dppo/single_lift_real6_bc_v1/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
+#   --act-steps 4 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/real6_bc_jiupy_1500 --shard-size 10 --record-rgb \
+#   --max-steps 5000 "$@"
+
+# ── REAL-only BC, RGB = tawuv (2026-09-08): same 110 real eps, ViT on cam_ext RGB instead of the cloud.
+#    state_400 = 220 epochs past the val bottom (ep 180); val loss is not predictive here, so this tests it.
+ckpt=logs/dppo/dppo-pretrain/single_lift_real6_bc_rgb_v1/tawuv/checkpoint/state_200.pt
+normalization=dataset/dppo/single_lift_real6_bc_rgb_v1/normalization.npz
 uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
-  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus_rgb.yaml \
   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
   --act-steps 4 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/real6_bc_jiupy_500 --shard-size 10 --record-rgb \
+  --record dataset/real_deploy/real6_bc_rgb_tawuv_200 --shard-size 10 --record-rgb \
   --max-steps 5000 "$@"
