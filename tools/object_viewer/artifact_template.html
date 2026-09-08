@@ -92,6 +92,17 @@ footer{padding:20px 32px 40px;color:var(--ink-faint);font-size:12px;border-top:1
 footer a{color:var(--accent)}
 @media(max-width:900px){.specimens{grid-template-columns:1fr;height:auto}.railcol,.detail{max-height:280px}.viewport{height:340px}}
 </style>
+<div id="fatalError" hidden style="background:#a1503b;color:#fff;padding:12px 32px;font:13px 'IBM Plex Mono',monospace;white-space:pre-wrap"></div>
+<script>
+window.addEventListener('error', e => {
+  const el = document.getElementById('fatalError');
+  if (el) { el.hidden = false; el.textContent = 'Page error: ' + (e.message || e.error) + (e.filename ? ' (' + e.filename + ':' + e.lineno + ')' : ''); }
+});
+window.addEventListener('unhandledrejection', e => {
+  const el = document.getElementById('fatalError');
+  if (el) { el.hidden = false; el.textContent = 'Page error (promise): ' + (e.reason && e.reason.message ? e.reason.message : e.reason); }
+});
+</script>
 <header>
   <div class="brand">
     <div class="eyebrow">Gentle Manip · Object-Set Expansion</div>
@@ -143,11 +154,17 @@ footer a{color:var(--accent)}
   </section>
 </main>
 <footer>Gripper cap 79&nbsp;mm (planner-enforced, <code>finger_grasp_final.py:515</code>) · height floor 20&nbsp;mm · data embedded at publish time from the object-expansion pipeline running on the arrhenius cluster.</footer>
-<script type="importmap">{"imports":{"three":"https://cdnjs.cloudflare.com/ajax/libs/three.js/r150/three.module.min.js"}}</script>
+<script type="importmap">{"imports":{"three":"https://cdnjs.cloudflare.com/ajax/libs/three.js/0.150.0/three.module.min.js"}}</script>
 <script id="payload" type="application/json">__DATA_JSON__</script>
 <script type="module">
-import * as THREE from 'three';
 const $=id=>document.getElementById(id);
+let THREE = null;
+try {
+  THREE = await import('three');
+} catch (e) {
+  const el = $('fatalError');
+  if (el) { el.hidden = false; el.textContent = '3D viewer library failed to load (' + e.message + ') -- the specimen list and candidate table below still work.'; }
+}
 const DATA = JSON.parse(document.getElementById('payload').textContent);
 const REG = DATA.registered, CAND = DATA.candidates;
 const pretty = s => (s||'').replaceAll('_',' ').replace(/\(.*?\)/g,'').trim().replace(/\b\w/g,c=>c.toUpperCase());
@@ -169,45 +186,51 @@ document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>{
   $('tab-table').hidden = b.dataset.tab!=='table';
 });
 
-// ── 3D viewport ──
-const renderer=new THREE.WebGLRenderer({canvas:$('canvas'),antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));
-const scene=new THREE.Scene();
-function paintBg(){const dark=matchMedia('(prefers-color-scheme: dark)').matches;const explicit=document.documentElement.getAttribute('data-theme');const isDark=explicit?explicit==='dark':dark;scene.background=new THREE.Color(isDark?'#2a251d':'#efe9e0');}
-paintBg();
-const camera=new THREE.PerspectiveCamera(42,1,.0005,20);camera.up.set(0,0,1);
-let dragging=false,lastX=0,lastY=0,az=0.8,el=0.55,dist=0.2,target=new THREE.Vector3();
-function applyCam(){const x=target.x+dist*Math.cos(el)*Math.cos(az),y=target.y+dist*Math.cos(el)*Math.sin(az),z=target.z+dist*Math.sin(el);camera.position.set(x,y,z);camera.lookAt(target);}
-const canvas=$('canvas');
-canvas.addEventListener('pointerdown',e=>{dragging=true;lastX=e.clientX;lastY=e.clientY;canvas.setPointerCapture(e.pointerId);});
-canvas.addEventListener('pointerup',()=>dragging=false);
-canvas.addEventListener('pointermove',e=>{if(!dragging)return;az-=(e.clientX-lastX)*0.006;el=Math.max(-1.3,Math.min(1.3,el+(e.clientY-lastY)*0.006));lastX=e.clientX;lastY=e.clientY;applyCam();});
-canvas.addEventListener('wheel',e=>{e.preventDefault();dist=Math.max(0.02,Math.min(4,dist*(1+e.deltaY*0.001)));applyCam();},{passive:false});
-scene.add(new THREE.HemisphereLight(0xe2f5ff,0x544738,2.6));
-const light=new THREE.DirectionalLight(0xffffff,3);light.position.set(.3,-.3,.5);scene.add(light);
-const fill=new THREE.DirectionalLight(0x9fcfff,1.3);fill.position.set(-.3,.3,.2);scene.add(fill);
-const grid=new THREE.GridHelper(.3,30,0x8a7c62,0x5c5340);grid.rotation.x=Math.PI/2;scene.add(grid);
-let mesh=null,wire=false,spin=false,extent=.05;
-function reset(){target.set(0,0,extent*0.4);dist=extent*2.4;az=0.8;el=0.55;applyCam();}
-function showMesh(geomData){
-  if(mesh){scene.remove(mesh);mesh.geometry.dispose();mesh.material.dispose();mesh=null;}
-  if(!geomData)return;
-  const g=new THREE.BufferGeometry();
-  g.setAttribute('position',new THREE.Float32BufferAttribute(geomData.v,3));
-  g.setIndex(geomData.f);
-  g.computeVertexNormals();
-  const mat=new THREE.MeshStandardMaterial({color:'#c9a876',roughness:.78,metalness:.03,side:THREE.DoubleSide,wireframe:wire});
-  mesh=new THREE.Mesh(g,mat);
-  const box=new THREE.Box3().setFromObject(mesh),size=box.getSize(new THREE.Vector3()),center=box.getCenter(new THREE.Vector3());
-  mesh.position.set(-center.x,-center.y,-box.min.z);
-  scene.add(mesh);
-  extent=Math.max(size.x,size.y,size.z,0.01);
-  reset();
+// ── 3D viewport (degrades gracefully: if THREE failed to load, showMesh is a no-op and the
+// specimen list / detail panel / candidate table below still work fully) ──
+let showMesh = () => {};
+if (THREE) {
+  const renderer=new THREE.WebGLRenderer({canvas:$('canvas'),antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  const scene=new THREE.Scene();
+  var paintBg=function(){const dark=matchMedia('(prefers-color-scheme: dark)').matches;const explicit=document.documentElement.getAttribute('data-theme');const isDark=explicit?explicit==='dark':dark;scene.background=new THREE.Color(isDark?'#2a251d':'#efe9e0');};
+  paintBg();
+  const camera=new THREE.PerspectiveCamera(42,1,.0005,20);camera.up.set(0,0,1);
+  let dragging=false,lastX=0,lastY=0,az=0.8,el=0.55,dist=0.2,target=new THREE.Vector3();
+  function applyCam(){const x=target.x+dist*Math.cos(el)*Math.cos(az),y=target.y+dist*Math.cos(el)*Math.sin(az),z=target.z+dist*Math.sin(el);camera.position.set(x,y,z);camera.lookAt(target);}
+  const canvas=$('canvas');
+  canvas.addEventListener('pointerdown',e=>{dragging=true;lastX=e.clientX;lastY=e.clientY;canvas.setPointerCapture(e.pointerId);});
+  canvas.addEventListener('pointerup',()=>dragging=false);
+  canvas.addEventListener('pointermove',e=>{if(!dragging)return;az-=(e.clientX-lastX)*0.006;el=Math.max(-1.3,Math.min(1.3,el+(e.clientY-lastY)*0.006));lastX=e.clientX;lastY=e.clientY;applyCam();});
+  canvas.addEventListener('wheel',e=>{e.preventDefault();dist=Math.max(0.02,Math.min(4,dist*(1+e.deltaY*0.001)));applyCam();},{passive:false});
+  scene.add(new THREE.HemisphereLight(0xe2f5ff,0x544738,2.6));
+  const light=new THREE.DirectionalLight(0xffffff,3);light.position.set(.3,-.3,.5);scene.add(light);
+  const fill=new THREE.DirectionalLight(0x9fcfff,1.3);fill.position.set(-.3,.3,.2);scene.add(fill);
+  const grid=new THREE.GridHelper(.3,30,0x8a7c62,0x5c5340);grid.rotation.x=Math.PI/2;scene.add(grid);
+  let mesh=null,wire=false,spin=false,extent=.05;
+  var reset=function(){target.set(0,0,extent*0.4);dist=extent*2.4;az=0.8;el=0.55;applyCam();};
+  showMesh = function(geomData){
+    if(mesh){scene.remove(mesh);mesh.geometry.dispose();mesh.material.dispose();mesh=null;}
+    if(!geomData)return;
+    const g=new THREE.BufferGeometry();
+    g.setAttribute('position',new THREE.Float32BufferAttribute(geomData.v,3));
+    g.setIndex(geomData.f);
+    g.computeVertexNormals();
+    const mat=new THREE.MeshStandardMaterial({color:'#c9a876',roughness:.78,metalness:.03,side:THREE.DoubleSide,wireframe:wire});
+    mesh=new THREE.Mesh(g,mat);
+    const box=new THREE.Box3().setFromObject(mesh),size=box.getSize(new THREE.Vector3()),center=box.getCenter(new THREE.Vector3());
+    mesh.position.set(-center.x,-center.y,-box.min.z);
+    scene.add(mesh);
+    extent=Math.max(size.x,size.y,size.z,0.01);
+    reset();
+  };
+  $('btnReset').onclick=reset;
+  $('btnSpin').onclick=()=>{spin=!spin;$('btnSpin').classList.toggle('on',spin);};
+  $('btnWire').onclick=()=>{wire=!wire;$('btnWire').classList.toggle('on',wire);if(mesh)mesh.material.wireframe=wire;};
+  new ResizeObserver(()=>{const c=canvas.parentElement;renderer.setSize(c.clientWidth,c.clientHeight,false);camera.aspect=c.clientWidth/Math.max(1,c.clientHeight);camera.updateProjectionMatrix();}).observe(canvas.parentElement);
+  renderer.setAnimationLoop(()=>{if(spin){az+=0.004;applyCam();}renderer.render(scene,camera);});
+} else {
+  var paintBg=function(){};
 }
-$('btnReset').onclick=reset;
-$('btnSpin').onclick=()=>{spin=!spin;$('btnSpin').classList.toggle('on',spin);};
-$('btnWire').onclick=()=>{wire=!wire;$('btnWire').classList.toggle('on',wire);if(mesh)mesh.material.wireframe=wire;};
-new ResizeObserver(()=>{const c=canvas.parentElement;renderer.setSize(c.clientWidth,c.clientHeight,false);camera.aspect=c.clientWidth/Math.max(1,c.clientHeight);camera.updateProjectionMatrix();}).observe(canvas.parentElement);
-renderer.setAnimationLoop(()=>{if(spin){az+=0.004;applyCam();}renderer.render(scene,camera);});
 
 // ── specimen rail + detail ──
 let regSel=null;
