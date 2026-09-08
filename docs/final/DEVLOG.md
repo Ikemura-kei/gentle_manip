@@ -9798,6 +9798,33 @@ warmup 6, ckpt every 20, EMA from epoch 1, val every 5 from the same formula. Tw
    `.agent_tmp/verify_transfer2.py` is the working pattern. Note `numpy.lib.format._read_array_header` is private and absent in
    newer numpy — use `read_array_header_1_0`.
 
+### 2026-09-08 — the point-cloud encoder is NOT decoration (fixed-noise cloud-ablation probe)
+User's test: on a trained checkpoint, measure val denoising loss with (a) the real cloud, (b) a fixed
+cloud from a DIFFERENT episode, (c) a zeroed cloud. If (a) ~= (b) the policy is running on
+proprioception and the encoder is decoration. Script: `gentle_manip/scripts/final/probe_cloud_reliance.py`
+(+ `.sh`). Same `t` and the same noise tensor across conditions, so every delta is the cloud alone;
+model in eval mode, paired/consistency terms off, 25,600 val samples.
+
+| condition | wiayg (1M steps) | vs real | bqvzh (380k) | vs real |
+|---|---|---|---|---|
+| real cloud | 0.001092 | — | 0.001467 | — |
+| fixed cloud, other episode | 0.010708 | **+880 %** | 0.011677 | +696 % |
+| zeroed cloud | 0.009932 | +809 % | 0.010112 | +589 % |
+| shuffled within batch (extra control) | 0.008153 | +647 % | 0.011471 | +682 % |
+
+**Answer: the encoder is load-bearing.** Feeding another episode's cloud makes the loss ~10x worse.
+Sanity check: the probe's `real` numbers (0.00109 / 0.00147) match the training-reported val losses at
+those checkpoints (0.001175 / 0.001570) — small gap because the training figure includes the paired term.
+Note `fixed` hurts MORE than `zero`: a zeroed cloud collapses the feature toward "no information",
+while a wrong-but-plausible cloud is confidently wrong. So `zero` alone would have understated reliance.
+The `shuffled` control (an in-distribution but mismatched real cloud) still costs +647 %, so the encoder
+is reading THIS episode's geometry, not merely cloud statistics.
+
+Bearing on the capacity question: reliance did not weaken with 2.6x the steps — if anything the gap
+widened (+696 % -> +880 %), and the 1M model's advantage over 380k holds in every condition. So the
+6 %-of-parameters encoder is being used hard, which makes "widen the encoder" a live lever for the
+approach-precision and cherry-width failures rather than a speculative one.
+
 ### 2026-09-08 — checkpoint sweep on `wiayg`: 20-episode teasers CANNOT resolve the val-loss/success question
 User question: 1M steps beat 380k on both val loss and success, so does success keep tracking val loss while it is still
 descending (i.e. is the old "val loss does not predict success" finding only true AFTER convergence)? Swept the existing
