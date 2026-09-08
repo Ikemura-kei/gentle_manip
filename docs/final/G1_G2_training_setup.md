@@ -191,19 +191,45 @@ epoch 80 already matched epoch 120 (31/40 both), though that comparison sits ins
 Our hyperparameters against published diffusion-policy work. **Nothing here has been changed** — this
 is a survey to rank what is worth trying next.
 
-| | ours (G1/G2) | DP (Chi 2023) | DP3 (Ze 2024) | Data-Scaling-Laws (Lin 2024) | Octo | π0 |
-|---|---|---|---|---|---|---|
-| lr | 1e-4 cosine → 1e-5 | 1e-4 | 1e-4, 500-step warmup, cosine | 3e-4 denoiser / **3e-5 encoder** | inverse-sqrt | 2.5e-5 → 2.5e-6 |
-| batch | **128** | 64–256 | 128–2048 | 256 | 2048 | 256 |
-| optimizer | AdamW, wd 1e-6 | AdamW | AdamW | AdamW β 0.95/0.999 | AdamW, wd **0.1**, clip 1.0 | AdamW |
-| steps | 1.0 M | — | — | 5×10⁵ (largest set, 75 epochs) | 300 k | 500 k |
-| predict / execute | **4 / 4** | 10–16 / **8** | 4 / 4 | 16 / 8 (temporal ensemble) | 4 | 50 |
-| denoise steps | **20 / 20 (no DDIM)** | 100 train / 10 DDIM | 100 train / **2 DDIM** | 16 | — | flow |
+**Match the regime before borrowing a number.** Ours is a **from-scratch, single-task-family train**
+on 6,270 episodes / 1.19 M timesteps with a 2.89 M-parameter model, one robot, one workspace. Octo and
+π0's headline numbers are **large-scale multi-embodiment PRE-training** — different regime, and their
+batch/lr do not transfer. They are listed for scale context only; the comparable references are DP,
+DP3 and Data-Scaling-Laws.
 
-**Where we are conventional:** lr 1e-4 with cosine decay, AdamW, EMA, and a warmup fraction are all
-squarely standard; DP3 uses the identical lr and schedule shape. Our 1 M gradient steps is at the high
-end (Octo 300 k, π0 500 k). **Optimization is not where the headroom is** — and §7b's val plateau at
-epoch ~110 says the same thing from our own data.
+| | **ours (G1/G2)** | DP (Chi 2023) | DP3 (Ze 2024) | Data-Scaling-Laws (Lin 2024) |
+|---|---|---|---|---|
+| regime | from scratch, 1 task family | from scratch, per task | from scratch, per task | from scratch, per task |
+| data | **6,270 eps / 1.19 M steps** | 50–200 demos/task | 10–100 demos/task | up to ~1,600 demos/task |
+| params | **2.89 M** | ~250 M (CNN-UNet) | ~255 M | DINOv2 ViT-L + UNet |
+| lr | 1e-4 cosine → 1e-5 | 1e-4 | 1e-4, 500-step warmup, cosine | 3e-4 denoiser / **3e-5 encoder** (fine-tuning a *pretrained* DINOv2) |
+| batch | **128** | 64–256 | 128–2048 | 256 |
+| optimizer | AdamW, wd 1e-6 | AdamW | AdamW | AdamW β 0.95/0.999 |
+| steps | **1.0 M** | — | — | 5×10⁵ (largest set, 75 epochs) |
+| predict / execute | **4 / 4** | 10–16 / **8** | 4 / 4 | 16 / 8 (temporal ensemble) |
+| denoise steps | **20 / 20 (no DDIM)** | 100 train / 10 DDIM | 100 train / **2 DDIM** | 16 |
+
+Scale context only — **pre-training** runs, not comparable to ours:
+
+| | Octo (pre-train) | Octo (fine-tune) | π0 (pre-train) |
+|---|---|---|---|
+| data | **800 k trajectories** (Open X-Embodiment) | ~100 trajectories/domain | **~10,000 h**, 68 tasks, 7 robot configs (+9.1 % OXE/Bridge v2/DROID) |
+| params | 93 M (Base) / 27 M (Small) | same | **3.3 B** (3 B PaliGemma + 300 M action expert) |
+| steps | 300 k | 50 k | 700 k |
+| batch | 2048 | not stated | **not stated in the paper** |
+| lr | 3e-4, 2000 warmup, reciprocal-sqrt, wd 0.1, clip 1.0 | cosine decay + linear warmup | **not stated in the paper** |
+| hardware | TPU v4-128, 14 h | 1× A5000, ~5 h | — |
+
+⚠ The π0 paper states its step count and data scale but **not** batch size, learning rate or
+optimizer; any such figures circulating for π0 come from secondary sources or reproductions, not the
+paper. Do not cite them as π0's.
+
+**Where we are conventional:** lr 1e-4 with cosine decay, AdamW, EMA and a warmup fraction are all
+squarely standard; DP3 uses the identical lr and schedule shape, and batch 128 sits inside DP's and
+DP3's ranges. Our 1 M gradient steps is *more* than Data-Scaling-Laws spends on its largest set
+(5×10⁵). **Optimization is not where the headroom is** — and §7b's val plateau at epoch ~110 says the
+same thing from our own data. Note our model is ~100× SMALLER than DP/DP3's (2.89 M vs ~250 M), which
+makes capacity, not schedule, the interesting axis.
 
 **Where we differ, in rough order of expected value:**
 
@@ -241,7 +267,7 @@ epoch ~110 says the same thing from our own data.
    and **one environment**. This predicts that rebalancing toward more objects at ~50–100 each, and
    adding scene/workspace variation, buys more than more episodes of the same objects. It also makes
    the untouched 11:1 class imbalance (cherry is 8 % of data) worth a balanced-sampling test.
-6. **Batch 128 is at the low end** (literature 256–2048) and weight decay 1e-6 is very light next to
+6. **Batch 128 and weight decay 1e-6.** Batch 128 is INSIDE the comparable range (DP 64–256, DP3 128–2048); the 2048 figure is Octo PRE-training on 800k trajectories and does not transfer. Weight decay 1e-6 is light next to
    Octo's 0.1. Both are plausible mild wins but neither addresses a plateaued val loss, and batch is
    constrained by the ~14 GB train tensor being GPU-resident. Low priority.
 
