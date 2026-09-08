@@ -4,15 +4,18 @@
 <style>
 *{box-sizing:border-box}body{margin:0;background:#10191e;color:#e7eee9;font:15px system-ui}header{padding:25px 30px;border-bottom:1px solid #304047}h1{font-size:27px;margin:5px 0 10px}p{color:#a6b9bc;margin:6px 0;line-height:1.5}.eyebrow{color:#70d9b3;font-size:11px;letter-spacing:3px}main{display:grid;grid-template-columns:290px 1fr;height:calc(100vh - 157px);min-height:550px}aside{padding:20px;overflow:auto;border-right:1px solid #304047}input,select,button{font:inherit;color:inherit;background:#1d2b32;border:1px solid #40545e;border-radius:8px;padding:9px}input,select{width:100%;margin-bottom:10px}button{cursor:pointer}button:hover,button.selected{border-color:#70d9b3;background:#253f40}.item{display:block;width:100%;text-align:left;margin:6px 0}.item small{display:block;color:#9eb2b9;margin-top:4px}section{position:relative;min-width:0}#canvas{width:100%;height:100%;display:block}.toolbar{position:absolute;top:15px;left:18px;display:flex;gap:8px}.info{position:absolute;bottom:20px;left:20px;right:20px;background:#10191eea;padding:18px;border:1px solid #304047;border-radius:12px;pointer-events:none}.info h2{margin:0 0 8px;font-size:23px}.info p{font-size:13px}#error{color:#ffbd91}label{display:flex;align-items:center;gap:5px;font-size:13px}label input{width:auto;margin:0}#count{font-size:12px;margin:5px 0 14px}@media(max-width:650px){header{padding:16px}main{grid-template-columns:160px 1fr;height:75vh}aside{padding:10px}.toolbar{flex-wrap:wrap}.info{left:10px;right:10px;padding:10px}}
 .runs{position:absolute;top:60px;right:15px;width:min(430px,90%);max-height:calc(100% - 90px);overflow:auto;background:#10191ef5;border:1px solid #304047;border-radius:12px;padding:16px}.runs h3{margin:0 0 8px;font-size:16px}.runs .run{border-top:1px solid #26363d;padding:10px 0}.runs .run:first-child{border-top:none}.runs .stat{font-size:12px;color:#a6b9bc;margin:2px 0}.gallery{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.gallery video,.gallery img{width:96px;height:72px;object-fit:cover;border-radius:6px;border:1px solid #304047;cursor:pointer}.expmeta{font-size:12px;color:#9eb2b9;margin-top:4px;padding:8px;background:#1d2b32;border-radius:8px}
+.modes{display:flex;gap:6px;margin-bottom:10px}.modes button{flex:1;margin:0;font-size:13px;padding:8px 4px}
 </style>
 <script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script></head>
 <body><header><div class="eyebrow">GENTLE MANIP / ASSET EXPLORER</div><h1>Fragile object atlas</h1><p>9 food target types · 8 food families when banana forms are grouped · actual registered geometry</p><p style="font-size:12px">Raspberry is parked in simulation. Development objects and mesh variants are counted separately.</p></header>
-<main><aside><input id="search" placeholder="Find an object…" aria-label="Search objects"><select id="filter" aria-label="Object group"><option value="Food">Food targets</option><option value="all">All registered objects</option><option value="Object expansion">Object expansion (new)</option><option value="Development / synthetic">Development / synthetic</option></select><label><input type="checkbox" id="variants"> Show mesh variants</label><p id="count"></p><div id="list"></div></aside><section><canvas id="canvas"></canvas><div class="toolbar"><button id="reset">Reset view</button><button id="spin">Auto-rotate: off</button><button id="wire">Wireframe: off</button><button id="runsBtn">Grasp trials ▾</button></div><div class="info"><h2 id="title">Loading objects…</h2><p id="details"></p><p id="material"></p><p id="error"></p><p>Drag to orbit · scroll to zoom · right-drag to pan · grid spacing 1 cm</p></div><div class="runs" id="runsPanel" hidden></div></section></main>
+<main><aside><div class="modes"><button id="modeReg" class="item selected">Registered</button><button id="modeCand" class="item">Sourced candidates</button></div><input id="search" placeholder="Find an object…" aria-label="Search objects"><select id="filter" aria-label="Object group"><option value="Food">Food targets</option><option value="all">All registered objects</option><option value="Object expansion">Object expansion (new)</option><option value="Development / synthetic">Development / synthetic</option></select><select id="candFilter" aria-label="Candidate bucket" hidden><option value="all">All buckets</option></select><label><input type="checkbox" id="variants"> Show mesh variants</label><p id="count"></p><div id="list"></div></aside><section><canvas id="canvas"></canvas><div class="toolbar"><button id="reset">Reset view</button><button id="spin">Auto-rotate: off</button><button id="wire">Wireframe: off</button><button id="runsBtn">Grasp trials ▾</button></div><div class="info"><h2 id="title">Loading objects…</h2><p id="details"></p><p id="material"></p><p id="error"></p><p>Drag to orbit · scroll to zoom · right-drag to pan · grid spacing 1 cm</p></div><div class="runs" id="runsPanel" hidden></div></section></main>
 <script type="module">
 import * as THREE from 'three';
 import {OrbitControls} from './vendor/OrbitControls.js';
 import {OBJLoader} from './vendor/OBJLoader.js';
+import {GLTFLoader} from './vendor/GLTFLoader.js';
 const $=id=>document.getElementById(id);
+let mode='registered', candAll=[], candCurrent=null;
 const renderer=new THREE.WebGLRenderer({canvas:$('canvas'),antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 const scene=new THREE.Scene();scene.background=new THREE.Color('#15232b');
 const camera=new THREE.PerspectiveCamera(42,1,.0001,10);camera.up.set(0,0,1);
@@ -52,7 +55,37 @@ $('runsPanel').innerHTML=`<h3>Grasp trials — ${pretty(name)}</h3>`+html;
 }catch(e){$('runsPanel').innerHTML=`<p class="stat">${e.message}</p>`;}}
 $('runsBtn').onclick=()=>{$('runsPanel').hidden=!$('runsPanel').hidden;};
 function renderList(){const query=$('search').value.toLowerCase();const items=all.filter(o=>($('filter').value==='all'||o.group===$('filter').value)&&($('variants').checked||o.group!=='Food'||o.name===o.category)&&o.name.includes(query));$('count').textContent=`${items.length} shown · ${all.length} registry entries`;$('list').replaceChildren();for(const o of items){const b=document.createElement('button');b.className='item'+(current?.name===o.name?' selected':'');b.textContent=pretty(o.name);const s=document.createElement('small');s.textContent=o.parked?'Parked in simulation':o.group;b.append(s);b.onclick=()=>select(o);$('list').append(b);}}
-$('search').oninput=renderList;$('filter').onchange=renderList;$('variants').onchange=renderList;$('reset').onclick=reset;
+
+// ── Sourced candidates (pre-registration: raw geometry-filter-accepted .glb/.obj files) ──
+const candColor={accept:'#75c8bb',borderline:'#e0b25c'};
+async function selectCand(item){candCurrent=item;const ticket=++request;renderCandList();
+$('title').textContent=pretty(item.category)+` (${item.uid.slice(0,10)})`;$('details').textContent='Loading geometry…';$('material').textContent='';$('error').textContent='';$('runsPanel').hidden=true;
+if(object){scene.remove(object);object.traverse(n=>{if(n.isMesh){n.geometry.dispose();n.material.dispose();}});object=null;}
+try{
+if(!item.mesh)throw Error('Source file not servable (outside checkout root).');
+let mesh;
+if(item.ext==='.glb'||item.ext==='.gltf'){const gltf=await new GLTFLoader().loadAsync(item.mesh);mesh=gltf.scene;}
+else{mesh=await new OBJLoader().loadAsync(item.mesh);}
+if(ticket!==request)return;
+mesh.traverse(n=>{if(n.isMesh){if(!n.material||!n.material.map)n.material=new THREE.MeshStandardMaterial({color:candColor[item.verdict]||'#75c8bb',roughness:.75,metalness:.03,side:THREE.DoubleSide,wireframe:wire});n.geometry?.computeVertexNormals?.();}});
+const box=new THREE.Box3().setFromObject(mesh),size=box.getSize(new THREE.Vector3()),center=box.getCenter(new THREE.Vector3());mesh.position.sub(new THREE.Vector3(center.x,center.y,box.min.z));
+object=mesh;scene.add(mesh);extent=Math.max(size.x,size.y,size.z,1e-6);reset();
+$('details').textContent=`RAW source mesh (unregistered) · bbox ${[size.x,size.y,size.z].map(v=>v.toFixed(3)).join(' × ')} (source units) · suggested scale ${item.suggested_scale||'?'} → after rescale: min-width ${item.min_width_mm||'?'}mm, max-extent ${item.max_extent_mm||'?'}mm, thin-axis ${item.thin_axis_mm||'?'}mm`;
+$('material').textContent=`${item.source} / ${item.bucket} · verdict: ${item.verdict}${item.reason?' — '+item.reason:''}`;
+}catch(e){$('details').textContent='Geometry unavailable';$('error').textContent=e.message;}}
+function renderCandList(){const query=$('search').value.toLowerCase();const bucket=$('candFilter').value;
+const items=candAll.filter(o=>(bucket==='all'||o.bucket===bucket)&&(o.category.includes(query)||o.uid.toLowerCase().includes(query)));
+$('count').textContent=`${items.length} shown · ${candAll.length} sourced candidates (accept/borderline)`;$('list').replaceChildren();
+for(const o of items){const b=document.createElement('button');b.className='item'+(candCurrent?.uid===o.uid?' selected':'');b.textContent=pretty(o.category);const s=document.createElement('small');s.textContent=`${o.bucket} · ${o.verdict} · ${o.source}`;b.append(s);b.onclick=()=>selectCand(o);$('list').append(b);}}
+async function loadCandidates(){if(candAll.length)return;try{const r=await fetch('/api/candidates');candAll=r.ok?await r.json():[];
+const buckets=[...new Set(candAll.map(o=>o.bucket))].sort();const sel=$('candFilter');for(const b of buckets){const opt=document.createElement('option');opt.value=b;opt.textContent=pretty(b);sel.append(opt);}
+}catch(e){candAll=[];}}
+function setMode(m){mode=m;$('modeReg').classList.toggle('selected',m==='registered');$('modeCand').classList.toggle('selected',m==='candidates');
+$('filter').hidden=m!=='registered';$('variants').closest('label').hidden=m!=='registered';$('candFilter').hidden=m!=='candidates';
+if(m==='candidates'){loadCandidates().then(renderCandList);}else{renderList();}}
+$('modeReg').onclick=()=>setMode('registered');$('modeCand').onclick=()=>setMode('candidates');
+$('candFilter').onchange=renderCandList;
+$('search').oninput=()=>mode==='candidates'?renderCandList():renderList();$('filter').onchange=renderList;$('variants').onchange=renderList;$('reset').onclick=reset;
 $('spin').onclick=()=>{controls.autoRotate=!controls.autoRotate;$('spin').textContent='Auto-rotate: '+(controls.autoRotate?'on':'off');};
 $('wire').onclick=()=>{wire=!wire;object?.traverse(n=>{if(n.isMesh)n.material.wireframe=wire});$('wire').textContent='Wireframe: '+(wire?'on':'off');};
 new ResizeObserver(()=>{const c=$('canvas');renderer.setSize(c.clientWidth,c.clientHeight,false);camera.aspect=c.clientWidth/c.clientHeight;camera.updateProjectionMatrix();}).observe($('canvas').parentElement);

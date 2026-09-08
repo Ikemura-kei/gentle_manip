@@ -73,10 +73,64 @@ def find_runs(name: str, limit: int = 6):
         out.append(dict(run_dir=run_dir.name, stats=stats, videos=vids[:8], images=pngs[:8]))
     return out
 
+CANDIDATE_CSVS = [
+    ROOT / 'dataset' / 'object_expansion' / 'candidates_all.csv',
+    ROOT / 'dataset' / 'object_expansion' / 'candidates.csv',
+    ROOT / 'dataset' / 'object_expansion' / 'candidates_metafood3d.csv',
+    ROOT / 'dataset' / 'object_expansion' / 'candidates_thinshell_retry.csv',
+] + sorted(ROOT.glob('dataset/object_expansion/candidates_broad_*.csv'))
+
+def candidates():
+    """Sourced (pre-registration) candidates from every candidates*.csv the pipeline has
+    written -- raw .glb/.obj files straight from the source dataset, geometry-filter verdict
+    only (mesh_prep/FEM-gate/registration have NOT run yet). Servable path is the file's
+    location relative to ROOT (works through the objaverse_cache symlink to /nobackup too)."""
+    import csv
+    seen, out = set(), []
+    for csv_path in CANDIDATE_CSVS:
+        if not csv_path.exists():
+            continue
+        with open(csv_path) as f:
+            for row in csv.DictReader(f):
+                key = (row.get('category'), row.get('uid'))
+                if key in seen or row.get('verdict') not in ('accept', 'borderline'):
+                    continue
+                seen.add(key)
+                local_path = row.get('local_path') or ''
+                mesh_url = None
+                try:
+                    # NOT .resolve() -- dataset/object_expansion/objaverse_cache is a symlink
+                    # out to /nobackup (disk-quota fix, see DEVLOG); resolving it walks OUTSIDE
+                    # ROOT and breaks relative_to. The stored local_path is already absolute and
+                    # already under ROOT (via the symlink component), so use it as-is -- the OS
+                    # follows the symlink transparently when the file is actually opened to serve.
+                    p = Path(local_path)
+                    mesh_url = '/' + p.relative_to(ROOT).as_posix()
+                except Exception:
+                    mesh_url = None
+                out.append(dict(
+                    uid=row.get('uid'), category=row.get('category'), bucket=row.get('bucket'),
+                    source=row.get('source') or 'objaverse', verdict=row.get('verdict'),
+                    mesh=mesh_url, ext=Path(local_path).suffix.lower(),
+                    min_width_mm=row.get('min_width_scaled_mm'),
+                    max_extent_mm=row.get('max_extent_scaled_mm'),
+                    thin_axis_mm=row.get('thin_axis_scaled_mm'),
+                    suggested_scale=row.get('suggested_scale'), reason=row.get('reason'),
+                    from_csv=csv_path.name))
+    out.sort(key=lambda r: (r['category'], r['uid'] or ''))
+    return out
+
 class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
-        if parsed.path == '/api/objects':
+        if parsed.path == '/api/candidates':
+            data = json.dumps(candidates()).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        elif parsed.path == '/api/objects':
             data = json.dumps(catalog()).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
