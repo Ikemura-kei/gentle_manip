@@ -9738,6 +9738,42 @@ uniform faces, exact extent restore) fixed every one: regate 7/7 PASS at ratio 1
 same recipe (was a 45k-tet hang at 10/100). Lesson -> a failed `watertight_decimate` must FAIL
 LOUDLY, never silently keep the dense mesh.
 
+### 2026-09-08 11:00 — TWO OPS LESSONS caught by dry-running an eval before it fired
+The three teaser evals were pre-submitted with `--dependency=afterok:<train job>` so they would fire unattended.
+A dry run of their checkpoint-discovery logic (while training was still at epoch ~86) showed **all three would have
+failed**.
+
+1. **A greedy character class spans slashes.** `grep -oE "logs/dppo/dppo-pretrain/[^ ]*/[a-z]{5}"` against the
+   snapshot line `... -> /abs/logs/dppo/dppo-pretrain/<dataset>/ttukt/config/ (+ launch_command.sh)` matched
+   `.../ttukt/confi` — `[^ ]*` ate `<dataset>/ttukt/` and `[a-z]{5}` then took the first five letters of
+   **"config"**. The resulting run dir has no `checkpoint/`, so every eval would have exited "no checkpoint" hours
+   later with nothing to show. Fix: read the 5-letter ID off the `[registry] <id>` line and rebuild the path from
+   `dataset_name.txt`; the positional fallback uses `[^/ ]+` so it cannot cross a slash. **Use `[^/ ]` , never
+   `[^ ]`, for a single path segment.**
+2. **`sbatch` copies the batch script at SUBMIT time.** Editing the `.sbatch` file afterwards does NOT change an
+   already-queued job — it still runs the old text. Fixing a pre-submitted dependent job means `scancel` +
+   resubmit (done: 2128166/7/8 -> 2142815/6/7), not just editing the file. Anything already in the queue is frozen.
+
+**General lesson: dry-run a deferred job's logic against live state before it fires.** These jobs were designed to
+run unattended overnight; the bug would have surfaced only as three wasted allocations and no evals. The discovery
+path cost two minutes to exercise by hand.
+
+### 2026-09-08 05:10 — MONITORING LESSON: a watchdog that greps only stdout is half-blind
+Watchdog v1 on the three generalist runs reported `STARTUP-BAD … wandb_proj=0` for all three while the runs were
+perfectly healthy: the wandb banner is written to **stderr**, and sbatch sends `%j.out` and `%j.err` to separate
+files, so a `grep` of the .out file alone found nothing. Harmless as a false positive — but the same bug sat on the
+ERROR check, where it is not harmless: **Python tracebacks go to stderr**, so a crashed run would have produced NO
+error event and looked exactly like a healthy silent one. Stall detection had the same flaw (it stat'd only .out,
+so a job still writing to .err would read as stalled).
+
+**Rule: any log check on an sbatch job must scan `.out` AND `.err`** (`cat "$L/$J.out" "$L/$J.err"`), and staleness
+must take the NEWER of the two mtimes. `.agent_tmp/train_watchdog2.sh` is the corrected pattern. This is the
+"silence is not success" trap from the Monitor guidance, arriving through a stream split rather than a narrow regex.
+
+Also: **never edit a running bash script in place** — bash reads a script incrementally by byte offset, so an edit
+can corrupt the parse of a long-running loop. Write a new file and restart the monitor (done here for both).
+
+
 ### 2026-09-07 21:30 — CLUSTER generalist matrix launched: G1/G0/G2, TARGET_STEPS=1M, after the dataset arrival gate
 Three GH200 runs on the SAME transferred npz as `bqvzh`/`wiayg` (pinned val split → directly comparable), seed 42, wandb project
 `gentle_manip_generalist`, submitted G1 `2127880` (paired 0.5 / cons 0.3 = recipe v5 exact), G0 `2127881` (paired **1e-8**
@@ -9761,6 +9797,91 @@ warmup 6, ckpt every 20, EMA from epoch 1, val every 5 from the same formula. Tw
    member in 64 MB chunks out of the npz zip (`zipfile` + `numpy.lib.format` header, then `f.read(n*row)`): ~2 min, flat memory.
    `.agent_tmp/verify_transfer2.py` is the working pattern. Note `numpy.lib.format._read_array_header` is private and absent in
    newer numpy — use `read_array_header_1_0`.
+
+### 2026-09-08 — the point-cloud encoder is NOT decoration (fixed-noise cloud-ablation probe)
+User's test: on a trained checkpoint, measure val denoising loss with (a) the real cloud, (b) a fixed
+cloud from a DIFFERENT episode, (c) a zeroed cloud. If (a) ~= (b) the policy is running on
+proprioception and the encoder is decoration. Script: `gentle_manip/scripts/final/probe_cloud_reliance.py`
+(+ `.sh`). Same `t` and the same noise tensor across conditions, so every delta is the cloud alone;
+model in eval mode, paired/consistency terms off, 25,600 val samples.
+
+| condition | wiayg (1M steps) | vs real | bqvzh (380k) | vs real |
+|---|---|---|---|---|
+| real cloud | 0.001092 | — | 0.001467 | — |
+| fixed cloud, other episode | 0.010708 | **+880 %** | 0.011677 | +696 % |
+| zeroed cloud | 0.009932 | +809 % | 0.010112 | +589 % |
+| shuffled within batch (extra control) | 0.008153 | +647 % | 0.011471 | +682 % |
+
+**Answer: the encoder is load-bearing.** Feeding another episode's cloud makes the loss ~10x worse.
+Sanity check: the probe's `real` numbers (0.00109 / 0.00147) match the training-reported val losses at
+those checkpoints (0.001175 / 0.001570) — small gap because the training figure includes the paired term.
+Note `fixed` hurts MORE than `zero`: a zeroed cloud collapses the feature toward "no information",
+while a wrong-but-plausible cloud is confidently wrong. So `zero` alone would have understated reliance.
+The `shuffled` control (an in-distribution but mismatched real cloud) still costs +647 %, so the encoder
+is reading THIS episode's geometry, not merely cloud statistics.
+
+Bearing on the capacity question: reliance did not weaken with 2.6x the steps — if anything the gap
+widened (+696 % -> +880 %), and the 1M model's advantage over 380k holds in every condition. So the
+6 %-of-parameters encoder is being used hard, which makes "widen the encoder" a live lever for the
+approach-precision and cherry-width failures rather than a speculative one.
+
+### 2026-09-08 — checkpoint sweep on `wiayg`: 20-episode teasers CANNOT resolve the val-loss/success question
+User question: 1M steps beat 380k on both val loss and success, so does success keep tracking val loss while it is still
+descending (i.e. is the old "val loss does not predict success" finding only true AFTER convergence)? Swept the existing
+checkpoints, 20-ep teasers on tofu+mushroom, same seeds/augmentation.
+
+| epoch | val | tofu | mushroom | sum |
+|---|---|---|---|---|
+| 60 | 0.00174 | 13/20 | 15/20 | 28/40 |
+| 80 | 0.00140 | 13/20 | 18/20 | **31/40** |
+| 100 | 0.00125 | 8/20 | 18/20 | 26/40 |
+| 120 | 0.00118 | 14/20 | 17/20 | **31/40** |
+
+Val improved 32 % monotonically; success went 28, 31, 26, 31 — mean 29.0, spread 5, while **1 sigma at n=40 is 2.8**. The entire
+spread fits inside +-1 sigma, so no trend is resolvable either way. ep100 tofu (8/20 against 13/13/14 at its neighbours) is the
+outlier that makes the point concrete: checkpoint noise at n=20 is the size of the effect. **The sweep neither confirms nor
+refutes the hypothesis.** What IS outside noise is the cross-run datum: 380k final = 20/40 on the same two objects, 1M ep120 =
+31/40. Settling the within-run question needs the canonical 200-episode eval (1 sigma ~ 3 %) on 2-3 checkpoints, ~2 h/checkpoint.
+Practical note meanwhile: ep80 already matches ep120, so a shorter run may cost nothing — but that too is inside the noise.
+
+### 2026-09-08 03:53 — grasp-synthesis ablation harness VERIFIED (`grasp_synth_ablation.py`)
+All 8 methods x their width modes probed on tofu through the FROZEN v4.2 executor: ours / naive /
+antipodal / rigid / sdf / gn1b give 4/4 poses in every mode; gpd 2/4 (its own yield — 2 envs had no
+candidate past the validity ladder, handled gracefully); cgn 0/4 (runs, finds nothing on tofu; outside
+the paper set). Executed runs: ours and rigid both 2/2 saved with video+stats. Full table + the
+`--width-mode`/`--rot-bound` semantics: `docs/paper/synthesis_experiments.md` §5.
+**Bug the verification caught:** a baseline width that does not compress the object (routine in the
+no-squeeze `extent` mode) makes the frozen scorer return `no_contact` with no stress; `inf` crashed
+`synth_stats_row`'s round(), and `None` would have been worse — v4 reads it as a synthesis failure and
+substitutes its OWN default grasp, i.e. it would have silently measured our planner instead of the
+baseline. Fixed: all numeric fields coerced finite, `stress_top10 = 0.0` for zero indentation (correct,
+not a fudge), scorer verdict kept in `status`. Lesson: **our quality checker records its opinion but must never block a grasp** —
+the baseline's pose has to reach the MPM, or the experiment silently measures our planner instead.
+
+### 2026-09-08 — `wiayg`: recipe v5 at 1M gradient steps (the cluster's G1, run locally) — teasers up across the board
+Same npz as `bqvzh` (6,270 eps), `TARGET_STEPS=1000000` -> 120 epochs (8,393 batches/epoch), schedule scaled per
+`docs/final/generalist_cluster_run_2026-09-07.md` (warmup 6, ckpt every 20, EMA from 1, val every 5). 5 h 38 min at
+21 ms/step, no interruption. **Final train 0.00107 / val 0.00118 vs bqvzh's 0.00149 / 0.00157** — val fell monotonically
+to the end, train/val gap only 5-7 %: still NO overfit knee at this data scale, i.e. 380k really was a 100-demo-era number.
+
+**Teasers, state_120, 20 ep, `d435i_noise`, same 20 scenarios (wiayg vs bqvzh):** tofu **14/20** (ever 14) vs 11 (14);
+mushroom **17/20** (17) vs 9 (11); banana_chunk **13/20** (13) vs 12 (15); cherry_tomato **3/20** (3) vs 1 (1). Over the four
+comparable objects **47/80 vs 33/80**. tomato crashed mid-batch-2 (sim server "socket closed mid-message" — the tomato
+class's known rigid-solver instability, the same failure that killed its cluster collection twice; batch 1 was at 0.60); a
+single retry ALSO failed the same way (worker exits with no error line, ~800 steps into batch 1); not retried a third time.
+Cause unproven from the logs, but same object + same silent death + tomato's documented NaN history, while every other object
+evaluated fine minutes earlier. Best datum: attempt 1's batch 1 = 0.60/0.60 (12/20 pace). The cluster's noted fix (sim_substeps
+175 -> 350) changes fidelity mid-dataset, so it is the user's call.
+
+**The whole gain is HOLDING, not grasping.** Every wiayg object has success == ever (zero hold losses), where bqvzh lost 3
+on each of tofu/mushroom/banana. Ever-grasp itself moved 14->14, 11->17, 15->13. So more gradient steps bought grip
+quality/stability, not better approach.
+
+**Cherry is a bias, not a convergence deficit.** Median close width 26.9 mm (bqvzh 28.0) on a 25 mm object; the demos close
+to 21.3 mm (p10 14.9). 2.6x the steps moved it ~1 mm. A targeted fix is needed — gripper-width loss weight or an aux width
+head, and check whether the +-5/3.5/1.5 mm cloud offset + residue augmentation blur the size cue at 25 mm.
+
+**Recommendation:** the cluster's G1/G0/G2 should use the same 1M-step target; 380k under-trains this dataset.
 
 ### 2026-09-07 21:20 — `wiayg` launched: G1 (recipe v5, TARGET_STEPS=1M) run locally as the cluster's twin
 Same npz as bqvzh; EPOCHS=auto -> 120 (8,393 batches/epoch, 1,007,160 steps, ~5.6 h at 20 ms/step); schedule scaling per
