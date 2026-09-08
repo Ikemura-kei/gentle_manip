@@ -9778,6 +9778,25 @@ warmup 6, ckpt every 20, EMA from epoch 1, val every 5 from the same formula. Tw
    `.agent_tmp/verify_transfer2.py` is the working pattern. Note `numpy.lib.format._read_array_header` is private and absent in
    newer numpy — use `read_array_header_1_0`.
 
+### 2026-09-08 — checkpoint sweep on `wiayg`: 20-episode teasers CANNOT resolve the val-loss/success question
+User question: 1M steps beat 380k on both val loss and success, so does success keep tracking val loss while it is still
+descending (i.e. is the old "val loss does not predict success" finding only true AFTER convergence)? Swept the existing
+checkpoints, 20-ep teasers on tofu+mushroom, same seeds/augmentation.
+
+| epoch | val | tofu | mushroom | sum |
+|---|---|---|---|---|
+| 60 | 0.00174 | 13/20 | 15/20 | 28/40 |
+| 80 | 0.00140 | 13/20 | 18/20 | **31/40** |
+| 100 | 0.00125 | 8/20 | 18/20 | 26/40 |
+| 120 | 0.00118 | 14/20 | 17/20 | **31/40** |
+
+Val improved 32 % monotonically; success went 28, 31, 26, 31 — mean 29.0, spread 5, while **1 sigma at n=40 is 2.8**. The entire
+spread fits inside +-1 sigma, so no trend is resolvable either way. ep100 tofu (8/20 against 13/13/14 at its neighbours) is the
+outlier that makes the point concrete: checkpoint noise at n=20 is the size of the effect. **The sweep neither confirms nor
+refutes the hypothesis.** What IS outside noise is the cross-run datum: 380k final = 20/40 on the same two objects, 1M ep120 =
+31/40. Settling the within-run question needs the canonical 200-episode eval (1 sigma ~ 3 %) on 2-3 checkpoints, ~2 h/checkpoint.
+Practical note meanwhile: ep80 already matches ep120, so a shorter run may cost nothing — but that too is inside the noise.
+
 ### 2026-09-08 03:53 — grasp-synthesis ablation harness VERIFIED (`grasp_synth_ablation.py`)
 All 8 methods x their width modes probed on tofu through the FROZEN v4.2 executor: ours / naive /
 antipodal / rigid / sdf / gn1b give 4/4 poses in every mode; gpd 2/4 (its own yield — 2 envs had no
