@@ -309,6 +309,29 @@ did is therefore a **re-collection decision, not a config change** — the infor
 stored dataset. Same for R3D's FPS-randomization augmentation, which needs a larger stored cloud to
 resample from. Worth knowing before anyone plans an encoder-scaling experiment.
 
+**4b. Measured: the padding is NOT dropout, and small objects are NOT point-starved.**
+Two probes (`.agent_tmp/probe_padding.py`, `.agent_tmp/probe_object_points.py`):
+
+- **Zero-padded frames are rare and phase-specific**: 61 of 119,716 val frames (0.051 %), in only
+  **7 of 627 episodes**, and they occur *exclusively* at normalized phase 0.0–0.1 or 0.9–1.0 — never
+  in the middle 80 %. **Dropout is ruled out twice over**: augmentation is applied in the loss at
+  train time and never written to the stored dataset, and p = 0.03 dropout would in any case be
+  uniform across frames rather than clustered at episode ends. The signature matches crop +
+  `object_focus` leaving < `max_points` valid points when the arm is at home (start) or the object is
+  lifted (end), so the pipeline pads to 1024. Negligible for training; it matters only as a masking
+  requirement if pooling ever changes from max.
+- **Points actually on the object**, within 3 cm of `priv_object_pos` at t = 0 (mean over 12 episodes):
+
+  | cherry_tomato | strawberry | banana_chunk | tomato | mushroom | tofu |
+  |---|---|---|---|---|---|
+  | **124** | 218 | 212 | 200 (452 at 5 cm) | 303 | 347 |
+
+  Cherry gets ~2.5× fewer points than mushroom/tofu — but **124 points on a 25 mm object is ample to
+  resolve a 2–5 mm size difference in principle**. So "small objects are too sparsely sampled" is
+  NOT the explanation for the width bias. That shifts the weight onto the representation (global
+  max-pool bottleneck) and the objective/data balance (cherry is ~5 % of episodes and the loss is
+  dominated by the rest, so a conditional model can hedge toward the population width).
+
 **5. The one encoder change that IS available at 1024 points: stop collapsing to a global vector.**
 R3D keeps **structured N×C tokens** rather than pooling to one global feature; we max-pool 1024 points
 into a single 512-d vector. Max-pool keeps only the strongest activation per channel, which is exactly
