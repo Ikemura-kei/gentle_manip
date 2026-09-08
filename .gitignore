@@ -46,6 +46,7 @@ htmlcov/
 # Collected demo datasets + real-deploy recordings (large point-cloud pickles +
 # summary PNGs/MP4s). Keep small calibration artifacts (dataset/camera_calibration/) tracked.
 dataset/demos/
+dataset/object_expansion/objaverse_cache/
 dataset/real_deploy/
 dataset/serl_clips/
 # DPPO pretrain npz — derived from dataset/demos via gentle_manip.dppo.convert_demos
