@@ -9738,6 +9738,26 @@ uniform faces, exact extent restore) fixed every one: regate 7/7 PASS at ratio 1
 same recipe (was a 45k-tet hang at 10/100). Lesson -> a failed `watertight_decimate` must FAIL
 LOUDLY, never silently keep the dense mesh.
 
+### 2026-09-08 11:00 — TWO OPS LESSONS caught by dry-running an eval before it fired
+The three teaser evals were pre-submitted with `--dependency=afterok:<train job>` so they would fire unattended.
+A dry run of their checkpoint-discovery logic (while training was still at epoch ~86) showed **all three would have
+failed**.
+
+1. **A greedy character class spans slashes.** `grep -oE "logs/dppo/dppo-pretrain/[^ ]*/[a-z]{5}"` against the
+   snapshot line `... -> /abs/logs/dppo/dppo-pretrain/<dataset>/ttukt/config/ (+ launch_command.sh)` matched
+   `.../ttukt/confi` — `[^ ]*` ate `<dataset>/ttukt/` and `[a-z]{5}` then took the first five letters of
+   **"config"**. The resulting run dir has no `checkpoint/`, so every eval would have exited "no checkpoint" hours
+   later with nothing to show. Fix: read the 5-letter ID off the `[registry] <id>` line and rebuild the path from
+   `dataset_name.txt`; the positional fallback uses `[^/ ]+` so it cannot cross a slash. **Use `[^/ ]` , never
+   `[^ ]`, for a single path segment.**
+2. **`sbatch` copies the batch script at SUBMIT time.** Editing the `.sbatch` file afterwards does NOT change an
+   already-queued job — it still runs the old text. Fixing a pre-submitted dependent job means `scancel` +
+   resubmit (done: 2128166/7/8 -> 2142815/6/7), not just editing the file. Anything already in the queue is frozen.
+
+**General lesson: dry-run a deferred job's logic against live state before it fires.** These jobs were designed to
+run unattended overnight; the bug would have surfaced only as three wasted allocations and no evals. The discovery
+path cost two minutes to exercise by hand.
+
 ### 2026-09-08 05:10 — MONITORING LESSON: a watchdog that greps only stdout is half-blind
 Watchdog v1 on the three generalist runs reported `STARTUP-BAD … wandb_proj=0` for all three while the runs were
 perfectly healthy: the wandb banner is written to **stderr**, and sbatch sends `%j.out` and `%j.err` to separate
