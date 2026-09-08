@@ -169,7 +169,47 @@ ended with val still falling steeply). A future run on this data size has little
 Caveat as always: val loss is not a robot-performance predictor here (the `xagzg` lesson), so this
 calibrates the BUDGET, not the checkpoint choice — the teaser/canonical evals pick the checkpoint.
 
-(to be filled as runs complete: G1/G0 wall clock and curves, teaser + canonical eval numbers)
+### 6.3 All three COMPLETE — final numbers and the ablation readout
+
+| run | id | wall clock | train (ep 120) | val (ep 120) |
+|---|---|---|---|---|
+| G1 (both optimized) | `bmbrv` | 8 h 41 m | 0.00108557 | 0.00119699 |
+| G0 (paired log-only) | `fdcjk` | 8 h 19 m | 0.00109890 | 0.00120010 |
+| G2 (cons log-only) | `ttukt` | 7 h 30 m | **0.00101871** | **0.00114728** |
+
+All well inside the 12 h walltime (the spread is node speed). Six checkpoints each. Val plateaued
+near epoch 110 in every run — no overfit knee anywhere at this data scale.
+
+**Raw regularizer losses at epoch 120** (the point of the ε design):
+
+| | `loss_paired` | `val/loss_paired` | `loss_consistency` | `loss_diffusion` |
+|---|---|---|---|---|
+| G1 | 2.486e-5 | 2.178e-5 | 5.736e-5 | 1.056e-3 |
+| **G0** (paired OFF) | **1.740e-3** | **1.757e-3** | 1.032e-4 | 1.068e-3 |
+| **G2** (cons OFF) | 1.576e-5 | 1.190e-5 | **3.097e-5** | 1.011e-3 |
+
+**1. The paired real–sim term does large, unambiguous work.** Un-optimized (G0) the real–sim feature
+distance ends **70× higher** than when optimized (1.74e-3 vs 2.49e-5), and **80× on val**. The gap
+was only 2.6× at epoch 11 and grew all run: left alone, the encoder does not merely fail to close the
+sim/real gap, it actively drifts further apart as it fits the sim data. This is the strongest
+argument yet for keeping the paired term, and it is exactly what G0 was built to show.
+
+**2. The consistency term is NOT doing what it is meant to — turning it OFF made the encoder MORE
+noise-invariant.** G2, which only observes the term, ends at consistency **3.10e-5 vs G1's optimized
+5.74e-5** — the ablated run is ~1.9× BETTER on the very metric the objective optimizes. Plausible
+mechanism: the BC path is already trained under `d435i_noise_train`, so invariance is bought there,
+while the consistency term optimizes against a DIFFERENT and stronger view
+(`d435i_noise_strong`, residue p 0.30) and drags the encoder toward a compromise that is worse on
+both. G2 also has the lowest diffusion loss and the lowest val loss.
+
+**⚠ Caveat that blocks a firm conclusion on (2):** G1 and G0 differ ONLY in the paired weight, yet
+their consistency losses differ by 1.8× (5.74e-5 vs 1.03e-4) — comparable to the 1.9× G1-vs-G2 effect
+being claimed. So cross-run variation on this metric is of the same order as the effect. The paired
+result (70×) is far outside that band and is safe; the consistency result is suggestive only.
+**The teaser/canonical evals decide it** — and per the `xagzg` lesson, val loss is not a
+robot-performance predictor here regardless.
+
+(to be filled: teaser + canonical eval numbers)
 
 ## 7. Findings
 
