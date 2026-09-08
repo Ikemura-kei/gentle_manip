@@ -34,23 +34,23 @@ cd "$(dirname "$0")/../../.."
 #   --max-steps 5000 "$@"
 
 # ── G2 = ttukt (cluster): recipe v5 with the ENCODER CONSISTENCY term ablated (w=1e-8, log-only). Not yet evaluated.
-# ckpt=downloaded_runs/ttukt/checkpoint/state_120.pt
-# normalization=downloaded_runs/ttukt/normalization.npz
-# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
-#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
-#   --act-steps 4 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-#   --record dataset/real_deploy/generalist_v5_ttukt_G2_120 --shard-size 10 --record-rgb \
-#   --max-steps 5000 "$@"
-
-# ── G1 = bmbrv (cluster): recipe v5 EXACT, the cluster twin of wiayg. Same dataset + val split. Not yet evaluated.
-ckpt=downloaded_runs/bmbrv/checkpoint/state_120.pt
-normalization=downloaded_runs/bmbrv/normalization.npz
+ckpt=downloaded_runs/ttukt/checkpoint/state_120.pt
+normalization=downloaded_runs/ttukt/normalization.npz
 uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
   --act-steps 4 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/generalist_v5_bmbrv_G1_120 --shard-size 10 --record-rgb \
+  --record dataset/real_deploy/generalist_v5_ttukt_G2_120 --shard-size 10 --record-rgb \
   --max-steps 5000 "$@"
+
+# ── G1 = bmbrv (cluster): recipe v5 EXACT, the cluster twin of wiayg. Same dataset + val split. Not yet evaluated.
+# ckpt=downloaded_runs/bmbrv/checkpoint/state_120.pt
+# normalization=downloaded_runs/bmbrv/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
+#   --act-steps 4 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/generalist_v5_bmbrv_G1_120 --shard-size 10 --record-rgb \
+#   --max-steps 5000 "$@"

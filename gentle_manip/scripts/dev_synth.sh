@@ -1,5 +1,5 @@
 #! /bin/bash
-obj=banana_chunk
+obj=mushroom
 
 OMP_NUM_THREADS=8 MUJOCO_GL=glfw uv run --project envs/sim python grasp_synthesis/collect_demos_synth_v4.py \
   --experiment single_lift_${obj}_soft_abs_action_armfocus_7d_realws \
