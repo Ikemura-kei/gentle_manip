@@ -487,8 +487,7 @@ passing `None` would have been worse, since v4 reads that as a synthesis failure
 default grasp (measuring our planner instead of the baseline). Now every numeric field is coerced finite,
 with `stress_top10 = 0.0` for jaws that never compress the object (physically correct for zero
 indentation) and the scorer's real verdict carried in `status`. The three probes that had already run
-pre-fix were re-run and pass. **The scorer's verdict is data, never a veto: baseline poses are always
-executed and the MPM decides.**
+pre-fix were re-run and pass. **Our quality checker records its opinion but never blocks a grasp.** If it reports `no_contact`, the baseline's grasp is still executed and the MPM decides whether the object lifts.
 
 Non-GPU tests: `grasp_synthesis/tests/test_ablation_flags.py` (flag parsing, argv passthrough, rejection
 of invalid values) plus a source-level check that every frozen attribute the harness references exists.

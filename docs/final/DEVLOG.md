@@ -9789,8 +9789,8 @@ no-squeeze `extent` mode) makes the frozen scorer return `no_contact` with no st
 `synth_stats_row`'s round(), and `None` would have been worse — v4 reads it as a synthesis failure and
 substitutes its OWN default grasp, i.e. it would have silently measured our planner instead of the
 baseline. Fixed: all numeric fields coerced finite, `stress_top10 = 0.0` for zero indentation (correct,
-not a fudge), scorer verdict kept in `status`. Lesson: **a surrogate's verdict is data, never a veto** —
-the baseline's pose must always reach the MPM.
+not a fudge), scorer verdict kept in `status`. Lesson: **our quality checker records its opinion but must never block a grasp** —
+the baseline's pose has to reach the MPM, or the experiment silently measures our planner instead.
 
 ### 2026-09-08 — `wiayg`: recipe v5 at 1M gradient steps (the cluster's G1, run locally) — teasers up across the board
 Same npz as `bqvzh` (6,270 eps), `TARGET_STEPS=1000000` -> 120 epochs (8,393 batches/epoch), schedule scaled per

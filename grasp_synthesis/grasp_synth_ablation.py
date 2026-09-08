@@ -314,7 +314,7 @@ def synthesize_grasp(obj, pad_geo, obj_com, obj_quat_wxyz, **kw):
           f"yaw={np.degrees(x[5]):+.1f}deg | {wnote} | scorer status={res.get('status')} "
           f"holdable={res.get('holdable')}", flush=True)
 
-    # The scorer's verdict is DATA, not a veto: a gentleness-blind baseline that picks a
+    # The scorer RECORDS an opinion; it must never block a grasp. A gentleness-blind baseline that picks a
     # non-compressing width (`no_contact`, routine in `extent` mode) must still be EXECUTED — the
     # MPM decides whether it lifts, not our surrogate. So every field the frozen collector formats
     # or rounds is made finite here: `stress_top10 = None`/inf would either trip v4's
