@@ -53,6 +53,18 @@ fi
 unset PYTHONPATH ROS_DISTRO 2>/dev/null || true
 export MUJOCO_GL=egl
 
+# Self-heal pymeshlab if it's missing/broken (idempotent -- job 2177412 hit "No module named
+# 'pymeshlab'": envs/sim_arrhenius's pyproject.toml declares it but it was never actually
+# installed there, and it needs a GH200-specific post-install lib swap besides -- see
+# gentle_manip/scripts/arrhenius/fix_pymeshlab_gh200.sh's header for the full story. Both
+# steps must run ON an aarch64 node, so bundle them into the job itself rather than costing
+# another queue round-trip).
+if ! uv run --project envs/sim_arrhenius --no-sync python -c "import pymeshlab" 2>/dev/null; then
+    echo "[sbatch] pymeshlab missing/broken -- installing + applying the GH200 lib-swap fix"
+    uv pip install --python envs/sim_arrhenius/.venv/bin/python         --python-platform aarch64-manylinux_2_35 'pymeshlab>=2025.7' ||         echo "[sbatch] WARN: pymeshlab install failed, continuing without it (repair_watertight doesn't need it)"
+    bash gentle_manip/scripts/arrhenius/fix_pymeshlab_gh200.sh ||         echo "[sbatch] WARN: pymeshlab GH200 fix script failed, continuing without it"
+fi
+
 echo "[sbatch] launching: python -m gentle_manip.scripts.object_expansion.batch_expand ${ARGS[*]}"
 uv run --project envs/sim_arrhenius --no-sync python -m gentle_manip.scripts.object_expansion.batch_expand \
     "${ARGS[@]}"
