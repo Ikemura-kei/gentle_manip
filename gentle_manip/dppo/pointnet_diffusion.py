@@ -35,9 +35,12 @@ class PointNetEncoderXYZ(nn.Module):
     """DP3-style PointNet: per-point MLP -> max-pool -> projection. x: (B, N, 3) -> (B, out)."""
 
     def __init__(self, in_channels: int = 3, out_channels: int = 256,
-                 use_layernorm: bool = True, final_norm: str = "layernorm"):
+                 use_layernorm: bool = True, final_norm: str = "layernorm",
+                 pooling: str = "max"):
         super().__init__()
         assert in_channels == 3, f"PointNetEncoderXYZ expects xyz (3ch), got {in_channels}"
+        assert pooling in ("max", "meanmax"), f"pooling: {pooling}"
+        self.pooling = pooling
         block = [64, 128, 256]
         self.mlp = nn.Sequential(
             nn.Linear(in_channels, block[0]),
@@ -47,18 +50,29 @@ class PointNetEncoderXYZ(nn.Module):
             nn.Linear(block[1], block[2]),
             nn.LayerNorm(block[2]) if use_layernorm else nn.Identity(), nn.ReLU(),
         )
+        pooled_dim = block[-1] * (2 if pooling == "meanmax" else 1)
         if final_norm == "layernorm":
             self.final_projection = nn.Sequential(
-                nn.Linear(block[-1], out_channels), nn.LayerNorm(out_channels))
+                nn.Linear(pooled_dim, out_channels), nn.LayerNorm(out_channels))
         elif final_norm == "none":
-            self.final_projection = nn.Linear(block[-1], out_channels)
+            self.final_projection = nn.Linear(pooled_dim, out_channels)
         else:
             raise NotImplementedError(f"final_norm: {final_norm}")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.mlp(x)                    # (B, N, 256)
-        x = torch.max(x, 1)[0]             # (B, 256) — permutation-invariant pooling
-        return self.final_projection(x)    # (B, out_channels)
+        feat = self.mlp(x)                      # (B, N, 256)
+        pooled = torch.max(feat, 1)[0]          # (B, 256) — permutation-invariant
+        if self.pooling == "meanmax":
+            # Concatenate a MEAN branch. Max is left byte-identical to the default path so a
+            # meanmax run differs from a max run only by the added channels (attributable).
+            # Mask exact-(0,0,0) points: the perception pipeline pads short clouds up to
+            # max_points, and unlike max, a mean would be diluted by those padded slots
+            # (measured: 61/119,716 val frames pad, median 43 of 1024 points — rare, but the
+            # dilution is silent and would look like "mean pooling didn't help").
+            valid = (x.abs().sum(-1, keepdim=True) > 0).to(feat.dtype)      # (B, N, 1)
+            mean = (feat * valid).sum(1) / valid.sum(1).clamp(min=1.0)      # (B, 256)
+            pooled = torch.cat([pooled, mean], dim=-1)                      # (B, 512)
+        return self.final_projection(pooled)    # (B, out_channels)
 
 
 def _encode_clouds(backbone: PointNetEncoderXYZ, pc: torch.Tensor, pc_cond_steps: int) -> torch.Tensor:
