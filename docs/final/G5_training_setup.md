@@ -122,12 +122,19 @@ error (loud, unlike the `predict_epsilon` trap in `G3_G4_training_setup.md` §4,
 
 **Submitted 2026-09-08 22:20 as SLURM job `2186541`** (`.agent_tmp/train_g5.sbatch`), 12 h walltime.
 
-Queue reality: a job submitted now is estimated to start **~38 h out** — the account's fair-share is
-0.20 after ~83 node-hours in three days, putting us behind ~240 pending GPU jobs, and walltime makes
-no difference (probed 12 h / 8 h / 4 h / 2 h / 30 min, all identical start estimates). So the job was
-submitted *before* the dataset finished building: the tail-22 npz only has to exist when the job
-STARTS, and the wrapper fails loudly with a clear message if it does not, rather than letting an empty
+Submitted *before* the tail-22 dataset finished building, deliberately: the npz only has to exist
+when the job STARTS, and the wrapper checks for it and fails loudly rather than letting an empty
 `EPOCHS` become an obscure hydra error.
+
+⚠ Queue estimates on this cluster move by hours in both directions and should not be planned against.
+Probing a hypothetical new job at 19:23 gave **~38 h** (fair-share 0.20 after ~83 node-hours in three
+days, ~240 jobs pending; walltime made no difference — 12 h / 8 h / 4 h / 2 h / 30 min all returned
+the same estimate). By 22:12, minutes after submission, this job's estimate was **2026-09-09 00:42 —
+about 2.4 h**, because the queue drained. The dataset build (~50–60 min) therefore had ~1.5 h of
+margin rather than a day and a half. If a future build is slower than the queue, either hold the job
+(`scontrol hold`) or give the wrapper a bounded *wait* for the dataset instead of an immediate fail —
+note that editing the `.sbatch` after submission does nothing, since SLURM copies the script at
+submit time.
 
 Expected at start: train 1,141,991 steps (1,074,275 + 12 × 5,643) → 8,922 batches/epoch →
 **EPOCHS ≈ 113** at the 1 M target, warmup 5 (≈5 %).
