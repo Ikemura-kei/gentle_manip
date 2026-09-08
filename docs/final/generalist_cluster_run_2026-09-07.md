@@ -224,6 +224,28 @@ distance ended 70× G1's, so if the paired term does what §6.3 says, G0 should 
 real robot. A real-robot G0-vs-G1 gap is far stronger evidence for the paired term than any sim
 number, and it is the one comparison sim cannot make.
 
+### 6.5 G2 teaser results (local, 2026-09-08)
+
+**G2 (`ttukt`) teasers, 2026-09-08, local machine** — 20 episodes, `d435i_noise`, the same scenario
+seeds as every other teaser. The comparison column is the LOCAL recipe-v5 twin `wiayg` (settings
+identical to G1, but a different machine and RNG stream — NOT a matched A/B):
+
+| object | G2 `ttukt` | `wiayg` (v5, local) |
+|---|---|---|
+| mushroom | 15/20 (ever 17) | 17/20 (ever 17) |
+| tofu | 14/20 (ever 15) | 14/20 (ever 14) |
+| tomato | **crashed** | **crashed** |
+
+Both objects land inside the ±3 teaser noise band, so **this does not resolve the consistency
+question either way** — consistent with the local finding that 20-episode teasers cannot rank
+recipes (see the 2026-09-08 checkpoint-sweep DEVLOG entry: spread 5 against 1σ = 2.8). The clean
+test is `ttukt` vs `bmbrv`, both cluster, same seeds — not yet run. Note this teaser evidence does
+NOT contradict the loss-side finding in (2) above; it simply has no power at n = 20.
+
+Tomato has now failed on 4 attempts across 2 checkpoints (silent genesis worker death, no error
+line). It is an object-class instability, not a policy problem, and stays unmeasurable until the
+`sim_substeps` 175 → 350 change is accepted — a user decision, since it alters fidelity mid-dataset.
+
 ## 7. Findings
 
 (to be filled)
