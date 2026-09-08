@@ -9798,6 +9798,38 @@ warmup 6, ckpt every 20, EMA from epoch 1, val every 5 from the same formula. Tw
    `.agent_tmp/verify_transfer2.py` is the working pattern. Note `numpy.lib.format._read_array_header` is private and absent in
    newer numpy — use `read_array_header_1_0`.
 
+### 2026-09-08 — real demo collection: z15 action fix + a real-vs-sim gripper comparison tool
+`collect_real_world_demo.sh` was still saving actions with the pre-September
+`abs_pose_euler_abs_gripper.yaml` (pos_min z 0.003, pos_max x 0.59). Generalist v5 was converted with
+the **_z15** fork (z 0.015, x 0.55), so real demos recorded against the old bounds normalize
+differently and decode 15-25 mm off when co-trained — the `covel` failure. Fixed. Everything else in
+that script checked out against the training view (obs crop/filters/1024 pts identical to
+`superset_soft_armfocus_board`, D435i setup current).
+
+New: `gentle_manip/scripts/final/check_real_demos.sh` (+ `.py`) renders the set (paired RGB|cloud
+video + command-vs-proprio plots, reusing `deploy_episode_viz`, which gained an additive
+`--episodes`) and reports lengths, integrity, cloud occupancy and **gripper closing speed vs the sim
+demos**. The sim reference reads `train.npz` `states[:, 7]` (normalized width) so all 6,270 episodes
+summarize in a second; `--sim-object` restricts it to the SAME object, which matters because travel
+and final width are size-dependent (the split is deterministic, so `sources.yaml` reconstructs the
+per-trajectory object label exactly).
+
+First set, `single_lift_cherry_tomato_real/26-09-08-rzz`, 20 eps, integrity clean, cloud 99.9 %
+occupied, |cmd-state| median 2.0 mm:
+
+| metric | real | sim (cherry only) | ratio |
+|---|---|---|---|
+| active closing speed | 66.0 mm/s | 64.9 mm/s | 1.02 |
+| closing duration | 1.0 s | 0.9 s | 1.04 |
+| final width | 24.2 mm | 21.2 mm | 1.14 |
+
+**Closing speed already matches** (commanded = `--gripper-value` 0.45 x 5 mm x 30 Hz = 67.5 mm/s;
+0.433 would match sim exactly). User decision: leave 0.45 — 2 % is inside noise and changing mid-set
+would create two collection regimes. **The real gap is grasp TIGHTNESS, not speed**: teleop closes
+~3 mm looser than the scripted demonstrator on the same object, and the policy is looser still
+(~27 mm). Caveat: sim cherry carries scale DR 0.9-1.2, the physical tomato is one size, and the real
+p10-p90 (21.8-26.5 mm) overlaps sim. That is an operator instruction, not a parameter.
+
 ### 2026-09-08 — the point-cloud encoder is NOT decoration (fixed-noise cloud-ablation probe)
 User's test: on a trained checkpoint, measure val denoising loss with (a) the real cloud, (b) a fixed
 cloud from a DIFFERENT episode, (c) a zeroed cloud. If (a) ~= (b) the policy is running on
