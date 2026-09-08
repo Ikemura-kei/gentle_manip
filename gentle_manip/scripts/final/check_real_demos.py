@@ -9,8 +9,9 @@ Reports, per set and per episode:
 Gripper closing speed is measured on the MEASURED width (`observations.gripper_width`), identically
 for both sources, so the comparison is like for like:
     peak      max |dw/dt| over the episode                            [mm/s]
-    active    median |dw/dt| over steps that are actually closing     [mm/s]
-              (dw/dt < -CLOSE_EPS_MM_S; i.e. ignores holding and opening)
+    active    median |dw/dt| INSIDE the main closing run              [mm/s]
+              (not over every closing step in the episode: for a short close, post-grasp
+               adjustments would dominate the median and understate the speed)
     duration  time from the start of the main closing run to its end  [s]
 The sim reference comes from the CONVERTED dataset's `train.npz` (states[:, 7] is the normalized
 gripper width; de-normalized with `normalization.npz`), so all 6,270 sim episodes are summarized in
@@ -56,7 +57,6 @@ def closing_stats(width_m: np.ndarray, rate: float) -> dict:
     dw = np.diff(w) * rate                                       # mm/s, negative = closing
     closing = dw < -CLOSE_EPS_MM_S
     out = {"peak_mm_s": float(-dw.min()),
-           "active_mm_s": float(np.median(-dw[closing])) if closing.any() else 0.0,
            "n_closing_steps": int(closing.sum()),
            "width_open_mm": float(w.max()), "width_min_mm": float(w.min()),
            "travel_mm": float(w.max() - w.min())}
@@ -72,6 +72,17 @@ def closing_stats(width_m: np.ndarray, rate: float) -> dict:
         out["close_duration_s"] = float((e - s + 1) / rate)
         out["close_travel_mm"] = float(w[s] - w[min(e + 1, len(w) - 1)])
         out["close_start_step"] = int(s)
+        # active speed is measured INSIDE the main closing run only. Taking the median over every
+        # closing step in the episode instead lets small post-grasp adjustments dominate whenever the
+        # close itself is short: real tomato read 3.8 mm/s that way (15 mm of travel) versus 61.5 mm/s
+        # within its actual close, which wrongly looked like a different grasping style (2026-09-08).
+        seg = -dw[s:e + 1]
+        seg = seg[seg > CLOSE_EPS_MM_S]
+        out["active_mm_s"] = float(np.median(seg)) if seg.size else 0.0
+        outside = np.concatenate([-dw[:s][closing[:s]], -dw[e + 1:][closing[e + 1:]]])
+        out["adjust_mm_s"] = float(np.median(outside)) if outside.size else 0.0
+    else:
+        out["active_mm_s"] = 0.0
     return out
 
 
