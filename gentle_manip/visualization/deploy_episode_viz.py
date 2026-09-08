@@ -132,6 +132,8 @@ def main() -> None:
     ap.add_argument("--stride", type=int, default=2, help="video frame stride")
     ap.add_argument("--rate", type=float, default=None, help="control rate Hz (default: pkl meta rate_hz or 30)")
     ap.add_argument("--no-video", action="store_true")
+    ap.add_argument("--episodes", type=int, default=0,
+                    help="render only the first N episodes (0 = all); videos are the slow part")
     a = ap.parse_args()
     eps = _load(a.run)
     first = a.run if a.run.is_file() else Path(sorted(glob.glob(str(a.run / "*.pkl")))[0])
@@ -141,7 +143,7 @@ def main() -> None:
     vdir = (a.run if a.run.is_dir() else a.run.parent) / "videos"
     has_rgb = a.image_key in eps[0]["observations"] or (vdir / "ep_000.mp4").exists()
     print(f"{a.run}: {len(eps)} episodes, rate {rate:g} Hz, rgb={'yes' if has_rgb else 'no'} -> {out}")
-    for k, ep in enumerate(eps):
+    for k, ep in enumerate(eps[:a.episodes] if a.episodes else eps):
         cmd = _decode(ep["actions"], a.action_config)
         err = np.linalg.norm(cmd[0] - np.asarray(ep["observations"]["ee_pos"]), axis=1) * 1e3
         plot_signals(ep, cmd, out / f"ep_{k:03d}_signals.png", rate,
