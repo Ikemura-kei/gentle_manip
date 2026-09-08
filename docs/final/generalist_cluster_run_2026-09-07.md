@@ -151,8 +151,25 @@ instrument works, and it is already showing signal:
   which is exactly the question G2 was built to answer. **Early and provisional**: epoch 11 of 120,
   one snapshot, and cosine consistency saturates — revisit at the end.
 
-(to be filled as runs complete: wall clock, full loss curves, teaser + canonical eval numbers,
-checkpoints kept)
+### 6.2 G2 (`ttukt`) finished first — 7 h 30 m, and val PLATEAUS near epoch 110
+
+COMPLETED at 12:28, 7 h 30 m 26 s for 120 epochs (~222 s/epoch on n179, the fastest of the three
+nodes). Six checkpoints kept as designed: `state_{20,40,60,80,100,120}.pt`.
+
+| epoch | 105 | 110 | 115 | **120** |
+|---|---|---|---|---|
+| train | 0.00106 | 0.00105 | 0.00103 | **0.00102** |
+| val | 0.00118 | 0.00114 | 0.00116 | **0.00115** |
+
+**Val flattens from ~epoch 110** (0.00114 → 0.00116 → 0.00115 is noise, not descent) while train keeps
+creeping down — a plateau, NOT the overfit knee the 100-demo rounds showed (val never turns up).
+Read for `TARGET_STEPS` calibration: **1 M steps was about right and not wasteful** — it reaches the
+point where extra epochs stop buying val, rather than stopping early as `bqvzh`'s 380 k did (which
+ended with val still falling steeply). A future run on this data size has little to gain above ~1 M.
+Caveat as always: val loss is not a robot-performance predictor here (the `xagzg` lesson), so this
+calibrates the BUDGET, not the checkpoint choice — the teaser/canonical evals pick the checkpoint.
+
+(to be filled as runs complete: G1/G0 wall clock and curves, teaser + canonical eval numbers)
 
 ## 7. Findings
 
