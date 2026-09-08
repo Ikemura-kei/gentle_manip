@@ -110,12 +110,28 @@ cd "$(dirname "$0")/../../.."
 # | REAL-only BC, RGB + AUGMENTATION = xkhrc (2026-09-08): RandomShiftsAug(pad=4) on the RGB input. Val
 # | 0.0104 @ep820 vs 0.0176 without aug (cloud run: 0.0099). state_1200 = last (stopped there).
 # +-----------------------------------------------------------------------------------------------------------
-ckpt=logs/dppo/dppo-pretrain/single_lift_real6_bc_rgb_v1/xkhrc/checkpoint/state_1200.pt
+# ckpt=logs/dppo/dppo-pretrain/single_lift_real6_bc_rgb_v1/xkhrc/checkpoint/state_1200.pt
+# normalization=dataset/dppo/single_lift_real6_bc_rgb_v1/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus_rgb.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
+#   --act-steps 4 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/real6_bc_rgb_aug_xkhrc_1200 --shard-size 10 --record-rgb \
+#   --max-steps 5000 "$@"
+
+# +-----------------------------------------------------------------------------------------------------------
+# | REAL-only BC, RGB + DPPO IMAGE RECIPE = fuuoy (2026-09-08): the aug run with DPPO's own image settings
+# | (denoising 100, batch 256) instead of ours (20/128). Overfits less (1.5x at ep1600 vs 2.5x at ep1200)
+# | and peaks later; its val is NOT comparable to the 20-step runs (different noise-level mixture).
+# | state_1350 = val minimum (0.0160).
+# +-----------------------------------------------------------------------------------------------------------
+ckpt=logs/dppo/dppo-pretrain/single_lift_real6_bc_rgb_v1/fuuoy/checkpoint/state_1350.pt
 normalization=dataset/dppo/single_lift_real6_bc_rgb_v1/normalization.npz
 uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus_rgb.yaml \
   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
   --act-steps 4 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/real6_bc_rgb_aug_xkhrc_1200 --shard-size 10 --record-rgb \
+  --record dataset/real_deploy/real6_bc_rgb_dppo_fuuoy_1350 --shard-size 10 --record-rgb \
   --max-steps 5000 "$@"
