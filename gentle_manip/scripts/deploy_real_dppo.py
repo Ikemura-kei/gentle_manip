@@ -479,6 +479,7 @@ def main() -> None:
         visual=arch.get("visual", "pointcloud"),
         img_cond_steps=arch.get("img_cond_steps", 1), image_size=arch.get("image_size", 96),
         image_key=args.image_key, vit_cfg=arch.get("vit_cfg"),
+        backbone_target=arch.get("backbone_target"),   # picks ResNet vs ViT from the ckpt
         spatial_emb=arch.get("spatial_emb", 128), ddim_steps=args.ddim_steps,
         temporal_ensemble=args.temporal_ensemble, ensemble_m=args.ensemble_m,
         arch_predict_epsilon=arch.get("arch_predict_epsilon", True),
