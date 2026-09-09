@@ -10464,3 +10464,51 @@ twice in a row across two different loading strategies, stop trying to fix the l
 strategy and remove the dependency instead** -- for content this small (a few hundred to a
 couple thousand triangles), a minimal hand-rolled WebGL renderer is not meaningfully more
 code than correctly wiring up a library, and it can never suffer this failure mode again.
+User confirmed the 3D view still didn't render even with vanilla WebGL and said to give up
+on it -- dropped; the specimen list, detail panel, and both tables carry the page.
+
+### 2026-09-09 (cont.) — Category-level view: exclusion bug audit + shape-diversity priority
+
+User feedback, three parts: (1) stop the object-expansion pipeline from re-spending
+registration slots on a category that already has real collected demos (`pea_(food)` has 12
+separate registered instances, each with its own full 20-episode collection -- 240 total
+episodes on one category while 393 others sit at zero); (2) going forward, prioritize
+categories that are shape-*different* from what's already collected, not just "not yet
+tried"; (3) show a full per-category table (all categories, including the original
+hand-built dev/food objects like tofu/mushroom/gelatin -- confirmed via `find`/`ls` that
+NONE of those have ever had a `dataset/demos/single_lift_<name>_soft/` collection under any
+protocol, so they correctly show 0 episodes rather than being omitted) alongside the video
+reel, explicitly labeled with the collection protocol so all the numbers are known-comparable.
+
+**Audited the existing round-to-round category exclusion** (the `existing_base = {re.sub(r'
+\d+$','',n) for n in OBJECT_MAP}` pattern used for rounds 14/18): this strips trailing digits
+off the *registered object name* (`pea9` -> `pea`), which does NOT match the real CSV
+category string (`pea_(food)`) -- a live bug. It happened not to cause visible harm so far
+only because the categories that would have leaked back in weren't reached before those
+rounds got superseded, not because the logic was actually correct. Fixed properly for round
+19 onward: exclusion is now built directly from `EXPANSION_LOG.csv`'s exact `category` field
+(the categories with >=1 row where `collection_status` is `accepted`/`low_success`), no
+name-guessing.
+
+**Shape-diversity priority** (round 19 candidate ordering): read each remaining category's
+`bucket` field from `candidates_all.csv` (already present -- the curated 130-category list's
+`SHAPE_BUCKETS`, `unknown` for the broad-sourced pool), count how many already-collected
+categories fall in each bucket, and round-robin the fresh candidate list across buckets
+ordered by ascending existing coverage (`unknown` always last -- it's not a real diversity
+signal, just "not curated"). Result: `complex_concave` and `thin_shell_hollow` -- both at
+ZERO prior collections -- now lead round 19's queue, surfacing exactly the class of object
+(bowl, flute_glass, coffeepot, sponge, colander, jar, shot_glass, teacup, cup...) the
+project's original wine-glass/thin-shell MPM-feasibility question was about, still open.
+
+**Category consolidation (noted, NOT implemented today)**: the user's stated future direction
+is to register ONE object per category and get its size diversity from the *existing*
+`object_scale`/`object_axis_scale` domain-randomization machinery (`configs/dr/*.yaml`,
+already wired into `scene_dr_every`) applied WITHIN that category's 20-episode collection,
+instead of registering many near-duplicate instances. Left `pea_(food)`'s 12 existing
+instances as-is per explicit instruction ("keep it as is now for pea") -- this is a pipeline
+design change for a future session, not a today fix.
+
+**New export** (`export_category_summary.py`, CPU-only, reads `EXPANSION_LOG.csv` directly --
+no GPU node needed): one row per category with instances-attempted, instances-collected,
+summed total episodes, and average success rate. Added as a second tab ("All categories") on
+the Grasp Reel artifact alongside the video grid, with an explicit protocol banner.
