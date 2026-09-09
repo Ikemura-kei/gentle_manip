@@ -197,6 +197,31 @@ and the within-chunk drift. G4 is therefore a targeted test of G3's specific fai
 stack on a bad base. **The risk is real and stated:** if it compounds instead, both training slots
 are spent and the meeting result is the baseline's canonical eval.
 
+### Finding while G4 ran: sample prediction OVERFITS where epsilon does not
+
+Same data, same everything else, and the validation curves have different shapes:
+
+| | G3 (epsilon) | G4 (sample) |
+|---|---|---|
+| val at epoch 35 | still falling | **minimum**, 5.76e-4 |
+| val at epoch 60 | still falling | 5.98e-4, risen |
+| val minimum | epoch **115** of 122 | epoch **35** so far |
+| train/val gap at ep 60 | 6 % | **116 %** |
+
+Absolute losses are not comparable across the pair, but the SHAPE and the train-to-val RATIO are,
+and they diverge sharply. Plausible mechanism: epsilon is re-sampled unit Gaussian noise at every
+step — a strong stochastic regularizer — while the sample target is smooth and low-entropy, so the
+network can memorize it. On the 100-demo rounds 1-4 the same overfitting appeared with epsilon; at
+5,643 episodes epsilon no longer overfits but sample still does.
+
+**Consequence for the eval: G4's LAST checkpoint is probably not its best.** The post-G4 chain
+therefore A/Bs the checkpoint nearest the val minimum against the final one on mushroom (the
+highest-baseline, most sensitive object) and runs the remaining teasers on whichever wins. The
+val-minimum epoch is read from the run log at chain time rather than assumed, since the cosine decay
+may still pull val back down late. This also answers a standing question in this project — whether
+val loss tracks success once val has actually converged — in the one regime where the two clearly
+disagree.
+
 **Do not compare G4's loss numbers to G3's.** Sample prediction regresses the (normalized, smooth)
 action; epsilon prediction regresses unit Gaussian noise. The two losses are on different scales, so
 only success metrics compare across the pair. For reference G4 sits at train 4.25e-4 / val 5.78e-4 at
