@@ -485,7 +485,9 @@ def main() -> None:
         horizon_steps=arch.get("horizon_steps", 4),
         denoising_steps=arch.get("denoising_steps", 20),
         ft_denoising_steps=args.ft_denoising_steps,
-        visual_feature_dim=arch.get("visual_feature_dim", 256),
+        # 128 = VisionDiffusionMLP's OWN default, which is what a config that omits the key
+        # actually trained with. The previous 256 here silently disagreed with training.
+        visual_feature_dim=arch.get("visual_feature_dim", 128),
         mlp_dims=arch.get("mlp_dims"), time_dim=arch.get("time_dim", 16),
         pc_cond_steps=arch.get("pc_cond_steps", 1), pointnet=arch.get("pointnet"),
         device=args.device)

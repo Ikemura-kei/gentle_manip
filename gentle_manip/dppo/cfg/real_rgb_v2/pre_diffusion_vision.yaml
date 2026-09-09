@@ -71,6 +71,10 @@ model:
       pretrained: True                 # ImageNet-1k (DP's real-world recipe)
       groupnorm: True                  # BatchNorm -> GroupNorm: BN interacts badly with EMA
     img_cond_steps: ${img_cond_steps}
+    # EXPLICIT on purpose: unset, training silently used VisionDiffusionMLP's default (128) while
+    # deploy_real_dppo.py falls back to 256 when the checkpoint config omits the key -- the
+    # checkpoint then fails to load, after the arm has already homed. Never leave this implicit.
+    visual_feature_dim: 128
     # augmentation is TrainOnlyImageAug (set by the factory above): random shift + photometric
     # jitter, self-disabling under model.eval() so it cannot leak into deployment.
     aug_pad: 4

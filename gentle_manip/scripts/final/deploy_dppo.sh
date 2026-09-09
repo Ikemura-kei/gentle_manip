@@ -145,15 +145,15 @@ cd "$(dirname "$0")/../../.."
 # | cherry result, replicated 10 and 9 /20 (baseline 3) at the lowest stress; mushroom 18/20 hold 0.
 # | Pooling and ensembling INTERACT -- alone 6/20 and 4.5/20. smooth-alpha damps orientation dither.
 # +-----------------------------------------------------------------------------------------------------------
-# ckpt=logs/dppo/dppo-pretrain/single_lift_generalist_soft_v5_tail22/fsynt/checkpoint/state_113.pt
-# normalization=dataset/dppo/single_lift_generalist_soft_v5_tail22/normalization.npz
-# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
-#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
-#   --act-steps 4 --temporal-ensemble --ensemble-m 0.33 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-#   --record dataset/real_deploy/generalist_g5ens_fsynt_113 --shard-size 10 \
-#   --max-steps 5000 "$@"
+ckpt=logs/dppo/dppo-pretrain/single_lift_generalist_soft_v5_tail22/fsynt/checkpoint/state_113.pt
+normalization=dataset/dppo/single_lift_generalist_soft_v5_tail22/normalization.npz
+uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+  --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
+  --act-steps 1 --temporal-ensemble --ensemble-m 0.01 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+  --record dataset/real_deploy/generalist_g5ens_fsynt_113 --shard-size 10 \
+  --max-steps 5000 "$@"
 
 
 # +-----------------------------------------------------------------------------------------------------------
@@ -161,12 +161,28 @@ cd "$(dirname "$0")/../../.."
 # | 2000 epochs) so the two changes are attributable. First real policy that can ensemble at all.
 # | state_400 = val min (ep 390); val loss has misled before, so sweep 800/1500/2000 if it is weak.
 # +-----------------------------------------------------------------------------------------------------------
-ckpt=logs/dppo/dppo-pretrain/single_lift_real6_bc_v1/jfwqs/checkpoint/state_1500.pt
-normalization=dataset/dppo/single_lift_real6_bc_v1/normalization.npz
+# ckpt=logs/dppo/dppo-pretrain/single_lift_real6_bc_v1/jfwqs/checkpoint/state_1500.pt
+# normalization=dataset/dppo/single_lift_real6_bc_v1/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
+#   --act-steps 4 --temporal-ensemble --ensemble-m 0.33 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/real6_bc_g5recipe_jfwqs_1500 --shard-size 10 \
+#   --max-steps 5000 "$@"
+
+
+# +-----------------------------------------------------------------------------------------------------------
+# | REAL-only BC, RGB = lyslr: ImageNet-pretrained ResNet-18 (GroupNorm) at 224px, horizon 16, shift +
+# | photometric aug. Matched to the point-cloud arm otherwise. Stopped at 500 ep; val bottomed at 100,
+# | so try EARLY ckpts first (100/200/400), not the last. Normalization is inside the encoder.
+# +-----------------------------------------------------------------------------------------------------------
+ckpt=logs/dppo/dppo-pretrain/single_lift_real7_bc_rgb224_v1/lyslr/checkpoint/state_200.pt
+normalization=dataset/dppo/single_lift_real7_bc_rgb224_v1/normalization.npz
 uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
-  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus_rgb.yaml \
   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
   --act-steps 4 --temporal-ensemble --ensemble-m 0.33 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/real6_bc_g5recipe_jfwqs_1500 --shard-size 10 \
+  --record dataset/real_deploy/real7_bc_rgb_lyslr_200 --shard-size 10 --record-rgb \
   --max-steps 5000 "$@"
