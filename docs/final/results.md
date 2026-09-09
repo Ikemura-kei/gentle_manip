@@ -28,6 +28,7 @@ construction, since the whole chunk executes.
 | cherry_tomato | G3+ens | state_122 | 4 | 3/20 | 4 | 1 | 19.8 | 38.1 | 20.6 | 26.2 | 10-02-39 |
 | cherry_tomato | G3+ens | state_122 | 8 | 3/20 | 3 | 0 | 21.4 | 38.3 | — | 27.6 | 09-42-59 |
 | cherry_tomato | G5+ens | state_113 | 4 | 10/20 | 10 | 0 | 12.5 | 37.0 | 20.0 | 24.4 | 10-27-34 |
+| cherry_tomato | G5+ens | state_113 | 4 | 9/20 | 10 | 1 | 12.7 | 36.8 | 19.9 | 24.0 | 10-40-05 |
 | cherry_tomato | baseline | state_120 | 4 | 3/20 | 3 | 0 | 7.6 | 35.7 | — | 26.8 | 03-23-32 |
 | mushroom | G3 | state_122 | 4 | 15/20 | 18 | 3 | 20.6 | 52.2 | — | 30.3 | 04-21-21 |
 | mushroom | G4 | state_40 | 4 | 15/20 | 19 | 4 | 24.7 | 53.2 | — | 29.4 | 09-14-04 |
@@ -59,9 +60,11 @@ bit-deterministic (parallel float atomics), so repeats differ:
 - **Ensembling's cherry result does NOT replicate.** 6/20 then 3/20, against G3 plain's 3/20 then
   5/20. Means are 4.5 vs 4.0 — no effect. An earlier reading of this page claimed ensembling
   doubled cherry success; that was a single unreplicated run.
-- **G5+ens reached 10/20 on cherry** (hold 0, sustained 12.5 kPa) — the best cherry result of the
-  campaign, against 3-6 for every other policy. ONE run; a replicate and a no-ensembling arm are
-  running. Read it with the failure above in mind.
+- **G5+ens on cherry REPLICATES: 10/20 then 9/20** (12.5 and 12.7 kPa), against 3-6 for every other
+  policy and a 1-episode spread — inside the noise floor, unlike the ensembling result above. Mean
+  9.5 vs G3+ens 4.5, G3 4.0, baseline 3.0. The first cherry result this campaign that survives
+  repetition, and the gentlest horizon-16 run measured. Attribution between pooling and ensembling
+  is still open (G5 without ensembling is running).
 - **Gentleness differences between policies are not established.** The G3-vs-G4 mushroom gap
   (20.6 vs 24.7 kPa) is smaller than the 6 kPa repeat spread on one policy.
 - What survives: the **hold-loss signature** (below), which is consistent across objects and runs.
