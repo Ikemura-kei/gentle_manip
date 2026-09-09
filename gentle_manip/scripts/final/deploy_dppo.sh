@@ -122,18 +122,43 @@ cd "$(dirname "$0")/../../.."
 #   --record dataset/real_deploy/real6_bc_rgb_aug_xkhrc_1200 --shard-size 10 --record-rgb \
 #   --max-steps 5000 "$@"
 
+
 # +-----------------------------------------------------------------------------------------------------------
 # | REAL-only BC, RGB + DPPO IMAGE RECIPE = fuuoy (2026-09-08): the aug run with DPPO's own image settings
 # | (denoising 100, batch 256) instead of ours (20/128). Overfits less (1.5x at ep1600 vs 2.5x at ep1200)
 # | and peaks later; its val is NOT comparable to the 20-step runs (different noise-level mixture).
 # | state_1350 = val minimum (0.0160).
 # +-----------------------------------------------------------------------------------------------------------
-ckpt=logs/dppo/dppo-pretrain/single_lift_real6_bc_rgb_v1/fuuoy/checkpoint/state_1350.pt
-normalization=dataset/dppo/single_lift_real6_bc_rgb_v1/normalization.npz
+# ckpt=logs/dppo/dppo-pretrain/single_lift_real6_bc_rgb_v1/fuuoy/checkpoint/state_1000.pt
+# normalization=dataset/dppo/single_lift_real6_bc_rgb_v1/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus_rgb.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
+#   --act-steps 4 --ddim-steps 10 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/real6_bc_rgb_dppo_fuuoy_1000 --shard-size 10 --record-rgb \
+#   --max-steps 5000 "$@"
+
+
+# +-----------------------------------------------------------------------------------------------------------
+# | GENERALIST, G5 + TEMPORAL ENSEMBLING = fsynt (cluster, 2026-09-09): G3 (horizon 16 executing 4,
+# | hold tail 22) + mean(+)max cloud pooling. The ONLY cherry-tomato result this campaign that
+# | survives replication: 10/20 and 9/20 (baseline 3/20, G3 3-5/20), at the LOWEST sustained stress
+# | of any horizon-16 run (12.5 / 12.7 kPa vs G3's 20.9-26.9). See docs/final/results.md.
+# | Ensembling averages the 4 overlapping predictions per step (ACT, w=exp(-m*i), i=0 oldest); it
+# | needs horizon > act-steps, so it is a no-op on the horizon-4 policies above.
+# | NOTE the meanmax encoder shape (3,194,016 params) is read from the checkpoint's own .hydra
+# | config — no override needed, verified loading with 0 missing / 0 unexpected keys.
+# | CAVEAT: sim-only so far, and pooling-vs-ensembling is not yet attributed. --smooth-alpha is
+# | LEFT OFF deliberately: ensembling already smooths the same signal and stacking both would
+# | double-smooth and blunt the fast close.
+# +-----------------------------------------------------------------------------------------------------------
+ckpt=logs/dppo/dppo-pretrain/single_lift_generalist_soft_v5_tail22/fsynt/checkpoint/state_113.pt
+normalization=dataset/dppo/single_lift_generalist_soft_v5_tail22/normalization.npz
 uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
-  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus_rgb.yaml \
+  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
-  --act-steps 4 --ddim-steps 10 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/real6_bc_rgb_dppo_fuuoy_1350 --shard-size 10 --record-rgb \
+  --act-steps 4 --temporal-ensemble --ensemble-m 0.01 --max-pos-step-m 0.0065 \
+  --record dataset/real_deploy/generalist_g5ens_fsynt_113 --shard-size 10 \
   --max-steps 5000 "$@"

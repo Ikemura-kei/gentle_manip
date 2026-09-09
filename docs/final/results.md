@@ -27,6 +27,7 @@ construction, since the whole chunk executes.
 | cherry_tomato | G3+ens | state_122 | 4 | 6/20 | 6 | 0 | 13.9 | 37.2 | — | 26.5 | 09-04-34 |
 | cherry_tomato | G3+ens | state_122 | 4 | 3/20 | 4 | 1 | 19.8 | 38.1 | 20.6 | 26.2 | 10-02-39 |
 | cherry_tomato | G3+ens | state_122 | 8 | 3/20 | 3 | 0 | 21.4 | 38.3 | — | 27.6 | 09-42-59 |
+| cherry_tomato | G5 | state_113 | 4 | 6/20 | 7 | 1 | 18.8 | 37.3 | 16.3 | 18.2 | 10-51-00 |
 | cherry_tomato | G5+ens | state_113 | 4 | 10/20 | 10 | 0 | 12.5 | 37.0 | 20.0 | 24.4 | 10-27-34 |
 | cherry_tomato | G5+ens | state_113 | 4 | 9/20 | 10 | 1 | 12.7 | 36.8 | 19.9 | 24.0 | 10-40-05 |
 | cherry_tomato | baseline | state_120 | 4 | 3/20 | 3 | 0 | 7.6 | 35.7 | — | 26.8 | 03-23-32 |
@@ -34,6 +35,7 @@ construction, since the whole chunk executes.
 | mushroom | G4 | state_40 | 4 | 15/20 | 19 | 4 | 24.7 | 53.2 | — | 29.4 | 09-14-04 |
 | mushroom | G4 | state_80 | 4 | 18/20 | 19 | 1 | 24.2 | 52.1 | — | 28.0 | 09-34-07 |
 | mushroom | G4 | state_40 | 8 | 18/20 | 19 | 1 | 25.1 | 53.0 | — | 29.2 | 09-26-52 |
+| mushroom | G5+ens | state_113 | 4 | 18/20 | 18 | 0 | 15.8 | 48.8 | 27.7 | 32.1 | 11-02-10 |
 | mushroom | baseline | state_100 | 4 | 18/20 | 18 | 0 | 19.3 | 50.9 | — | 30.5 | 09-47-32 |
 | mushroom | baseline | state_120 | 4 | 17/20 | 17 | 0 | 16.5 | 49.8 | — | 31.1 | 03-03-31 |
 | mushroom | baseline | state_60 | 4 | 15/20 | 17 | 2 | 22.7 | 52.0 | — | 29.9 | 09-16-20 |
@@ -60,14 +62,18 @@ bit-deterministic (parallel float atomics), so repeats differ:
 - **Ensembling's cherry result does NOT replicate.** 6/20 then 3/20, against G3 plain's 3/20 then
   5/20. Means are 4.5 vs 4.0 — no effect. An earlier reading of this page claimed ensembling
   doubled cherry success; that was a single unreplicated run.
-- **G5+ens on cherry REPLICATES: 10/20 then 9/20** (12.5 and 12.7 kPa), against 3-6 for every other
-  policy and a 1-episode spread — inside the noise floor, unlike the ensembling result above. Mean
-  9.5 vs G3+ens 4.5, G3 4.0, baseline 3.0. The first cherry result this campaign that survives
-  repetition, and the gentlest horizon-16 run measured. Attribution between pooling and ensembling
-  is still open (G5 without ensembling is running).
-- **Gentleness differences between policies are not established.** The G3-vs-G4 mushroom gap
-  (20.6 vs 24.7 kPa) is smaller than the 6 kPa repeat spread on one policy.
-- What survives: the **hold-loss signature** (below), which is consistent across objects and runs.
+- **G5+ens is the campaign's one positive result, and it replicates.** Cherry 10/20 then 9/20
+  (12.5, 12.7 kPa) against baseline 3/20, G3 4.0 mean, G3+ens 4.5 — a 1-episode spread, inside the
+  noise floor. Mushroom 18/20 hold 0 at 15.8 kPa, matching the best baseline (18/20) while GENTLER
+  than it (19.3-21.4). So it roughly triples cherry without trading away mushroom, and is the
+  gentlest policy measured on both.
+- **Both components are needed — they interact, they do not add.** Cherry: pooling alone (G5 plain)
+  6/20; ensembling alone (G3+ens) 4.5 vs G3's 4.0, i.e. nothing; together 9.5.
+- **"Tighter is better" is WRONG — there is an optimal band.** G5 plain plans and executes the
+  tightest of any run (16.3 / 18.2 mm) and scores only 6/20 at 18.8 kPa; G5+ens executes 6 mm looser
+  (24.4 mm) and scores 9.5 at 12.5 kPa. On a 25 mm object, closing too far is its own failure.
+  Ensembling always loosens execution — that was a defect for G3 (21.9 -> 26.2 mm, past the band)
+  and a correction for G5 (18.2 -> 24 mm, into it). Same mechanism, opposite sign.
 
 ## What holds up
 
