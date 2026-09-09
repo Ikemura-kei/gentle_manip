@@ -227,6 +227,23 @@ action; epsilon prediction regresses unit Gaussian noise. The two losses are on 
 only success metrics compare across the pair. For reference G4 sits at train 4.25e-4 / val 5.78e-4 at
 epoch 30 — meaningful only against a future sample-prediction run.
 
+### Not a confound for G3/G4, but a real bug in the anchor script
+
+The cluster's G5 hit an `EPOCHS=auto` error (`docs/final/G5_training_setup.md`): the wrapper derives
+epochs from raw frames, but the loader yields CHUNKS, and a horizon-H chunk cannot start in the last
+H-1 frames of an episode, so `chunks = raw − (H−1) × episodes`. At horizon 4 the error is 1.6 % and
+went unnoticed; at horizon 16 it is 7.4 %, and G5 ran 933,493 steps instead of 1,007,842.
+
+**G3 and G4 are NOT affected** — both were launched with an explicit `EPOCHS=122`, computed from the
+chunk count (8,261 batches/epoch), so both got the intended 1,007,842 steps. G3 vs G4 remains a clean
+A/B; only G5 carries the deficit.
+
+⚠ **The bug is still live in `train_dppo_dp3.sh` line 30** and must be fixed for future runs:
+`T = traj_lengths.sum()` should be `T − (horizon − 1) × len(traj_lengths)`. NOT fixed yet, because
+that script is a running process in G4's own process tree (bash re-reads a script from a byte offset
+as it executes, so editing it mid-run risks corrupting the run). **Apply immediately after G4
+finishes.**
+
 ## 5. Not a training change: temporal ensembling
 
 Predicting 16 and executing 4 means four overlapping predictions cover every timestep; averaging
