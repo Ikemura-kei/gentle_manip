@@ -10268,6 +10268,25 @@ update` before trusting the working tree** -- `git status` DOES flag the drift (
 third_party/genesis`) but it's easy to read past a one-line submodule diff when scanning for
 regular file changes, especially under time pressure.
 
+### 2026-09-08 (cont.) — Memory grows across a long-running batch, not just per-object peaks
+
+Two production jobs (84-category chunks each, `--mem 64G` then `--mem 128G`) both hit
+`Detected N oom_kill event ... step tasks have been OOM Killed`, the second one even at
+128G. Since the crash always lands well into a run (not on the first few objects), this
+looks like memory accumulating ACROSS the batch inside `batch_expand.py`'s own long-running
+parent process, not a single object's peak usage -- consistent with CLAUDE.md's documented
+"Genesis leaks GPU memory on relaunch" lesson, generalized: `fem_gate_check`'s
+`build_grasp_fem` (tetgen via `smgrasp.finger_grasp_final`) runs IN-PROCESS (not
+subprocess-isolated the way the actual MPM collection step is, which correctly spawns
+`collect_demos_synth_v4.py` fresh per object), so any per-call leak in that C-extension path
+compounds over many objects in one process lifetime.
+
+**Mitigation (not a real fix -- time-boxed):** cut the per-job category-chunk size way down
+(84 -> ~26-27) and submit more, smaller parallel jobs instead, so each process lifetime is
+short enough to stay under the memory ceiling before accumulation becomes fatal. A real fix
+would isolate `fem_gate_check` (and maybe `mesh_prep`) into their own subprocess per object
+too, mirroring how collection is already isolated -- flagged for later, not implemented here.
+
 ### 2026-09-09 — CRITICAL: mesh repair was failing 92.7% of candidates; root cause + fix
 
 Cumulative pipeline stats across every job to date: 3,678 of 3,966 `mesh_prep` attempts
