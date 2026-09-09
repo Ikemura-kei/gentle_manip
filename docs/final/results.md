@@ -31,6 +31,7 @@ construction, since the whole chunk executes.
 | cherry_tomato | G5+ens | state_113 | 4 | 10/20 | 10 | 0 | 12.5 | 37.0 | 20.0 | 24.4 | 10-27-34 |
 | cherry_tomato | G5+ens | state_113 | 4 | 9/20 | 10 | 1 | 12.7 | 36.8 | 19.9 | 24.0 | 10-40-05 |
 | cherry_tomato | G5+ens | state_113 | 8 | 9/20 | 11 | 2 | 15.5 | 37.3 | 21.2 | 23.3 | 11-48-09 |
+| cherry_tomato | G5+ens m.33 | state_113 | 4 | 6/20 | 7 | 1 | 14.2 | 37.6 | 19.4 | 23.9 | 13-59-32 |
 | cherry_tomato | baseline | state_120 | 4 | 3/20 | 3 | 0 | 7.6 | 35.7 | — | 26.8 | 03-23-32 |
 | mushroom | G3 | state_122 | 4 | 15/20 | 18 | 3 | 20.6 | 52.2 | — | 30.3 | 04-21-21 |
 | mushroom | G4 | state_40 | 4 | 15/20 | 19 | 4 | 24.7 | 53.2 | — | 29.4 | 09-14-04 |
@@ -74,6 +75,15 @@ bit-deterministic (parallel float atomics), so repeats differ:
   23-24.5 mm on a 25 mm object.** Across four policies and both execution modes: exec 18.2 -> 6/20,
   21.9 -> 5, 22.7 -> 3, **23.3 -> 9, 24.0 -> 9, 24.4 -> 10**, 26.2 -> 3, 26.8 -> 3, 27.6 -> 3. It
   predicts better than any training-side variable in the table.
+- **The ensembling weight `m` barely matters at our depth, and 0.33 is WORSE in sim.** ACT's
+  `w_i = exp(-m*i)` (i=0 oldest) was calibrated for its 100-deep window; at our depth of 4,
+  m=0.01 gives a 1.03x oldest/newest ratio, i.e. a plain mean. m=0.33 reproduces ACT's 2.69x ratio
+  and scored 6/20 vs 0.01's 10 and 9. My prediction that it would loosen the close was FALSIFIED:
+  executed width did not move (23.9 vs 24.0/24.4 mm). The loss is UPSTREAM -- ever-grasped 7 vs 10 --
+  so it is an approach effect, plausibly lag from weighting the stalest plan highest. One run, and
+  the 3.5-episode gap is only just outside the noise floor. NOTE the user reports 0.33 is clearly
+  better ON THE ROBOT; sim scores success and ignores smoothness, which is what heavier averaging
+  most directly buys, so both can be true. Sim-reported numbers use m=0.01.
 - **exec 8 is a WASH for G5, and a prediction of mine failed.** I predicted exec 8 would drop G5
   toward 6/20 (less ensembling overlap + reaching deeper into a tighter plan). It scored 9/20. The
   shortfall did halve as the mechanism says (4.5 -> 2.2 mm), but the PLAN shifted looser in

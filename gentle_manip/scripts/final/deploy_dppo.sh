@@ -141,24 +141,32 @@ cd "$(dirname "$0")/../../.."
 
 
 # +-----------------------------------------------------------------------------------------------------------
-# | GENERALIST, G5 + TEMPORAL ENSEMBLING = fsynt (cluster, 2026-09-09): G3 (horizon 16 executing 4,
-# | hold tail 22) + mean(+)max cloud pooling. The ONLY cherry-tomato result this campaign that
-# | survives replication: 10/20 and 9/20 (baseline 3/20, G3 3-5/20), at the LOWEST sustained stress
-# | of any horizon-16 run (12.5 / 12.7 kPa vs G3's 20.9-26.9). See docs/final/results.md.
-# | Ensembling averages the 4 overlapping predictions per step (ACT, w=exp(-m*i), i=0 oldest); it
-# | needs horizon > act-steps, so it is a no-op on the horizon-4 policies above.
-# | NOTE the meanmax encoder shape (3,194,016 params) is read from the checkpoint's own .hydra
-# | config — no override needed, verified loading with 0 missing / 0 unexpected keys.
-# | CAVEAT: sim-only so far, and pooling-vs-ensembling is not yet attributed. --smooth-alpha is
-# | LEFT OFF deliberately: ensembling already smooths the same signal and stacking both would
-# | double-smooth and blunt the fast close.
+# | GENERALIST G5 + ENSEMBLING = fsynt: G3 (horizon 16, exec 4, tail 22) + mean(+)max pooling. Best
+# | cherry result, replicated 10 and 9 /20 (baseline 3) at the lowest stress; mushroom 18/20 hold 0.
+# | Pooling and ensembling INTERACT -- alone 6/20 and 4.5/20. smooth-alpha damps orientation dither.
 # +-----------------------------------------------------------------------------------------------------------
-ckpt=logs/dppo/dppo-pretrain/single_lift_generalist_soft_v5_tail22/fsynt/checkpoint/state_113.pt
-normalization=dataset/dppo/single_lift_generalist_soft_v5_tail22/normalization.npz
+# ckpt=logs/dppo/dppo-pretrain/single_lift_generalist_soft_v5_tail22/fsynt/checkpoint/state_113.pt
+# normalization=dataset/dppo/single_lift_generalist_soft_v5_tail22/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
+#   --act-steps 4 --temporal-ensemble --ensemble-m 0.33 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/generalist_g5ens_fsynt_113 --shard-size 10 \
+#   --max-steps 5000 "$@"
+
+
+# +-----------------------------------------------------------------------------------------------------------
+# | REAL-only BC, G5 RECIPE = jfwqs: meanmax + horizon 16, otherwise identical to jiupy (same data,
+# | 2000 epochs) so the two changes are attributable. First real policy that can ensemble at all.
+# | state_400 = val min (ep 390); val loss has misled before, so sweep 800/1500/2000 if it is weak.
+# +-----------------------------------------------------------------------------------------------------------
+ckpt=logs/dppo/dppo-pretrain/single_lift_real6_bc_v1/jfwqs/checkpoint/state_1500.pt
+normalization=dataset/dppo/single_lift_real6_bc_v1/normalization.npz
 uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
-  --act-steps 4 --temporal-ensemble --ensemble-m 0.01 --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/generalist_g5ens_fsynt_113 --shard-size 10 \
+  --act-steps 4 --temporal-ensemble --ensemble-m 0.33 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+  --record dataset/real_deploy/real6_bc_g5recipe_jfwqs_1500 --shard-size 10 \
   --max-steps 5000 "$@"
