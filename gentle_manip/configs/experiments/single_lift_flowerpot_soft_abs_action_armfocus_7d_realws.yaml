@@ -1,0 +1,13 @@
+# [experiment] flowerpot: 7d euler abs action, arm-focus cloud, realws DR, D435i noise.
+# Used by: collect_demos_synth_v4 / DPPO training + eval / deploy
+# Status: active (object-expansion batch)
+
+task: single_lift_flowerpot_soft
+action: abs_pose_euler_abs_gripper_z15
+dr: soft_orientation_realws_flowerpot
+augmentation: d435i_noise
+
+obs: superset_soft_armfocus_board
+views: {student: [point_cloud], teacher: [privileged]}
+
+rl: {batch_size: 256, discount: 0.99, max_episode_steps: 400, random_steps: 300, training_starts: 5000}
