@@ -162,7 +162,28 @@ Expected at start: train 1,141,991 steps (1,074,275 + 12 × 5,643) → 8,922 bat
 Watcher `.agent_tmp/g5_watch.sh` reports the dataset build + verification gate (trajectory and step
 counts against the expected +12/episode) and the job's startup line.
 
-### Started 2026-09-08 23:12, running
+### DONE 2026-09-09 07:19 — completed, with one confound to declare
+
+**COMPLETED, 8 h 06 m, 113/113 epochs**, six checkpoints (`state_{20,40,60,80,100,113}.pt`).
+Final: **train 0.0023566 / val 0.0024951**; raw regularizers `loss_paired` 2.44e-5
+(`val` 1.89e-5), `loss_consistency` 4.73e-5. Val tracked train within 6 % and was flat over the
+last five epochs (0.002379 → 0.002357), i.e. converged.
+
+⚠ **Do NOT compare this loss to G1/G2's ~0.0011.** At horizon 16 the network predicts 16 timesteps
+per chunk instead of 4, so the per-sample MSE is over 4× more output dimensions. Absolute loss is
+only comparable at equal horizon — i.e. against **G3 `mmgyy`**, never against the horizon-4 runs.
+
+⚠ **CONFOUND: G5 received 7.4 % fewer gradient steps than G3.** My wrapper derived EPOCHS from
+`traj_lengths.sum()` (raw frames = 1,141,991 → 8,922 batches/epoch → 113 epochs), but the loader
+yields *chunks*, and a horizon-16 chunk cannot start in the last 15 frames of an episode:
+`chunks = raw − (H−1)·episodes = 1,141,991 − 15 × 5,643 = 1,057,346` → **8,261** batches/epoch. So
+G5 ran 113 × 8,261 = **933,493** steps against G3's correctly-derived 122 × 8,261 = **1,007,842**.
+The same formula is in the anchor script's `EPOCHS=auto`, where at horizon 4 the error is only 1.6 %
+and went unnoticed; at horizon 16 it is 7.4 %. **Fix for any future long-horizon run: derive EPOCHS
+from chunks, not frames.** Given val was flat for the last five epochs the practical impact is
+likely small, but it must be declared when G5 and G3 are compared.
+
+### Started 2026-09-08 23:12
 
 | | |
 |---|---|
