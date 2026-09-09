@@ -154,16 +154,21 @@ window.addEventListener('unhandledrejection', e => {
   </section>
 </main>
 <footer>Gripper cap 79&nbsp;mm (planner-enforced, <code>finger_grasp_final.py:515</code>) · height floor 20&nbsp;mm · data embedded at publish time from the object-expansion pipeline running on the arrhenius cluster.</footer>
-<script type="importmap">{"imports":{"three":"https://cdnjs.cloudflare.com/ajax/libs/three.js/0.150.0/three.module.min.js"}}</script>
+<!-- UMD build (defines window.THREE), NOT the ES-module build: an importmap + dynamic
+     import() previously loaded here failed completely silently in the Artifact CSP sandbox
+     (a blocked module fetch doesn't throw a catchable JS error or fire window.onerror, so
+     the try/catch degrade never even triggered its own error banner) -- the specimen list
+     and stats rendered fine, but the 3D view was permanently blank with zero diagnostic
+     signal, 2026-09-09. The tool's own guidance is explicit: UMD global via a plain
+     <script src> placed BEFORE the inline script, never an ES-module import for a CDN lib. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.150.0/three.min.js"></script>
 <script id="payload" type="application/json">__DATA_JSON__</script>
 <script type="module">
 const $=id=>document.getElementById(id);
-let THREE = null;
-try {
-  THREE = await import('three');
-} catch (e) {
+const THREE = (typeof window.THREE !== 'undefined') ? window.THREE : null;
+if (!THREE) {
   const el = $('fatalError');
-  if (el) { el.hidden = false; el.textContent = '3D viewer library failed to load (' + e.message + ') -- the specimen list and candidate table below still work.'; }
+  if (el) { el.hidden = false; el.textContent = '3D viewer library failed to load -- the specimen list and candidate table below still work.'; }
 }
 const DATA = JSON.parse(document.getElementById('payload').textContent);
 const REG = DATA.registered, CAND = DATA.candidates;
@@ -259,6 +264,7 @@ function selectReg(name){
   </dl>`;
   if(r.grasp){
     const g=r.grasp,pct=v=>v==null?'—':Math.round(100*v);
+    if(g.thumb) html+=`<img src="${g.thumb}" alt="Successful grasp still frame" style="width:100%;border-radius:8px;border:1px solid var(--line);margin-bottom:12px;display:block">`;
     html+=`<div class="gaugewrap"><div class="gaugelabel"><span>Grasp success</span><span class="mono">${pct(g.success_rate)}%</span></div>
     <div class="gauge"><i style="width:${pct(g.success_rate)}%"></i></div></div>
     <dl class="kv" style="margin-top:10px">

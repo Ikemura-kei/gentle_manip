@@ -80,6 +80,33 @@ def export_registered(max_tris: int) -> list[dict]:
     return out
 
 
+def _grasp_thumb(run_dir, max_w: int = 280, quality: int = 68) -> str | None:
+    """A small base64 JPEG data URI of one successful-grasp still frame, downsized from the
+    collector's full-res PNG (~1430x1210, ~450KB each -- far too big to embed at scale: 35+
+    objects would already blow past the Artifact 16MB cap on stills alone, let alone actual
+    video, which has no path onto a static artifact page at all -- no `assets` capability is
+    granted on this account (confirmed via the artifact-capabilities skill), and the user
+    explicitly rejected a local-server-backed viewer). This is the practical middle ground:
+    not a video, but real visual confirmation the grasp happened, at ~10-20KB each."""
+    vdir = run_dir / "videos"
+    if not vdir.exists():
+        return None
+    pngs = sorted(vdir.glob("*_success_grasp.png"))
+    if not pngs:
+        return None
+    try:
+        from PIL import Image
+        import base64, io
+        im = Image.open(pngs[0]).convert("RGB")
+        if im.width > max_w:
+            im = im.resize((max_w, round(im.height * max_w / im.width)), Image.LANCZOS)
+        buf = io.BytesIO()
+        im.save(buf, format="JPEG", quality=quality)
+        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception:
+        return None
+
+
 def collect_grasp_stats() -> dict[str, dict]:
     import yaml
     out = {}
@@ -103,6 +130,7 @@ def collect_grasp_stats() -> dict[str, dict]:
                         "episodes_saved": s.get("episodes_saved"),
                         "total_attempts": s.get("total_attempts"),
                         "run": run_dir.name,
+                        "thumb": _grasp_thumb(run_dir),
                     }
                 except Exception:
                     pass

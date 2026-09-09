@@ -10397,3 +10397,45 @@ watching round 17's crash rate as the test, rather than building a slower isolat
 smoke-test harness under today's time constraint. If the crash rate doesn't improve, the
 next things to try: smaller `sim_substeps`/`mpm_grid_density` for these harder shapes, or
 per-object retry with a coarser `max_faces` before accepting a crash as terminal.
+
+**Result (round 17, later the same day):** crash rate recovered to ~24% (roughly the
+historical ~29% baseline, well within sampling noise) instead of the 10/10 seen in round 16
+-- e.g. 19/87 gate-passers succeeded at one point, spanning genuinely new categories
+(dixie_cup notably -- the exact thin-walled shape that failed the face-budget sweep above at
+every tested budget in isolation, now completing a full 20-episode collection at 69% success).
+Smoothing appears to have worked as hypothesized; treating this as resolved pending further
+volume.
+
+### 2026-09-09 (cont.) — Artifact bug: 3D view permanently blank, no error shown
+
+User report: "3d view cannot be seen on the website. also no smoketest grasp videos of passed
+categories." Root cause (3D view): the template loaded three.js via an ES-module dynamic
+`import()` against an `<script type="importmap">` pointing at the CDN's `.module.min.js`
+build. This is architecturally wrong for the Artifact CSP sandbox -- the tool's own guidance
+is explicit that a CDN library must load via a plain `<script src>` UMD build (defines a
+global), never an ES-module import. Worse, a blocked/failed module fetch under CSP does NOT
+throw a catchable JS exception or fire `window.onerror` (module-loading failures surface via
+`securitypolicyviolation` events / console only), so the existing try/catch-plus-error-banner
+defense-in-depth from the EARLIER blank-page bug (2026-09-08, wrong CDN URL format) never
+even triggered -- it silently degraded to "3D view permanently empty, zero diagnostic signal,
+rest of the page fine" instead of showing the fatal-error banner. Two blank-page incidents,
+two different causes, but the SAME lesson both times: an external library failure mode that
+bypasses normal JS error propagation is much easier to hit than it looks, and default-adding
+defensive banners doesn't help if the failure never reaches a `catch` or `onerror` in the
+first place. **Fix:** switched to `<script src="https://cdnjs.cloudflare.com/ajax/libs/
+three.js/0.150.0/three.min.js">` (the UMD build, defines `window.THREE`) loaded as a plain
+script BEFORE the inline module script, which just checks `typeof window.THREE` -- no
+import/importmap anywhere. This is now the CDN-loading pattern this project's artifact
+should always use going forward, not the ES-module route, regardless of what the module
+build's URL happens to be.
+
+**No videos**: confirmed not fixable within the current architecture -- no `assets`
+capability is granted on this account (checked via the artifact-capabilities skill), so
+there is no path to serve `.mp4` files (or any binary asset) from a static Artifact page,
+and a local-server-backed viewer was explicitly rejected by the user earlier this session in
+favor of a shareable, IP-free artifact link. Practical middle ground shipped instead: each
+fully-collected object's detail panel now embeds ONE downsized JPEG still frame (from the
+collector's `*_success_grasp.png`, resized to 280px wide, ~10-20KB after re-encoding vs.
+~450KB for the original full-res PNG -- `export_artifact_data.py::_grasp_thumb`) as a base64
+data URI in the JSON payload. Real visual confirmation the grasp happened, without needing
+any capability this account doesn't have.
