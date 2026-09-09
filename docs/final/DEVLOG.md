@@ -10368,3 +10368,32 @@ the project's known open question about thin-shell MPM feasibility. Set the new 
 `max_faces=2000` in both `repair_watertight` and `prep_mesh` -- a time-boxed empirical choice
 from a 3-sample sweep, not a precise optimum; revisit with a larger sample if throughput is
 still tet-count-gated after this lands.
+
+### 2026-09-09 (cont.) — Round 16 exposed a THIRD bottleneck: 10/10 gate-passers crashed at collection
+
+With both fixes above live, round 16 immediately showed a new, worse pattern: every single
+object that reached MPM collection (10/10: cooler, postbox x2, bell, barge, atomizer, book,
+cart, cock) crashed mid-sim -- declining FPS (18->11 over ~2 min) then a native abort (rc=-6,
+no catchable Python traceback), vs. a ~29% historical crash rate (18/62) before today's fixes.
+10/10 failures has <4% probability under the old base rate by chance alone -- worth treating
+as a real regression, not noise.
+
+**Hypothesis**: the historically-successful 18 (pea, ball, clementine, honey, piggy_bank,
+soccer_ball) are all simple round/blob shapes that needed little or no repair -- they barely
+touched the voxel-remesh path. Today's fixes route MANY MORE objects through that path
+specifically BECAUSE it's what got them past mesh_prep at all, and a raw marching-cubes
+surface is BLOCKY: axis-aligned voxel-grid steps produce sharp corners at every cell boundary.
+Sharp, high local curvature geometry is exactly what produces poorly-shaped (sliver) tetrahedra
+and stress-concentration blowups in MPM -- consistent with the declining-FPS-then-divergence
+pattern and CLAUDE.md's own documented "a soft body dropped from height blows up" MPM fragility.
+
+**Fix** (`mesh_prep.py::_coarsen_to_budget`): apply Taubin smoothing (`trimesh.smoothing.
+filter_taubin`, volume-preserving -- plain Laplacian shrinks) to the marching-cubes output
+before returning it, rounding off the staircase artifacts while keeping the coarse face
+budget and overall shape. Re-verified watertightness holds on all 6 previously-fixed real
+candidates after adding this. **Not yet empirically confirmed to fix the MPM crash rate**
+(that needs a real collection run, which the next production round provides) -- deployed and
+watching round 17's crash rate as the test, rather than building a slower isolated MPM
+smoke-test harness under today's time constraint. If the crash rate doesn't improve, the
+next things to try: smaller `sim_substeps`/`mpm_grid_density` for these harder shapes, or
+per-object retry with a coarser `max_faces` before accepting a crash as terminal.

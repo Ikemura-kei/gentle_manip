@@ -26,6 +26,55 @@ from pathlib import Path
 import numpy as np
 
 
+def _coarsen_to_budget(mesh, max_faces: int, voxel_div: int = 160):
+    """Voxelize+marching_cubes at progressively finer resolutions, stopping just before the
+    first resolution that exceeds max_faces (see repair_watertight's 2026-09-09 finding: this
+    is watertight by construction and avoids the heavy quadric decimation that reliably broke
+    watertightness in ways fill_holes couldn't recover). Returns None if voxelization never
+    produces any geometry (caller decides the fallback)."""
+    import trimesh
+    mc, last_cand = None, None
+    for div in (10, 14, 18, 24, 32, 42, 55, 70, 90, 120, voxel_div):
+        pitch = float(mesh.extents.max()) / div
+        try:
+            vg = mesh.voxelized(pitch).fill()
+            cand = vg.marching_cubes
+            cand.apply_transform(vg.transform)
+        except Exception:
+            continue
+        if len(cand.faces) == 0:
+            continue
+        last_cand = cand
+        if len(cand.faces) <= max_faces:
+            mc = cand
+        else:
+            break  # finer only ever increases face count -- stop before the expensive one
+    out = mc if mc is not None else last_cand
+    if out is None:
+        return None
+    # 2026-09-09: round 16 (this fix live) showed EVERY object that reached MPM collection
+    # (10/10: cooler, postbox, bell, barge, atomizer, book, cart, cock, ...) crash mid-sim
+    # (declining FPS then a native abort, no Python traceback -- the classic "soft body blew
+    # up" MPM divergence CLAUDE.md already documents), vs. ~29% crash-free historically. A
+    # raw marching-cubes surface is BLOCKY (axis-aligned voxel steps, sharp corners at every
+    # cell boundary) -- exactly the kind of poorly-shaped, high local curvature geometry that
+    # produces sliver tetrahedra and stress-concentration blowups in MPM. Taubin smoothing
+    # (volume-preserving, unlike Laplacian which shrinks) rounds off the staircase artifacts
+    # while keeping the coarse face budget and overall shape -- a topology-only-preserving
+    # vertex-position operation, so a watertight input should stay watertight.
+    try:
+        import trimesh
+        trimesh.smoothing.filter_taubin(out, lamb=0.5, nu=0.53, iterations=10)
+        if not out.is_watertight:
+            out.merge_vertices()
+            out.remove_unreferenced_vertices()
+            trimesh.repair.fill_holes(out)
+            trimesh.repair.fix_normals(out)
+    except Exception:
+        pass  # smoothing is a quality improvement, not correctness-critical -- never let it fail the repair
+    return out
+
+
 def yup_to_zup(mesh):
     """glTF Y-up -> sim Z-up: rotate -90deg about X (new_z=old_y, new_y=-old_z)."""
     v = np.asarray(mesh.vertices).copy()
@@ -99,24 +148,7 @@ def repair_watertight(mesh, *, voxel_div: int = 160, max_faces: int = 2000, forc
             # resolution keeps every voxelize+marching_cubes call in this loop's own
             # successfully-fit face count, so the most expensive one actually run is the
             # smallest that still cleared the fine side of the budget line.
-            mc, last_cand = None, None
-            for div in (10, 14, 18, 24, 32, 42, 55, 70, 90, 120, voxel_div):
-                pitch = float(mesh.extents.max()) / div
-                try:
-                    vg = mesh.voxelized(pitch).fill()
-                    cand = vg.marching_cubes
-                    cand.apply_transform(vg.transform)
-                except Exception:
-                    continue
-                if len(cand.faces) == 0:
-                    continue
-                last_cand = cand
-                if len(cand.faces) <= max_faces:
-                    mc = cand
-                else:
-                    break  # finer only ever increases face count -- stop before the expensive one
-            if mc is None:
-                mc = last_cand  # even the coarsest grid was over budget; decimate it (mild, not ~98%)
+            mc = _coarsen_to_budget(mesh, max_faces, voxel_div)
             if mc is None:
                 raise RuntimeError("repair failed: voxel remesh produced no geometry at any "
                                     "tried resolution (FAILS LOUDLY per the 2026-09-07 DEVLOG lesson)")
@@ -142,20 +174,28 @@ def repair_watertight(mesh, *, voxel_div: int = 160, max_faces: int = 2000, forc
     # pilot: zucchini's already-watertight 73,598-face mesh reached the FEM gate at 5,748 tets,
     # over the 4,500 cap in adding_new_objects.md ss2, because nothing had decimated it).
     if len(mesh.faces) > max_faces:
-        try:
-            import fast_simplification
-            v, f = fast_simplification.simplify(
-                np.asarray(mesh.vertices, np.float32), np.asarray(mesh.faces, np.int32),
-                target_reduction=1.0 - max_faces / len(mesh.faces))
-            mesh = trimesh.Trimesh(vertices=v, faces=f)
-        except ImportError:
-            mesh = mesh.simplify_quadric_decimation(max_faces)
-        # Same post-decimation hole-defect fix as the inner voxel-remesh branch above --
-        # this mesh was watertight going INTO decimation (that's how it reached this branch),
-        # so any hole here was introduced by the simplifier and merge/fill_holes is safe.
-        mesh.merge_vertices()
-        mesh.remove_unreferenced_vertices()
-        trimesh.repair.fill_holes(mesh)
+        # 2026-09-09: this path used to decimate the ORIGINAL (already-watertight) mesh
+        # directly via fast_simplification, which hit the exact same hole-defect bug as the
+        # inner branch above ("post-decimation mesh lost watertightness") -- fill_holes
+        # afterward didn't reliably recover it there either. Use the same proven-robust
+        # coarsen-via-voxel-remesh strategy instead of ever leaning on heavy decimation.
+        mc = _coarsen_to_budget(mesh, max_faces, voxel_div)
+        if mc is None:
+            raise RuntimeError("repair failed: voxel remesh produced no geometry at any "
+                                "tried resolution (FAILS LOUDLY per the 2026-09-07 DEVLOG lesson)")
+        mesh = mc
+        if len(mesh.faces) > max_faces:
+            try:
+                import fast_simplification
+                v, f = fast_simplification.simplify(
+                    np.asarray(mesh.vertices, np.float32), np.asarray(mesh.faces, np.int32),
+                    target_reduction=1.0 - max_faces / len(mesh.faces))
+                mesh = trimesh.Trimesh(vertices=v, faces=f)
+            except ImportError:
+                mesh = mesh.simplify_quadric_decimation(max_faces)
+            mesh.merge_vertices()
+            mesh.remove_unreferenced_vertices()
+            trimesh.repair.fill_holes(mesh)
         trimesh.repair.fix_normals(mesh)
         if not mesh.is_watertight:
             raise RuntimeError("repair failed: post-decimation mesh lost watertightness "
