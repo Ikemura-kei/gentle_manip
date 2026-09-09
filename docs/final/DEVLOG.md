@@ -10342,3 +10342,29 @@ isosurface) should never be decimated by more than a mild amount if watertightne
 downstream** -- reach for a coarser regeneration first, and treat heavy quadric/edge-collapse
 decimation as fundamentally unsafe for topology preservation on fragmented, high-genus
 source geometry, `fix_normals` and `fill_holes` are not a safety net for it.
+
+### 2026-09-09 (cont.) — Round 15 exposed the NEXT bottleneck: surface faces vs. tet-count cap
+
+With mesh repair fixed, round 15 (12 jobs, full 420-category candidate pool) immediately
+showed objects reaching `fem_gate_check` in bulk for the first time -- and roughly half of
+those failing `ok_tetcount` (`meta["tets"] > 3 * TARGET_TETS = 4500`). Root cause: `mesh_prep`'s
+`max_faces=6000` default (a mesh-repair implementation constant) was never tuned against
+`fem_gate_check`'s `TARGET_TETS=1500` (docs/final/adding_new_objects.md ss2) -- a 6000-face
+surface routinely made tetgen produce 5000-9000+ tets on real candidates, since a dense
+surface forces small boundary-conforming tets tetgen can't coarsen past. This mismatch
+predates today's repair fix; it just never mattered before because ~93% of objects never
+survived mesh_prep to reach this gate.
+
+**Diagnosis + fix** (`gentle_manip/scripts/object_expansion/diag_facebudget.py`, run via
+sbatch): swept `max_faces` in (3000, 2000, 1500, 1000) against 3 real round-15 candidates that
+had failed the tet-count gate (dixie_cup, avocado, book). Result was shape-dependent and
+NON-monotonic (finer is not always better: avocado got WORSE at max_faces=1000 -- 4721 tets,
+up from 4334 at 1500/2000 -- forcing too few surface faces on a smooth curved shape can
+introduce sharp/degenerate features that make tetgen's Delaunay refinement insert MORE
+Steiner points, not fewer). `max_faces=2000` passed 2/3 samples (avocado, book) vs 1/3 at the
+old 6000 default; `dixie_cup` (a thin-walled cup) failed the tet-count gate at every budget
+tried -- a separate thin-shell/thin-wall difficulty, not a face-count one, consistent with
+the project's known open question about thin-shell MPM feasibility. Set the new default to
+`max_faces=2000` in both `repair_watertight` and `prep_mesh` -- a time-boxed empirical choice
+from a 3-sample sweep, not a precise optimum; revisit with a larger sample if throughput is
+still tet-count-gated after this lands.

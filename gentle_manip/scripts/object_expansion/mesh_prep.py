@@ -37,7 +37,15 @@ def yup_to_zup(mesh):
     return mesh
 
 
-def repair_watertight(mesh, *, voxel_div: int = 160, max_faces: int = 6000, force_remesh: bool = False):
+def repair_watertight(mesh, *, voxel_div: int = 160, max_faces: int = 2000, force_remesh: bool = False):
+    # max_faces default lowered 6000->2000 (2026-09-09, gentle_manip/scripts/object_expansion/
+    # diag_facebudget.py): now that repair succeeds broadly (the watertightness fix above),
+    # the NEXT bottleneck was surface face count vs. fem_gate_check's tet-count cap (3 *
+    # TARGET_TETS=1500 -> 4500) -- a 6000-face surface routinely produced 5000-9000+ tets on
+    # real candidates. 2000 empirically passed 2/3 sampled real objects vs 1/3 at 6000 (and
+    # non-monotonic: neither higher nor lower is uniformly better -- some shapes, e.g. a
+    # thin-walled cup, produce high tet counts at ANY face budget, a separate thin-shell
+    # issue, not a face-count one). Not a precise optimum, a time-boxed empirical default.
     import trimesh
     if mesh.body_count > 1:
         # Largest by CONVEX-HULL VOLUME, unioning every component within 2% of the biggest --
@@ -156,7 +164,7 @@ def repair_watertight(mesh, *, voxel_div: int = 160, max_faces: int = 6000, forc
 
 
 def prep_mesh(src: str, dst: str, scale: float, *, orient: str = "yup2zup",
-              voxel_div: int = 160, max_faces: int = 6000, force_remesh: bool = False,
+              voxel_div: int = 160, max_faces: int = 2000, force_remesh: bool = False,
               align_longest_to: str | None = None) -> dict:
     import trimesh
     mesh = trimesh.load(src, force="mesh", process=True)
