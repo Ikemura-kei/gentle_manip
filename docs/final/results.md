@@ -30,6 +30,7 @@ construction, since the whole chunk executes.
 | cherry_tomato | G5 | state_113 | 4 | 6/20 | 7 | 1 | 18.8 | 37.3 | 16.3 | 18.2 | 10-51-00 |
 | cherry_tomato | G5+ens | state_113 | 4 | 10/20 | 10 | 0 | 12.5 | 37.0 | 20.0 | 24.4 | 10-27-34 |
 | cherry_tomato | G5+ens | state_113 | 4 | 9/20 | 10 | 1 | 12.7 | 36.8 | 19.9 | 24.0 | 10-40-05 |
+| cherry_tomato | G5+ens | state_113 | 8 | 9/20 | 11 | 2 | 15.5 | 37.3 | 21.2 | 23.3 | 11-48-09 |
 | cherry_tomato | baseline | state_120 | 4 | 3/20 | 3 | 0 | 7.6 | 35.7 | — | 26.8 | 03-23-32 |
 | mushroom | G3 | state_122 | 4 | 15/20 | 18 | 3 | 20.6 | 52.2 | — | 30.3 | 04-21-21 |
 | mushroom | G4 | state_40 | 4 | 15/20 | 19 | 4 | 24.7 | 53.2 | — | 29.4 | 09-14-04 |
@@ -69,6 +70,15 @@ bit-deterministic (parallel float atomics), so repeats differ:
   gentlest policy measured on both.
 - **Both components are needed — they interact, they do not add.** Cherry: pooling alone (G5 plain)
   6/20; ensembling alone (G3+ens) 4.5 vs G3's 4.0, i.e. nothing; together 9.5.
+- **EXECUTED width is the best single predictor of cherry success — an optimal BAND near
+  23-24.5 mm on a 25 mm object.** Across four policies and both execution modes: exec 18.2 -> 6/20,
+  21.9 -> 5, 22.7 -> 3, **23.3 -> 9, 24.0 -> 9, 24.4 -> 10**, 26.2 -> 3, 26.8 -> 3, 27.6 -> 3. It
+  predicts better than any training-side variable in the table.
+- **exec 8 is a WASH for G5, and a prediction of mine failed.** I predicted exec 8 would drop G5
+  toward 6/20 (less ensembling overlap + reaching deeper into a tighter plan). It scored 9/20. The
+  shortfall did halve as the mechanism says (4.5 -> 2.2 mm), but the PLAN shifted looser in
+  compensation (20.0 -> 21.2), so executed width barely moved (24.4 -> 23.3) and stayed in the band.
+  No reason to prefer exec 8: same score, higher stress (15.5 vs 12.5 kPa).
 - **"Tighter is better" is WRONG — there is an optimal band.** G5 plain plans and executes the
   tightest of any run (16.3 / 18.2 mm) and scores only 6/20 at 18.8 kPa; G5+ens executes 6 mm looser
   (24.4 mm) and scores 9.5 at 12.5 kPa. On a 25 mm object, closing too far is its own failure.
