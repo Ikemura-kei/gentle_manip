@@ -97,6 +97,11 @@ model:
       in_channels: 3
       use_layernorm: True
       final_norm: layernorm
+      # FROM THE CKPT, defaulting to max for runs that predate the knob (G1-G4, wiayg). A meanmax
+      # checkpoint (G5 `fsynt`) has a different encoder shape, so a mismatch is a loud state-dict
+      # error rather than a silent mis-decode -- but reading it here means nobody has to remember
+      # the override in the first place.
+      pooling: ${run_cfg:${base_policy_path},model.network.pointnet.pooling,max}
   horizon_steps: ${horizon_steps}
   obs_dim: ${obs_dim}
   action_dim: ${action_dim}

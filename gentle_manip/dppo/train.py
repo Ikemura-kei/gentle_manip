@@ -44,7 +44,7 @@ def _eval_base(ckpt: str) -> str:
     return str(p.parent.parent if p.parent.name == "checkpoint" else p.parent)
 
 
-def _run_cfg(ckpt: str, key: str) -> str:
+def _run_cfg(ckpt: str, key: str, default=None) -> str:
     """OmegaConf resolver `${run_cfg:<ckpt>,<key>}`: a top-level key of the checkpoint's OWN
     training config (<run>/.hydra/config.yaml) — lets an eval cfg derive `env`/`experiment`
     from the checkpoint instead of pinning one object. Override on the CLI if the run is too
@@ -55,6 +55,11 @@ def _run_cfg(ckpt: str, key: str) -> str:
     node = d
     for part in str(key).split("."):          # dotted keys, e.g. model.predict_epsilon
         if not isinstance(node, dict) or part not in node:
+            # A DEFAULT lets an eval cfg read a key that only NEWER runs carry (e.g. the encoder
+            # `pooling`, added for G5) without breaking every older checkpoint that predates it.
+            # Without a default the key stays mandatory, which is right for env/experiment.
+            if default is not None:
+                return default
             raise KeyError(f"{f} has no '{key}' — pass {key}=... on the command line")
         node = node[part]
     # keep the VALUE's type: `str(False)` would come back as the truthy string "False", which is

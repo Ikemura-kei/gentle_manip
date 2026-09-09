@@ -6,6 +6,8 @@ All numbers are 20-episode teasers through the canonical harness (`EvalSpec`, fi
 
 **Policies.** baseline `wiayg` = recipe v5, horizon 4. G3 `mmgyy` = horizon 16 executing 4, hold
 tail 22. G4 `bpfnl` = G3 + sample prediction (`predict_epsilon=False`), stopped at epoch 94.
+G5 `fsynt` = G3 + mean(+)max cloud pooling, trained on the cluster (epsilon target, 113 epochs,
+933k steps — NOT step-matched to G3's 1.008M, so G5-vs-G3 confounds pooling with training length).
 `+ens` = ACT temporal ensembling at inference (`GM_TEMPORAL_ENSEMBLE=1`, m=0.01), no retraining.
 
 **Columns.** `ever` = episodes that ever closed on the object; `hold` = `ever − success`, i.e.
@@ -21,6 +23,7 @@ pinned at 49–53 kPa across nine demonstrator configs and is a contact/metric a
 | cherry_tomato | G3+ens | state_122 | 4 | 6/20 | 6 | 0 | 0.3 | 13.9 | 37.2 | 09-04-34 |
 | cherry_tomato | G3+ens | state_122 | 4 | 3/20 | 4 | 1 | 0.2 | 19.8 | 38.1 | 10-02-39 |
 | cherry_tomato | G3+ens | state_122 | 8 | 3/20 | 3 | 0 | 0.15 | 21.4 | 38.3 | 09-42-59 |
+| cherry_tomato | G5+ens | state_113 | 4 | 10/20 | 10 | 0 | 0.55 | 12.5 | 37.0 | 10-27-34 |
 | cherry_tomato | baseline | state_120 | 4 | 3/20 | 3 | 0 | 0.3 | 7.6 | 35.7 | 03-23-32 |
 | mushroom | G3 | state_122 | 4 | 15/20 | 18 | 3 | 0.95 | 20.6 | 52.2 | 04-21-21 |
 | mushroom | G4 | state_40 | 4 | 15/20 | 19 | 4 | 0.95 | 24.7 | 53.2 | 09-14-04 |
@@ -52,6 +55,9 @@ bit-deterministic (parallel float atomics), so repeats differ:
 - **Ensembling's cherry result does NOT replicate.** 6/20 then 3/20, against G3 plain's 3/20 then
   5/20. Means are 4.5 vs 4.0 — no effect. An earlier reading of this page claimed ensembling
   doubled cherry success; that was a single unreplicated run.
+- **G5+ens reached 10/20 on cherry** (hold 0, sustained 12.5 kPa) — the best cherry result of the
+  campaign, against 3-6 for every other policy. ONE run; a replicate and a no-ensembling arm are
+  running. Read it with the failure above in mind.
 - **Gentleness differences between policies are not established.** The G3-vs-G4 mushroom gap
   (20.6 vs 24.7 kPa) is smaller than the 6 kPa repeat spread on one policy.
 - What survives: the **hold-loss signature** (below), which is consistent across objects and runs.
@@ -103,11 +109,48 @@ the average were made when the gripper was further away and predicted less closu
 lags the closing schedule instead of reaching its tight tail. The explanation is wrong and the
 reason exec 8 helps is still open.
 
+## Cherry tomato: baseline and G3 fail for OPPOSITE reasons
+
+Object 25 mm, demonstrations close to 21 mm. `plan` = tightest width the policy predicted for a step
+that actually arrived; `exec` = what reached the gripper.
+
+| policy | outcome | plan | exec | shortfall |
+|---|---|---|---|---|
+| baseline h4 | success | *(= exec)* | 25.1 | 0.0 |
+| baseline h4 | fail | *(= exec)* | **27.1** | 0.0 |
+| G3 h16 | success | 17.9 | 19.0 | **1.1** |
+| G3 h16 | fail | **18.2** | 22.5 | **4.3** |
+| G3+ens h16 | fail | 21.1 | **27.2** | 6.0 |
+| G5+ens h16 | success | 18.7 | 23.0 | 4.3 |
+| G5+ens h16 | fail | **21.2** | 25.9 | 4.6 |
+
+- **Baseline = a PREDICTION problem.** Horizon 4 executes everything it predicts, so there is no
+  drift to blame; it simply never intends to close far enough (27.1 mm on a 25 mm object).
+- **G3 = an EXECUTION problem.** It plans 18.2 mm on failures, essentially the same as the 17.9 mm
+  it plans on successes. What separates them is whether the plan survives: 1.1 mm of slippage when
+  it works, 4.3 mm when it does not. Horizon 16 fixed the prediction problem and created an
+  execution one — both land at 3-5/20, which is why teasers made them look equivalent.
+- **Ensembling makes execution LOOSER**, not tighter (shortfall 3.1 -> 5.7 mm overall): at a given
+  step the older plans in the average were made when the gripper was further away and predicted
+  less closure, so blending them lags the closing schedule. This refutes the tempting explanation
+  that ensembling and exec-8 help by reaching into the tighter tail of the plan; why exec 8 helps
+  is still open.
+- **G5's gain is NOT width.** Paired on identical scenarios G3 and G5 plan within 0.58 mm of each
+  other and G5 plans tighter in only 11/20, yet it wins 7 episodes G3 lost and ever-grasps 10 times
+  against 4. The gain is upstream of the final width; the mechanism is NOT identified. Note
+  `obj_scale` is fixed at 0.95 on cherry, so the width-vs-scale adaptation metric cannot be
+  computed on this experiment at all.
+
+
 ## Open
 
 - Replicate the plan-vs-execution split before building on it.
 - Forced-width probe: nothing here forced a failing episode to 18.2 mm to confirm it would then
   succeed. Correlational until then.
 - Disentangle exec 8 from `state_80` (run exec 8 on `state_80`).
+- Replicate G5+ens 10/20, and attribute it between pooling and ensembling (G5 plain) — RUNNING.
+- Identify G5's mechanism: it ever-grasps 10 vs 4 and it is not the planned width. Needs object
+  position recorded in `signals/` (absent today), or watching the 7 seed-matched episodes G5 won
+  and G3 lost (1, 2, 3, 5, 7, 13, 14).
 - G3 at exec 8 — isolates epsilon vs sample at matched inference; if it also reaches 18/20, the G4
   training run bought nothing.
