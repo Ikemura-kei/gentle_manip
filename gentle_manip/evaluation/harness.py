@@ -114,7 +114,7 @@ def _policy_columns(policy, n):
 
 
 def _write_signals(out_dir, batch, n, ee_buf, grip_buf, quat_buf, act_buf, flag_buf, venv, experiment_name, spec,
-                   state_buf=None):
+                   state_buf=None, full_buf=None):
     """<out>/signals/epNNN.{png,npz}: command chunks (derive space via venv._unnorm_action) vs state.
     The DPPO venv exposes proprio only as the normalized `state` vector (obs_keys order, last cond
     step); when the ee buffers are empty the state buffer is de-normalized with venv.obs_min/max."""
@@ -135,7 +135,7 @@ def _write_signals(out_dir, batch, n, ee_buf, grip_buf, quat_buf, act_buf, flag_
                 elif k == "gripper_width": grip_buf[j] = list(seg[:, 0])
     if not ee_buf[0]:
         return
-    from gentle_manip.evaluation.signals import plot_episode
+    from gentle_manip.evaluation.signals import plot_episode, plot_plan_vs_executed
     from gentle_manip.experiment import Experiment
     acfg = Experiment.load(experiment_name).action_config
     sig_dir = Path(out_dir) / "signals"; sig_dir.mkdir(parents=True, exist_ok=True)
@@ -151,12 +151,34 @@ def _write_signals(out_dir, batch, n, ee_buf, grip_buf, quat_buf, act_buf, flag_
         quat = np.stack(quat_buf[j]) if quat_buf[j] else None
         flags = {"residue-injected sub-steps": flag_buf[j]} if flag_buf[j] else None
         k = batch * n + j
+        # FULL predicted chunk (all `horizon` steps), not just the `act_steps` executed. With
+        # horizon 16 / execute 4 the policy discards 12 of every 16 predicted steps, so the
+        # executed trace cannot answer "did it ever PLAN the right closing width?" -- only
+        # "what did it do". Empty for any policy that does not expose last_full_chunk().
+        full = np.empty((0,))
+        if full_buf and full_buf[j]:
+            fr = np.stack(full_buf[j])                                       # (T, H, A) normalized
+            if hasattr(venv, "_unnorm_action"):
+                fr = np.stack([np.stack([venv._unnorm_action(c[None])[0] for c in ch]) for ch in fr])
+            full = fr
         np.savez_compressed(sig_dir / f"ep{k:03d}.npz", ee_pos=ee, gripper_width=grip,
                             ee_quat=quat if quat is not None else np.empty((0,)), action_chunks=chunks,
+                            action_chunks_full=full,
                             residue_injected=np.asarray(flag_buf[j], float) if flag_buf[j] else np.empty((0,)))
         plot_episode(sig_dir / f"ep{k:03d}.png", ee=ee, grip=grip, quat=quat, act_chunks=chunks, action_config=acfg,
                      act_steps=chunks.shape[1], dt=dt, flags=flags,
                      title=f"eval ep {k} (batch {batch} env {j}): command chunks vs state")
+        # Planned-vs-executed width, whenever the policy exposed its full chunk. Separate figure
+        # because it answers a different question than the command-vs-state plot: not "what did it
+        # do" but "did it PLAN the right closing width and fail to realize it". Never fatal.
+        if full.size:
+            try:
+                plot_plan_vs_executed(sig_dir / f"ep{k:03d}_plan.png", act_chunks=chunks,
+                                      act_chunks_full=full, action_config=acfg,
+                                      act_steps=chunks.shape[1],
+                                      title=f"eval ep {k} (batch {batch} env {j})")
+            except Exception as _pe:                                     # noqa: BLE001
+                print(f"[harness] plan-vs-executed plot failed for ep {k}: {_pe}", flush=True)
 
 
 def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional[str] = None,
@@ -236,6 +258,7 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
         # action stream 5.6x (njerk 1475 -> 264) while the achieved EE path was unchanged (~11150),
         # so an ee_*-only gate would have scored a real improvement as no change at all.
         act_buf = [[] for _ in range(n)]
+        full_buf = [[] for _ in range(n)]      # optional: the policy's FULL predicted chunk
 
         for t in range(spec.max_policy_steps):
             if isinstance(obs, dict) and "state" in obs:                       # proprio the policy acts on (signals.py)
@@ -265,6 +288,20 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
                 _a2 = _a.reshape(n, -1)                       # chunked actions flatten harmlessly
                 for j in range(n):
                     act_buf[j].append(_a2[j].copy())
+            # OPTIONAL, duck-typed (like policy.episode_metrics): the full predicted chunk, so
+            # signals record what the policy PLANNED as well as what it executed. A policy without
+            # the method contributes nothing and the npz key stays empty.
+            _fc = getattr(policy, "last_full_chunk", None)
+            if _fc is not None:
+                try:
+                    _f = _fc()
+                    if _f is not None:
+                        _f = np.asarray(_f, float)
+                        if _f.ndim == 3 and _f.shape[0] == n:
+                            for j in range(n):
+                                full_buf[j].append(_f[j].copy())
+                except Exception:
+                    pass
             obs, reward, _term, _trunc, info = venv.step(action)
             # Optional, PROTOCOL-NEUTRAL hook: let a policy adapter observe the step info (e.g. a
             # contact-triggered width controller reading `contact_force`). Does NOT change the eval
@@ -298,6 +335,7 @@ def run_eval(venv, policy, spec: EvalSpec, out_dir, *, experiment_name: Optional
         # over the sampled state, + binary per-step flags (e.g. residue injected). Best-effort.
         try:
             _write_signals(out_dir, i, n, ee_buf, grip_buf, quat_buf, act_buf, flag_buf, venv, experiment_name, spec,
+                           full_buf=full_buf,
                            state_buf=state_buf)
         except Exception as _e:                                  # noqa: BLE001
             print(f"  [signals] skipped for batch {i}: {_e}", flush=True)

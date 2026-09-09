@@ -397,6 +397,7 @@ class _DiffusionPolicy:
         ensembling ON the executed width therefore differs slightly from the dumped one.
         """
         n_exec = self.act_steps
+        self._last_full = np.asarray(traj, np.float32).copy()   # what was PLANNED (all horizon steps)
         if not self._ensemble:
             self._ens_c += 1
             return traj[:, :n_exec]
@@ -423,6 +424,16 @@ class _DiffusionPolicy:
             out[:, k] = np.tensordot(w.astype(np.float32), np.stack(contrib, 0), axes=(0, 0))
         self._ens_c += 1
         return out
+
+    def last_full_chunk(self):
+        """The most recent FULL predicted chunk, (n_env, horizon, act_dim), normalized.
+
+        Read by the eval harness (duck-typed) so `signals/epNNN.npz` records what the policy
+        PLANNED, not only the `act_steps` it executed. At horizon 16 / execute 4, twelve of every
+        sixteen predicted steps are otherwise discarded, which makes it impossible to tell a policy
+        that never plans the right closing width from one that plans it and then drifts off it.
+        """
+        return getattr(self, "_last_full", None)
 
     def act(self, obs):
         self._act_calls += 1

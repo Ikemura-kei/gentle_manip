@@ -27,6 +27,54 @@ def decode_chunks(act_chunks: np.ndarray, action_config):
     return phys[:, :3], eul, phys[:, 7], a.shape[0] // max(act_chunks.shape[0], 1)
 
 
+def plot_plan_vs_executed(out_png: Path, *, act_chunks, act_chunks_full, action_config,
+                          act_steps: int, title: str, demo_width_m: float | None = None) -> None:
+    """Gripper width the policy PLANNED vs what it EXECUTED, on an absolute-step axis.
+
+    With horizon H executing K < H steps, only h=0..K-1 of each chunk ever runs and the rest is
+    replaced by the next decision. Drawing each chunk from its own decision point shows whether a
+    policy plans the right closing width and then drifts off it (the plans dip below the executed
+    trace) or never plans it at all (plans and execution coincide).
+
+    Measured on G3/cherry 2026-09-09: successes execute within 1.1 mm of plan, failures fall 4.3 mm
+    short while planning the SAME width -- i.e. the width was predicted correctly and not realized.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    full = np.asarray(act_chunks_full)
+    if full.size == 0:
+        return
+    K = int(act_steps)
+    _, _, ex_w, _ = decode_chunks(np.asarray(act_chunks), action_config)      # (T*K,) metres
+    ex_mm = np.asarray(ex_w, float) * 1000.0
+    T, H = full.shape[0], full.shape[1]
+    _, _, fu_w, _ = decode_chunks(full, action_config)                        # (T*H,) metres
+    fu_mm = np.asarray(fu_w, float).reshape(T, H) * 1000.0
+
+    fig, ax = plt.subplots(figsize=(11, 3.6))
+    for t in range(T):                                    # every chunk's full plan, from its own step
+        ax.plot(np.arange(t * K, t * K + H), fu_mm[t], color="#d62728", lw=0.6, alpha=0.30)
+    ax.plot(np.arange(ex_mm.size), ex_mm, color="#1f77b4", lw=2.0, label="executed", zorder=5)
+    ax.plot([], [], color="#d62728", lw=0.9, alpha=0.8, label=f"each chunk's {H}-step plan")
+    for b in range(0, ex_mm.size + K, K):                 # chunk breaks: plan replaced here
+        ax.axvline(b, color="0.8", lw=0.4, ls=":", zorder=0)
+    if demo_width_m:
+        ax.axhline(demo_width_m * 1000.0, color="green", lw=1.0, ls="--", alpha=0.7,
+                   label=f"demo {demo_width_m * 1000:.0f} mm")
+    # headline number: how much looser the execution ended up than the tightest realizable plan
+    reach = [fu_mm[t, h] for t in range(T) for h in range(H) if t * K + h < ex_mm.size]
+    if reach:
+        short = float(ex_mm.min() - min(reach))
+        ax.set_title(f"{title}   |   plan min {min(reach):.1f} mm, exec min {ex_mm.min():.1f} mm, "
+                     f"shortfall {short:+.1f} mm", fontsize=9)
+    else:
+        ax.set_title(title, fontsize=9)
+    ax.set_xlabel("absolute action step (dotted = chunk break)"); ax.set_ylabel("gripper width (mm)")
+    ax.grid(alpha=0.2); ax.legend(fontsize=7, loc="upper right")
+    fig.tight_layout(); fig.savefig(out_png, dpi=130); plt.close(fig)
+
+
 def plot_episode(out_png: Path, *, ee, grip, quat, act_chunks, action_config, act_steps: int,
                  dt: float, title: str, flags: dict | None = None) -> None:
     import matplotlib

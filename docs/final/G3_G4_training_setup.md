@@ -214,6 +214,24 @@ step — a strong stochastic regularizer — while the sample target is smooth a
 network can memorize it. On the 100-demo rounds 1-4 the same overfitting appeared with epsilon; at
 5,643 episodes epsilon no longer overfits but sample still does.
 
+**STOPPED at epoch 94 of 122 (user, 2026-09-09 09:00).** Val had risen for eleven consecutive
+measurements (5.761e-4 at 35 → 6.596e-4 at 90, +14.5 %), so the remaining 28 epochs were very
+unlikely to produce a better policy, and the ~90 min they would have cost went to the G3+ensembling
+test instead. Checkpoints on disk: `state_{20,40,60,80}`; the A/B is **state_40 (val min) vs
+state_80 (last saved)** — the user asked that the last checkpoint still be tested, so the val-rise
+question is settled by measurement rather than assumed.
+
+**Why sample prediction converges so much faster — and overfits for the same reason.** At high noise
+levels epsilon is close to unpredictable, so the network can do little better than output the mean
+there; the target is high-variance and the gradient signal weak. The sample target is well-determined
+at EVERY noise level, since the conditional mean action given the observation is meaningful even from
+pure noise. That is a much better-conditioned regression, hence the earlier val minimum. The same
+property removes epsilon's implicit regularization: epsilon's target is re-drawn noise on every pass,
+so the network never sees the same (input, target) pair twice, while the sample target is fixed per
+(sample, timestep) and can be memorized. Faster convergence and earlier overfitting are two faces of
+one property, not two findings. (The two runs' absolute losses remain incomparable — different
+targets, different scales — so only the SHAPE of the curves supports this.)
+
 **Consequence for the eval: G4's LAST checkpoint is probably not its best.** The post-G4 chain
 therefore A/Bs the checkpoint nearest the val minimum against the final one on mushroom (the
 highest-baseline, most sensitive object) and runs the remaining teasers on whichever wins. The
