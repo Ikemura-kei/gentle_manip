@@ -20,34 +20,48 @@ closing width the policy PREDICTED for a step that actually arrived (needs `acti
 gap between them is the plan the policy did not carry out — at horizon 4 they are equal by
 construction, since the whole chunk executes.
 
-| object | policy | ckpt | exec | success | ever | hold | sust kPa | peak kPa | plan mm | exec mm | run |
+**`grasp mm` is the one to read for closing behaviour.** It is the AT-GRASP width — where the
+gripper stops closing — averaged over every attempt in an episode and then over episodes. An
+attempt is a local minimum of commanded width at least 6 mm below the open level with the EE at the
+table beforehand ("beforehand" matters: the width minimum coincides with lift-off, so testing the
+EE at the minimum rejects every real grasp). `exec mm` is the episode MINIMUM, i.e. whichever single
+attempt closed furthest, so a policy that closes correctly once in three tries looks identical to
+one that closes correctly every time. On cherry (25 mm object, demos close to ~21 mm) the two give
+opposite readings: `exec mm` barely moves across configurations (23.9-24.4) while `grasp mm` shows
+G3+ens at 30.3 and G5+ens exec2 at 25.2. Successes close BELOW the object, failures at or above it:
+G3+ens 22.4 vs 31.7 mm, G5+ens exec2 24.4 vs 26.5 mm. This is what explains the ever-grasped
+ordering that neither the width nor the approach analysis accounted for — G5 closes properly on
+most attempts, G3 on one in three and retries the rest (3.20 attempts/episode vs 2.00).
+
+| object | policy | ckpt | exec | success | ever | hold | sust kPa | plan mm | exec mm | grasp mm | run |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| cherry_tomato | G3 | state_122 | 4 | 3/20 | 5 | 2 | 20.9 | 38.3 | — | 22.7 | 04-11-58 |
-| cherry_tomato | G3 | state_122 | 4 | 5/20 | 7 | 2 | 26.9 | 39.0 | 18.8 | 21.9 | 09-52-14 |
-| cherry_tomato | G3+ens | state_122 | 4 | 6/20 | 6 | 0 | 13.9 | 37.2 | — | 26.5 | 09-04-34 |
-| cherry_tomato | G3+ens | state_122 | 4 | 3/20 | 4 | 1 | 19.8 | 38.1 | 20.6 | 26.2 | 10-02-39 |
-| cherry_tomato | G3+ens | state_122 | 8 | 3/20 | 3 | 0 | 21.4 | 38.3 | — | 27.6 | 09-42-59 |
-| cherry_tomato | G5 | state_113 | 4 | 6/20 | 7 | 1 | 18.8 | 37.3 | 16.3 | 18.2 | 10-51-00 |
-| cherry_tomato | G5+ens | state_113 | 4 | 10/20 | 10 | 0 | 12.5 | 37.0 | 20.0 | 24.4 | 10-27-34 |
-| cherry_tomato | G5+ens | state_113 | 4 | 9/20 | 10 | 1 | 12.7 | 36.8 | 19.9 | 24.0 | 10-40-05 |
-| cherry_tomato | G5+ens | state_113 | 8 | 9/20 | 11 | 2 | 15.5 | 37.3 | 21.2 | 23.3 | 11-48-09 |
-| cherry_tomato | G5+ens m.33 | state_113 | 4 | 6/20 | 7 | 1 | 14.2 | 37.6 | 19.4 | 23.9 | 13-59-32 |
-| cherry_tomato | baseline | state_120 | 4 | 3/20 | 3 | 0 | 7.6 | 35.7 | — | 26.8 | 03-23-32 |
-| mushroom | G3 | state_122 | 4 | 15/20 | 18 | 3 | 20.6 | 52.2 | — | 30.3 | 04-21-21 |
-| mushroom | G4 | state_40 | 4 | 15/20 | 19 | 4 | 24.7 | 53.2 | — | 29.4 | 09-14-04 |
-| mushroom | G4 | state_80 | 4 | 18/20 | 19 | 1 | 24.2 | 52.1 | — | 28.0 | 09-34-07 |
-| mushroom | G4 | state_40 | 8 | 18/20 | 19 | 1 | 25.1 | 53.0 | — | 29.2 | 09-26-52 |
-| mushroom | G5+ens | state_113 | 4 | 18/20 | 18 | 0 | 15.8 | 48.8 | 27.7 | 32.1 | 11-02-10 |
-| mushroom | baseline | state_100 | 4 | 18/20 | 18 | 0 | 19.3 | 50.9 | — | 30.5 | 09-47-32 |
-| mushroom | baseline | state_120 | 4 | 17/20 | 17 | 0 | 16.5 | 49.8 | — | 31.1 | 03-03-31 |
-| mushroom | baseline | state_60 | 4 | 15/20 | 17 | 2 | 22.7 | 52.0 | — | 29.9 | 09-16-20 |
-| mushroom | baseline | state_80 | 4 | 18/20 | 18 | 0 | 21.4 | 51.1 | — | 30.2 | 09-31-56 |
-| tofu | G3 | state_122 | 4 | 10/20 | 12 | 2 | 6.4 | 21.5 | — | 28.2 | 04-29-10 |
-| tofu | baseline | state_100 | 4 | 8/20 | 11 | 3 | 5.8 | 18.1 | — | 29.7 | 09-39-45 |
-| tofu | baseline | state_120 | 4 | 14/20 | 14 | 0 | 6.3 | 22.1 | — | 29.5 | 02-55-41 |
-| tofu | baseline | state_60 | 4 | 13/20 | 15 | 2 | 5.1 | 19.9 | — | 30.0 | 09-08-37 |
-| tofu | baseline | state_80 | 4 | 13/20 | 13 | 0 | 5.5 | 19.0 | — | 30.1 | 09-24-11 |
-| banana_chunk | baseline | state_120 | 4 | 13/20 | 13 | 0 | 19.9 | 33.1 | — | 28.6 | 03-11-23 |
+| cherry_tomato | G3 | state_122 | 4 | 3/20 | 5 | 2 | 20.9 | — | 22.7 | 29.5 | 04-11-58 |
+| cherry_tomato | G3 | state_122 | 4 | 5/20 | 7 | 2 | 26.9 | 18.8 | 21.9 | 29.7 | 09-52-14 |
+| cherry_tomato | G3+ens | state_122 | 4 | 6/20 | 6 | 0 | 13.9 | — | 26.5 | 30.5 | 09-04-34 |
+| cherry_tomato | G3+ens | state_122 | 4 | 3/20 | 4 | 1 | 19.8 | 20.6 | 26.2 | 30.3 | 10-02-39 |
+| cherry_tomato | G3+ens | state_122 | 8 | 3/20 | 3 | 0 | 21.4 | — | 27.6 | 32.2 | 09-42-59 |
+| cherry_tomato | G5 | state_113 | 4 | 6/20 | 7 | 1 | 18.8 | 16.3 | 18.2 | 26.9 | 10-51-00 |
+| cherry_tomato | G5+ens | state_113 | 4 | 10/20 | 10 | 0 | 12.5 | 20.0 | 24.4 | 26.4 | 10-27-34 |
+| cherry_tomato | G5+ens | state_113 | 4 | 9/20 | 10 | 1 | 12.7 | 19.9 | 24.0 | 26.4 | 10-40-05 |
+| cherry_tomato | G5+ens | state_113 | 4 | 12/20 | 14 | 2 | 13.1 | 19.1 | 24.0 | 26.4 | 14-13-12 |
+| cherry_tomato | G5+ens | state_113 | 8 | 9/20 | 11 | 2 | 15.5 | 21.2 | 23.3 | 26.0 | 11-48-09 |
+| cherry_tomato | G5+ens m.33 | state_113 | 4 | 6/20 | 7 | 1 | 14.2 | 19.4 | 23.9 | 25.9 | 13-59-32 |
+| cherry_tomato | baseline | state_120 | 4 | 3/20 | 3 | 0 | 7.6 | — | 26.8 | 30.9 | 03-23-32 |
+| mushroom | G3 | state_122 | 4 | 15/20 | 18 | 3 | 20.6 | — | 30.3 | 34.3 | 04-21-21 |
+| mushroom | G4 | state_40 | 4 | 15/20 | 19 | 4 | 24.7 | — | 29.4 | 31.3 | 09-14-04 |
+| mushroom | G4 | state_80 | 4 | 18/20 | 19 | 1 | 24.2 | — | 28.0 | 30.2 | 09-34-07 |
+| mushroom | G4 | state_40 | 8 | 18/20 | 19 | 1 | 25.1 | — | 29.2 | 30.6 | 09-26-52 |
+| mushroom | G5+ens | state_113 | 4 | 18/20 | 18 | 0 | 15.8 | 27.7 | 32.1 | 32.9 | 11-02-10 |
+| mushroom | baseline | state_100 | 4 | 18/20 | 18 | 0 | 19.3 | — | 30.5 | 33.8 | 09-47-32 |
+| mushroom | baseline | state_120 | 4 | 17/20 | 17 | 0 | 16.5 | — | 31.1 | 33.8 | 03-03-31 |
+| mushroom | baseline | state_60 | 4 | 15/20 | 17 | 2 | 22.7 | — | 29.9 | 32.7 | 09-16-20 |
+| mushroom | baseline | state_80 | 4 | 18/20 | 18 | 0 | 21.4 | — | 30.2 | 32.9 | 09-31-56 |
+| tofu | G3 | state_122 | 4 | 10/20 | 12 | 2 | 6.4 | — | 28.2 | 32.6 | 04-29-10 |
+| tofu | baseline | state_100 | 4 | 8/20 | 11 | 3 | 5.8 | — | 29.7 | 33.7 | 09-39-45 |
+| tofu | baseline | state_120 | 4 | 14/20 | 14 | 0 | 6.3 | — | 29.5 | 32.7 | 02-55-41 |
+| tofu | baseline | state_60 | 4 | 13/20 | 15 | 2 | 5.1 | — | 30.0 | 32.8 | 09-08-37 |
+| tofu | baseline | state_80 | 4 | 13/20 | 13 | 0 | 5.5 | — | 30.1 | 32.3 | 09-24-11 |
+| banana_chunk | baseline | state_120 | 4 | 13/20 | 13 | 0 | 19.9 | — | 28.6 | 31.6 | 03-11-23 |
 
 ## The noise floor is large — read the table with it
 
