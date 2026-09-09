@@ -10512,3 +10512,31 @@ design change for a future session, not a today fix.
 no GPU node needed): one row per category with instances-attempted, instances-collected,
 summed total episodes, and average success rate. Added as a second tab ("All categories") on
 the Grasp Reel artifact alongside the video grid, with an explicit protocol banner.
+
+### 2026-09-09 (cont.) — Severe cluster congestion: an uncaught collection timeout was killing whole batch jobs
+
+Login node load spiked to 50-90 (vs. the session's earlier 16-65) with 240-260 concurrent
+users, and GPU-node scheduling backed up badly -- round 20's 12 jobs sat PENDING at 0:00
+elapsed for 40+ minutes straight (`squeue` reason: Priority), and round 19 mostly FAILED
+outright rather than just running slow. Root cause of the round-19 failures: `batch_expand.py
+::process_one` calls `subprocess.run(..., timeout=1800)` for the collection step with NO
+try/except around it -- under this level of contention, individual collection runs exceeded
+the 30-minute budget, `subprocess.TimeoutExpired` propagated up uncaught, and it killed the
+ENTIRE batch_expand.py process. That's not just losing the one slow object -- every OTHER
+still-queued candidate in that job's chunk was lost too (10/12 round-19 jobs failed this way,
+`sacct` showing `FAILED 1:0` after 30min-3.5h of real elapsed time). This was a latent bug
+that simply never mattered on a quiet cluster (30 min was always plenty before today).
+
+**Fix**: wrap the collection subprocess call in `try/except subprocess.TimeoutExpired`,
+logging a new `collection_status="timeout"` row (the partial stdout/stderr `e.stdout`/
+`e.stderr` are saved same as a normal failure) and returning to let the caller's loop move on
+to the next candidate, instead of letting the exception propagate and take the whole job down.
+Synced to the production checkout immediately so it took effect on round 20 before those jobs
+had actually started running (still 0:00 elapsed at push time) -- no time lost re-submitting.
+
+**Lesson: any per-candidate subprocess call in a batch loop needs its OWN exception boundary,
+independent of what the outer loop does** -- a per-object timeout/crash should never be able
+to take down candidates that haven't even run yet. This is the second time a bug in this
+family has surfaced today (mesh_prep's per-object exceptions were already isolated correctly;
+this collection-subprocess call was the one path that wasn't) -- worth an audit of the rest of
+`process_one`'s call chain for the same gap if more contention-driven failures show up later.

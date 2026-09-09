@@ -186,11 +186,27 @@ def process_one(cand: dict, *, n_episodes: int, n_envs: int, min_success: float,
            "--seed", "0", "--scene-dr-every", "1", "--record-video", "100000"]
     print(f"  [collect] launching pilot: {n_episodes} episodes x {n_envs} envs ...")
     t0 = time.time()
-    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, capture_output=True, text=True,
-                          timeout=1800)
-    dt = time.time() - t0
     log_path = REPO_ROOT / "dataset" / "object_expansion" / "logs" / f"{name}_pilot_collect.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        proc = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, capture_output=True, text=True,
+                              timeout=1800)
+    except subprocess.TimeoutExpired as e:
+        # 2026-09-09: an UNCAUGHT TimeoutExpired here crashed the whole batch job (this
+        # process_one call is inside the caller's per-candidate loop with no try/except of
+        # its own) -- under heavy cluster contention (login+compute node load spiked to
+        # 50-90 this session) a single slow/stuck collection was enough to kill every OTHER
+        # candidate still queued in that job's chunk too, not just the slow one. Catch it and
+        # keep going: one lost object beats losing the rest of the batch.
+        dt = time.time() - t0
+        stdout = (e.stdout or b"").decode("utf-8", "replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
+        stderr = (e.stderr or b"").decode("utf-8", "replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
+        log_path.write_text(stdout + "\n\n=== STDERR ===\n" + stderr + f"\n\n[TIMEOUT after {dt:.0f}s]")
+        print(f"  [collect] TIMED OUT after {dt:.0f}s -- see {log_path}")
+        log_row(**log_kw, prep_ok=True, fem_gate_pass=True, fem_tets=gate["tets"],
+                collection_status="timeout", stage="collect", note=f"timed out after {dt:.0f}s, see {log_path.name}")
+        return
+    dt = time.time() - t0
     log_path.write_text(proc.stdout + "\n\n=== STDERR ===\n" + proc.stderr)
     if proc.returncode != 0:
         print(f"  [collect] FAILED rc={proc.returncode} ({dt:.0f}s) -- see {log_path}")
