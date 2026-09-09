@@ -18,9 +18,10 @@ meaningless, so every real-only run sets them to 0 / "".
 essentially no trailing hold — the run of near-identical final commands is 1.1 frames on average,
 3 at most — so there are ZERO all-hold chunks at horizon 16, and also zero at horizon 4. The sim
 recipe solved this with a 22-frame tail (rule: `tail − horizon = 6`, holding the all-hold share at
-3.7 %). We deliberately do NOT apply it here (user, 2026-09-09): matching `jiupy` keeps the
-comparison clean. Consequence: both horizon-16 real policies train with no stop supervision. This
-is a shared limitation, not a difference between them.
+3.7 %). We deliberately do NOT apply it here (user, 2026-09-09): the real demos are used as
+recorded, with no synthetic frames appended. Consequence: every horizon-16 real policy trains with
+no stop supervision. That is a shared property of the real baselines, not a difference between
+them — but it is worth remembering if one of them fails to stop cleanly at the end of an episode.
 
 ---
 
