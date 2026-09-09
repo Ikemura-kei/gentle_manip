@@ -217,8 +217,22 @@ safe for the euler dims only because `euler_frame_offset_deg` keeps the top-down
 
 Verified offline on G3's `state_40` (CPU, training untouched): the first chunk is bit-identical to
 the non-ensembled path (only one prediction covers it), later chunks blend up to 4, and the
-step-to-step command change drops **45 %**. Still to do: mirror it in the eval adapter so a sim
-number reflects the deployed behaviour.
+step-to-step command change drops **45 %**.
+
+✅ **MIRRORED IN THE EVAL ADAPTER (2026-09-09 06:00)** — `dppo/eval_agent.py::_DiffusionPolicy._emit`,
+so a sim number can reflect the deployed behaviour. Both of `act()`'s return sites route through one
+helper; OFF unless `GM_TEMPORAL_ENSEMBLE=1` (with `GM_ENSEMBLE_M`, default 0.01), matching the deploy
+flags. Covered by `gentle_manip/tests/test_temporal_ensemble.py`, 7 tests, all passing in envs/dppo
+(they skip in envs/sim, which has no dppo stack). The two that matter: OFF is **bit-identical** to
+the historical slice, and a constant plan is returned **exactly** — averaging introduces no bias.
+The width/observation dumps deliberately keep recording the RAW policy output so existing
+dump-analysis scripts keep their meaning.
+
+**This is now more than a smoothness nicety — it is the candidate fix for G3's measured defect.** On
+a synthetic re-plan sequence carrying per-plan drift (G3's situation), ensembling cuts tracking error
+against the true ramp **44 %** and step-to-step change 18 %, measured ACROSS chunk boundaries where
+the discontinuity actually lives. `m` barely matters at horizon 16 / execute 4 (0.01 and 0.10 differ
+by <1 %) because only 4 predictions overlap and the weights are near-uniform either way.
 
 It likely **replaces** the `--smooth-alpha 0.6` command smoothing rather than stacking with it —
 both smooth the same signal, and running both would double-smooth and could blunt the fast close.
@@ -256,6 +270,7 @@ Actual, from G3's measured 171 s/epoch:
 | teasers G3 | 04:20 → **04:36** ✅ | cherry 3, mushroom 15, tofu 10 — **negative**, §3 |
 | G4 | **04:36** → ~10:20 | `bpfnl`, on schedule |
 | teasers G4 | 10:20 → 10:50 | |
+| G3 + ensembling | 10:20 → 10:50 | **PROPOSED** (see below), runs alongside G4's teasers |
 | canonical evals | 10:50 → 13:50 | 100 episodes, cherry + mushroom, baseline and winner |
 | buffer / write-up | 13:50 → 15:00 | |
 
@@ -267,6 +282,12 @@ canonical value; the 200 in `eval_diffusion_pointnet.yaml` is the deviation. 100
 rank recipes — the 2026-09-08 checkpoint sweep established that. What they DO show, from the
 per-episode videos and `signals/` plots, is mechanism: did it approach the right place, did it pick a
 sensible width, did it retry, did the orientation wander. That is what steers the next run.
+
+**Proposed addition — re-teaser G3 with ensembling ON (`GM_TEMPORAL_ENSEMBLE=1`).** ~16 min for
+three objects, no training run, and it directly tests the mechanism §3 identified: if within-chunk
+drift is what cost the 7 hold losses, ensembling should recover them. A positive result is
+deployable immediately as a flag on an existing checkpoint. Worth the slot regardless of how G4
+lands, and it is the only way to learn whether horizon 16 is salvageable rather than simply wrong.
 
 **Objects: cherry_tomato and mushroom.** Cherry is the known hard case; mushroom is the strongest
 baseline result, so a regression there is the clearest warning. Tomato is excluded — 4 crashes across

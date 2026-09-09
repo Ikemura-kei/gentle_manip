@@ -25,6 +25,22 @@ class _DiffusionPolicy:
         self.obs_keys = list(obs_keys)
         self.device = device
         self.act_steps = int(act_steps)
+        # TEMPORAL ENSEMBLING (ACT, Zhao et al. 2023) — the eval-side mirror of
+        # deploy_real_dppo.py's --temporal-ensemble, so a sim number can reflect the
+        # deployed behaviour. Predicting `horizon` while executing `act_steps` means several
+        # overlapping predictions cover every action index; average them with w_i = exp(-m*i),
+        # i = 0 OLDEST. OFF unless GM_TEMPORAL_ENSEMBLE is set, so every existing eval is
+        # byte-identical. Averaging happens in the NORMALIZED action space — linear for
+        # position and gripper, and safe for the euler dims only because euler_frame_offset_deg
+        # keeps the top-down pose away from the +-pi seam.
+        # Motivation (2026-09-09): G3's horizon-16 run drifted 5.64 mm in commanded width
+        # WITHIN one predicted chunk and lost 7 grasps in the hold; this is the cheap candidate
+        # fix, and it needs no training run.
+        import os as _os
+        self._ensemble = bool(_os.environ.get("GM_TEMPORAL_ENSEMBLE"))
+        self._ensemble_m = float(_os.environ.get("GM_ENSEMBLE_M", "0.01"))
+        self._preds = []          # [(call_index, full_horizon_chunk)], oldest first
+        self._ens_c = 0           # own counter: _act_calls advances before the return sites
         # RESIDUAL WIDTH ACTIONS (item 18 iter 4): if GM_RESIDUAL_WIDTH points at the
         # dataset's normalization.npz, the policy was trained on width RESIDUALS
         # (action dim -1 minus the episode grasp width in action-normalized units), and
@@ -310,6 +326,8 @@ class _DiffusionPolicy:
         # max() OPENED the gripper mid-hold, visibly loosening after a successful lift.
         # Latch on the first act() of each episode and hold.
         self._flush_dump()
+        self._preds = []          # ensembling never carries across an episode boundary
+        self._ens_c = 0
         self._floor_latch = None
         self._obj_latch = None          # object crop is per-EPISODE (see __init__)
         self._w_open = None
@@ -367,6 +385,44 @@ class _DiffusionPolicy:
                  ee_z_m=(buf[..., 1] + 1) / 2 * (z_hi - z_lo + 1e-6) + z_lo)     # (T, n_env), m
         self._dump_buf = []
         self._dump_batch += 1
+
+    def _emit(self, traj):
+        """Full-horizon chunk -> the act_steps actually executed, ensembled if enabled.
+
+        Every return site in act() goes through here. With ensembling OFF this is exactly
+        `traj[:, :act_steps]`, the historical behaviour.
+
+        NOTE: the width/observation dumps deliberately record the RAW policy output, not the
+        ensembled command, so existing dump-analysis scripts keep their meaning. With
+        ensembling ON the executed width therefore differs slightly from the dumped one.
+        """
+        n_exec = self.act_steps
+        if not self._ensemble:
+            self._ens_c += 1
+            return traj[:, :n_exec]
+        H = int(traj.shape[1])
+        if H <= n_exec:                     # nothing overlaps; ensembling is a no-op
+            if self._ens_c == 0:
+                print(f"[eval_agent] temporal ensembling INACTIVE: horizon {H} <= act_steps "
+                      f"{n_exec} (no overlap)", flush=True)
+            self._ens_c += 1
+            return traj[:, :n_exec]
+        if self._ens_c == 0:
+            print(f"[eval_agent] temporal ensembling ACTIVE: horizon {H}, exec {n_exec}, "
+                  f"m={self._ensemble_m} (up to {H // n_exec} predictions averaged)", flush=True)
+        c = self._ens_c
+        self._preds.append((c, np.asarray(traj).copy()))
+        self._preds = self._preds[-(H // n_exec + 1):]        # older ones can no longer overlap
+        out = np.empty((traj.shape[0], n_exec, traj.shape[2]), dtype=np.float32)
+        for k in range(n_exec):
+            a = c * n_exec + k                                 # absolute action index
+            contrib = [tr[:, a - c0 * n_exec] for (c0, tr) in self._preds      # oldest first
+                       if 0 <= a - c0 * n_exec < H]
+            w = np.exp(-self._ensemble_m * np.arange(len(contrib), dtype=np.float64))
+            w /= w.sum()
+            out[:, k] = np.tensordot(w.astype(np.float32), np.stack(contrib, 0), axes=(0, 0))
+        self._ens_c += 1
+        return out
 
     def act(self, obs):
         self._act_calls += 1
@@ -436,7 +492,7 @@ class _DiffusionPolicy:
                     # legacy: latch on the episode's FIRST act()
                     if self._floor_latch is None:
                         if self._act_calls < max(self._latch_step, 1):
-                            return traj[:, : self.act_steps]        # floor not armed yet
+                            return self._emit(traj)                 # floor not armed yet
                         self._floor_latch = self.model.network.aux_predict(cond)["grasp_width"] \
                             .cpu().numpy()[:, 0]
                 else:
@@ -529,7 +585,7 @@ class _DiffusionPolicy:
             if self._obs_dump_cloud:
                 self._obs_buf["point_cloud"].append(
                     np.asarray(obs["point_cloud"])[:, -1].astype(np.float32).copy())  # (n_env,N,3)
-        return traj[:, : self.act_steps]              # (n_env, act_steps, act_dim), normalized
+        return self._emit(traj)                       # (n_env, act_steps, act_dim), normalized
 
 
 class EvalHarnessAgent(EvalAgent):
