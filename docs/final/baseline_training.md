@@ -24,68 +24,61 @@ is a shared limitation, not a difference between them.
 
 ---
 
-## 1. Point cloud, G5 recipe — `jfwqs` (2026-09-09)
+## 1. Point cloud, G5 recipe — PLANNED
 
-The real twin of the sim generalist's best configuration. Against the previous real-only baseline
-`jiupy`, **only two things change** — encoder pooling and action horizon — so any difference is
-attributable to them.
+The real twin of the sim generalist's best configuration: **mean(+)max cloud pooling + action
+horizon 16** (executing 4 at deploy), trained real-only on the full 7-object mix.
 
-| | `jiupy` (previous baseline) | **`jfwqs`** |
-|---|---|---|
-| cloud pooling | max | **concat(max, masked mean)** |
-| action horizon | 4 | **16** (execute 4 at deploy) |
-| everything else | — | identical |
-
-**Why these two.** In sim they are the only changes that produced a replicated gain: on cherry
-tomato, G5 (pooling + horizon 16) with temporal ensembling scored 10/20 and 9/20 against a
-baseline's 3/20, at the lowest sustained stress of any horizon-16 run, and matched the best
-baseline on mushroom (18/20) while being gentler. Pooling and ensembling INTERACT — alone they give
-6/20 and 4.5/20, together 9.5/20. See `docs/final/results.md`.
+**Why these two changes.** In sim they are the only pair that produced a replicated gain. On cherry
+tomato, pooling + horizon 16 with temporal ensembling scored 10/20 and 9/20 against a baseline's
+3/20, at the lowest sustained stress of any horizon-16 run, and it matched the best baseline on
+mushroom (18/20) while being gentler. The two INTERACT rather than add — alone they give 6/20 and
+4.5/20, together 9.5/20. Full table in `docs/final/results.md`.
 
 **Architecture.** PointNet encoder with `pooling: meanmax`, `use_layernorm: True`,
 `final_norm: layernorm`, visual feature dim 512; ResidualMLP denoiser `[1024, 1024, 1024]`,
-`time_dim 16`. **3,194,016 parameters** — the meanmax shape, +131,072 over max-pooling
-(`Linear(256→512)` becomes `Linear(512→512)`). Verify this number when loading a checkpoint: a
-mismatch means the pooling override did not apply.
+`time_dim 16`. **3,194,016 parameters** — the meanmax shape, +131,072 over max pooling
+(`Linear(256→512)` becomes `Linear(512→512)`). Check this number after loading any checkpoint: a
+mismatch means the pooling override did not apply and the run is max-pooling.
 
 **Diffusion.** DDPM, 20 denoising steps, `predict_epsilon: True`, 2 conditioning steps, 1
 point-cloud conditioning step. Do NOT raise the step count at inference — the beta schedule is
-built for the trained value, so 20 is a ceiling; DDIM may subsample below it, but measured in sim
-that costs success (DDIM-10 halved it, DDIM-20 lost ~2.5 episodes).
+built for the trained value, so 20 is a ceiling. DDIM may subsample below it, but measured in sim
+that costs success (DDIM-10 halved it; DDIM-20 lost ~2.5 episodes).
 
-**Optimization.** 2000 epochs, batch 128, AdamW lr 1e-4 with one cosine cycle to min_lr 1e-5,
-warmup 100 epochs, EMA from epoch 10, checkpoint every 100, validate every 10, seed 42.
+**Optimization.** **2000 epochs (fixed)**, batch 128, AdamW lr 1e-4 with one cosine cycle to
+min_lr 1e-5, warmup 100 epochs, EMA from epoch 10, checkpoint every 100, validate every 10, seed 42.
+Epochs are held at 2000 rather than matching gradient steps, so the 130-episode set gets ~18 % more
+updates than a 110-episode run at the same epoch count. That is the deliberate choice: the schedule
+(warmup, cosine cycle, EMA start, checkpoint cadence) stays identical across runs.
 
-**Reproduce.**
+**Launch.**
 ```bash
 DATASET=single_lift_real7_bc_v1 EPOCHS=2000 \
   bash gentle_manip/scripts/final/train_dppo_dp3_real.sh \
     horizon_steps=16 +model.network.pointnet.pooling=meanmax
 ```
-`+` is required for pooling: the training config has no such key (unlike the eval config, which now
-reads it from the checkpoint). Without the `+` hydra errors; without the override entirely the run
-silently trains max-pooling, which the parameter count above will catch.
+The `+` on pooling is required: the training config has no such key (unlike the eval config, which
+now reads it from the checkpoint). Without `+` hydra errors; without the override entirely the run
+silently trains max pooling, which the parameter count above will catch.
 
-**Result (on `single_lift_real6_bc_v1`, 110 episodes — the 130-episode rerun is the finalised one).**
-2000/2000 epochs in ~1 h 30 m at 2.1 s/epoch. Train loss 0.00865, val 0.03759. **Val minimum was
-epoch 390 at 0.02205**, after which val rose ~70 % while train kept falling — expected, since 99
-demos × 2000 epochs means each sample is seen ~2000 times.
+**Expected shape of the run.** ~2.1 s/epoch, so roughly 1 h 30 m. Expect the val minimum EARLY —
+around a fifth of the way in — and then a long rise while train loss keeps falling: 117 demos ×
+2000 epochs means each sample is seen ~2000 times.
 
 ⚠ **Do not pick the checkpoint by val loss alone.** It has already misled in this project: on the
-sim run G4, the val-minimum checkpoint scored 15/20 while one with 12 % worse val scored 18/20, and
-`jiupy` itself deploys `state_1500`, not its val minimum. With no sim eval available for a real-only
-policy, the options are robot trials across several checkpoints or an informed guess. The deploy
-entry starts at `state_400` and the box comment says to sweep 800 / 1500 / 2000 if it underperforms.
+sim run G4, the val-minimum checkpoint scored 15/20 while a checkpoint with 12 % worse val scored
+18/20. With no sim eval available for a real-only policy, the options are robot trials across
+several checkpoints or an informed guess — start at the val minimum and sweep later ones if it
+underperforms.
 
-**Deploy.** `gentle_manip/scripts/final/deploy_dppo.sh`, the `jfwqs` block — exec 4,
-`--temporal-ensemble --ensemble-m 0.01`, `--smooth-alpha 0.6`, `--max-pos-step-m 0.0065`. This is
-the first real-only policy that can ensemble at all: ensembling needs horizon > act-steps, so it is
-inert on every horizon-4 entry. `m` was 0.33 on the robot in one session (the ACT-proportional value
-for a 4-deep window) and clearly better qualitatively, while sim preferred 0.01 (9.5/20 vs 6/20) —
-sim scores success and ignores smoothness, so both can hold. State which value produced any number
-you report.
-
----
+**Deploy.** Add a block to `gentle_manip/scripts/final/deploy_dppo.sh`: exec 4,
+`--temporal-ensemble --ensemble-m <see below>`, `--smooth-alpha 0.6`, `--max-pos-step-m 0.0065`,
+and the matching `normalization.npz`. Horizon 16 is what makes ensembling possible at all — it
+needs horizon > act-steps, so it is inert on any horizon-4 policy. On `m`: sim prefers 0.01
+(9.5/20 vs 6/20 at 0.33), while 0.33 — the ACT-proportional value for a 4-deep window — was clearly
+better in one robot session. Sim scores success and ignores smoothness, which is what heavier
+weighting buys, so both can hold. State which value produced any number you report.
 
 ## 2. RGB baseline — TBD
 
