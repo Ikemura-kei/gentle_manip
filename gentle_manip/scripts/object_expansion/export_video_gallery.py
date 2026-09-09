@@ -61,6 +61,22 @@ def find_best_clip(run_dir: Path, max_kb: int, tmp_dir: Path, name: str) -> dict
     return None
 
 
+def _name_to_category() -> dict[str, str]:
+    """Object instance name -> its real category string, from EXPANSION_LOG.csv (NOT a
+    regex guess off the name -- pea9's category is 'pea_(food)', not 'pea'; see the
+    2026-09-09 DEVLOG entry on the exclusion bug this exact heuristic caused elsewhere)."""
+    import csv
+    out = {}
+    log = REPO_ROOT / "gentle_manip/scripts/object_expansion/EXPANSION_LOG.csv"
+    if not log.exists():
+        return out
+    with open(log) as f:
+        for r in csv.DictReader(f):
+            if r.get("name") and r.get("category"):
+                out[r["name"]] = r["category"]
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", type=Path, required=True)
@@ -69,12 +85,20 @@ def main() -> None:
     args = ap.parse_args()
     args.tmp_dir.mkdir(parents=True, exist_ok=True)
 
+    name_to_cat = _name_to_category()
     demos_root = REPO_ROOT / "dataset" / "demos"
-    entries = []
+    import yaml
+
+    # One entry per OBJECT INSTANCE with a completed collection, keeping the best
+    # (highest success_rate) instance per CATEGORY -- a category like pea_(food) with 12
+    # near-identical registered instances only gets ONE clip in the reel, not 12 copies of
+    # visually the same grasp (2026-09-09, user feedback: "dont repeat").
+    best_per_cat: dict[str, tuple[float, str, Path]] = {}  # category -> (success_rate, obj_name, run_dir)
     for task_dir in sorted(demos_root.iterdir()):
         if not task_dir.is_dir() or not task_dir.name.startswith("single_lift_") or not task_dir.name.endswith("_soft"):
             continue
         obj_name = task_dir.name[len("single_lift_"):-len("_soft")]
+        cat = name_to_cat.get(obj_name, obj_name)  # fall back to the name itself if not in the log
         run_dirs = sorted([d for d in task_dir.iterdir() if d.is_dir()], reverse=True)
         if not run_dirs:
             continue
@@ -82,14 +106,21 @@ def main() -> None:
         stats_path = run_dir / "stats.yaml"
         if not stats_path.exists():
             continue
-        import yaml
         s = yaml.safe_load(stats_path.read_text())
+        sr = s.get("success_rate") or 0.0
+        cur = best_per_cat.get(cat)
+        if cur is None or sr > cur[0]:
+            best_per_cat[cat] = (sr, obj_name, run_dir, s)
+
+    entries = []
+    for cat, (sr, obj_name, run_dir, s) in sorted(best_per_cat.items()):
         clip = find_best_clip(run_dir, args.max_kb, args.tmp_dir, obj_name)
-        print(f"{obj_name}: {'ok ' + str(clip['size_kb']) + 'KB' if clip else 'FAILED (no clip under budget)'}", flush=True)
+        print(f"{cat} (instance={obj_name}): {'ok ' + str(clip['size_kb']) + 'KB' if clip else 'FAILED (no clip under budget)'}", flush=True)
         if clip is None:
             continue
         entries.append({
-            "name": obj_name,
+            "name": cat,
+            "instance": obj_name,
             "success_rate": s.get("success_rate"),
             "ever_success_rate": s.get("ever_success_rate"),
             "episodes_saved": s.get("episodes_saved"),
@@ -99,7 +130,7 @@ def main() -> None:
 
     args.out.write_text(json.dumps({"clips": entries}, separators=(",", ":")))
     total_mb = args.out.stat().st_size / 1e6
-    print(f"\n{len(entries)} clips exported -> {args.out} ({total_mb:.2f} MB)")
+    print(f"\n{len(entries)} clips exported (one per category) -> {args.out} ({total_mb:.2f} MB)")
 
 
 if __name__ == "__main__":

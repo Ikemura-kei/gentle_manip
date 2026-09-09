@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import time
 from collections import defaultdict
 from pathlib import Path
 
@@ -26,6 +27,15 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 # explicitly so the page can state "same protocol" as a checked fact, not an assumption.
 PROTOCOL = "collect_demos_synth_v4.py, target 20 episodes/instance, n_envs=5"
 
+# The project's stated goal (user directive, this session): 200 categories x 20 demos each.
+TARGET_CATEGORIES = 200
+
+# Rate/ETA window: throughput swung wildly across today's session (hours of debugging with
+# near-zero output, then three pipeline fixes landing in quick succession) -- an all-time
+# average would be meaningless. Use a recent rolling window instead, long enough to smooth
+# over single-job noise but short enough to reflect the CURRENT (post-fix) pipeline state.
+RATE_WINDOW_HOURS = 2.0
+
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -34,7 +44,8 @@ def main() -> None:
     args = ap.parse_args()
 
     by_cat: dict[str, dict] = defaultdict(lambda: {"instances": [], "collected_episodes": 0,
-                                                     "collected_instances": 0, "success_rates": []})
+                                                     "collected_instances": 0, "success_rates": [],
+                                                     "first_collected_ts": None})
     with open(args.log) as f:
         for r in csv.DictReader(f):
             cat = r.get("category")
@@ -57,6 +68,9 @@ def main() -> None:
                         d["success_rates"].append(float(sr))
                     except ValueError:
                         pass
+                ts = r.get("timestamp")
+                if ts and (d["first_collected_ts"] is None or ts < d["first_collected_ts"]):
+                    d["first_collected_ts"] = ts
 
     rows = []
     for cat, d in sorted(by_cat.items()):
@@ -67,12 +81,37 @@ def main() -> None:
             "n_instances_collected": d["collected_instances"],
             "total_episodes": d["collected_episodes"],
             "avg_success_rate": round(sum(srs) / len(srs), 4) if srs else None,
+            "first_collected_ts": d["first_collected_ts"],
         })
 
-    payload = {"protocol": PROTOCOL, "categories": rows}
-    args.out.write_text(json.dumps(payload, separators=(",", ":")))
     n_with_demos = sum(1 for r in rows if r["total_episodes"] > 0)
-    print(f"{len(rows)} categories total, {n_with_demos} with >=1 collected episode -> {args.out}")
+
+    # Recent-window throughput -> ETA. A category's "collected at" moment is the first
+    # accepted/low_success row for it (its FIRST completed instance, not every duplicate --
+    # matches how the reel now dedupes too).
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    cutoff = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - RATE_WINDOW_HOURS * 3600))
+    recent_new_cats = sum(1 for r in rows if r["first_collected_ts"] and r["first_collected_ts"] >= cutoff)
+    cats_per_hour = recent_new_cats / RATE_WINDOW_HOURS
+    remaining = max(0, TARGET_CATEGORIES - n_with_demos)
+    eta_hours = round(remaining / cats_per_hour, 1) if cats_per_hour > 0 else None
+
+    progress = {
+        "target_categories": TARGET_CATEGORIES,
+        "categories_collected": n_with_demos,
+        "categories_remaining": remaining,
+        "percent_complete": round(100 * n_with_demos / TARGET_CATEGORIES, 1),
+        "recent_window_hours": RATE_WINDOW_HOURS,
+        "categories_per_hour_recent": round(cats_per_hour, 2),
+        "eta_hours": eta_hours,
+        "updated_at": now,
+    }
+
+    payload = {"protocol": PROTOCOL, "progress": progress, "categories": rows}
+    args.out.write_text(json.dumps(payload, separators=(",", ":")))
+    print(f"{len(rows)} categories total, {n_with_demos} with >=1 collected episode "
+          f"({progress['percent_complete']}% of {TARGET_CATEGORIES}), "
+          f"rate={cats_per_hour:.2f}/hr, eta={eta_hours}h -> {args.out}")
 
 
 if __name__ == "__main__":
