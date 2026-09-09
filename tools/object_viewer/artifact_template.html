@@ -154,22 +154,18 @@ window.addEventListener('unhandledrejection', e => {
   </section>
 </main>
 <footer>Gripper cap 79&nbsp;mm (planner-enforced, <code>finger_grasp_final.py:515</code>) · height floor 20&nbsp;mm · data embedded at publish time from the object-expansion pipeline running on the arrhenius cluster.</footer>
-<!-- UMD build (defines window.THREE), NOT the ES-module build: an importmap + dynamic
-     import() previously loaded here failed completely silently in the Artifact CSP sandbox
-     (a blocked module fetch doesn't throw a catchable JS error or fire window.onerror, so
-     the try/catch degrade never even triggered its own error banner) -- the specimen list
-     and stats rendered fine, but the 3D view was permanently blank with zero diagnostic
-     signal, 2026-09-09. The tool's own guidance is explicit: UMD global via a plain
-     <script src> placed BEFORE the inline script, never an ES-module import for a CDN lib. -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.150.0/three.min.js"></script>
 <script id="payload" type="application/json">__DATA_JSON__</script>
 <script type="module">
+// 2026-09-09: two independent attempts to load three.js from cdnjs (first an ES-module
+// import()+importmap, then the tool-recommended UMD <script src> global) both left the 3D
+// view permanently blank in the field with zero diagnostic signal -- CDN/CSP failure modes
+// here don't reliably surface as catchable JS errors. Rather than keep guessing at a THIRD
+// CDN loading strategy, the 3D viewport is now a small hand-rolled vanilla WebGL renderer
+// with ZERO external dependencies -- nothing to fail to load, ever. The geometry payload is
+// tiny (a few hundred to ~2000 triangles per specimen) so this needs no library: one
+// GLSL program, flat/smooth per-vertex lighting computed from the mesh data itself, and the
+// same orbit-camera math a small library would give us.
 const $=id=>document.getElementById(id);
-const THREE = (typeof window.THREE !== 'undefined') ? window.THREE : null;
-if (!THREE) {
-  const el = $('fatalError');
-  if (el) { el.hidden = false; el.textContent = '3D viewer library failed to load -- the specimen list and candidate table below still work.'; }
-}
 const DATA = JSON.parse(document.getElementById('payload').textContent);
 const REG = DATA.registered, CAND = DATA.candidates;
 const pretty = s => (s||'').replaceAll('_',' ').replace(/\(.*?\)/g,'').trim().replace(/\b\w/g,c=>c.toUpperCase());
@@ -191,50 +187,178 @@ document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>{
   $('tab-table').hidden = b.dataset.tab!=='table';
 });
 
-// ── 3D viewport (degrades gracefully: if THREE failed to load, showMesh is a no-op and the
-// specimen list / detail panel / candidate table below still work fully) ──
+// ── 3D viewport: vanilla WebGL, no external library ──
 let showMesh = () => {};
-if (THREE) {
-  const renderer=new THREE.WebGLRenderer({canvas:$('canvas'),antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));
-  const scene=new THREE.Scene();
-  var paintBg=function(){const dark=matchMedia('(prefers-color-scheme: dark)').matches;const explicit=document.documentElement.getAttribute('data-theme');const isDark=explicit?explicit==='dark':dark;scene.background=new THREE.Color(isDark?'#2a251d':'#efe9e0');};
-  paintBg();
-  const camera=new THREE.PerspectiveCamera(42,1,.0005,20);camera.up.set(0,0,1);
-  let dragging=false,lastX=0,lastY=0,az=0.8,el=0.55,dist=0.2,target=new THREE.Vector3();
-  function applyCam(){const x=target.x+dist*Math.cos(el)*Math.cos(az),y=target.y+dist*Math.cos(el)*Math.sin(az),z=target.z+dist*Math.sin(el);camera.position.set(x,y,z);camera.lookAt(target);}
+var paintBg = function(){};
+{
   const canvas=$('canvas');
-  canvas.addEventListener('pointerdown',e=>{dragging=true;lastX=e.clientX;lastY=e.clientY;canvas.setPointerCapture(e.pointerId);});
-  canvas.addEventListener('pointerup',()=>dragging=false);
-  canvas.addEventListener('pointermove',e=>{if(!dragging)return;az-=(e.clientX-lastX)*0.006;el=Math.max(-1.3,Math.min(1.3,el+(e.clientY-lastY)*0.006));lastX=e.clientX;lastY=e.clientY;applyCam();});
-  canvas.addEventListener('wheel',e=>{e.preventDefault();dist=Math.max(0.02,Math.min(4,dist*(1+e.deltaY*0.001)));applyCam();},{passive:false});
-  scene.add(new THREE.HemisphereLight(0xe2f5ff,0x544738,2.6));
-  const light=new THREE.DirectionalLight(0xffffff,3);light.position.set(.3,-.3,.5);scene.add(light);
-  const fill=new THREE.DirectionalLight(0x9fcfff,1.3);fill.position.set(-.3,.3,.2);scene.add(fill);
-  const grid=new THREE.GridHelper(.3,30,0x8a7c62,0x5c5340);grid.rotation.x=Math.PI/2;scene.add(grid);
-  let mesh=null,wire=false,spin=false,extent=.05;
-  var reset=function(){target.set(0,0,extent*0.4);dist=extent*2.4;az=0.8;el=0.55;applyCam();};
-  showMesh = function(geomData){
-    if(mesh){scene.remove(mesh);mesh.geometry.dispose();mesh.material.dispose();mesh=null;}
-    if(!geomData)return;
-    const g=new THREE.BufferGeometry();
-    g.setAttribute('position',new THREE.Float32BufferAttribute(geomData.v,3));
-    g.setIndex(geomData.f);
-    g.computeVertexNormals();
-    const mat=new THREE.MeshStandardMaterial({color:'#c9a876',roughness:.78,metalness:.03,side:THREE.DoubleSide,wireframe:wire});
-    mesh=new THREE.Mesh(g,mat);
-    const box=new THREE.Box3().setFromObject(mesh),size=box.getSize(new THREE.Vector3()),center=box.getCenter(new THREE.Vector3());
-    mesh.position.set(-center.x,-center.y,-box.min.z);
-    scene.add(mesh);
-    extent=Math.max(size.x,size.y,size.z,0.01);
+  const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+  if (!gl) {
+    const el = $('fatalError');
+    if (el) { el.hidden = false; el.textContent = 'WebGL is not available in this browser -- the specimen list and candidate table below still work.'; }
+  } else {
+    const VS = `attribute vec3 aPos; attribute vec3 aNormal;
+      uniform mat4 uMVP; varying vec3 vNormal;
+      void main(){ vNormal = aNormal; gl_Position = uMVP * vec4(aPos,1.0); }`;
+    const FS = `precision mediump float; varying vec3 vNormal;
+      uniform vec3 uColor; uniform vec3 uLightDir; uniform vec3 uFillDir; uniform bool uWire;
+      void main(){
+        if(uWire){ gl_FragColor = vec4(0.13,0.11,0.08,1.0); return; }
+        vec3 n = normalize(vNormal);
+        float key = max(dot(n, normalize(uLightDir)), 0.0);
+        float fill = max(dot(n, normalize(uFillDir)), 0.0);
+        vec3 col = uColor * (0.42 + key*0.62 + fill*0.22);
+        gl_FragColor = vec4(min(col, vec3(1.0)), 1.0);
+      }`;
+    function compile(type, src){
+      const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { console.error(gl.getShaderInfoLog(s)); }
+      return s;
+    }
+    const prog = gl.createProgram();
+    gl.attachShader(prog, compile(gl.VERTEX_SHADER, VS));
+    gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FS));
+    gl.linkProgram(prog);
+    const aPos = gl.getAttribLocation(prog, 'aPos'), aNormal = gl.getAttribLocation(prog, 'aNormal');
+    const uMVP = gl.getUniformLocation(prog, 'uMVP'), uColor = gl.getUniformLocation(prog, 'uColor');
+    const uLightDir = gl.getUniformLocation(prog, 'uLightDir'), uFillDir = gl.getUniformLocation(prog, 'uFillDir');
+    const uWire = gl.getUniformLocation(prog, 'uWire');
+
+    // ── mat4 helpers (column-major, matches WebGL convention) ──
+    const m4 = {
+      perspective(fovy, aspect, near, far){
+        const f = 1/Math.tan(fovy/2), nf = 1/(near-far);
+        return new Float32Array([f/aspect,0,0,0, 0,f,0,0, 0,0,(far+near)*nf,-1, 0,0,2*far*near*nf,0]);
+      },
+      lookAt(eye, center, up){
+        let z0=eye[0]-center[0], z1=eye[1]-center[1], z2=eye[2]-center[2];
+        let len=Math.hypot(z0,z1,z2)||1; z0/=len;z1/=len;z2/=len;
+        let x0=up[1]*z2-up[2]*z1, x1=up[2]*z0-up[0]*z2, x2=up[0]*z1-up[1]*z0;
+        len=Math.hypot(x0,x1,x2)||1; x0/=len;x1/=len;x2/=len;
+        const y0=z1*x2-z2*x1, y1=z2*x0-z0*x2, y2=z0*x1-z1*x0;
+        return new Float32Array([x0,y0,z0,0, x1,y1,z1,0, x2,y2,z2,0,
+          -(x0*eye[0]+x1*eye[1]+x2*eye[2]), -(y0*eye[0]+y1*eye[1]+y2*eye[2]), -(z0*eye[0]+z1*eye[1]+z2*eye[2]), 1]);
+      },
+      mul(a,b){
+        const o=new Float32Array(16);
+        for(let i=0;i<4;i++)for(let j=0;j<4;j++){let s=0;for(let k=0;k<4;k++)s+=a[k*4+j]*b[i*4+k];o[i*4+j]=s;}
+        return o;
+      },
+    };
+
+    function computeNormals(v, f){
+      const n = new Float32Array(v.length);
+      for (let i=0;i<f.length;i+=3){
+        const a=f[i]*3,b=f[i+1]*3,c=f[i+2]*3;
+        const ux=v[b]-v[a],uy=v[b+1]-v[a+1],uz=v[b+2]-v[a+2];
+        const wx=v[c]-v[a],wy=v[c+1]-v[a+1],wz=v[c+2]-v[a+2];
+        const nx=uy*wz-uz*wy, ny=uz*wx-ux*wz, nz=ux*wy-uy*wx;
+        n[a]+=nx;n[a+1]+=ny;n[a+2]+=nz; n[b]+=nx;n[b+1]+=ny;n[b+2]+=nz; n[c]+=nx;n[c+1]+=ny;n[c+2]+=nz;
+      }
+      for (let i=0;i<n.length;i+=3){const len=Math.hypot(n[i],n[i+1],n[i+2])||1;n[i]/=len;n[i+1]/=len;n[i+2]/=len;}
+      return n;
+    }
+    // Every unique undirected edge of the triangle soup, for the wireframe draw mode.
+    function computeEdges(f){
+      const seen=new Set(), idx=[];
+      for (let i=0;i<f.length;i+=3){
+        const tri=[f[i],f[i+1],f[i+2]];
+        for (let e=0;e<3;e++){
+          const p=tri[e], q=tri[(e+1)%3], key=p<q?p+'_'+q:q+'_'+p;
+          if(!seen.has(key)){seen.add(key);idx.push(p,q);}
+        }
+      }
+      return idx;
+    }
+
+    let posBuf=null,normBuf=null,triIdxBuf=null,triCount=0,edgeIdxBuf=null,edgeCount=0;
+    let dragging=false,lastX=0,lastY=0,az=0.8,el=0.55,dist=0.2,tx=0,ty=0,tz=0,extent=.05,wire=false,spin=false;
+    let bgColor=[0.937,0.914,0.878];
+
+    function paintBgFn(){
+      const dark=matchMedia('(prefers-color-scheme: dark)').matches;
+      const explicit=document.documentElement.getAttribute('data-theme');
+      const isDark=explicit?explicit==='dark':dark;
+      bgColor = isDark ? [0.165,0.145,0.114] : [0.937,0.914,0.878];
+    }
+    paintBg = paintBgFn; paintBgFn();
+
+    function reset(){ tx=0;ty=0;tz=extent*0.4; dist=extent*2.4; az=0.8; el=0.55; }
     reset();
-  };
-  $('btnReset').onclick=reset;
-  $('btnSpin').onclick=()=>{spin=!spin;$('btnSpin').classList.toggle('on',spin);};
-  $('btnWire').onclick=()=>{wire=!wire;$('btnWire').classList.toggle('on',wire);if(mesh)mesh.material.wireframe=wire;};
-  new ResizeObserver(()=>{const c=canvas.parentElement;renderer.setSize(c.clientWidth,c.clientHeight,false);camera.aspect=c.clientWidth/Math.max(1,c.clientHeight);camera.updateProjectionMatrix();}).observe(canvas.parentElement);
-  renderer.setAnimationLoop(()=>{if(spin){az+=0.004;applyCam();}renderer.render(scene,camera);});
-} else {
-  var paintBg=function(){};
+
+    showMesh = function(geomData){
+      if (!geomData) { posBuf=null; return; }
+      const v = geomData.v, f = geomData.f;
+      let minx=Infinity,miny=Infinity,minz=Infinity,maxx=-Infinity,maxy=-Infinity,maxz=-Infinity;
+      for (let i=0;i<v.length;i+=3){
+        minx=Math.min(minx,v[i]);maxx=Math.max(maxx,v[i]);
+        miny=Math.min(miny,v[i+1]);maxy=Math.max(maxy,v[i+1]);
+        minz=Math.min(minz,v[i+2]);maxz=Math.max(maxz,v[i+2]);
+      }
+      const cx=(minx+maxx)/2, cy=(miny+maxy)/2;
+      const centered = new Float32Array(v.length);
+      for (let i=0;i<v.length;i+=3){ centered[i]=v[i]-cx; centered[i+1]=v[i+1]-cy; centered[i+2]=v[i+2]-minz; }
+      const normals = computeNormals(centered, f);
+      posBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.bufferData(gl.ARRAY_BUFFER, centered, gl.STATIC_DRAW);
+      normBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, normBuf); gl.bufferData(gl.ARRAY_BUFFER, normals, gl.STATIC_DRAW);
+      triIdxBuf = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triIdxBuf);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(f), gl.STATIC_DRAW); triCount = f.length;
+      const edges = computeEdges(f);
+      edgeIdxBuf = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, edgeIdxBuf);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(edges), gl.STATIC_DRAW); edgeCount = edges.length;
+      extent = Math.max(maxx-minx, maxy-miny, maxz-minz, 0.01);
+      reset();
+    };
+
+    canvas.addEventListener('pointerdown',e=>{dragging=true;lastX=e.clientX;lastY=e.clientY;canvas.setPointerCapture(e.pointerId);});
+    canvas.addEventListener('pointerup',()=>dragging=false);
+    canvas.addEventListener('pointermove',e=>{if(!dragging)return;az-=(e.clientX-lastX)*0.006;el=Math.max(-1.3,Math.min(1.3,el+(e.clientY-lastY)*0.006));lastX=e.clientX;lastY=e.clientY;});
+    canvas.addEventListener('wheel',e=>{e.preventDefault();dist=Math.max(0.02,Math.min(4,dist*(1+e.deltaY*0.001)));},{passive:false});
+    $('btnReset').onclick=reset;
+    $('btnSpin').onclick=()=>{spin=!spin;$('btnSpin').classList.toggle('on',spin);};
+    $('btnWire').onclick=()=>{wire=!wire;$('btnWire').classList.toggle('on',wire);};
+
+    function resize(){
+      const c = canvas.parentElement, dpr = Math.min(devicePixelRatio||1, 2);
+      const w = Math.max(1, Math.round(c.clientWidth*dpr)), h = Math.max(1, Math.round(c.clientHeight*dpr));
+      if (canvas.width!==w || canvas.height!==h){ canvas.width=w; canvas.height=h; }
+    }
+    new ResizeObserver(resize).observe(canvas.parentElement);
+    resize();
+
+    function frame(){
+      if (spin) az += 0.004;
+      resize();
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.clearColor(bgColor[0], bgColor[1], bgColor[2], 1);
+      gl.enable(gl.DEPTH_TEST);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      if (posBuf) {
+        const eye = [tx+dist*Math.cos(el)*Math.cos(az), ty+dist*Math.cos(el)*Math.sin(az), tz+dist*Math.sin(el)];
+        const view = m4.lookAt(eye, [tx,ty,tz], [0,0,1]);
+        const proj = m4.perspective(42*Math.PI/180, canvas.width/Math.max(1,canvas.height), 0.0005, 20);
+        const mvp = m4.mul(proj, view);
+        gl.useProgram(prog);
+        gl.uniformMatrix4fv(uMVP, false, mvp);
+        gl.uniform3f(uColor, 0.788, 0.659, 0.463);
+        gl.uniform3f(uLightDir, 0.3, -0.3, 0.5);
+        gl.uniform3f(uFillDir, -0.3, 0.3, 0.2);
+        gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.vertexAttribPointer(aPos,3,gl.FLOAT,false,0,0); gl.enableVertexAttribArray(aPos);
+        gl.bindBuffer(gl.ARRAY_BUFFER, normBuf); gl.vertexAttribPointer(aNormal,3,gl.FLOAT,false,0,0); gl.enableVertexAttribArray(aNormal);
+        if (wire) {
+          gl.uniform1i(uWire, 1);
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, edgeIdxBuf);
+          gl.drawElements(gl.LINES, edgeCount, gl.UNSIGNED_SHORT, 0);
+        } else {
+          gl.uniform1i(uWire, 0);
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triIdxBuf);
+          gl.drawElements(gl.TRIANGLES, triCount, gl.UNSIGNED_SHORT, 0);
+        }
+      }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
 }
 
 // ── specimen rail + detail ──

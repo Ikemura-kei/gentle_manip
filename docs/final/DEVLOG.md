@@ -10439,3 +10439,28 @@ collector's `*_success_grasp.png`, resized to 280px wide, ~10-20KB after re-enco
 ~450KB for the original full-res PNG -- `export_artifact_data.py::_grasp_thumb`) as a base64
 data URI in the JSON payload. Real visual confirmation the grasp happened, without needing
 any capability this account doesn't have.
+
+### 2026-09-09 (cont.) — 3D view STILL blank after the UMD fix; switched to vanilla WebGL
+
+User reported the 3D view still wasn't visible after republishing with the UMD `<script src>`
+fix above. Two independent attempts to load three.js from cdnjs (first ES-module
+`import()`+importmap, then the tool's own recommended UMD global pattern) both left the
+viewport permanently blank with no error surfaced -- strong evidence CDN-script loading
+inside this Artifact's sandbox is just not reliable for this account/environment right now,
+for reasons that don't reliably throw a catchable JS error either way. Rather than attempt a
+third CDN strategy blind, replaced the three.js dependency entirely with a small hand-rolled
+vanilla WebGL renderer (raw `gl.createShader`/`gl.createProgram`, own mat4 perspective/lookAt/
+multiply, per-vertex normals computed from the mesh's own position+face data via a cross-
+product face-normal accumulation pass, same orbit-camera drag/wheel interaction as before).
+Zero external dependencies -- nothing left to fail to load. Confirmed the reference "GRACE"
+Artifact from earlier in this account's history DOES successfully embed `<video>` elements as
+plain `data:video/mp4;base64,...` src (no `assets` capability involved -- video is just
+another binary asset embeddable the same way images already were), which corrected an
+earlier wrong assumption that video was categorically infeasible here; built a companion
+video-gallery Artifact using the same base64 pattern instead (see below).
+
+**Lesson: when a CDN-loaded library fails in a way that produces zero diagnostic signal
+twice in a row across two different loading strategies, stop trying to fix the loading
+strategy and remove the dependency instead** -- for content this small (a few hundred to a
+couple thousand triangles), a minimal hand-rolled WebGL renderer is not meaningfully more
+code than correctly wiring up a library, and it can never suffer this failure mode again.
