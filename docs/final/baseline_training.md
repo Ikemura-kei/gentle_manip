@@ -81,13 +81,88 @@ needs horizon > act-steps, so it is inert on any horizon-4 policy. On `m`: sim p
 better in one robot session. Sim scores success and ignores smoothness, which is what heavier
 weighting buys, so both can hold. State which value produced any number you report.
 
-## 2. RGB baseline — TBD
+## 2. RGB baseline — PLANNED
 
-To be filled when the matched RGB arm is trained. Open decisions recorded 2026-09-09:
-horizon 16 to match §1 (the existing RGB runs `xkhrc`/`fuuoy` are horizon 4, so a modality
-comparison against them confounds modality with horizon); colour jitter, which DPPO does not ship
-(`RandomShiftsAug` is its only image augmentation) and which is the actual answer to lighting drift;
-and an ImageNet-pretrained ResNet-18 with GroupNorm instead of DPPO's from-scratch depth-1 ViT,
-which would also want a 224×224 re-convert — the raw frames are 480×640, so the data supports it.
+The image twin of §1: **same data, same 130 episodes, same horizon 16 / 20 DDPM steps / 2000 epochs
+/ batch 128 / lr 1e-4 cosine / EMA from 10 / seed 42**, so the observation branch and its encoder
+are the only differences. Dataset `single_lift_real7_bc_rgb224_v1`.
+
+### Encoder: ImageNet-pretrained ResNet-18 with GroupNorm
+
+DPPO ships a from-scratch depth-1, 128-dim ViT. That is a weak encoder at ~120 demonstrations and
+would leave the baseline open to the charge that it was underpowered, so we follow the real-world
+reference instead:
+
+- **Chi et al., *Diffusion Policy: Visuomotor Policy Learning via Action Diffusion*, RSS 2023** —
+  ImageNet-pretrained ResNet-18 for the real experiments, with **BatchNorm replaced by GroupNorm**
+  because BN interacts badly with EMA. This training loop uses EMA, so the substitution carries over.
+- **Zhao et al., *Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware* (ACT), RSS
+  2023** — also a pretrained ResNet-18 backbone on real data.
+
+Implementation: `gentle_manip/dppo/rgb_backbone.py::ResNet18Encoder`. 11.2 M encoder parameters,
+13.7 M total with the denoiser. Verified: 0 BatchNorm / 20 GroupNorm after conversion.
+
+**Images at 224 px**, not the 96 the earlier RGB runs used — pretrained features are learned at 224
+and DP's real experiments run 240×320 cropped to 216×288. The raw recordings are 480×640, so this
+needed only a re-convert.
+
+### Augmentation: two, deliberately not five
+
+- **Random shift** (`RandomShiftsAug`, pad 4) — kept. **Mandlekar et al., robomimic, CoRL 2021**
+  found random crop the most impactful image augmentation for manipulation, and it is DP's only one.
+- **Photometric jitter** — added, because DPPO ships none and shift does nothing for illumination.
+  Standard in large-scale real pipelines (RT-1, Octo). Defaults brightness 0.25, contrast 0.25,
+  saturation 0.2, channel gain 0.05.
+- **Skipped: Gaussian pixel noise, random erasing, grayscale.** Not used in real DP, and with 117
+  training episodes each extra augmentation spends fit on speculative robustness.
+
+**Ranges are sized from the data, not guessed.** Measured across our collection days (tofu is a
+different day from the other six): luminance spread **0.5 %**, R/G **1.4 %**, B/G **0.4 %**, contrast
+sd 27.1–28.8. The camera auto-exposes and auto-white-balances, so it is already suppressing most of
+the day-to-day difference; the jitter is insurance for deploy days we have not sampled, not
+correction for a large observed shift.
+
+**`channel_gain` replaces hue rotation deliberately.** The measured drift is a white-balance shift,
+which per-channel gain models directly. A hue rotation would move colours the policy legitimately
+uses to tell a red tomato from a brown mushroom from white tofu.
+
+### Preprocessing contract (the part most likely to break silently)
+
+| stage | resize | scale | normalize |
+|---|---|---|---|
+| convert | PIL BILINEAR → 224×224 | uint8 0-255 | none |
+| train | — | `.float()`, still 0-255 | **inside the encoder** |
+| deploy | PIL BILINEAR → 224×224 | `.float()`, still 0-255 | **inside the encoder** |
+
+Normalisation (/255 then ImageNet mean/std) lives in `ResNet18Encoder.forward`, so neither side has
+to remember it and they cannot diverge. The resize is the *same call* in `convert_demos` and
+`deploy_real_dppo.py`, and deploy takes the size from the checkpoint's own `shape_meta`.
+
+⚠ **DPPO's augmentation is NOT train-only.** `VisionDiffusionMLP.forward` applies `self.aug`
+unconditionally, and `RandomShiftsAug` is a plain callable, so `model.eval()` does not disable it —
+a model built with `augment=True` for inference would jitter every deploy step. Deploy escapes this
+today only because it never passes `augment`. Our `TrainOnlyImageAug` is an `nn.Module` that checks
+`self.training`, so it is correct by construction instead of by omission.
+
+`VisionDiffusionMLPAug` is a **factory**, not a subclass or wrapper: it returns a real
+`VisionDiffusionMLP` whose state_dict keys are byte-identical to a stock build, verified by loading
+train-built weights into a deploy-built model with `strict=True`. Augmentation contributes no
+parameters, so it cannot affect the checkpoint.
+
+### Launch
+
+```bash
+DATASET=single_lift_real7_bc_rgb224_v1 EPOCHS=2000 \
+  bash gentle_manip/scripts/final/train_dppo_dp_real.sh
+```
+Photometric ranges are env knobs (`BRIGHTNESS`, `CONTRAST`, `SATURATION`, `CHANNEL_GAIN`,
+`SHIFT_PAD`). `torchvision==0.19.0+cu121` was installed manually into `envs/dppo` to match
+torch 2.4.0+cu121 — like torch itself it is kept out of the pyproject as a platform-specific build.
+
+### Open
+
+Whether to freeze the ResNet stem. Not frozen by default (`freeze_stem: False`); with 117 episodes
+full fine-tuning may overfit the encoder, and a frozen-stem arm is the obvious ablation if the
+val curve turns early.
 
 ## 3. pi0.5 — TBD

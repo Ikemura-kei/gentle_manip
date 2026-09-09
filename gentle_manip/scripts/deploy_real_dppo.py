@@ -84,6 +84,7 @@ def _load_net_arch(ckpt: Path) -> dict:
             "img_cond_steps": cfg.get("img_cond_steps", net.get("img_cond_steps")),
             "image_size": (shape[-1] if shape else 96),
             "vit_cfg": ((net.get("backbone") or {}).get("cfg")),
+            "backbone_target": str((net.get("backbone") or {}).get("_target_", "")),
             "spatial_emb": net.get("spatial_emb"),
         })
     return {k: v for k, v in arch.items() if v is not None}
@@ -109,6 +110,7 @@ class DPPOPolicyAdapter:
                  action_config=None, warmup_steps: int = 0,
                  visual: str = "pointcloud", img_cond_steps: int = 1, image_size: int = 96,
                  image_key: str = "image_cam_ext", vit_cfg: "dict | None" = None,
+                 backbone_target: "str | None" = None,
                  spatial_emb: int = 128, ddim_steps: int = 0,
                  temporal_ensemble: bool = False, ensemble_m: float = 0.01,
                  arch_predict_epsilon: bool = True,
@@ -143,14 +145,28 @@ class DPPOPolicyAdapter:
         # checkpoint — read from its hydra config by main() so any net size loads; these defaults are
         # the original small net.
         if self._visual == "rgb":
-            from model.common.vit import VitEncoder
             from model.diffusion.mlp_diffusion import VisionDiffusionMLP
             from types import SimpleNamespace
-            _vc = dict(vit_cfg or {"patch_size": 8, "depth": 1, "embed_dim": 128,
-                                   "num_heads": 4, "embed_style": "embed2", "embed_norm": 0})
-            backbone = VitEncoder(obs_shape=[3, self._image_size, self._image_size],
-                                  num_channel=3 * self._img_cond_steps,
-                                  cfg=SimpleNamespace(**_vc))   # VitEncoder wants attr access
+            # BACKBONE from the checkpoint's own target, so a ResNet policy cannot be rebuilt as a
+            # ViT (which would fail loudly on load, but only after the robot is already homed).
+            # PREPROCESSING: both encoders take RAW 0-255 float. ResNet18Encoder does the /255 and
+            # the ImageNet mean/std INSIDE its forward, so training and deploy cannot diverge --
+            # there is no normalization step here to keep in sync. The resize is already shared:
+            # convert_demos and this file both call PIL BILINEAR to (S, S), and S comes from the
+            # checkpoint's shape_meta below.
+            if "ResNet18Encoder" in str(backbone_target or ""):
+                from gentle_manip.dppo.rgb_backbone import ResNet18Encoder
+                backbone = ResNet18Encoder(obs_shape=[3, self._image_size, self._image_size],
+                                           num_channel=3 * self._img_cond_steps, pretrained=False)
+                print(f"  vision backbone: ResNet18Encoder (GroupNorm, ImageNet norm internal) "
+                      f"@ {self._image_size}px", flush=True)
+            else:
+                from model.common.vit import VitEncoder
+                _vc = dict(vit_cfg or {"patch_size": 8, "depth": 1, "embed_dim": 128,
+                                       "num_heads": 4, "embed_style": "embed2", "embed_norm": 0})
+                backbone = VitEncoder(obs_shape=[3, self._image_size, self._image_size],
+                                      num_channel=3 * self._img_cond_steps,
+                                      cfg=SimpleNamespace(**_vc))   # VitEncoder wants attr access
             net = VisionDiffusionMLP(
                 backbone=backbone, action_dim=action_dim, horizon_steps=horizon_steps,
                 cond_dim=obs_dim * cond_steps, img_cond_steps=self._img_cond_steps,

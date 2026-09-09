@@ -1,0 +1,112 @@
+# [dppo-pretrain] REAL-only BC on RGB — the image twin of sim2real_v1/pre_diffusion_pointnet.yaml.
+# Same data, same split, same diffusion/optimisation settings; the ONLY change is the observation
+# branch: a ViT on 96x96 cam_ext RGB replaces the PointNet on 1024-point clouds. Structure follows
+# DPPO's proven image recipe (cfg/robomimic/pretrain/can/pre_diffusion_mlp_img.yaml), with the
+# denoising steps / horizon / history / batch / schedule matched to OUR point-cloud run so the two
+# are comparable.
+# Used by: gentle_manip/scripts/final/train_dppo_dp_real.sh
+# Status: active
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${logdir}
+_target_: agent.pretrain.train_diffusion_agent.TrainDiffusionAgent
+
+name: ${env}_pre_diffusion_vision_ta${horizon_steps}_td${denoising_steps}
+logdir: ${oc.env:DPPO_LOG_DIR}/dppo-pretrain/${env}/${exp_id:}
+train_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/train.npz
+val_dataset_path: ${oc.env:DPPO_DATA_DIR}/${env}/val.npz
+experiment: ""                 # real run: no sim env config to snapshot
+
+seed: 42
+device: cuda:0
+env: single_lift_real6_bc_rgb_v1
+obs_dim: 8                     # proprio only (ee_pos3 + ee_quat4 + gripper1); RGB is separate
+action_dim: 7                  # abs pos3 + euler3 + gripper1
+denoising_steps: 20            # matched to the point-cloud run (DPPO's image example uses 100)
+horizon_steps: 16
+cond_steps: 2                  # proprio history
+img_cond_steps: 1              # RGB history (concatenated as channels by the ViT)
+
+wandb:
+  entity: ${oc.env:DPPO_WANDB_ENTITY,null}
+  project: gentle_manip_generalist   # same project as the cloud runs, for side-by-side loss curves
+  run: ${exp_id:}
+  group: dppo-pretrain
+
+shape_meta:
+  obs:
+    rgb:
+      shape: [3, 224, 224]       # cam_ext, square-resized at convert time (--image-size)
+    state:
+      shape: [8]
+  action:
+    shape: [7]
+
+train:
+  n_epochs: 2000
+  batch_size: 128
+  learning_rate: 1e-4
+  weight_decay: 1e-6
+  lr_scheduler:
+    first_cycle_steps: ${train.n_epochs}
+    warmup_steps: 100
+    min_lr: 1e-5
+  epoch_start_ema: 10
+  update_ema_freq: 5
+  save_model_freq: 100         # 20 checkpoints; the val minimum is expected early
+  val_freq: 10
+
+model:
+  _target_: model.diffusion.diffusion.DiffusionModel   # plain BC: no aux heads, no paired/consistency
+  predict_epsilon: True
+  denoised_clip_value: 1.0
+  network:
+    _target_: gentle_manip.dppo.rgb_backbone.VisionDiffusionMLPAug
+    backbone:
+      _target_: gentle_manip.dppo.rgb_backbone.ResNet18Encoder
+      obs_shape: ${shape_meta.obs.rgb.shape}
+      num_channel: ${eval:'3 * ${img_cond_steps}'}
+      pretrained: True                 # ImageNet-1k (DP's real-world recipe)
+      groupnorm: True                  # BatchNorm -> GroupNorm: BN interacts badly with EMA
+    img_cond_steps: ${img_cond_steps}
+    # augmentation is TrainOnlyImageAug (set by the factory above): random shift + photometric
+    # jitter, self-disabling under model.eval() so it cannot leak into deployment.
+    aug_pad: 4
+    aug_brightness: 0.25
+    aug_contrast: 0.25
+    aug_saturation: 0.2
+    aug_channel_gain: 0.05             # white-balance drift (measured across our days: R/G 1.4 %)
+    spatial_emb: 0                     # ResNet has no patches; the >0 path is ViT-only
+    time_dim: 16                       # match the point-cloud arm
+    mlp_dims: [1024, 1024, 1024]       # match the point-cloud arm
+    residual_style: True
+    cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+    horizon_steps: ${horizon_steps}
+    action_dim: ${action_dim}
+  horizon_steps: ${horizon_steps}
+  obs_dim: ${obs_dim}
+  action_dim: ${action_dim}
+  denoising_steps: ${denoising_steps}
+  device: ${device}
+
+ema:
+  decay: 0.995
+
+train_dataset:
+  _target_: agent.dataset.sequence.StitchedSequenceDataset
+  use_img: True
+  dataset_path: ${train_dataset_path}
+  horizon_steps: ${horizon_steps}
+  cond_steps: ${cond_steps}
+  img_cond_steps: ${img_cond_steps}
+  device: ${device}
+val_dataset:
+  _target_: agent.dataset.sequence.StitchedSequenceDataset
+  use_img: True
+  dataset_path: ${val_dataset_path}
+  horizon_steps: ${horizon_steps}
+  cond_steps: ${cond_steps}
+  img_cond_steps: ${img_cond_steps}
+  device: ${device}
