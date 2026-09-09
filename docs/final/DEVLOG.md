@@ -9830,6 +9830,66 @@ would create two collection regimes. **The real gap is grasp TIGHTNESS, not spee
 (~27 mm). Caveat: sim cherry carries scale DR 0.9-1.2, the physical tomato is one size, and the real
 p10-p90 (21.8-26.5 mm) overlaps sim. That is an operator instruction, not a parameter.
 
+### 2026-09-09 — G5 (pooling + horizon 16) is the campaign's one REPLICATED win, and it is inference-tunable
+
+Full table: `docs/final/results.md` (regenerate with `scripts/final/refresh_results_table.py`, which
+rebuilds it from the eval dirs so entries cannot be missed or duplicated).
+
+**The result.** G5 = G3 + mean(+)max cloud pooling (cluster run `fsynt`), with temporal ensembling
+at inference. Cherry tomato **10/20 then 9/20** against a baseline's 3/20 — the only cherry result
+this campaign that survives a repeat, and the ensembling-only result (6/20) did NOT survive its own
+(3/20 on rerun). Mushroom 18/20 hold 0 at 15.8 kPa, matching the best baseline while GENTLER than
+it. So it roughly triples the hard object without trading away the easy one.
+
+**Pooling and ensembling INTERACT — neither is enough alone.** Cherry: pooling alone 6/20,
+ensembling alone 4.5/20 (vs 4.0 without), together 9.5. Worth noting our own analysis argued
+against pooling on measured grounds (width survives max-pooling at corr 0.8 vs a 0.85 ceiling) and
+that argument was wrong about the outcome, though still right that the gain is NOT about width.
+
+**Inference-side findings, all on the same checkpoint, no retraining:**
+- **Ensemble DEPTH is what matters, and it is monotone.** Ordering by effective number of averaged
+  plans: 3.5 -> 6/20, 4.0 -> 9.5, 8.0 -> 12/20, 16.0 -> 13/20, with sustained stress falling to
+  9.6 kPa (the gentlest of the campaign) and grasp attempts/episode falling 2.25 -> 1.45. Depth is
+  `horizon / act_steps`, so exec 1 (ACT's own design point) is best and fits latency: inference is
+  8.6 ms at 20 denoising steps against a 33 ms budget at 30 Hz.
+- **The ACT weight `m` is a red herring at our depth.** `w_i = exp(-m*i)` with ACT's m=0.01 gives a
+  1.03x oldest/newest ratio over 4 predictions — a plain mean. m=0.33 reproduces ACT's 2.69x ratio
+  and scored WORSE in sim (6/20), by losing grasps upstream (ever 7 vs 10), not by changing width.
+  The user reports 0.33 is clearly better ON THE ROBOT; sim scores success and ignores smoothness,
+  which is what heavier weighting buys, so both can hold. Always state which m produced a number.
+- **Full stochastic DDPM-20 beats DDIM.** DDIM-10 5/20, DDIM-20 7/20, DDPM-20 9.5. Determinism
+  costs ~2.5 and the step reduction ~2 more. **And offline accuracy ANTI-PREDICTED this**: on the
+  val set DDIM-10 matched the demonstrated chunk 36 % better at the grasp (3.29 vs 5.16 mm) and
+  then halved closed-loop success. Do not tune this policy on open-loop prediction error.
+- **Sampling variance is negligible where it matters** (0.25 mm at the grasp vs 4.5 mm of
+  plan-to-plan disagreement), so within-timestep sample averaging is not worth building. Batching
+  N samples is nearly free (16 samples = +9 % latency), but there is nothing to average.
+- **exec 8 is a wash** (9/20, higher stress). Not adopted.
+
+**METRIC LESSON — `exec mm` (episode minimum width) is misleading; use AT-GRASP width.** The
+episode minimum is whichever single attempt closed furthest, so a policy that closes correctly once
+in three tries reads identical to one that closes correctly every time. That is why executed width
+appeared frozen at 23.9-24.4 mm across configurations while ever-grasped swung 7 -> 14. The honest
+measure averages the width at which closing STOPS over EVERY attempt: G3+ens 30.3 mm vs G5+ens
+exec2 25.2 mm on a 25 mm object, and within each policy successes close BELOW the object while
+failures close at or above it (G3 22.4 vs 31.7; G5 24.4 vs 26.5). Now a column in results.md.
+Detector: a local minimum of commanded width >=6 mm below the open level with the EE at the table
+BEFOREHAND — "beforehand" matters, since the width minimum coincides with lift-off, and two earlier
+versions of this detector were wrong (end-of-closing-run splits one close into fragments; requiring
+the EE stationary AT the minimum rejects every real grasp).
+
+**Also fixed today, both silent-failure classes:**
+- The eval config now reads the encoder `pooling` from the checkpoint (default "max"), so a meanmax
+  policy cannot be evaluated with the wrong encoder by forgetting an override.
+- `signals/*.npz` now stores `action_chunks_full` (the whole predicted chunk, not just the executed
+  steps) and every episode gets a planned-vs-executed plot. This showed that at horizon 16 the
+  policy PLANS the right closing width and fails to execute it: successes and failures plan the
+  same 17.9 / 18.2 mm, but successes land within 1.1 mm and failures fall 4.3 mm short.
+- ⚠ **DPPO applies image augmentation at INFERENCE.** `VisionDiffusionMLP.forward` calls `self.aug`
+  with no train/eval check and `RandomShiftsAug` is a plain callable, so `model.eval()` does not
+  disable it. Deploy escapes this only because it never passes `augment`. Any new image model must
+  use an `nn.Module` aug that checks `self.training` (see `dppo/rgb_backbone.py`).
+
 ### 2026-09-09 04:30 — G3 NEGATIVE: action horizon 16 grasps as well and drops what it grasps
 
 `mmgyy`, G2's recipe with `horizon_steps` 4 → 16 (executed steps stay 4) and hold tail 10 → 22.
