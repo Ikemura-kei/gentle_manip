@@ -1,0 +1,99 @@
+<title>Grasp Reel</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#f6f3ee; --surface:#ffffff; --surface-2:#efe9e0; --line:#ddd3c4;
+  --ink:#211d17; --ink-dim:#6b6255; --ink-faint:#a89d8a;
+  --accent:#b5763a; --accent-ink:#4a3016;
+  --good:#4f7d54; --good-bg:#e6efe1;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#1a1712; --surface:#221e18; --surface-2:#2a251d; --line:#3c352a;
+    --ink:#ece6da; --ink-dim:#a99e8c; --ink-faint:#786e5d;
+    --accent:#d99a54; --accent-ink:#f6dcb8;
+    --good:#7bb280; --good-bg:#22301f;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#1a1712; --surface:#221e18; --surface-2:#2a251d; --line:#3c352a;
+  --ink:#ece6da; --ink-dim:#a99e8c; --ink-faint:#786e5d;
+  --accent:#d99a54; --accent-ink:#f6dcb8;
+  --good:#7bb280; --good-bg:#22301f;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font:15px/1.5 "IBM Plex Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+h1{font-family:"IBM Plex Serif",Georgia,serif;font-weight:600;text-wrap:balance;margin:0}
+header{padding:28px 32px 22px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;justify-content:space-between;gap:24px;flex-wrap:wrap}
+.brand{display:flex;flex-direction:column;gap:4px;max-width:64ch}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.14em;color:var(--accent);text-transform:uppercase}
+h1{font-size:26px;color:var(--ink)}
+.subtitle{color:var(--ink-dim);font-size:13.5px}
+.statstrip{display:flex;gap:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface)}
+.stat{padding:10px 18px;text-align:right;border-left:1px solid var(--line)}
+.stat:first-child{border-left:none}
+.stat .n{font-family:"IBM Plex Mono",monospace;font-size:20px;font-weight:500;color:var(--ink)}
+.stat .l{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
+main{padding:24px 32px 48px}
+.toolbar{display:flex;gap:10px;margin-bottom:18px}
+.toolbar input{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:9px 12px;width:280px}
+.toolbar input:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+.tile video{width:100%;aspect-ratio:4/3;background:#000;display:block;object-fit:cover}
+.tile .body{padding:12px 14px 14px}
+.tile h3{font-family:"IBM Plex Serif",Georgia,serif;font-size:15.5px;font-weight:600;margin:0 0 8px;text-transform:capitalize}
+.tile .gaugelabel{display:flex;justify-content:space-between;font-size:11px;color:var(--ink-dim);margin-bottom:4px}
+.tile .gauge{height:6px;border-radius:4px;background:var(--surface-2);border:1px solid var(--line);overflow:hidden}
+.tile .gauge > i{display:block;height:100%;background:var(--good);border-radius:4px 0 0 4px}
+.tile .meta{margin-top:8px;font-size:11px;color:var(--ink-faint);font-family:"IBM Plex Mono",monospace;display:flex;justify-content:space-between}
+.empty{color:var(--ink-faint);font-size:13.5px;padding:40px 0;text-align:center}
+footer{padding:20px 32px 40px;color:var(--ink-faint);font-size:12px;border-top:1px solid var(--line);margin-top:8px}
+footer a{color:var(--accent)}
+</style>
+<header>
+  <div class="brand">
+    <div class="eyebrow">Gentle Manip · Object-Set Expansion</div>
+    <h1>Grasp Reel</h1>
+    <p class="subtitle">One real collected demonstration per fully-registered category — the xArm7 approaching, closing, and lifting the soft-body specimen in Genesis MPM. Muted, looping, autoplaying.</p>
+  </div>
+  <div class="statstrip mono" id="statstrip"></div>
+</header>
+<main>
+  <div class="toolbar"><input type="text" id="search" placeholder="Search category…"></div>
+  <div class="grid" id="grid"></div>
+  <p class="empty" id="empty" hidden>No categories match your search.</p>
+</main>
+<footer>Companion to the <a href="__CATALOG_URL__">Grasp Specimen Catalog</a> · clips re-encoded and downsized for embedding, source renders are higher resolution · data embedded at publish time from the object-expansion pipeline running on the arrhenius cluster.</footer>
+<script id="payload" type="application/json">__DATA_JSON__</script>
+<script type="module">
+const $=id=>document.getElementById(id);
+const DATA = JSON.parse($('payload').textContent);
+const CLIPS = DATA.clips;
+const pretty = s => (s||'').replaceAll('_',' ').replace(/\(.*?\)/g,'').trim().replace(/\b\w/g,c=>c.toUpperCase());
+
+$('statstrip').innerHTML = [
+  [CLIPS.length,'Categories with a clip'],
+].map(([n,l])=>`<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('');
+
+function render(){
+  const q = $('search').value.toLowerCase();
+  const items = CLIPS.filter(c=>c.name.toLowerCase().includes(q)).sort((a,b)=>a.name.localeCompare(b.name));
+  $('empty').hidden = items.length>0;
+  $('grid').innerHTML = items.map(c=>{
+    const pct = v => v==null ? '—' : Math.round(100*v);
+    return `<div class="tile">
+      <video muted loop autoplay playsinline preload="metadata" src="data:video/mp4;base64,${c.clip_b64}"></video>
+      <div class="body">
+        <h3>${pretty(c.name)}</h3>
+        <div class="gaugelabel"><span>Grasp success</span><span class="mono">${pct(c.success_rate)}%</span></div>
+        <div class="gauge"><i style="width:${pct(c.success_rate)}%"></i></div>
+        <div class="meta"><span>ever lifted ${pct(c.ever_success_rate)}%</span><span>${c.episodes_saved??'—'} eps</span></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+$('search').oninput = render;
+render();
+</script>
