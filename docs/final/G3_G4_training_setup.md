@@ -4,6 +4,10 @@ Two training slots before a 2026-09-09 15:00 meeting. This page records **what w
 what we decided NOT to run, and the evidence behind each call** — so the choices can be audited
 later and so a negative result is not re-tried a third time.
 
+**RESULT (2026-09-09 04:30): G3 is a NEGATIVE result — 28/60 vs the baseline's 34/60.** It grasps
+just as often and then drops what it grasped. Full analysis in §3. G4 launched anyway (§4), because
+its one change targets exactly the deficit G3 exposed.
+
 **G3 as launched** (2026-09-08 22:14): run `mmgyy`, dataset
 `single_lift_generalist_soft_v5_tail22`, 122 epochs = 1,007,842 gradient steps (8,261 batches/epoch
 at batch 128), `horizon_steps=16`, G2's recipe otherwise (paired 0.5, `pc_aug` d435i_noise_train,
@@ -16,8 +20,8 @@ and its local twin `wiayg`. Setup reference: `docs/final/G1_G2_training_setup.md
 
 | run | what it changes vs G2 | why |
 |---|---|---|
-| **G3** = `mmgyy` (RUNNING, launched 22:14) | action horizon 4 → **16**, executed steps stay **4**; hold tail 10 → **22** | the only untested change with two independent reference implementations behind it |
-| **G4** | G3 **+ sample prediction** (`predict_epsilon: False`); FiLM head only if G3's teaser says the conditioning path is the problem | one further change, attributable given G3 |
+| **G3** = `mmgyy` (DONE 04:20, **negative**) | action horizon 4 → **16**, executed steps stay **4**; hold tail 10 → **22** | the only untested change with two independent reference implementations behind it |
+| **G4** = `bpfnl` (RUNNING, launched 04:36) | G3 **+ sample prediction** (`predict_epsilon: False`) | one further change, attributable given G3; and it targets G3's measured deficit (§4) |
 
 ## 1. Where the baseline actually stands
 
@@ -135,6 +139,43 @@ Tail 22 reproduces today's numbers *exactly* (both counts depend only on `K − 
 3.7 % the current policies were trained on. The setting that destroyed retry was round 2's tail 60 at
 24 %, six times today's dose — tail 22 is nowhere near it. **Rule: keep `tail − horizon = 6`.**
 
+### Result — negative, with a clean mechanism
+
+Three 20-episode teasers, same scenarios as the baseline:
+
+| object | baseline `wiayg` | G3 `mmgyy` |
+|---|---|---|
+| cherry_tomato | 3, ever 3 | 3, ever **5** |
+| mushroom | 17, ever 17 | 15, ever **18** |
+| tofu | 14, ever 14 | 10, ever 12 |
+| **total** | **34/60**, ever 34 | **28/60**, ever **35** |
+
+**The grasping is equal; the holding is not.** Ever-grasped is a tie (35 vs 34), but G3 loses **7 of
+its grasps during the hold, against the baseline's 0.** Any single cell here is inside teaser noise;
+7-vs-0 across 60 episodes, in the same direction on all three objects, is not.
+
+The stop-width probe measures the same thing offline, and adds the mechanism:
+
+| | G3 h16 | h4 baseline |
+|---|---|---|
+| slope (between objects) | 0.870 | 0.876 |
+| corr (between objects) | 0.995 | 0.996 |
+| plateau detected | **30.8 %** | 23.3 % |
+| corr (within object) | 0.814 | **0.883** |
+| stop-width error | 2.14 mm | **1.83 mm** |
+| **width drift inside one chunk** | **5.64 mm** | n/a (chunk too short) |
+
+So the longer horizon did buy the one thing only it could buy — stop commitment, 30.8 % vs 23.3 % —
+and paid for it in precision, within-object corr and stop-width error both worse. The 5.64 mm of
+width drift *within a single predicted chunk* is the bridge to the closed-loop result: even
+executing only the first 4 steps of each plan, a plan whose commanded width wanders by 5.64 mm can
+shed a grasp it had already closed. That is the hold loss, measured.
+
+**Conclusion: horizon 16 is not adopted.** The tail-22 arithmetic and `augment_hold_tail.py` remain
+correct and reusable; the horizon itself is a regression. Do not re-try it without first fixing the
+within-chunk drift (temporal ensembling, §5, is the cheap candidate — it averages the 4 overlapping
+predictions covering each step and cut the step-to-step command change 45 % offline).
+
 No re-collection: `gentle_manip/dppo/augment_hold_tail.py` appends the 12 extra frames to the
 converted npz and records `hold_tail_k` for provenance. **Built and verified** as
 `dataset/dppo/single_lift_generalist_soft_v5_tail22`: 5,643 episodes, 1,074,275 → 1,141,991 steps,
@@ -143,12 +184,23 @@ to today's horizon-4 numbers.
 
 ## 4. G4 — sample prediction on top of G3
 
-One further change, so a regression is attributable. Fix the two hardcoded `predict_epsilon` lines
-first. Note DDIM is unavailable with sample prediction, which costs the generalist nothing: it
+**As launched** (2026-09-09 04:36): run `bpfnl`, G3's config with `model.predict_epsilon=False`,
+same tail-22 dataset, 122 epochs, ~5.8 h → ~10:20. One further change, so a regression is
+attributable. DDIM is unavailable with sample prediction, which costs the generalist nothing: it
 denoises in 20 steps = 13 ms against a 133 ms budget (DDIM mattered only for the 100-step RGB runs).
 
-Fallback if G3 is a clear catastrophe (e.g. 3/20 where the baseline gets 14): G4 reverts to the G2
-recipe with only the tail correction.
+**Why G4 proceeded on a base now measured worse.** The pre-registered rule was to revert only on a
+clear catastrophe (e.g. 3/20 where the baseline gets 14); mushroom at 15/20 does not meet it. Beyond
+the letter of the rule there is a substantive argument: sample prediction is best-conditioned at the
+LOW-noise end of the schedule, which is precisely where G3's deficit lives — final width precision
+and the within-chunk drift. G4 is therefore a targeted test of G3's specific failure, not a blind
+stack on a bad base. **The risk is real and stated:** if it compounds instead, both training slots
+are spent and the meeting result is the baseline's canonical eval.
+
+**Do not compare G4's loss numbers to G3's.** Sample prediction regresses the (normalized, smooth)
+action; epsilon prediction regresses unit Gaussian noise. The two losses are on different scales, so
+only success metrics compare across the pair. For reference G4 sits at train 4.25e-4 / val 5.78e-4 at
+epoch 30 — meaningful only against a future sample-prediction run.
 
 ## 5. Not a training change: temporal ensembling
 
@@ -200,9 +252,9 @@ Actual, from G3's measured 171 s/epoch:
 
 | | | |
 |---|---|---|
-| G3 | **22:14 → ~04:00** | 122 epochs, 1,007,842 steps |
-| teasers G3 | 04:00 → 04:30 | cherry, mushroom, tofu — read as DIAGNOSIS |
-| G4 | 04:30 → ~10:20 | |
+| G3 | 22:14 → **04:20** ✅ | 122 epochs, 1,007,842 steps |
+| teasers G3 | 04:20 → **04:36** ✅ | cherry 3, mushroom 15, tofu 10 — **negative**, §3 |
+| G4 | **04:36** → ~10:20 | `bpfnl`, on schedule |
 | teasers G4 | 10:20 → 10:50 | |
 | canonical evals | 10:50 → 13:50 | 100 episodes, cherry + mushroom, baseline and winner |
 | buffer / write-up | 13:50 → 15:00 | |

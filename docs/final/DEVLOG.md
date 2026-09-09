@@ -9830,6 +9830,51 @@ would create two collection regimes. **The real gap is grasp TIGHTNESS, not spee
 (~27 mm). Caveat: sim cherry carries scale DR 0.9-1.2, the physical tomato is one size, and the real
 p10-p90 (21.8-26.5 mm) overlaps sim. That is an operator instruction, not a parameter.
 
+### 2026-09-09 04:30 — G3 NEGATIVE: action horizon 16 grasps as well and drops what it grasps
+
+`mmgyy`, G2's recipe with `horizon_steps` 4 → 16 (executed steps stay 4) and hold tail 10 → 22.
+122 epochs, 1,007,842 gradient steps, 6.1 h. Plan and full reasoning:
+`docs/final/G3_G4_training_setup.md`.
+
+**Result: 28/60 vs the horizon-4 baseline `wiayg`'s 34/60** (20-episode teasers, same scenarios).
+
+| object | baseline `wiayg` | G3 `mmgyy` |
+|---|---|---|
+| cherry_tomato | 3, ever 3 | 3, ever 5 |
+| mushroom | 17, ever 17 | 15, ever 18 |
+| tofu | 14, ever 14 | 10, ever 12 |
+| **total** | **34/60**, ever 34 | **28/60**, ever 35 |
+
+**The grasping is equal; the holding is not.** Ever-grasped ties (35 vs 34) — the longer horizon does
+not hurt reaching or closing. It loses **7 grasps during the hold against the baseline's 0**, in the
+same direction on all three objects. Any single cell is inside teaser noise (1σ ≈ 2.8 at n = 20);
+7-vs-0 across 60 episodes is not.
+
+**Mechanism, from the stop-width probe (fixed anchor, both checkpoints):** the longer chunk buys the
+one thing only it could buy — stop commitment, plateau detected 30.8 % vs 23.3 % — and pays for it in
+final-close precision: within-object corr 0.814 vs 0.883, stop-width error 2.14 mm vs 1.83 mm.
+Between-object slope and corr are unchanged (0.870/0.995 vs 0.876/0.996), so size *reading* is
+untouched; it is size *execution* that degrades. The bridge to the closed-loop result is a new
+measure: **the commanded width drifts 5.64 mm inside a single predicted chunk.** Even executing only
+the first 4 steps of each plan, a plan whose width wanders that far can shed a grasp already closed —
+and 2–4 mm of width error is already known to separate success from failure here.
+
+**Adopted conclusions.**
+- **Horizon 16 is NOT adopted.** This is now the third recorded horizon result (horizon 8 `jjjjy`
+  failed; the September-2 horizon-16 runs executed all 16 steps open-loop). Do not re-try it without
+  first damping within-chunk drift — temporal ensembling is the cheap candidate, and cut step-to-step
+  command change 45 % offline.
+- **The tail arithmetic is correct and reusable:** all-hold chunks = `K − horizon + 1`, so
+  **keep `tail − horizon = 6`** to hold stop supervision at 3.7 %. `augment_hold_tail.py` reproduced
+  the predicted chunk counts exactly (1,057,346 chunks / 39,501 all-hold). At tail 10 a horizon-16
+  policy would see ZERO all-hold chunks.
+- **Longer chunks trade commitment against precision.** Worth remembering as a general shape: the
+  metric a change is designed to move can move as predicted while the run still regresses.
+
+G4 (`bpfnl`) launched 04:36 = G3 + sample prediction (`predict_epsilon=False`), on the argument that
+epsilon prediction is worst-conditioned at the low-noise end where exactly this precision is decided.
+Risk recorded at launch: it builds on a base now measured worse, so it may compound instead.
+
 ### 2026-09-09 (night) — the stop-width probe: the policy DOES read object size; the defect is a compressed range
 `gentle_manip/scripts/final/probe_stop_width.py` — **the standard acceptance probe for every future
 generalist run** (user, 2026-09-09). CPU-only, a few minutes, measures what teasers cannot: does the
@@ -9849,6 +9894,16 @@ recipe, not of an arm):**
 | corr within object (scale DR) | +0.786 | +0.781 | +0.783 |
 | stop-width error | 2.91 mm | 2.82 | 2.89 |
 | plateau detected in chunk | 32.7 % | 37.0 % | 37.0 % (demos: 100 %) |
+
+⚠ **CORRECTION (2026-09-09 04:30): this table was measured with a SUPERSEDED ANCHOR.** The probe
+anchored on the last *dropping* step, but the settled width is one step later, at `ends+1`. The tell
+was the demos' impossible 0 % plateau. Re-measured on the horizon-4 final checkpoint with the fixed
+anchor: **slope 0.876** (not 0.82), corr 0.996, within-object corr 0.883, stop-width error 1.83 mm,
+**plateau 23.3 %** (not ~37 %). So the policy is LESS compressed and commits LESS often than the
+table says. The three arms are not re-measurable — none of those checkpoints is local — but the bias
+is identical across them, so the finding they support (all three arms indistinguishable, therefore a
+property of the recipe rather than of an arm) is unaffected. **Use the corrected h4 numbers as the
+reference for any new run; treat the per-arm table as relative only.**
 
 **The policy reads object size well** (cherry stop 22.3 demo vs 24.5 predicted; tomato 59.7 vs 56.1).
 The defect is the **slope of 0.82** — the range is compressed, over-open on small objects and
