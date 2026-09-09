@@ -79,12 +79,26 @@ locally, check these are all still in place (they're in the commits pushed today
 | Per-object task/DR/experiment configs | `gentle_manip/configs/{tasks,dr,experiments}/single_lift_<name>_soft*.yaml` | **Yes** | small |
 | Full pipeline audit log (every candidate, every outcome) | `gentle_manip/scripts/object_expansion/EXPANSION_LOG.csv` | **Yes** | small |
 | Sourced-candidate metadata (pre-registration) | `dataset/object_expansion/candidates*.csv` | **Yes** | ~40 MB |
-| Raw downloaded Objaverse meshes (candidates, pre-repair) | `dataset/object_expansion/objaverse_cache/` | No | large, regenerable — not needed to resume |
+| Raw downloaded Objaverse meshes (candidates, pre-repair) | real location: `/nobackup/proj/disk/softenable-codesign26/personal/yifeid/object_expansion_sources/objaverse_cache/` (reached via a symlink at `dataset/object_expansion/objaverse_cache` in the home checkout — NOT present as a real dir under the nobackup repo checkout, which is why an early version of this doc wrongly called it "not needed") | **No** | 9.3 GB, 1,566 files |
 | Orchestrator script | `gentle_manip/scripts/object_expansion/batch_expand.py` | Yes | — |
 | Web pages (see Β§7) | n/a — hosted, not local files | — | — |
 
-**The one thing you actually need to manually copy is `dataset/demos/`.** Everything else
-comes from `git pull`.
+**Two things need manual copying, not one:**
+1. `dataset/demos/` — only if you want to inspect/reuse already-collected episodes; not
+   read by registration, only written by collection.
+2. **`objaverse_cache/` (9.3 GB) — REQUIRED to register any NEW (not-yet-registered)
+   category from the existing `candidates_all.csv` pool.** `batch_expand.py` reads each
+   candidate's source mesh from the `local_path` column in that CSV and does **not**
+   auto-download — the file must already be on disk, or `mesh_prep` fails outright. Skip
+   this only if you're going to re-run `source_and_filter.py` to re-download from
+   Objaverse fresh (slower, and re-download of everything already vetted is wasted work).
+
+```bash
+# from your local machine, after cloning the repo:
+rsync -avz --progress \
+  yifeid@arrhenius1.hpc.arrhenius.naiss.se:/nobackup/proj/disk/softenable-codesign26/personal/yifeid/object_expansion_sources/objaverse_cache/ \
+  dataset/object_expansion/objaverse_cache/
+```
 
 ## 6. How to resume locally
 
@@ -110,19 +124,31 @@ uv pip install --python envs/sim/.venv/bin/python "torch==2.5.1+cu121" --index-u
 ```
 Verify: `uv run --project envs/sim python -m pytest gentle_manip/tests/ -q`
 
-### 6.3 Copy the collected demo data from the cluster
-Run this **from your local machine** (needs your cluster SSH access configured):
+### 6.3 Copy data from the cluster (two separate things)
+Run these **from your local machine** (needs your cluster SSH access configured), from
+your repo root:
+
+**(a) Already-collected demo trajectories** — only needed if you want to inspect/reuse old
+episodes; `batch_expand.py` never reads this at registration time, only writes fresh run
+dirs there at collection time:
 ```bash
 mkdir -p dataset/demos
 rsync -avz --progress \
-  <cluster-login-host>:/nobackup/proj/disk/softenable-codesign26/personal/yifeid/gentle_manip/dataset/demos/ \
+  yifeid@arrhenius1.hpc.arrhenius.naiss.se:/nobackup/proj/disk/softenable-codesign26/personal/yifeid/gentle_manip/dataset/demos/ \
   dataset/demos/
 ```
-This is ~49 GB — expect it to take a while depending on your connection. If you only need
-enough to resume *collecting more* (not to re-inspect what's already done), you can skip
-this until you actually need to look at old episodes; nothing in `batch_expand.py` reads
-`dataset/demos/` at registration time, only at collection time (each object writes its own
-fresh run dir there).
+~49 GB — expect it to take a while.
+
+**(b) The sourced-candidate mesh cache — REQUIRED to register any new category** from the
+existing `candidates_all.csv` pool (not optional like (a); `mesh_prep` fails outright
+without the source file on disk, `batch_expand.py` has no auto-download fallback):
+```bash
+mkdir -p dataset/object_expansion/objaverse_cache
+rsync -avz --progress \
+  yifeid@arrhenius1.hpc.arrhenius.naiss.se:/nobackup/proj/disk/softenable-codesign26/personal/yifeid/object_expansion_sources/objaverse_cache/ \
+  dataset/object_expansion/objaverse_cache/
+```
+~9.3 GB, 1,566 files — much faster than (a), do this one first.
 
 ### 6.4 Run the pipeline
 This is the direct local equivalent of what `gentle_manip/scripts/arrhenius/
