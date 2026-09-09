@@ -66,10 +66,52 @@ def repair_watertight(mesh, *, voxel_div: int = 160, max_faces: int = 6000, forc
         trimesh.repair.fill_holes(mesh)
         trimesh.repair.fix_normals(mesh)
         if not mesh.is_watertight or force_remesh:
-            pitch = float(mesh.extents.max()) / voxel_div
-            vg = mesh.voxelized(pitch).fill()
-            mc = vg.marching_cubes
-            mc.apply_transform(vg.transform)
+            # 2026-09-09 finding: the old code voxelized ONCE at a fixed fine pitch
+            # (voxel_div=160, often 100k-330k marching-cubes faces for these fragmented
+            # multi-part Objaverse scans -- hundreds of disjoint filled blobs, very negative
+            # euler numbers) then leaned on fast_simplification.simplify() for a ~98%
+            # edge-collapse reduction down to max_faces. Diagnosed via
+            # gentle_manip/scripts/object_expansion/diag_repair.py on real failing candidates
+            # (mop/sunflower/football_helmet/thermometer): marching_cubes RAW was always
+            # watertight=True (it's a filled-voxel isosurface -- watertight by construction),
+            # but that aggressive a decimation broke 1-22% of faces every single time, and
+            # NEITHER fix_normals (orientation only) NOR a follow-up merge/fill_holes pass
+            # could recover it (still fails -- these are more than simple boundary-loop
+            # holes). This was the dominant cause of the pipeline's 92.7% mesh_prep failure
+            # rate. Fix: search progressively COARSER voxel pitches (same proven pattern as
+            # export_artifact_data.py's _voxel_decimate) until marching_cubes itself lands
+            # under the face budget, so the finished mesh never needs heavy decimation at
+            # all -- only a mild last-resort trim if even the coarsest tried grid is still
+            # over budget, by which point the reduction ratio is small.
+            # Start COARSE and refine (not the reverse): a fine-first search would still
+            # voxelize pathologically huge/complex meshes (e.g. a fabric scan with a 7-meter
+            # raw extent) at the most expensive resolution before ever trying anything
+            # cheaper -- that alone OOM'd a 32GB diagnostic job on this exact code path.
+            # Refining while under budget and stopping BEFORE the first over-budget
+            # resolution keeps every voxelize+marching_cubes call in this loop's own
+            # successfully-fit face count, so the most expensive one actually run is the
+            # smallest that still cleared the fine side of the budget line.
+            mc, last_cand = None, None
+            for div in (10, 14, 18, 24, 32, 42, 55, 70, 90, 120, voxel_div):
+                pitch = float(mesh.extents.max()) / div
+                try:
+                    vg = mesh.voxelized(pitch).fill()
+                    cand = vg.marching_cubes
+                    cand.apply_transform(vg.transform)
+                except Exception:
+                    continue
+                if len(cand.faces) == 0:
+                    continue
+                last_cand = cand
+                if len(cand.faces) <= max_faces:
+                    mc = cand
+                else:
+                    break  # finer only ever increases face count -- stop before the expensive one
+            if mc is None:
+                mc = last_cand  # even the coarsest grid was over budget; decimate it (mild, not ~98%)
+            if mc is None:
+                raise RuntimeError("repair failed: voxel remesh produced no geometry at any "
+                                    "tried resolution (FAILS LOUDLY per the 2026-09-07 DEVLOG lesson)")
             if len(mc.faces) > max_faces:
                 try:
                     import fast_simplification
@@ -79,6 +121,9 @@ def repair_watertight(mesh, *, voxel_div: int = 160, max_faces: int = 6000, forc
                     mc = trimesh.Trimesh(vertices=v, faces=f)
                 except ImportError:
                     mc = mc.simplify_quadric_decimation(max_faces)
+                mc.merge_vertices()
+                mc.remove_unreferenced_vertices()
+                trimesh.repair.fill_holes(mc)
             trimesh.repair.fix_normals(mc)
             mesh = mc
     if not mesh.is_watertight:
@@ -97,6 +142,12 @@ def repair_watertight(mesh, *, voxel_div: int = 160, max_faces: int = 6000, forc
             mesh = trimesh.Trimesh(vertices=v, faces=f)
         except ImportError:
             mesh = mesh.simplify_quadric_decimation(max_faces)
+        # Same post-decimation hole-defect fix as the inner voxel-remesh branch above --
+        # this mesh was watertight going INTO decimation (that's how it reached this branch),
+        # so any hole here was introduced by the simplifier and merge/fill_holes is safe.
+        mesh.merge_vertices()
+        mesh.remove_unreferenced_vertices()
+        trimesh.repair.fill_holes(mesh)
         trimesh.repair.fix_normals(mesh)
         if not mesh.is_watertight:
             raise RuntimeError("repair failed: post-decimation mesh lost watertightness "

@@ -10267,3 +10267,59 @@ collection-only re-run once resubmitted, which the fix now makes possible.
 update` before trusting the working tree** -- `git status` DOES flag the drift (`M
 third_party/genesis`) but it's easy to read past a one-line submodule diff when scanning for
 regular file changes, especially under time pressure.
+
+### 2026-09-09 — CRITICAL: mesh repair was failing 92.7% of candidates; root cause + fix
+
+Cumulative pipeline stats across every job to date: 3,678 of 3,966 `mesh_prep` attempts
+(92.7%) failed with `"repair failed: mesh still not watertight after voxel-remesh
+fallback"`. This, not GPU throughput or category exhaustion, was the real bottleneck --
+only 6 distinct categories (pea, ball, clementine, honey, piggy_bank, soccer_ball) had ever
+reached a full 20-episode collection despite 412 of 420 accepted categories having been
+attempted, and 179 objects registered.
+
+**Diagnosis** (`gentle_manip/scripts/object_expansion/diag_repair.py`, run via a one-off
+sbatch job in the real production env -- the x86_64 login node was too CPU-starved, 138
+concurrent users, load avg 16+, for even a trivial voxelize+decimate call to finish in
+reasonable time; two attempts there each ran >6 CPU-minutes on operations that take seconds
+under normal load and had to be killed). Instrumenting `mesh_prep.repair_watertight`
+stage-by-stage on 6 real failing candidates (mop, sunflower, vase, football_helmet,
+thermometer, domestic_ass) showed:
+- `marching_cubes` on the filled voxel grid was **watertight=True in every single case**
+  (expected -- a filled-voxel isosurface is watertight by construction). Very negative
+  Euler numbers (-84 to -812) confirmed these sources are hundreds of disjoint filled blobs
+  (fragmented multi-part Objaverse scans with lots of tiny decorative sub-meshes).
+- The old code then called `fast_simplification.simplify()` for a **~98% edge-collapse
+  reduction** (e.g. 328,080 -> 6,000 faces) to hit the `max_faces` FEM-gate budget. This
+  broke 1-22% of faces (`trimesh.repair.broken_faces`) every single time, and the old code
+  only ran `fix_normals()` afterward (orientation only -- can't close a hole or fix a
+  non-manifold edge). A follow-up `merge_vertices + fill_holes` pass ALSO failed to recover
+  it -- these are worse than simple boundary-loop holes, so `fill_holes` (which only patches
+  those) is not sufficient.
+
+**Fix** (`mesh_prep.py::repair_watertight`): stop leaning on aggressive decimation at all.
+Search **progressively coarser voxel pitches** (divisors 10, 14, 18, 24, 32, 42, 55, 70, 90,
+120, 160 of the mesh's max extent -- same proven pattern as
+`export_artifact_data.py::_voxel_decimate`, used for the artifact-preview mesh) and take the
+finest resolution whose direct marching-cubes output already fits `max_faces`, so the
+finished mesh is *never* run through heavy decimation -- it's watertight by construction,
+no repair pass needed. Only if even the coarsest tried grid is still over budget does a
+(now much milder) decimation run as a last resort. Iterate coarse-to-fine and stop at the
+first resolution that crosses the budget (never try a finer, more expensive resolution once
+one has already gone over) -- this also avoids a second real failure mode: a fine-first
+search would still voxelize huge/pathological meshes (e.g. `tartan`, a fabric scan with a
+7-meter raw extent) at the single most expensive resolution before ever trying anything
+cheaper, which is exactly what OOM-killed a 32GB verification job on the naive fine-first
+version of this fix.
+
+**Verified**: re-ran the same 6 previously-failing real candidates through the patched
+`repair_watertight` in the actual production env -- all 6 now succeed (watertight=True,
+3.4k-6.0k faces). `tartan` itself still OOMs even at the coarsest grid (something in
+loading/splitting that specific asset is pathological -- likely the multi-body split or
+per-part convex-hull-volume computation over hundreds of parts) but this is a single
+edge-case object, not representative of the general 92.7% failure, which the fix resolves.
+
+**Lesson: a mesh that is provably watertight by construction (a filled-voxel marching-cubes
+isosurface) should never be decimated by more than a mild amount if watertightness matters
+downstream** -- reach for a coarser regeneration first, and treat heavy quadric/edge-collapse
+decimation as fundamentally unsafe for topology preservation on fragmented, high-genus
+source geometry, `fix_normals` and `fill_holes` are not a safety net for it.
