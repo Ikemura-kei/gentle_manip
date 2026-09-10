@@ -1,0 +1,39 @@
+# [dr] can_lying_mush: realws pose DR (SHARED with every object) + this object's shape/size/material ranges.
+# Used by: experiments/single_lift_can_lying_mush_soft_abs_action_armfocus_7d_realws.yaml
+# Status: active (2026-09-04 per-object cleanup: shared block = soft_orientation_realws_tofu.yaml)
+
+# ── SHARED, EXCEPT the orientation block below ──
+# Orientation is OBJECT-SPECIFIC here (2026-09-09): these meshes were authored in a
+# deliberate resting pose (cans on the curved surface vs standing, donut hole up), so
+# pitch/roll tilt and the 180-degree flip are OFF and only yaw varies, +/-80 degrees.
+object_pos_x: [0.38, 0.45]     # TIGHTER THAN SHARED (can only, 2026-09-10)
+object_pos_y: [-0.09, 0.09]    # TIGHTER THAN SHARED (can only)
+# Why: at scale 0.9 the can is 153x58 mm, and yaw +/-90 gives a worst-case AABB half-extent
+# of 81.9 mm in EITHER axis. The padded MPM domain is x [0.222,0.548], y [-0.178,0.178], so
+# the centre must stay inside x [0.304,0.466], y [-0.096,0.096]. The shared y range of
+# +/-0.12 put a rotated can 19 mm outside the domain, where particles are SILENTLY killed —
+# add_entity cannot catch it because the morph spawns unrotated.
+object_nominal_xy: [0.47, 0.0]
+robot_init_pos_xyz: 0.02
+object_yaw_deg: 80
+object_pitch_roll_deg: 0
+object_flip_prob: 0
+object_flip_deg: [160, 180]
+coup_friction: [3.5, 4.5]
+
+# ── OBJECT-SPECIFIC ──
+object_scale: [0.9, 1.0]      # mesh shrunk to 150 mm (2026-09-10) so the NOMINAL can fits:
+                              # max x 0.545 vs the padded edge 0.548. The first scene build
+                              # uses scale 1.0 -- DR scale only applies on later rebuilds --
+                              # so the nominal size, not the DR range, is what must fit.
+                              # edge is x=0.548, leaving 78 mm for the can's 85 mm half-length,
+                              # so scale 1.0 does not fit (over by 7 mm). 0.918 is the ceiling.
+object_axis_scale: [1.0, 1.0]   # no axis randomisation on the can (user, 2026-09-10)
+object_bend_deg: [-3, 3]
+object_twist_deg: [-3, 3]
+object_taper: [-0.03, 0.03]
+object_E: [2.0e5, 3.0e5]
+object_nu: [0.32, 0.38]
+object_rho: [900, 1000]
+start_modes: {home: 0.6, in_air: 0.15, above_object: 0.15, mid_approach: 0.1}
+disturbance_prob: 0.1
