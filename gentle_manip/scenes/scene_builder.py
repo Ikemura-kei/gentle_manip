@@ -222,6 +222,29 @@ def build_scene(
         _xy = entry.spawn_xy if entry.spawn_xy is not None else odef.default_pos[:2]
         _z = float(entry.spawn_z) if entry.spawn_z is not None else odef.default_pos[2]
         _pos = (float(_xy[0]), float(_xy[1]), _z)
+        # GUARD (2026-09-10): an object whose spawn AABB pokes outside the MPM domain makes Genesis
+        # raise "Entity has particles outside solver boundary" from inside add_entity, naming no
+        # object and no axis — on a 100-object collection that is a needle hunt. Check it here,
+        # where the object's name and the overflow are known. Genesis insets the domain by a safety
+        # padding of 3 cells per side (measured: 0.012 m at grid_density 250), so use the SAME
+        # inset; the raw bounds would not have caught can_lying_mush, which failed 10 mm inside them.
+        _pad = 3.0 / float(spec.mpm_grid_density)
+        _blo = [lo[i] + _pad for i in range(3)]
+        _bhi = [hi[i] - _pad for i in range(3)]
+        _olo = [_pos[i] - size[i] / 2 for i in range(3)]
+        _ohi = [_pos[i] + size[i] / 2 for i in range(3)]
+        _bad = [(ax, _olo[i], _ohi[i], _blo[i], _bhi[i])
+                for i, ax in enumerate("xyz") if _olo[i] < _blo[i] or _ohi[i] > _bhi[i]]
+        if _bad:
+            _d = "; ".join(f"{ax}: object [{o0:.4f}, {o1:.4f}] vs domain [{b0:.4f}, {b1:.4f}] "
+                           f"(over by {max(b0 - o0, o1 - b1)*1000:.1f} mm)"
+                           for ax, o0, o1, b0, b1 in _bad)
+            raise ValueError(
+                f"object '{entry.name}' does not fit the MPM domain at spawn — {_d}. "
+                f"Its extents are {tuple(round(v, 4) for v in size)} m at scale {entry.scale:g} and it "
+                f"spawns at {tuple(round(v, 4) for v in _pos)}. Fix by widening the task's mpm_bounds, "
+                f"lowering object_spawn_z, shrinking object_scale, or using a smaller mesh. "
+                f"(Domain {tuple(lo)}-{tuple(hi)} inset by {_pad*1000:.0f} mm of Genesis safety padding.)")
         if mesh_file is not None:
             morph = gs.morphs.Mesh(file=mesh_file, pos=_pos,
                                    scale=entry.scale, euler=(0, 0, 0))
