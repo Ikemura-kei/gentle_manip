@@ -622,3 +622,21 @@ class EvalHarnessAgent(EvalAgent):
             checkpoint=self.cfg.base_policy_path,
             record_batches=self.cfg.get("record_batches", None),   # None -> all episodes (per-traj video)
         )
+        # Record the SAMPLER in summary.json. It is not recoverable from the eval outputs
+        # otherwise, and it matters: on cherry, DDIM-10 halved success against DDPM-20 at
+        # identical grasp geometry, so a table row without it is ambiguous. `deterministic` is
+        # hardcoded True in the policy adapter, so only the DDPM/DDIM choice varies.
+        try:
+            import json as _json
+            from pathlib import Path as _P
+            f = _P(self.logdir) / "summary.json"
+            if f.exists():
+                d = _json.loads(f.read_text())
+                use_ddim = bool(self.cfg.get("use_ddim", False))
+                d["sampler"] = ("DDIM-%d" % int(self.cfg.get("ddim_steps", 0)) if use_ddim
+                                else "DDPM-%d" % int(self.cfg.get("denoising_steps", 0)))
+                d["ensemble_m"] = float(os.environ.get("GM_ENSEMBLE_M", 0.01)) \
+                    if os.environ.get("GM_TEMPORAL_ENSEMBLE") else None
+                f.write_text(_json.dumps(d, indent=2))
+        except Exception as _e:                                    # noqa: BLE001
+            print(f"[eval_agent] could not record sampler in summary.json: {_e}", flush=True)

@@ -89,34 +89,52 @@ def rows():
         obj = str(s.get("experiment", "")).replace("single_lift_", "").split("_soft")[0]
         n = s.get("n_episodes", 0)
         su, ev = round(s["success_rate"] * n), round(s["ever_success_rate"] * n)
-        ex = 8 if (s.get("max_policy_steps") or 99) < 50 else 4
+        # act_steps from the SIGNALS themselves: action_chunks is (T, act_steps, A). The old
+        # threshold on max_policy_steps only distinguished 4 from 8 and silently mislabelled the
+        # exec-2 and exec-1 runs as exec 4, which then corrupted every width column for them.
+        ex = None
+        for f in sorted(glob.glob(d + "signals/ep*.npz"))[:1]:
+            try:
+                ex = int(np.load(f)["action_chunks"].shape[1])
+            except Exception:
+                ex = None
+        if ex is None:
+            mps = s.get("max_policy_steps") or 0
+            eps = int(((s.get("config") or {}).get("max_episode_steps")) or 300)
+            ex = max(1, round(eps / mps)) if mps else 4
         lab = open(d + "LABEL.txt").read().strip() if os.path.exists(d + "LABEL.txt") else ""
         pol = RUNS[run] + ("+ens" if "ens" in lab else "")
+        # Sampler: newer evals record it in summary.json (eval_agent). Older ones do not, so fall
+        # back to the label -- only the two DDIM probes deviate; everything else is full DDPM-20.
+        samp = s.get("sampler")
+        if not samp:
+            mm_ = re.search(r"ddim\s*-?(\d+)", lab, re.I)
+            samp = f"DDIM-{mm_.group(1)}" if mm_ else "DDPM-20"
         if re.search(r"m0?\.?33", lab):
             pol += " m.33"
         pl, exm = _widths(d, ex)
         gr = _at_grasp(d, ex)
         out.append((obj, pol, os.path.basename(ck).replace(".pt", ""), ex, n, su, ev, ev - su,
                     s.get("stress_top20_ttop20_mean"), s.get("stress_max_tmax_mean"),
-                    pl, exm, gr, stamp[-8:]))
+                    pl, exm, gr, samp, stamp[-8:]))
     order = {"cherry_tomato": 0, "mushroom": 1, "tofu": 2, "banana_chunk": 3}
-    out.sort(key=lambda r: (order.get(r[0], 9), r[1], r[3], r[2], r[13]))
+    out.sort(key=lambda r: (order.get(r[0], 9), r[1], r[3], r[2], r[14]))
     return out
 
 
 def main():
     rs = rows()
-    tbl = ["| object | policy | ckpt | exec | success | ever | hold | sust kPa | plan mm | exec mm | grasp mm | run |",
-           "|---|---|---|---|---|---|---|---|---|---|---|---|"]
-    for o, p, c, e, n, su, ev, ho, ss, pk, pl, exm, gr, w in rs:
-        tbl.append(f"| {o} | {p} | {c} | {e} | {su}/{n} | {ev} | {ho} | {ss/1000:.1f} | "
+    tbl = ["| object | policy | ckpt | exec | sampler | success | ever | hold | sust kPa | plan mm | exec mm | grasp mm | run |",
+           "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    for o, p, c, e, n, su, ev, ho, ss, pk, pl, exm, gr, samp, w in rs:
+        tbl.append(f"| {o} | {p} | {c} | {e} | {samp} | {su}/{n} | {ev} | {ho} | {ss/1000:.1f} | "
                    f"{f'{pl:.1f}' if pl else '—'} | {f'{exm:.1f}' if exm else '—'} | "
                    f"{f'{gr:.1f}' if gr else '—'} | {w} |")
     doc = open(DOC).read()
     i = doc.index("| object | policy |")
     j = doc.index("\n## The noise floor")
     open(DOC, "w").write(doc[:i] + "\n".join(tbl) + "\n" + doc[j:])
-    stamps = [r[13] for r in rs]
+    stamps = [r[14] for r in rs]
     dup = {s for s in stamps if stamps.count(s) > 1}
     print(f"{DOC}: {len(rs)} evals written" + (f"  DUPLICATES: {dup}" if dup else "  (no duplicates)"))
 

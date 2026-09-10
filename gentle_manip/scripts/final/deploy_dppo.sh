@@ -145,15 +145,15 @@ cd "$(dirname "$0")/../../.."
 # | cherry result, replicated 10 and 9 /20 (baseline 3) at the lowest stress; mushroom 18/20 hold 0.
 # | Pooling and ensembling INTERACT -- alone 6/20 and 4.5/20. smooth-alpha damps orientation dither.
 # +-----------------------------------------------------------------------------------------------------------
-ckpt=logs/dppo/dppo-pretrain/single_lift_generalist_soft_v5_tail22/fsynt/checkpoint/state_113.pt
-normalization=dataset/dppo/single_lift_generalist_soft_v5_tail22/normalization.npz
-uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-  --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
-  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
-  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
-  --act-steps 1 --temporal-ensemble --ensemble-m 0.01 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/generalist_g5ens_fsynt_113 --shard-size 10 --record-rgb \
-  --max-steps 5000 "$@"
+# ckpt=logs/dppo/dppo-pretrain/single_lift_generalist_soft_v5_tail22/fsynt/checkpoint/state_113.pt
+# normalization=dataset/dppo/single_lift_generalist_soft_v5_tail22/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
+#   --act-steps 1 --temporal-ensemble --ensemble-m 0.01 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/generalist_g5ens_fsynt_113 --shard-size 10 --record-rgb \
+#   --max-steps 5000 "$@"
 
 
 # +-----------------------------------------------------------------------------------------------------------
@@ -202,3 +202,19 @@ uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.p
 #   --act-steps 4 --temporal-ensemble --ensemble-m 0.33 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
 #   --record dataset/real_deploy/real7_bc_rgb_pwifv_200 --shard-size 10 --record-rgb \
 #   --max-steps 5000 "$@"
+
+
+# +-----------------------------------------------------------------------------------------------------------
+# | REAL-only BC, RGB 600ep, ResNet FROM SCRATCH = bhzdw: pwifv with pretrained=False, ONE config line apart.
+# | Tests whether ImageNet features are what generalize -- so test on objects NOT in the 117 demos; both look
+# | fine on demonstrated ones. Verified random at the weights (0/64 conv1 filters aligned to ImageNet).
+# +-----------------------------------------------------------------------------------------------------------
+ckpt=logs/dppo/dppo-pretrain/single_lift_real7_bc_rgb224_v1/bhzdw/checkpoint/state_200.pt
+normalization=dataset/dppo/single_lift_real7_bc_rgb224_v1/normalization.npz
+uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+  --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus_rgb.yaml \
+  --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
+  --act-steps 4 --temporal-ensemble --ensemble-m 0.33 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+  --record dataset/real_deploy/real7_bc_rgb_bhzdw_200 --shard-size 10 --record-rgb \
+  --max-steps 5000 "$@"
