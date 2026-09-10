@@ -43,6 +43,20 @@ MATERIALS: dict[str, Material] = {
     # 4e4 / E 3e5 -> ~13% yield strain, so it bruises under a firm grasp (the regime
     # the gentle-manipulation stress reward targets). TODO: calibrate to a real mushroom.
     "mushroom": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=1000.0, von_mises_yield_stress=4e4),
+
+    # Donut: the mushroom's stiffness/yield, but density set to hit a 50 g object at the enlarged
+    # 20 cm size (user, 2026-09-10). 89 kg/m^3 is FAR below a real doughnut (~350-450) and below
+    # cork — the 20 cm ring is 564 cm^3, so any edible density puts it at 500 g+, past the 398 g
+    # banana the planner already failed to grasp. This is a geometry probe (does the planner take
+    # the ring?), so mass is dialled to a liftable value rather than a physical one.
+    # NOTE: low density is EXPENSIVE in MPM — wave speed is sqrt(E/rho), so substeps rise 3.25x
+    # against rho 1000. The task config pairs this with grid_density 140 to stay affordable.
+    "donut": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=88.7, von_mises_yield_stress=4e4),
+
+    # donut_mush_small: the 10 cm ring, 69.9 cm^3, so 30 g needs rho 429 (user, 2026-09-10) — which
+    # lands INSIDE the real doughnut range (350-450 kg/m^3), unlike the 20 cm donut's 89. This is
+    # the one donut here that is both the mass asked for and physically plausible.
+    "donut_small": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=426.0, von_mises_yield_stress=4e4),
     # ── Grasp-benchmark shape objects ────────────────────────────────────────────────────────────
     # These exist to vary GEOMETRY, not material: cylinder/cube share the mushroom's stiffness,
     # density and yield so a benchmark difference is attributable to shape rather than to a

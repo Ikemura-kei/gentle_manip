@@ -5,9 +5,11 @@
 # ── OBJECT-SPECIFIC ──
 object_name: "donut_mush"
 object_type: "soft"
-sim_substeps: 235
-mpm_grid_density: 250
-object_spawn_z: 0.0429   # board + h/2*1.15*1.05 + 20mm; h=15.0mm. Margin is at the LARGEST scale draw. Yaw-only DR, so no half-diagonal term.
+sim_substeps: 428        # CFL: substeps ~ sqrt(E/rho) * grid_density. rho 1000 -> 89 raises the
+                         # wave speed 3.25x, grid 250 -> 140 gives back 0.56x. Worst case E 3e5, rho 85.
+mpm_grid_density: 140    # the object is 2.5x bigger, so a coarser grid holds the SAME relative
+                         # resolution: 5.2 cells across the 3.75 cm tube vs 3.8 on the old 4 cm donut.
+object_spawn_z: 0.0564   # board + h/2*1.15*1.05 + 20mm; h=37.5mm. Margin is at the LARGEST scale draw. Yaw-only DR, so no half-diagonal term.
 
 # ── SHARED (identical for all objects) ──
 success_z_min: 0.175
@@ -27,4 +29,4 @@ cam_up: [-0.46799099, -0.01495762, 0.88360665]
 rewards:
   stress: {cap: 1.5, mean_weight: 0.2, scale: 0.2, top10_weight: 0.8}
   dist_to_obj: {decay: 8.0, scale: 0.1}
-  lift: {grasp_gate_dist: 0.0891, lift_target: 0.16, scale: 0.1}   # grasp_gate_dist per object (size-dependent); lift_target shared
+  lift: {grasp_gate_dist: 0.1000, lift_target: 0.16, scale: 0.1}   # RING grasp: the EE sits on the tube, ~81mm from the centroid (which is the HOLE), so the usual half-diagonal rule under-reaches

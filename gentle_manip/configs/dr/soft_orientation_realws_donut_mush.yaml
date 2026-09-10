@@ -6,9 +6,16 @@
 # Orientation is OBJECT-SPECIFIC here (2026-09-09): these meshes were authored in a
 # deliberate resting pose (cans on the curved surface vs standing, donut hole up), so
 # pitch/roll tilt and the 180-degree flip are OFF and only yaw varies, +/-80 degrees.
-object_pos_x: [0.30, 0.46]
-object_pos_y: [-0.12, 0.12]
-object_nominal_xy: [0.47, 0.0]
+# 20 cm donut in a 35x38 cm MPM domain (0.21-0.56 x, +/-0.19 y): the object eats over half of it,
+# so it is recentred on the DOMAIN centre (0.385) rather than the usual 0.47, and the pose/scale
+# ranges are narrowed to keep every draw inside. Pre-enlargement values, for the 8 cm donut:
+#   object_pos_x [0.30, 0.46]  object_pos_y [-0.12, 0.12]  object_nominal_xy [0.47, 0.0]
+#   object_scale [0.85, 1.15]
+# Restoring the wide ranges at this size needs the task's mpm_bounds widened to ~0.43 x 0.51 m,
+# which costs ~1.6x the grid.
+object_pos_x: [0.34, 0.43]
+object_pos_y: [-0.05, 0.05]
+object_nominal_xy: [0.385, 0.0]
 robot_init_pos_xyz: 0.02
 object_yaw_deg: 80
 object_pitch_roll_deg: 0
@@ -17,13 +24,13 @@ object_flip_deg: [160, 180]
 coup_friction: [3.5, 4.5]
 
 # ── OBJECT-SPECIFIC ──
-object_scale: [0.85, 1.15]
+object_scale: [0.85, 1.05]   # max stays 1.05: it is the MAX that binds the MPM domain (7.8 mm spare)
 object_axis_scale: [0.95, 1.05]
 object_bend_deg: [-3, 3]
 object_twist_deg: [-3, 3]
 object_taper: [-0.03, 0.03]
 object_E: [2.0e5, 3.0e5]
 object_nu: [0.32, 0.38]
-object_rho: [900, 1000]
+object_rho: [84, 93]        # 48-54 g at 564 cm^3; see MATERIALS["donut"] for why it is unphysical
 start_modes: {home: 0.6, in_air: 0.15, above_object: 0.15, mid_approach: 0.1}
 disturbance_prob: 0.1

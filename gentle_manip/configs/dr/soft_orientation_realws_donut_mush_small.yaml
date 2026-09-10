@@ -1,0 +1,32 @@
+# [dr] donut_mush_small: realws pose DR (SHARED with every object) + this object's shape/size/material ranges.
+# Used by: experiments/single_lift_donut_mush_small_soft_abs_action_armfocus_7d_realws.yaml
+# Status: active (2026-09-04 per-object cleanup: shared block = soft_orientation_realws_tofu.yaml)
+
+# ── SHARED, EXCEPT the orientation block below ──
+# Orientation is OBJECT-SPECIFIC here (2026-09-09): these meshes were authored in a
+# deliberate resting pose (cans on the curved surface vs standing, donut hole up), so
+# pitch/roll tilt and the 180-degree flip are OFF and only yaw varies, +/-80 degrees.
+object_pos_x: [0.30, 0.46]
+object_pos_y: [-0.10, 0.10]   # 10 cm ring: at the max draw the half-extent is 5.78 cm, so
+                              # +/-0.12 would leave 0.2 mm to the MPM domain edge
+object_nominal_xy: [0.47, 0.0]
+robot_init_pos_xyz: 0.02
+object_yaw_deg: 80
+object_pitch_roll_deg: 0
+object_flip_prob: 0
+object_flip_deg: [160, 180]
+coup_friction: [3.5, 4.5]
+
+# ── OBJECT-SPECIFIC ──
+object_scale: [0.95, 1.1]   # floor 0.9 -> 0.95 (user): at 0.9 x axis 0.95 the ring is 7.7 cm
+                            # across, UNDER the 7.9 cm opening, so the disc becomes graspable whole
+                            # and the ring grasp stops being forced. 0.95 keeps every draw > 7.9.
+object_axis_scale: [0.95, 1.05]
+object_bend_deg: [-3, 3]
+object_twist_deg: [-3, 3]
+object_taper: [-0.03, 0.03]
+object_E: [2.0e5, 3.0e5]
+object_nu: [0.32, 0.38]
+object_rho: [405, 447]      # 28.5-31.5 g at 70.4 cm^3
+start_modes: {home: 0.6, in_air: 0.15, above_object: 0.15, mid_approach: 0.1}
+disturbance_prob: 0.1

@@ -495,6 +495,12 @@ OBJECT_MAP: dict[str, ObjectDef] = {
     "pepper": ObjectDef("pepper", MATERIALS["mushroom"], object_type="soft",
                         size=(0.0422, 0.0156, 0.0144), default_pos=(0.47, 0.0, 0.0082),
                         mesh_path=str(_OBJ_DIR / "pepper1.obj")),
+    # Lying rod, 15 mm dia x 100 mm, long axis +X like can_lying_mush (user, 2026-09-10). prim_*_mush
+    # material; 17.6 g at rho 1000. Thin enough that the gripper closes on the DIAMETER, long enough
+    # (100 mm > LARGE_EXTENT_M) that the synthesizer gets the full yaw box.
+    "rod_d015l100_mush": ObjectDef("rod_d015l100_mush", MATERIALS["mushroom"], object_type="soft",
+                        size=(0.1000, 0.0150, 0.0150), default_pos=(0.47, 0.0, 0.0085),
+                        mesh_path=str(_OBJ_DIR / "rod_d015l100_mush.obj")),
     "can_lying_mush": ObjectDef("can_lying_mush", MATERIALS["mushroom"], object_type="soft",
                         size=(0.1500, 0.0650, 0.0650), default_pos=(0.47, 0.0, 0.0335),
                         mesh_path=str(_OBJ_DIR / "can_lying_mush.obj")),
@@ -504,9 +510,22 @@ OBJECT_MAP: dict[str, ObjectDef] = {
     "beer_can_standing_mush": ObjectDef("beer_can_standing_mush", MATERIALS["mushroom"], object_type="soft",
                         size=(0.0650, 0.0650, 0.0850), default_pos=(0.47, 0.0, 0.0435),
                         mesh_path=str(_OBJ_DIR / "beer_can_standing_mush.obj")),
-    "donut_mush": ObjectDef("donut_mush", MATERIALS["mushroom"], object_type="soft",
-                        size=(0.0800, 0.0800, 0.0150), default_pos=(0.47, 0.0, 0.0085),
+    # Donut scaled 2.5x from the original 8 cm ring (user, 2026-09-10): outer RADIUS 10 cm, so
+    # 20 cm across — past the gripper's 7.9 cm opening, and the planner CANNOT grasp the disc as a
+    # whole. The only feasible grasp is the ring itself (3.75 cm tube, either axis). default_pos x is
+    # the DOMAIN centre 0.385, not the usual 0.47 — at 20 cm wide it does not fit otherwise, and the
+    # BUILD reads this, not the DR object_nominal_xy. This is the
+    # forced-ring-grasp probe; the 8 cm version is recoverable by scaling the mesh 1/2.5.
+    "donut_mush": ObjectDef("donut_mush", MATERIALS["donut"], object_type="soft",
+                        size=(0.2000, 0.2000, 0.0375), default_pos=(0.385, 0.0, 0.0198),
                         mesh_path=str(_OBJ_DIR / "donut_mush.obj")),
+    # The 10 cm sibling of donut_mush (user, 2026-09-10): same mesh, same proportions, 0.5x. 50 g at
+    # rho 709, and small enough for the NORMAL spawn (0.47). The ring grasp is forced at EVERY DR
+    # draw (smallest is 9.03 cm across vs the 7.9 cm opening) but with less headroom than the 20 cm
+    # donut, so this is the marginal-size companion to it.
+    "donut_mush_small": ObjectDef("donut_mush_small", MATERIALS["donut_small"], object_type="soft",
+                        size=(0.1000, 0.1000, 0.0188), default_pos=(0.47, 0.0, 0.0104),
+                        mesh_path=str(_OBJ_DIR / "donut_mush_small.obj")),
     "prim_frustum_mush": ObjectDef("prim_frustum_mush", MATERIALS["mushroom"], object_type="soft",
                         size=(0.03, 0.03, 0.025), default_pos=(0.47, 0.0, 0.0135),
                         mesh_path=str(_OBJ_DIR / "prim_frustum.obj")),
