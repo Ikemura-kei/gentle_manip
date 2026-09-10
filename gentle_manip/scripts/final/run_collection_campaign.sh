@@ -5,7 +5,7 @@
 # Writes logs/campaign/status.json after every object so the dashboard can read live progress.
 set -u; cd "$(dirname "$0")/../../.."
 PLAN=${PLAN:-logs/campaign/plan.json}
-STATUS=logs/campaign/status.json
+STATUS=${STATUS:-logs/campaign/status.json}   # overridable so a follow-up campaign does not clobber the first
 mkdir -p logs/campaign
 
 python3 - "$PLAN" "$STATUS" <<'PY'
@@ -28,7 +28,7 @@ json.dump(s, open(sys.argv[1], "w"), indent=1)
 PY
   echo "### [$((i+1))/$N] $OBJ  n=$NEP envs=$NENV  $(date '+%F %T')"
   t0=$(date +%s)
-  OBJ="$OBJ" N_EPISODES="$NEP" N_ENVS="$NENV" SEED=0 \
+  OBJ="$OBJ" N_EPISODES="$NEP" N_ENVS="$NENV" SEED=0 EXTRA_ARGS="${EXTRA_ARGS:-}" \
     bash gentle_manip/scripts/final/collect_demo_template.sh > "logs/campaign/${OBJ}.log" 2>&1
   rc=$?; t1=$(date +%s)
   python3 - "$STATUS" "$OBJ" "$rc" "$((t1-t0))" <<'PY'
