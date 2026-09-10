@@ -209,12 +209,29 @@ cd "$(dirname "$0")/../../.."
 # | Tests whether ImageNet features are what generalize -- so test on objects NOT in the 117 demos; both look
 # | fine on demonstrated ones. Verified random at the weights (0/64 conv1 filters aligned to ImageNet).
 # +-----------------------------------------------------------------------------------------------------------
-ckpt=logs/dppo/dppo-pretrain/single_lift_real7_bc_rgb224_v1/bhzdw/checkpoint/state_200.pt
+# ckpt=logs/dppo/dppo-pretrain/single_lift_real7_bc_rgb224_v1/bhzdw/checkpoint/state_200.pt
+# normalization=dataset/dppo/single_lift_real7_bc_rgb224_v1/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus_rgb.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
+#   --act-steps 4 --temporal-ensemble --ensemble-m 0.33 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/real7_bc_rgb_bhzdw_200 --shard-size 10 --record-rgb \
+#   --max-steps 5000 "$@"
+
+
+# +-----------------------------------------------------------------------------------------------------------
+# | REAL-only BC, RGB 600ep, ImageNet ResNet FROZEN = anjbm: pwifv + freeze_conv, one added config line. Conv
+# | kernels fixed at ImageNet (verified 6e-7 drift vs pwifv's 24%); GroupNorm stays trainable ON PURPOSE --
+# | bn->gn installs fresh norms, so freezing those too would confound "frozen" with "uncalibrated".
+# | Third arm of pwifv (tuned) / bhzdw (random) / anjbm (frozen): is ImageNet useful as-is, or only as a prior?
+# +-----------------------------------------------------------------------------------------------------------
+ckpt=logs/dppo/dppo-pretrain/single_lift_real7_bc_rgb224_v1/anjbm/checkpoint/state_300.pt
 normalization=dataset/dppo/single_lift_real7_bc_rgb224_v1/normalization.npz
 uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus_rgb.yaml \
   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
   --act-steps 4 --temporal-ensemble --ensemble-m 0.33 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/real7_bc_rgb_bhzdw_200 --shard-size 10 --record-rgb \
+  --record dataset/real_deploy/real7_bc_rgb_anjbm_300 --shard-size 10 --record-rgb \
   --max-steps 5000 "$@"

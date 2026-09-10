@@ -47,7 +47,7 @@ class ResNet18Encoder(nn.Module):
     """
 
     def __init__(self, obs_shape, num_channel: int = 3, pretrained: bool = True,
-                 groupnorm: bool = True, freeze_stem: bool = False):
+                 groupnorm: bool = True, freeze_stem: bool = False, freeze_conv: bool = False):
         super().__init__()
         if int(num_channel) != 3:
             raise ValueError(
@@ -67,6 +67,16 @@ class ResNet18Encoder(nn.Module):
         if freeze_stem:
             for p in (list(net.conv1.parameters()) + list(net.layer1.parameters())):
                 p.requires_grad = False
+        if freeze_conv:
+            # FROZEN backbone (user, 2026-09-10): every conv/linear weight fixed at its ImageNet
+            # value, GroupNorm affine LEFT TRAINABLE on purpose. _bn_to_gn installs FRESH GroupNorms
+            # (identity init, ImageNet running stats gone), so freezing those too would push the
+            # pretrained filters through an uncalibrated normalization -- that would confound
+            # "frozen features" with "miscalibrated norms". Freezing the filters is the variable.
+            for m in net.modules():
+                if isinstance(m, (nn.Conv2d, nn.Linear)):
+                    for p in m.parameters():
+                        p.requires_grad = False
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = (x.float() - self._mean) / self._std        # 0-255 -> ImageNet-normalized

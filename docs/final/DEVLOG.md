@@ -10141,3 +10141,38 @@ Committed 2026-09-07 with the user's go-ahead (3 meshes, registry, 9 config yaml
   3-list), consistency view residue p 0.30 and no offset, paired 0.5, consistency w 0.3 / frac 0.3; DATASET/EXPERIMENT/EPOCHS are
   required env vars; EPOCHS=auto derives the epoch count from a TARGET of 380,000 gradient steps at batch 128 (user; round 4
   reference = 280,000: 140 batches/epoch x 2000). Verified: per-axis shift bounded at 5 / 3.5 / 1.5 mm and rigid within each cloud.
+
+## 2026-09-10 — RGB encoder ablation: what generalizes is ADAPTATION, not ImageNet
+
+Three runs on `single_lift_real7_bc_rgb224_v1` (117 real demos), identical apart from the encoder.
+Same seed 42, 600 epochs, same augmentation/schedule; each config differs from `pwifv` by ONE line.
+
+| run | ImageNet init | encoder trainable | real-robot, NOVEL objects |
+|---|---|---|---|
+| `pwifv` | yes | yes | acts on novel objects |
+| `bhzdw` | **no** (random) | yes | acts on novel objects |
+| `anjbm` | yes | **frozen** (convs fixed; GroupNorm trainable) | **cannot act on novel objects** |
+
+**Conclusion — the original hypothesis was wrong.** The user's premise was that ImageNet features are
+what let `lyslr`/`pwifv` grasp objects absent from the 117 demonstrations. But `bhzdw`, initialized
+RANDOMLY, generalizes just as well, so ImageNet is not the source. And `anjbm`, which keeps ImageNet
+features but cannot adapt them, is the only arm that FAILS. The common factor among the two that work
+is that the visual encoder is trained on task data; the one that fails has a fixed representation.
+So the generalization comes from adapting the encoder to this domain, not from what it started as.
+ImageNet remains a fine initialization (it is not harmful) — it is simply not the mechanism.
+
+Freeze scope matters when reading this: `anjbm` froze conv/linear only (9,600 of 11.2M encoder params
+trainable = the GroupNorm affines). `_bn_to_gn` installs FRESH GroupNorms and discards ImageNet's
+running stats, so freezing those too would have confounded "frozen features" with "uncalibrated norms".
+
+**Loss curves cannot see any of this** and must not be used to rank these runs: train differs by
++2.8 % and val by +0.3 % between `pwifv` and `bhzdw`, because the val set is 13 episodes of the SAME
+objects. 29k samples x 600 epochs is ample for a random ResNet-18 to fit the demonstrated objects.
+The real-robot novel-object test is the only readout. (`bhzdw` also overfits hard in the back half:
+val 0.0291 @ep100 -> 0.0830 @ep600.)
+
+**Verifying a freeze:** `requires_grad` flags prove nothing about what the optimizer and EMA do, and
+`torch.equal` is too strict — the EMA recomputes `0.995x + 0.005x` every step, so a genuinely frozen
+float32 weight still drifts ~1e-7. Use a tolerance. Measured max conv drift from ImageNet at epoch 100:
+`anjbm` 6.0e-07 (0.00 %), `pwifv` 7.2e-02 (24 %), `bhzdw` 1.18 (162 %). Epoch time is an independent
+check: 10.4 s frozen vs 13.0 s trainable (no backward through the ResNet).
