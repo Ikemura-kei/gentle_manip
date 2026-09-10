@@ -516,7 +516,13 @@ WIDTH_MIN, WIDTH_MAX = 0.008, 0.079     # gripper range (m)
 REFINE_SCAN  = 25        # width refine: widths scanned per CMA result ...
 REFINE_HALF  = 0.003     # ... over +- this (m) about the CMA width (0.25 mm steps; CMA's width step is 2 mm)
 # Rotation box about the top-down home pose (roll pi, pitch 0, yaw 0), degrees; yaw bounds occlusion.
-ROLL_MAX_DEG, PITCH_MAX_DEG, YAW_MAX_DEG = 30.0, 20.0, 60.0
+ROLL_MAX_DEG, PITCH_MAX_DEG, YAW_MAX_DEG = 25.0, 20.0, 60.0   # roll 30 -> 25 (user, 2026-09-10)
+# Yaw is tight because the gripper can hide a small object entirely at any yaw. An object with an
+# extent past LARGE_EXTENT_M sticks out whatever the yaw, so occlusion stops binding and the full
+# range is allowed -- for an elongated object lying down the best grasp is often ~90 deg across its
+# long axis (user, 2026-09-10). At 70 mm this changes 6 of 189 objects; the only pre-existing one is
+# `banana`, the case that motivated it. Every frozen campaign object keeps 60 deg.
+LARGE_EXTENT_M, YAW_MAX_LARGE_DEG = 0.070, 90.0
 # Seed pool
 N_ANTIPODAL   = 2600     # antipodal surface pairs
 N_MEDIAL_AXIS = 500      # medial-axis points, closing across the local tangent
@@ -592,7 +598,9 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
     half_xy = np.maximum(0.5 * BBOX_MARGIN * (vw_xy.max(0) - vw_xy.min(0)), 0.01)
     tz_lo = max(com[2] + FINGER_TO_TCP_Z - 0.04, tcp_z_min)       # tcp_z_min: the action box / real EE clip
     tz_hi = com[2] + Z_LIFT_HI
-    _r, _p, _y = np.radians([ROLL_MAX_DEG, PITCH_MAX_DEG, YAW_MAX_DEG])
+    _ext = obj.verts.max(0) - obj.verts.min(0)
+    _yaw_max = YAW_MAX_LARGE_DEG if float(_ext.max()) > LARGE_EXTENT_M else YAW_MAX_DEG
+    _r, _p, _y = np.radians([ROLL_MAX_DEG, PITCH_MAX_DEG, _yaw_max])
     lb = [ctr_xy[0] - half_xy[0], ctr_xy[1] - half_xy[1], tz_lo, np.pi - _r, -_p, -_y, WIDTH_MIN]
     ub = [ctr_xy[0] + half_xy[0], ctr_xy[1] + half_xy[1], tz_hi, np.pi + _r,  _p,  _y, WIDTH_MAX]
     Robj_inv = Robj.inv()
@@ -699,7 +707,8 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
         lb = list(lb0); ub = list(ub0)
         lb[3] -= relax; ub[3] += relax; lb[4] -= relax; ub[4] += relax
         if tier >= 1:
-            lb[5], ub[5] = -np.radians(80.0), np.radians(80.0)
+            _y1 = max(np.radians(80.0), _y)      # relax only; never narrow a large object's box
+            lb[5], ub[5] = -_y1, _y1
         seed_pen_max = 0.020 if tier >= 1 else SEED_PEN_MAX
         _kw["pen_tol"] = 0.020 if tier >= 1 else PEN_TOL
         _kw["w_press"] = 2.0 * W_PRESS if tier >= 1 else None
