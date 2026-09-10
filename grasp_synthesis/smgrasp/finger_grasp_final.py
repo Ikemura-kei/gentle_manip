@@ -23,6 +23,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import time
+from collections import Counter
 
 import numpy as np
 import trimesh
@@ -244,11 +245,14 @@ W_PRESS      = 0.1       # weight of the contact-pressure term (grip / smaller p
 G            = 9.81      # gravity
 LIFT_ACCEL   = 9.81      # lift margin: holdability is checked at m*(G + LIFT_ACCEL)
 MAX_INDENT   = 0.01      # jaw buried deeper than this -> `degenerate` (outside the linear FEM regime)
+VOID_FRAC    = 0.25      # _local_width: take the SDF solid run over the slab envelope only when it is
+                         # shorter than this fraction of it (= the envelope crossed a hole, not curvature)
 PEN_TOL      = 0.005     # finger-body penetration allowed before `penetrate`
 TABLE_TOL    = 0.002     # finger may dip this far below the table before `table` (execution is capped at the 15 mm TCP floor anyway)
 
 
-def _pre_fem(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, table_z, obj_sdf, pen_tol: float = PEN_TOL):
+def _pre_fem(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, table_z, obj_sdf, pen_tol: float = PEN_TOL,
+             max_indent: float = MAX_INDENT):
     """Gates 1-3 of the scorer (no FEM). Returns ("done", res) for a rejected candidate, or
     ("fem", ctx) with everything the FEM stage and `_post_fem` need."""
     half_uv = (pad_geo["half_u1"], pad_geo["half_u2"])
@@ -273,7 +277,7 @@ def _pre_fem(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, table_z, obj_sdf, p
     # 3. map the pose to the object-local pad; per-jaw indentation at this width (geometry only)
     center, axis, u1, u2, wface = tcp_to_local_grasp(x_tcp, obj_com, obj_quat_wxyz, pad_geo)
     dl, dr, status, dist = indent_from_width(obj, center, axis, pad_half=ph, width=wface,
-                                             max_indent=MAX_INDENT, u1=u1, u2=u2, half_uv=half_uv)
+                                             max_indent=max_indent, u1=u1, u2=u2, half_uv=half_uv)
     if status != "ok":
         return "done", {"score": _shaped_penalty(status, dist), "status": status, "holdable": False,
                         "stress_top10": np.inf}
@@ -326,20 +330,20 @@ def _post_fem(obj, ctx, prim, *, E, density, mu, yield_stress, w_press: float = 
 
 def score_finger_grasp(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                        table_z: float, obj_sdf, yield_stress=None, pen_tol: float = PEN_TOL,
-                       w_press: float = None) -> dict:
+                       w_press: float = None, max_indent: float = MAX_INDENT) -> dict:
     """Score one 7-DOF TCP grasp `[tx,ty,tz,roll,pitch,yaw,width]` (higher = gentler; MAXIMIZED).
 
     Feasibility gates, cheapest first, each returning a shaped penalty below -PEN_BASE:
       1. table       lowest finger point below table - TABLE_TOL
       2. penetrate   finger body inside the object by more than PEN_TOL
-      3. no_contact / degenerate   a jaw misses, or is buried past MAX_INDENT (no FEM)
+      3. no_contact / degenerate   a jaw misses, or is buried past `max_indent` (no FEM)
       4. not holdable   2*mu*grip < m*(G + LIFT_ACCEL)                      (FEM solve)
       5. twist       gravity torque about the closing axis > torsional friction of the pads
       6. over_yield  stress_top10 > yield (the FEM cannot rank grasps past yield)
     Score of a feasible grasp:  -stress_top10  -  W_PRESS * (grip / smaller pad contact area).
     `score_finger_grasp_batch` evaluates many candidates with ONE GPU solve; same gates, same score."""
     kind, ctx = _pre_fem(obj, x_tcp, obj_com=obj_com, obj_quat_wxyz=obj_quat_wxyz, pad_geo=pad_geo,
-                         table_z=table_z, obj_sdf=obj_sdf, pen_tol=pen_tol)
+                         table_z=table_z, obj_sdf=obj_sdf, pen_tol=pen_tol, max_indent=max_indent)
     if kind == "done":
         return ctx
     bc = ctx["bc"]
@@ -353,12 +357,13 @@ def score_finger_grasp(obj, x_tcp, *, obj_com, obj_quat_wxyz, pad_geo, E, densit
 
 def score_finger_grasp_batch(obj, X, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                              table_z: float, obj_sdf, yield_stress=None, max_cols: int = None,
-                             pen_tol: float = PEN_TOL, w_press: float = None) -> list:
+                             pen_tol: float = PEN_TOL, w_press: float = None,
+                             max_indent: float = MAX_INDENT) -> list:
     """`score_finger_grasp` for a list of candidates with ONE batched GPU solve per chunk. Same gates,
     same score (verified to machine precision). Chunks are sized so W = ndof x columns stays < ~1 GB."""
     from .width_grasp import USE_GPU_SOLVE, width_grasp_stress_batch
     pre = [_pre_fem(obj, x, obj_com=obj_com, obj_quat_wxyz=obj_quat_wxyz, pad_geo=pad_geo,
-                    table_z=table_z, obj_sdf=obj_sdf, pen_tol=pen_tol) for x in X]
+                    table_z=table_z, obj_sdf=obj_sdf, pen_tol=pen_tol, max_indent=max_indent) for x in X]
     out = [ctx if kind == "done" else None for kind, ctx in pre]
     fem_idx = [i for i, (kind, _) in enumerate(pre) if kind == "fem"]
     if not fem_idx:
@@ -367,7 +372,7 @@ def score_finger_grasp_batch(obj, X, *, obj_com, obj_quat_wxyz, pad_geo, E, dens
         for i in fem_idx:
             out[i] = score_finger_grasp(obj, X[i], obj_com=obj_com, obj_quat_wxyz=obj_quat_wxyz, pad_geo=pad_geo,
                                         E=E, density=density, mu=mu, table_z=table_z, obj_sdf=obj_sdf,
-                                        yield_stress=yield_stress, w_press=w_press)
+                                        yield_stress=yield_stress, w_press=w_press, max_indent=max_indent)
         return out
     cap = max_cols or max(64, int(1.0e9 / (8 * obj.fem.ndof)))
     start = 0
@@ -536,6 +541,52 @@ SEED_PEN_MAX  = 0.010    # filter: max finger/object penetration per finger (gen
 TOP_K         = 6       # seeds carried forward
 
 
+# ── Rejection accounting (2026-09-10, user) ───────────────────────────────────
+# Every gate stamps a distinct `status`, and the shaped penalties encode HOW FAR the candidate
+# missed inside the score. So the reason a tier found nothing is fully recoverable — the histogram
+# below turns "tier 0 rejected everything" into "97 % over_yield at a median 3.4x", which says
+# whether to loosen the yield gate, the geometry, or the object itself.
+_REJ_LABEL = {
+    "table":      ("finger below table",  lambda v: "median %.1f mm" % (v * 1000)),
+    "penetrate":  ("finger inside object", lambda v: "median %.1f mm" % (v * 1000)),
+    "no_contact": ("width too WIDE (jaw short)", lambda v: "median %.1f mm short" % (v * 1000)),
+    "degenerate": ("width too NARROW (jaw buried)", lambda v: "median %.1f mm past the %.0f mm limit"
+                   % (v * 1000, MAX_INDENT * 1000)),
+    "grip":       ("grip too weak to hold", lambda v: "median %.2fx of needed" % v),
+    "twist":      ("torsion exceeds friction", lambda v: "median %.2fx capacity" % v),
+    "over_yield": ("stress past yield",   lambda v: "median %.2fx yield" % v),
+}
+
+
+def _classify_reject(res):
+    """(label, magnitude) for one evaluated candidate; magnitude is None for a success."""
+    st, sc = res["status"], float(res["score"])
+    if st == "ok" and bool(res.get("holdable", False)):
+        return "HOLDABLE", None
+    if st == "ok":                                   # FEM ran; grip could not hold it
+        return "grip", max(0.0, 2.0 + sc / PEN_BASE)
+    if st in ("twist", "over_yield"):
+        frac = min(max(2.0 + sc / PEN_BASE, 1e-9), 0.999)
+        return st, (1.0 / frac if st == "over_yield" else frac)
+    return st, max(-sc - PEN_BASE, 0.0) / PEN_SLOPE  # pre-FEM: distance encoded in the score
+
+
+def _print_reject_hist(tier, hist, mags, n_eval):
+    if not n_eval:
+        return
+    print("  [synth] tier %d: %d candidates evaluated" % (tier, n_eval), flush=True)
+    for st, n in sorted(hist.items(), key=lambda kv: -kv[1]):
+        label, fmt = _REJ_LABEL.get(st, (st, None))
+        v = mags.get(st) or []
+        detail = ""
+        if fmt is not None and v:
+            detail = "   %s" % fmt(float(np.median(v)))
+        elif v:
+            detail = "   median %.4g" % float(np.median(v))
+        print("            %-26s %5d  %5.1f%%%s"
+              % (label if st != "HOLDABLE" else "HOLDABLE (kept)", n, 100.0 * n / n_eval, detail), flush=True)
+
+
 def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
                       table_z: float = 0.0, tcp_z_min: float = 0.0, seed: int = 0,
                       yield_stress=None, record_history: bool = False, stage_cb=None) -> dict:
@@ -560,6 +611,7 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
 
     best = {"score": -np.inf, "x": None, "res": None}
     history, feasible, n_eval, cur_round = [], [], [0], [1]      # cur_round: 1 = CMA, 2 = width refine
+    reject_hist, reject_mags = Counter(), {}                     # per-TIER, cleared at each tier start
     seeds: list = []
 
     _kw = dict(obj_com=com, obj_quat_wxyz=obj_quat_wxyz, pad_geo=pad_geo, E=E, density=density, mu=mu,
@@ -574,6 +626,10 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
 
     def _record(x, res):
         n_eval[0] += 1
+        _st, _mag = _classify_reject(res)
+        reject_hist[_st] += 1
+        if _mag is not None:
+            reject_mags.setdefault(_st, []).append(_mag)
         if is_real_grasp(res["score"]):
             feasible.append((np.asarray(x, float).copy(), res["score"], res))
             if res["score"] > best["score"]:
@@ -615,7 +671,23 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
         if near.sum() < 8:
             near = radial <= np.percentile(radial, 15)
         sel = along[near]
-        return float(np.clip((sel.max() - sel.min()) - 2 * indent, 0.01, WIDTH_MAX))
+        _env = float(sel.max() - sel.min())                    # the historical value: slab envelope
+        # VOID GUARD (2026-09-10). The envelope spans the whole slab, so on a holed or deeply concave
+        # object it crosses the VOID to the far side: on the donut every medial seed asked for a
+        # whole-ring grasp, 63 % pinned at WIDTH_MAX, and 0/23 of those ever lifted it. March the SDF
+        # out from the anchor to get the SOLID run actually through it, and take it ONLY when it is
+        # much shorter than the envelope — i.e. a real void was crossed. A convex body is unchanged
+        # (the two agree there), so this touches rings and handles and nothing else.
+        _p = np.asarray(point, float)
+        _t = np.arange(5e-4, float(WIDTH_MAX) + 1e-9, 5e-4)
+        _run = []
+        for _s in (+1.0, -1.0):
+            _d = np.asarray(obj_sdf(_p + np.outer(_s * _t, ax)))
+            _o = np.flatnonzero(_d > 0.0)
+            _run.append(float(_t[_o[0]]) if _o.size else float(_t[-1]))
+        _solid = _run[0] + _run[1]
+        _w = _solid if (0.0 < _solid < VOID_FRAC * _env) else _env
+        return float(np.clip(_w - 2 * indent, 0.01, WIDTH_MAX))
 
     # ── Step 1: seed grasps from primitives (all at once) ──
     #   orientation  tool +y = closing axis, tool +z (approach) as close to straight down as possible
@@ -711,9 +783,15 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
             lb[5], ub[5] = -_y1, _y1
         seed_pen_max = 0.020 if tier >= 1 else SEED_PEN_MAX
         _kw["pen_tol"] = 0.020 if tier >= 1 else PEN_TOL
+        # `degenerate` bound relaxes with the tier, but only to 12 mm (user, 2026-09-10): 10 mm made the
+        # width gate stricter than tier 1's 20 mm finger-BODY penetration and threw away candidates the
+        # relaxation meant to admit, while a full 20 mm produced weird tier-2 solutions — the FEM is
+        # small-strain and stops ranking deep indentations sensibly. 12 mm is the compromise.
+        _kw["max_indent"] = 0.012 if tier >= 1 else MAX_INDENT
         _kw["w_press"] = 2.0 * W_PRESS if tier >= 1 else None
         _kw["yield_stress"] = None if tier >= 2 else yield_stress
         tier_used = tier
+        reject_hist.clear(); reject_mags.clear(); _tier_eval0 = n_eval[0]
         # ── Step 2: filter — table clearance, rotation box, then per-finger penetration (one batched
         #    SDF query over the survivors of the two cheap checks) ──
         for k, sd in enumerate(seeds):
@@ -828,6 +906,7 @@ def plan_finger_grasp(obj, *, obj_com, obj_quat_wxyz, pad_geo, E, density, mu,
 
         # ── Step 7: selection — the best refined grasp ──
         sel_x, sel_res = (refined[0]["x"], refined[0]["res"]) if refined else (best["x"], best["res"])
+        _print_reject_hist(tier, reject_hist, reject_mags, n_eval[0] - _tier_eval0)
         if sel_res is not None and sel_res.get("holdable"):
             break                                                    # this tier produced a holdable grasp
         if tier < 2:
