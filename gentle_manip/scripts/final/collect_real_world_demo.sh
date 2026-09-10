@@ -15,7 +15,7 @@
 #   - one run per object; task name = single_lift_<object>_real (naming convention);
 #     --description is stored in the run's config.yaml — put the object + intent there.
 
-obj=cube
+obj=tofu
 uv run --project envs/deploy python -m gentle_manip.demos.record \
   --setup gentle_manip/configs/setup/real_lab.yaml \
   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus_rgb.yaml \

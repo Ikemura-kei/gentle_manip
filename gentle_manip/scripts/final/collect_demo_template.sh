@@ -12,6 +12,7 @@ cd "$(dirname "$0")/../../.."
 n_episodes=${N_EPISODES:-100}   # or edit here
 obj=${OBJ:-tofu}                # or edit here
 seed=${SEED:-0}                 # parallel jobs on the same object MUST use different seeds (DR + CMA streams)
+n_envs=${N_ENVS:-10}            # sub-envs per batch (default 10 = the 6k-demo recipe)
 exp=single_lift_${obj}_soft_abs_action_armfocus_7d_realws
 task=single_lift_${obj}_soft
 stamp="$(date +%y%m%d-%H%M%S)_$(hostname -s)_$(git rev-parse --short HEAD)"
@@ -25,7 +26,7 @@ OMP_NUM_THREADS=8 MUJOCO_GL=egl uv run --project envs/sim python grasp_synthesis
   --task-name  "$task" \
   --out-dir    "$out" \
   --table-z 0.0138 \
-  --n-episodes ${n_episodes} --n-envs 10 --seed ${seed} --scene-dr-every 1 --record-video 25 \
+  --n-episodes ${n_episodes} --n-envs ${n_envs} --seed ${seed} --scene-dr-every 1 --record-video 25 \
   --description "stamp=${stamp}" ${EXTRA_ARGS:-} 2>&1 | tee "$log"
 
 # ── resolved config snapshot + log into the run dir ──
