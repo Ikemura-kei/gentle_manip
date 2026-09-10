@@ -1,0 +1,25 @@
+# [task] burrito3 (Objaverse-LVIS burrito, object-expansion batch): soft_shape material, board rig.
+# Used by: collect_demos_synth_v4 / training / eval via the experiment yaml
+# Status: active
+object_name: "burrito3"
+object_type: "soft"
+sim_substeps: 235
+mpm_grid_density: 250
+object_spawn_z: 0.1268   # board + max(h/2*1.6+20mm, diag/2*1.6+5mm); h=36.4mm diag=135.0mm (s_max=1.6 matches the widened object_scale DR)
+success_z_min: 0.175
+success_z_max: 0.275
+hold_steps: 30
+success_scale: 0.2
+board_thickness: 0.0138
+board_size: [0.6, 0.7, 0.0138]
+board_center: [0.41, 0.0]
+board_color: [0.647, 0.608, 0.514, 1.0]
+finger_color: [0.1, 0.1, 0.1, 1.0]
+cam_fov: 43.15
+cam_pos: [0.78032539, -0.00362529, 0.28947945]
+cam_lookat: [0.25932406, 0.01186746, 0.0138]
+cam_up: [-0.46799099, -0.01495762, 0.88360665]
+rewards:
+  stress: {cap: 1.5, mean_weight: 0.2, scale: 0.2, top10_weight: 0.8}
+  dist_to_obj: {decay: 8.0, scale: 0.1}
+  lift: {grasp_gate_dist: 0.110, lift_target: 0.16, scale: 0.1}

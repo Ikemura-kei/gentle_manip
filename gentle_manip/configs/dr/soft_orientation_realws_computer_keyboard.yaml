@@ -1,0 +1,28 @@
+# [dr] computer_keyboard: realws pose/shape/material DR. WIDENED size/shape/material bands (2026-09-08,
+# user: stronger randomization than the bs_/prim_ batch -- more size up/down, per-axis geometry
+# variation e.g. cylinder diameter vs height, wider E/nu). object_scale [0.6,1.6] (was [0.9,1.2]);
+# object_axis_scale [0.6,1.6] on a random x/y/z axis each scene, so a cylinder-like mesh gets
+# independently thinner/fatter or shorter/taller draws, not just uniform resize. Grasp-cap margin:
+# the mesh is pre-scaled at prep time so min-width * 1.6 (this s_max) stays under the 79mm planner
+# cap (gentle_manip/scripts/object_expansion/geom_filter.py target_min_width=0.040).
+# Used by: the computer_keyboard experiment yaml
+# Status: active
+object_pos_x: [0.30, 0.46]
+object_pos_y: [-0.12, 0.12]
+object_nominal_xy: [0.47, 0.0]
+robot_init_pos_xyz: 0.02
+object_yaw_deg: 180
+object_pitch_roll_deg: 45
+object_flip_prob: 0.25
+object_flip_deg: [160, 180]
+coup_friction: [3.5, 4.5]
+object_scale: [0.6, 1.6]
+object_axis_scale: [0.6, 1.6]
+object_bend_deg: [-4, 4]
+object_twist_deg: [-4, 4]
+object_taper: [-0.05, 0.05]
+object_E: [1.5e5, 5.0e5]
+object_nu: [0.28, 0.42]
+object_rho: [700, 1300]
+start_modes: {home: 0.6, in_air: 0.15, above_object: 0.15, mid_approach: 0.1}
+disturbance_prob: 0.1

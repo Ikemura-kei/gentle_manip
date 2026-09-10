@@ -5453,3 +5453,390 @@ toaster,toaster,unknown,75fc1765690b4f6f9b15adbaa6ff5888,accept,0.0001,True,True
 water_gun,water_gun,unknown,7fa9d5093e424caea027e4c68d6a60c3,accept,0.0182,True,False,4576,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-09 12:08:29
 salad,salad,unknown,ef6e1987d2bd44709ba08e4a0175df06,accept,0.2898,True,True,3727,accepted,0.7407,0.8,1.0,20,done,,2026-09-09 12:17:28
 shaving_cream,shaving_cream,unknown,9ac7a85e1b7b4172afb7648ae270b7ef,accept,0.0018,True,True,4127,crashed,,,,,collect,"rc=1, see shaving_cream_pilot_collect.log",2026-09-09 12:17:55
+alcohol,alcohol,unknown,2884e7f790a64d39b3a9f680d8bfb16d,accept,0.0039,True,False,4528,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-09 23:21:02
+backpack4,backpack,unknown,0b5f059d4ad346a79e7360f5904cf7cd,accept,0.0039,True,True,3563,crashed,,,,,collect,"rc=-6, see backpack4_pilot_collect.log",2026-09-09 23:29:32
+banner,banner,unknown,2440d24c883c46a4a6c21e3cb1b6f323,accept,0.1783,True,False,6315,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-09 23:29:34
+binoculars,binoculars,unknown,6614ffc5235941b9b274af113b0511b2,accept,0.0174,True,False,4721,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-09 23:29:36
+bottle_opener2,bottle_opener,complex_concave,4ccbb5d870ea4189a5ce53291ddb7921,accept,0.0092,True,True,3147,crashed,,,,,collect,"rc=-6, see bottle_opener2_pilot_collect.log",2026-09-09 23:37:08
+burrito3,burrito,unknown,41196597e7d14b5f8210e075873f3529,accept,0.0047,True,True,4337,crashed,,,,,collect,"rc=1, see burrito3_pilot_collect.log",2026-09-09 23:37:42
+cellular_telephone4,cellular_telephone,unknown,22c0fa4190db425ca8f6b5318f9e162f,accept,0.0056,True,True,4390,crashed,,,,,collect,"rc=-6, see cellular_telephone4_pilot_collect.log",2026-09-09 23:45:41
+clock2,clock,unknown,6ce8e485da724a24ad63ff9047d78c21,accept,0.0018,True,True,3577,crashed,,,,,collect,"rc=-6, see clock2_pilot_collect.log",2026-09-09 23:53:00
+coin3,coin,flat_thin,5c7fa159c094419f9e11178456a2ba79,accept,0.0045,True,True,3804,crashed,,,,,collect,"rc=-6, see coin3_pilot_collect.log",2026-09-10 00:00:11
+barbell,barbell,unknown,82c0b6ada2924702a561101339ea3250,accept,0.0,True,False,,,,,,,fem_gate,Failed to apply filter:  'meshing_close_holes. Current mesh does not have Any Faces.,2026-09-10 00:01:02
+birthday_cake3,birthday_cake,unknown,f058995dd57c445a8e50030702a8dbc6,accept,0.0127,True,True,3885,crashed,,,,,collect,"rc=1, see birthday_cake3_pilot_collect.log",2026-09-10 00:02:39
+cornbread2,cornbread,unknown,0f2ad11b9ad8445e87b7c6ee8ef61e14,accept,0.4158,True,True,3576,crashed,,,,,collect,"rc=-6, see cornbread2_pilot_collect.log",2026-09-10 00:07:34
+barge3,barge,unknown,b4379858a3224dec8b89f93656ccd156,accept,0.0038,True,True,2830,crashed,,,,,collect,"rc=1, see barge3_pilot_collect.log",2026-09-10 00:09:40
+birthday_card3,birthday_card,unknown,68ba07440e744d5697050446162bc661,accept,0.1579,True,True,3891,crashed,,,,,collect,"rc=1, see birthday_card3_pilot_collect.log",2026-09-10 00:10:01
+camcorder,camcorder,unknown,86f614d94be444a99c688dec28a89a3a,accept,0.0377,True,False,4652,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 00:10:02
+cherry,cherry,unknown,adbaadd6d5a14b1ca3960dc312191d04,accept,0.0005,True,False,4508,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 00:10:03
+clutch_bag,clutch_bag,unknown,d5cb92f6e9b44a7d8f1818f701c31d7d,accept,0.1311,True,False,5759,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 00:10:04
+cupcake,cupcake,unknown,a00977e464e34094b8a55aaacb17bcfa,accept,0.0893,True,True,3959,crashed,,,,,collect,"rc=-6, see cupcake_pilot_collect.log",2026-09-10 00:14:46
+dispenser,dispenser,unknown,aeae5e2622344e298aa586f8db9d2172,accept,0.0018,True,False,5253,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 00:14:47
+eclair,eclair,unknown,b68ca06a1edb4edaae1978fda36c6aa4,accept,0.8221,True,False,4676,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 00:14:48
+flash,flash,unknown,7aa816aa52f54e7b9249190b46ee4472,accept,0.0013,True,True,2091,crashed,,,,,collect,"rc=-6, see flash_pilot_collect.log",2026-09-10 00:22:46
+goggles2,goggles,unknown,566492c26f6949ec8f082c0710ca93e5,accept,0.0394,True,True,3088,crashed,,,,,collect,"rc=-6, see goggles2_pilot_collect.log",2026-09-10 00:30:09
+business_card6,business_card,unknown,d975ecff85c54f6cb6c6a01787bed3a8,accept,0.0462,True,True,3609,timeout,,,,,collect,"timed out after 1801s, see business_card6_pilot_collect.log",2026-09-10 00:32:40
+checkbook2,checkbook,unknown,201fb18d8cdf49039c8f06f958b22e7b,accept,0.0495,True,False,6336,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 00:32:44
+gravy_boat,gravy_boat,thin_shell_hollow,e6b4fbc8ec404d32a67cc67d574adaec,accept,0.0065,True,True,2593,crashed,,,,,collect,"rc=-6, see gravy_boat_pilot_collect.log",2026-09-10 00:38:21
+cornmeal3,cornmeal,unknown,146e704d169d453c9b41f48d59652039,accept,0.0489,True,True,1937,timeout,,,,,collect,"timed out after 1801s, see cornmeal3_pilot_collect.log",2026-09-10 00:40:05
+handbag,handbag,unknown,6fac63bf15bb409b8d4340544bb1b9df,accept,0.0306,True,True,4069,crashed,,,,,collect,"rc=-6, see handbag_pilot_collect.log",2026-09-10 00:45:26
+hot_air_balloon,hot-air_balloon,unknown,d7c26b14eba741d2bb0120069c5eac4f,accept,0.0132,True,True,3492,crashed,,,,,collect,"rc=-6, see hot_air_balloon_pilot_collect.log",2026-09-10 00:54:07
+knob,knob,unknown,d1774953cc4d4a1f833ae33a4a188c33,accept,0.0005,True,False,4860,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 00:54:08
+liquor,liquor,unknown,38e0c30e50ec4e15b88a60e4dcec9107,accept,0.5965,True,False,4589,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 00:54:09
+cylinder4,cylinder,unknown,fa44ddeb72614002ba960b85f4237a2c,accept,0.0001,True,True,3423,crashed,,,,,collect,"rc=1, see cylinder4_pilot_collect.log",2026-09-10 00:59:45
+doughnut,doughnut,unknown,bc7963b2bba14a6dafc8821976e19805,accept,0.7226,True,False,6186,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 00:59:58
+eggplant,eggplant,unknown,6138ac03aaee4755a23e9271d23a776a,accept,0.0148,True,False,4781,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 00:59:58
+clothes_hamper2,clothes_hamper,unknown,2381b495c6d34165a182eaea80d3f8f7,accept,0.0016,True,True,3779,accepted,0.5556,0.625,0.9,20,done,,2026-09-10 01:00:15
+colander,colander,thin_shell_hollow,0ba23e1b5ca346eea78fb885dd1a59d3,accept,0.4153,True,False,4974,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 01:00:21
+medicine,medicine,unknown,64fdc917a7934b07a1ac3287e9ade405,accept,0.0409,True,True,4193,crashed,,,,,collect,"rc=-6, see medicine_pilot_collect.log",2026-09-10 01:01:02
+compass3,compass,small_tools_office,a1d1c782e1c14d29824a8f2983198e9c,accept,0.055,True,True,3974,crashed,,,,,collect,"rc=1, see compass3_pilot_collect.log",2026-09-10 01:04:41
+cornet,cornet,unknown,1b2eed690ce84d26b868ca8e22acf267,accept,0.0012,True,False,5452,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 01:04:42
+cushion2,cushion,unknown,b9d8bdff87814ac395c3a1943ee39ce4,accept,0.0008,True,False,5835,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 01:04:44
+domestic_ass,domestic_ass,unknown,37edd07985684e18a50e111cd4087824,accept,0.0157,True,False,5190,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 01:04:45
+edible_corn,edible_corn,unknown,6ba38407b4ef48f4aac1890c2cc88b13,accept,0.0201,True,False,5841,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 01:04:47
+flashlight,flashlight,unknown,85812bc38c3d410f9d75339df78f8051,accept,0.0139,True,True,3852,crashed,,,,,collect,"rc=1, see flashlight_pilot_collect.log",2026-09-10 01:08:26
+olive_oil,olive_oil,unknown,1ae4148047c94a8d9f2d7c8443c29c5f,accept,0.0184,True,True,3517,crashed,,,,,collect,"rc=-6, see olive_oil_pilot_collect.log",2026-09-10 01:08:36
+parasail2,parasail_(sports),unknown,c5ac7eab218a4b50a5ffcbbf09d34363,accept,0.0032,True,True,3221,crashed,,,,,collect,"rc=-6, see parasail2_pilot_collect.log",2026-09-10 01:15:44
+pencil_sharpener3,pencil_sharpener,small_tools_office,aea08798296f4c0d99fcf11979b5e50d,accept,0.3234,True,True,3492,crashed,,,,,collect,"rc=-6, see pencil_sharpener3_pilot_collect.log",2026-09-10 01:23:22
+pistol,pistol,unknown,f93cbc21279d4423986d6d84ca4ba74f,accept,0.0006,True,False,4831,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 01:23:24
+pretzel,pretzel,unknown,3ab147acc5604ed4b76943cf99504a55,accept,0.0048,True,False,4858,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 01:23:33
+fleece2,fleece,unknown,80659d45b56b4b9bb7279c146bf0c615,accept,0.0002,True,True,3753,accepted,0.5128,0.525,0.9,20,done,,2026-09-10 01:27:51
+flowerpot2,flowerpot,thin_shell_hollow,9241361a5ce14498ada7eb128b1f38ea,accept,1.724,True,False,5461,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 01:27:53
+ring,ring,unknown,1c5c7ffd7a95473dbe6c2d40d5623034,accept,0.088,True,True,3804,crashed,,,,,collect,"rc=-6, see ring_pilot_collect.log",2026-09-10 01:30:52
+shaker,shaker,unknown,83aa9bc0ba404af49cbeba8fdc0cf2ea,accept,0.0002,True,True,3684,crashed,,,,,collect,"rc=-6, see shaker_pilot_collect.log",2026-09-10 01:38:00
+sleeping_bag,sleeping_bag,unknown,b1b452fe764a4cc9af3030f69939f506,accept,0.0835,True,True,3877,crashed,,,,,collect,"rc=1, see sleeping_bag_pilot_collect.log",2026-09-10 01:38:13
+golf_club2,golf_club,unknown,a4f9de5cd6d04ff881c906ae5d0a7ee9,accept,0.0359,True,True,1964,timeout,,,,,collect,"timed out after 1801s, see golf_club2_pilot_collect.log",2026-09-10 01:38:38
+straw,straw_(for_drinking),unknown,2ce197fe22c5404f8674aab5a6cb410b,accept,0.4037,True,True,4025,crashed,,,,,collect,"rc=-6, see straw_pilot_collect.log",2026-09-10 01:46:03
+telephone2,telephone,unknown,0ea3e2fa6d4f42ebbd2a0095060ce39e,accept,0.2883,True,True,3988,crashed,,,,,collect,"rc=-6, see telephone2_pilot_collect.log",2026-09-10 01:53:26
+visor,visor,unknown,371011a1dbd34742bc0fa6ef72f335b6,accept,0.0011,True,True,4182,crashed,,,,,collect,"rc=1, see visor_pilot_collect.log",2026-09-10 01:53:54
+flute_glass,flute_glass,tall_narrow,531dc9b727254aef9918e1d0b7c06e97,accept,0.0004,True,True,3882,timeout,,,,,collect,"timed out after 1801s, see flute_glass_pilot_collect.log",2026-09-10 01:57:54
+handcart,handcart,unknown,53053c677f9d47edbab3e14c9f07c2ce,accept,0.0079,True,True,3778,timeout,,,,,collect,"timed out after 1801s, see handcart_pilot_collect.log",2026-09-10 02:08:40
+grape3,grape,unknown,418f684021d240d6bc69a0da1b17dd34,accept,7.1942,True,True,2974,accepted,0.8696,1.0,1.0,20,done,,2026-09-10 02:14:05
+handcuff,handcuff,unknown,3c705cd9cd0b436dbc2987fac27af7aa,accept,0.2856,True,False,3161,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 02:14:06
+ipod2,iPod,unknown,417e80d50f4c4cb7a153d6ea593de9ee,accept,0.0927,True,True,3247,crashed,,,,,collect,"rc=1, see ipod2_pilot_collect.log",2026-09-10 02:14:20
+lampshade2,lampshade,unknown,1aa6739d774348efa691340e3a12b870,accept,0.0145,True,True,2948,crashed,,,,,collect,"rc=1, see lampshade2_pilot_collect.log",2026-09-10 02:15:19
+armband4,armband,unknown,569c551891a14f8ba70ed992670e4cd3,accept,0.2959,True,True,4481,crashed,,,,,collect,"rc=1, see armband4_pilot_collect.log",2026-09-10 02:18:08
+bagel4,bagel,unknown,32c0bcf29aee45da8a7bcf7ffe1fd8c1,accept,0.069,True,True,3935,crashed,,,,,collect,"rc=1, see bagel4_pilot_collect.log",2026-09-10 02:18:33
+lime2,lime,compact_blobby,4ee454c08f5c45a7ac12ffd484c6ec14,accept,0.0007,True,True,3071,accepted,0.8696,0.92,1.0,20,done,,2026-09-10 02:31:00
+baseball_cap3,baseball_cap,unknown,4a713326b70a4a32aa7ec6eca918603a,accept,0.1002,True,True,2460,crashed,,,,,collect,"rc=1, see baseball_cap3_pilot_collect.log",2026-09-10 02:32:30
+blueberry,blueberry,unknown,fd6eb6cff0a44166a4d57a7287182a41,accept,0.0002,True,False,5053,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 02:32:34
+alarm_clock6,alarm_clock,unknown,badd03bfce2b413f9b2adac9dd12e4ad,accept,0.0106,True,True,3616,crashed,,,,,collect,"rc=1, see alarm_clock6_pilot_collect.log",2026-09-10 02:34:31
+bottle_cap2,bottle_cap,flat_thin,f0edda0b93e146fd83c7318d7f1bc695,accept,0.1121,True,True,3815,crashed,,,,,collect,"rc=1, see bottle_cap2_pilot_collect.log",2026-09-10 02:36:40
+hot_sauce,hot_sauce,unknown,0e5d6fec63714df0b49b3399c59044c8,accept,0.0027,True,True,3627,timeout,,,,,collect,"timed out after 1801s, see hot_sauce_pilot_collect.log",2026-09-10 02:38:41
+lamp,lamp,unknown,d45b51f76e704625814794b1d03b9dd5,accept,0.0005,True,False,4801,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 02:38:42
+locker3,locker,unknown,363957301621438cbb8fa188dc344d9f,accept,0.0112,True,False,6576,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 02:38:45
+barrel4,barrel,unknown,a35bdd1b77124e28a5179715ebc39037,accept,0.0001,True,True,2597,timeout,,,,,collect,"timed out after 1800s, see barrel4_pilot_collect.log",2026-09-10 02:48:34
+log,log,unknown,1d2a32289c944f558942ca4db3ea71fc,accept,0.0558,True,True,3233,accepted,0.6897,0.7667,0.9667,20,done,,2026-09-10 02:50:11
+melon2,melon,unknown,fdf8f4480d874f4c8cc2841727051da2,accept,0.0021,True,True,3725,accepted,0.6452,0.7143,1.0,20,done,,2026-09-10 03:03:13
+amplifier3,amplifier,unknown,19cf952615cf48e48ed5d2128eb8b23a,accept,0.0042,True,True,2444,timeout,,,,,collect,"timed out after 1801s, see amplifier3_pilot_collect.log",2026-09-10 03:04:35
+basket,basket,unknown,9c10ce62bfac419290f5ab20c070c503,accept,0.0048,True,False,4509,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 03:04:36
+bob,bob,unknown,2f20d23e80ed432cb5866cab6f0f1461,accept,0.0003,True,False,5171,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 03:04:40
+bowl5,bowl,thin_shell_hollow,15b103f822ef4d92a386e95746a9aebe,accept,0.0117,True,False,5592,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 03:04:42
+card3,card,unknown,44f633120a434b71931dacf9c8235184,accept,0.1678,True,True,2913,crashed,,,,,collect,"rc=1, see card3_pilot_collect.log",2026-09-10 03:05:03
+chocolate_mousse,chocolate_mousse,unknown,595ed4212cee46b494cb681cb5bd64fd,accept,0.1619,True,False,5600,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 03:05:04
+coil,coil,unknown,33d70246aca544cf9ddae738254bc1ef,accept,0.0223,True,False,5488,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 03:05:07
+crabmeat,crabmeat,unknown,fc28c7110c15496dbe05d9cff4ba6a21,accept,0.0162,True,False,5309,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 03:05:08
+dartboard,dartboard,unknown,fb08eb8a6b944b18aa54cfc7431d8809,accept,0.1014,True,True,3068,crashed,,,,,collect,"rc=1, see dartboard_pilot_collect.log",2026-09-10 03:05:19
+cantaloup3,cantaloup,unknown,4e0cd828f3b94c21b61a7de473533315,accept,0.0122,True,True,3455,timeout,,,,,collect,"timed out after 1801s, see cantaloup3_pilot_collect.log",2026-09-10 03:06:41
+blender2,blender,unknown,35534127707243d6a40ae3bbcf461d7a,accept,0.0022,True,True,4487,accepted,0.625,0.6857,0.9714,20,done,,2026-09-10 03:15:14
+camera,camera,unknown,2892cc4cab4748cd865b7b7cf3805308,accept,0.0049,True,False,4839,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 03:15:16
+chessboard3,chessboard,unknown,4252a510f3c8476ab98fe9f99100696e,accept,0.0619,True,True,4300,crashed,,,,,collect,"rc=1, see chessboard3_pilot_collect.log",2026-09-10 03:15:55
+drill2,drill,unknown,82118925322647e38a6ea1a33e3bec4d,accept,0.2518,True,True,4259,crashed,,,,,collect,"rc=1, see drill2_pilot_collect.log",2026-09-10 03:18:12
+orange_juice,orange_juice,unknown,25d2e4dd016640139562a1ad23828ad3,accept,0.148,True,True,3047,accepted,0.9524,0.88,1.0,20,done,,2026-09-10 03:19:23
+parasol,parasol,unknown,287738fd02734769ab20b648fa8537cb,accept,0.0024,True,True,3933,crashed,,,,,collect,"rc=1, see parasol_pilot_collect.log",2026-09-10 03:19:50
+perfume,perfume,tall_narrow,42602ad7a1024052a28e606031de0ca6,accept,0.0003,True,False,5228,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 03:19:58
+microscope2,microscope,unknown,fd336d24aa5945b9b640409b9a5a9701,accept,0.021,True,True,4458,timeout,,,,,collect,"timed out after 1801s, see microscope2_pilot_collect.log",2026-09-10 03:20:13
+chocolate_milk2,chocolate_milk,unknown,4ccf0fa531124ac29b4c8173471f8e1b,accept,0.0208,True,True,2602,timeout,,,,,collect,"timed out after 1801s, see chocolate_milk2_pilot_collect.log",2026-09-10 03:36:43
+overalls2,overalls_(clothing),unknown,08ccb9a009a34ca5916866149e5b51a3,accept,0.3328,True,True,2634,crashed,,,,,collect,"rc=1, see overalls2_pilot_collect.log",2026-09-10 03:40:23
+coaster2,coaster,flat_thin,77a3a5bb2b5b497e9a1b97bf65efdd7d,accept,0.0057,True,True,2681,crashed,,,,,collect,"rc=1, see coaster2_pilot_collect.log",2026-09-10 03:41:59
+fan2,fan,unknown,56f9038d53634c48a57195f5927d4ef9,accept,0.0174,True,True,3665,accepted,0.6452,0.6571,0.8571,20,done,,2026-09-10 03:44:14
+pita,pita_(bread),unknown,c2e916b66c4d4bf5b93373cb43a85b99,accept,0.0025,True,True,4412,accepted,0.6452,0.6286,0.9429,20,done,,2026-09-10 03:44:31
+cocoa2,cocoa_(beverage),unknown,46e0b2e911594c699cff8a3cf533ff75,accept,0.0003,True,True,2391,timeout,,,,,collect,"timed out after 1801s, see cocoa2_pilot_collect.log",2026-09-10 04:06:44
+cock3,cock,unknown,abe09cf8812a414b8a790a5e97920196,accept,0.0018,True,True,2898,timeout,,,,,collect,"timed out after 1801s, see cock3_pilot_collect.log",2026-09-10 04:12:00
+freshener,freshener,unknown,59ed9da27c2d419b959fad13027a0dec,accept,0.0046,True,True,3653,timeout,,,,,collect,"timed out after 1800s, see freshener_pilot_collect.log",2026-09-10 04:14:15
+gun,gun,unknown,149a7ccdbf26454e81c704cfddc3bd53,accept,0.0114,True,False,5342,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 04:14:16
+headband3,headband,unknown,be6ef0a613ab41ad908d0deb2b399925,accept,0.002,True,True,3335,crashed,,,,,collect,"rc=1, see headband3_pilot_collect.log",2026-09-10 04:14:41
+bait,bait,unknown,645886761a804fa5bfb184d1ec8221b1,accept,0.0928,True,False,4662,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 04:33:31
+basketball_backboard5,basketball_backboard,unknown,2f3803f9694b4db88a41d75e37daf75b,accept,9.417,True,True,3356,crashed,,,,,collect,"rc=1, see basketball_backboard5_pilot_collect.log",2026-09-10 04:34:43
+boiled_egg,boiled_egg,unknown,6e1a6841c5e44dd18554a20cac28c927,accept,0.0039,True,False,4787,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 04:34:44
+cardigan2,cardigan,unknown,c9cb359c89aa4ede842e1250d3e04b75,accept,0.0006,True,True,3517,crashed,,,,,collect,"rc=1, see cardigan2_pilot_collect.log",2026-09-10 04:35:19
+choker,choker,unknown,18f84f3e9ad94bb69f570a437a719aa1,accept,0.1345,True,False,5052,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 04:35:30
+coloring_material,coloring_material,unknown,76b43343e280494aa581ca01a138f4c8,accept,0.0199,True,False,5032,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 04:35:31
+cracker,cracker,unknown,77e34b5b67b64963a67f0d8d5e4eacae,accept,0.0151,True,False,5830,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 04:35:53
+deadbolt,deadbolt,unknown,f913bf792d5f480a8786e1ebdf704c4c,accept,0.0019,True,False,4836,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 04:35:54
+coffeepot2,coffeepot,thin_shell_hollow,04206b246cf7419392e40881212a8010,accept,0.4331,True,True,3790,timeout,,,,,collect,"timed out after 1800s, see coffeepot2_pilot_collect.log",2026-09-10 04:36:48
+ice_skate,ice_skate,unknown,3f38a8a2273441508889951f6e312ae0,accept,0.0013,True,True,4398,accepted,0.7692,0.8333,1.0,20,done,,2026-09-10 04:37:25
+coverall2,coverall,unknown,84f0eabb482d46e1b39a3d559130a664,accept,0.0312,True,True,3587,crashed,,,,,collect,"rc=1, see coverall2_pilot_collect.log",2026-09-10 04:40:35
+cougar,cougar,unknown,6ec4ee91d6344924ab7d0fbf36e2a9ab,accept,0.0005,True,True,4262,timeout,,,,,collect,"timed out after 1801s, see cougar_pilot_collect.log",2026-09-10 04:42:02
+cymbal2,cymbal,unknown,7dec326bba8940b0b4de9d5a0e69e1da,accept,0.0183,True,False,5906,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 04:42:04
+dove,dove,unknown,27f97e3f6d9b40bda877a88d0d1e8bba,accept,0.0093,True,False,4505,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 04:42:05
+drumstick2,drumstick,elongated_rope_stick,9099f14a50194c6da24a526877b28066,accept,0.0231,True,True,3119,crashed,,,,,collect,"rc=1, see drumstick2_pilot_collect.log",2026-09-10 04:42:29
+escargot,escargot,unknown,a4a4f69a1a07445d8d417e1c96a57446,accept,0.0021,True,False,5586,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 04:42:34
+flower_arrangement2,flower_arrangement,unknown,23c639ca701d4713a8c7f6480d0a8797,accept,0.0003,True,True,3417,crashed,,,,,collect,"rc=1, see flower_arrangement2_pilot_collect.log",2026-09-10 04:43:28
+green_onion2,green_onion,unknown,41f72822b6134246a7770f540f04c0e8,accept,0.0396,True,True,4349,crashed,,,,,collect,"rc=1, see green_onion2_pilot_collect.log",2026-09-10 04:43:51
+handle,handle,unknown,baa90088dfb8429b9bbe7ed8f6746714,accept,0.0007,True,True,3051,crashed,,,,,collect,"rc=1, see handle_pilot_collect.log",2026-09-10 04:44:30
+ice_maker,ice_maker,unknown,9885a4f288c24135a7796035cbae6de3,accept,0.0305,True,False,4614,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 04:44:31
+ladle,ladle,elongated_rope_stick,0b68dc92604f47c89065c8c21be8a8df,accept,0.2145,True,False,4518,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 04:44:33
+lantern,lantern,unknown,a11b0cc9957d4e0296c7cff039ca245a,accept,0.0349,True,True,3146,crashed,,,,,collect,"rc=1, see lantern_pilot_collect.log",2026-09-10 04:45:32
+drone,drone,unknown,4f95cb46814f43859b80172c9f712cd7,accept,0.0037,True,True,3283,timeout,,,,,collect,"timed out after 1801s, see drone_pilot_collect.log",2026-09-10 05:05:56
+ferry2,ferry,unknown,51dba5eb17c24e0c9fbd1f817505cd60,accept,0.0021,True,True,4174,crashed,,,,,collect,"rc=1, see ferry2_pilot_collect.log",2026-09-10 05:06:59
+lawn_mower2,lawn_mower,unknown,61b40bf8aa0748da88849a6336bf71de,accept,0.0111,True,True,3476,timeout,,,,,collect,"timed out after 1800s, see lawn_mower2_pilot_collect.log",2026-09-10 05:07:30
+frisbee2,frisbee,toys_misc,71e5d069a583437ab6734944f0ca599b,accept,0.0013,True,True,3911,crashed,,,,,collect,"rc=1, see frisbee2_pilot_collect.log",2026-09-10 05:10:25
+dagger3,dagger,unknown,5de582634cfe4c348e7fe81f1d29bf02,accept,0.0002,True,True,3735,timeout,,,,,collect,"timed out after 1801s, see dagger3_pilot_collect.log",2026-09-10 05:10:36
+mail_slot3,mail_slot,unknown,5ab8a2aa7994478c987c3b541016a56a,accept,0.3452,True,True,3871,timeout,,,,,collect,"timed out after 1801s, see mail_slot3_pilot_collect.log",2026-09-10 05:15:35
+mandarin_orange2,mandarin_orange,unknown,9796bcdd0869446da27813947ecceb8b,accept,0.0002,True,True,3020,accepted,0.9091,0.92,1.0,20,done,,2026-09-10 05:23:58
+measuring_cup2,measuring_cup,thin_shell_hollow,39551948552d438499e8694b7d3691c5,accept,0.0456,True,True,4489,crashed,,,,,collect,"rc=1, see measuring_cup2_pilot_collect.log",2026-09-10 05:27:06
+milk2,milk,unknown,ff7fe95e57564cedb3f61bfcbd7e683c,accept,0.3884,True,True,4392,accepted,0.7692,0.8333,1.0,20,done,,2026-09-10 05:35:51
+fruit_juice2,fruit_juice,unknown,316cbfa55e8549d8bce87e6a8e884090,accept,0.017,True,True,4110,timeout,,,,,collect,"timed out after 1801s, see fruit_juice2_pilot_collect.log",2026-09-10 05:40:26
+drawer,drawer,unknown,e836eb07dc6e4dee859b920acb6d31f8,accept,0.0784,True,True,3918,timeout,,,,,collect,"timed out after 1800s, see drawer_pilot_collect.log",2026-09-10 05:40:39
+egg2,egg,compact_blobby,1bd870512aff40efba5678a97e7b05f4,accept,0.0002,True,True,3231,accepted,0.9524,1.0,1.0,20,done,,2026-09-10 05:56:56
+milkshake,milkshake,unknown,0ab8c1875131421e9bb1c442fa3f5950,accept,0.1855,True,True,4382,timeout,,,,,collect,"timed out after 1801s, see milkshake_pilot_collect.log",2026-09-10 05:57:15
+painting,painting,unknown,460a5ca01e0e409cafaa5611e564f04b,accept,1.3865,True,False,4120,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 05:57:30
+pacifier,pacifier,unknown,e45ede8d849141d49762ca5d3390cbc5,accept,0.0184,True,True,4368,timeout,,,,,collect,"timed out after 1801s, see pacifier_pilot_collect.log",2026-09-10 06:05:52
+pastry,pastry,unknown,3f752c3834a74b4294c6686493c6fdb4,accept,0.7412,True,False,5736,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 06:05:55
+platter2,platter,unknown,791a73b17d7e40a4957e7c0df360e5a3,accept,0.1651,True,True,4300,crashed,,,,,collect,"rc=1, see platter2_pilot_collect.log",2026-09-10 06:06:19
+pudding,pudding,unknown,1ab28887546540d69a4c34618b285387,accept,0.055,True,False,5278,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 06:06:23
+safety_pin,safety_pin,unknown,fefe61636e7e4670b83f38943cdac85d,accept,0.0005,True,True,2249,crashed,,,,,collect,"rc=1, see safety_pin_pilot_collect.log",2026-09-10 06:06:47
+shaving_cream2,shaving_cream,unknown,9ac7a85e1b7b4172afb7648ae270b7ef,accept,0.0018,True,True,4127,crashed,,,,,collect,"rc=1, see shaving_cream2_pilot_collect.log",2026-09-10 06:07:10
+hair_dryer3,hair_dryer,unknown,141202eed32747b7b1259a3efeba9c96,accept,0.0179,True,True,4184,timeout,,,,,collect,"timed out after 1801s, see hair_dryer3_pilot_collect.log",2026-09-10 06:10:29
+headboard,headboard,unknown,62e03de5b2eb4e8d81d1ffe8e94720b8,accept,0.0016,True,True,2610,crashed,,,,,collect,"rc=1, see headboard_pilot_collect.log",2026-09-10 06:10:55
+battery3,battery,unknown,bf7360470ba342a1b9a2351a711542d9,accept,0.0006,True,True,3562,crashed,,,,,collect,"rc=1, see battery3_pilot_collect.log",2026-09-10 06:26:20
+falcon,falcon,unknown,534c7ef382f34700800f72f3374a10c5,accept,0.0225,True,True,3561,timeout,,,,,collect,"timed out after 1801s, see falcon_pilot_collect.log",2026-09-10 06:26:58
+peanut_butter,peanut_butter,unknown,686c71ef72f04b50aa522325651e3222,accept,0.0038,True,True,3921,timeout,,,,,collect,"timed out after 1800s, see peanut_butter_pilot_collect.log",2026-09-10 06:27:31
+award,award,unknown,2a115610451c4bd58a7f79d11a7bab61,accept,1.9105,True,False,5563,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 06:28:24
+bead,bead,unknown,734ab343ed2d483b8127bf38d90311ad,accept,0.0006,True,False,6511,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 06:28:37
+icecream2,icecream,unknown,07bbf4c6cb8e4ea59a9afadae21f82cf,accept,0.0225,True,True,3325,accepted,0.7692,0.8667,1.0,20,done,,2026-09-10 06:30:15
+jar,jar,kitchen_containers,03a5f54034b64995bcce6291b35bff71,accept,0.0394,True,False,4698,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 06:30:16
+leather,leather,unknown,29ec3177bf844092a6e631bc45215b06,accept,0.0012,True,False,5443,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 06:30:19
+marker,marker,unknown,19ccbeebbe91485ebaac67a0e352a703,accept,0.0332,True,False,5209,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 06:30:24
+money,money,unknown,359a17121a744e1cb1e9b5cee7b8161d,accept,0.0341,True,True,3446,accepted,0.625,0.6571,0.8286,20,done,,2026-09-10 06:55:09
+bolt3,bolt,unknown,48b7012e722449fe9320471dbba6f32a,accept,0.3802,True,True,3034,low_success,0.4762,0.4667,0.9778,20,done,,2026-09-10 06:55:39
+book4,book,unknown,202f3448f68c44ceaa5f7f8e28807341,accept,0.3343,True,True,2079,timeout,,,,,collect,"timed out after 1801s, see book4_pilot_collect.log",2026-09-10 06:58:38
+carrot2,carrot,elongated_rope_stick,50412b64aa20474b87e2ed690464cfea,accept,0.0004,True,True,3745,crashed,,,,,collect,"rc=1, see carrot2_pilot_collect.log",2026-09-10 06:59:42
+carton,carton,unknown,cf71f2d412a5491ba70ef8081d553272,accept,0.0102,True,False,4695,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 06:59:44
+clasp3,clasp,unknown,25290cec69eb4154b7c831f76a5c022e,accept,0.0055,True,True,3474,crashed,,,,,collect,"rc=1, see clasp3_pilot_collect.log",2026-09-10 07:00:09
+pajamas,pajamas,unknown,1d909b482ccf4d3f8688702bff9d78ed,accept,0.0604,True,True,3881,timeout,,,,,collect,"timed out after 1801s, see pajamas_pilot_collect.log",2026-09-10 07:25:15
+pegboard,pegboard,unknown,395987a7deb44f82a12b18eefae474f4,accept,0.0016,True,False,5887,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 07:25:17
+popsicle,popsicle,unknown,f68105e64cc142b59b4a701d4315d03b,accept,0.2892,True,False,5571,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 07:25:18
+cart3,cart,unknown,8f340bb7c39b42fab68c628d9752f259,accept,0.0201,True,True,3359,timeout,,,,,collect,"timed out after 1801s, see cart3_pilot_collect.log",2026-09-10 07:25:40
+condiment2,condiment,unknown,bb7f9ec1585844a1a19c89e4e6c127eb,accept,1.5359,True,True,4449,timeout,,,,,collect,"timed out after 1800s, see condiment2_pilot_collect.log",2026-09-10 07:30:11
+crescent_roll,crescent_roll,unknown,51600a9a53284b18a9b1623ca54d9a49,accept,0.0696,True,False,6809,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 07:30:13
+tabasco_sauce,Tabasco_sauce,unknown,463023dd24d14b68b368aecb221425c4,accept,0.0034,True,False,4682,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 07:34:03
+artichoke,artichoke,compact_blobby,907ec92dd9a949e79f4633c3cabb2fa8,accept,0.0859,True,False,4602,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 07:34:06
+balloon,balloon,unknown,120fd69494994dcaa23c95e499ebd6e5,accept,0.0,True,False,,,,,,,fem_gate,Failed to apply filter:  'meshing_close_holes. Current mesh does not have Any Faces.,2026-09-10 07:34:15
+cup3,cup,thin_shell_hollow,4f3edd9bf5fb4b6ab11433cbd9e19c74,accept,0.0087,True,True,4117,accepted,0.8696,0.88,1.0,20,done,,2026-09-10 07:48:34
+quilt2,quilt,unknown,603d067ea2094550842bf65ad7c7e279,accept,0.0008,True,True,3970,timeout,,,,,collect,"timed out after 1801s, see quilt2_pilot_collect.log",2026-09-10 07:55:20
+lego4,Lego,unknown,3a4c4e3fd81241ec99e2a9dac838dc31,accept,0.0041,True,True,4241,crashed,,,,,collect,"rc=1, see lego4_pilot_collect.log",2026-09-10 07:55:38
+cigarette_case2,cigarette_case,unknown,659afc7b5cd84c91beaf3911888acb30,accept,1.1587,True,True,3168,timeout,,,,,collect,"timed out after 1801s, see cigarette_case2_pilot_collect.log",2026-09-10 07:55:41
+salami,salami,unknown,5350e6ec2afa48ca864cc216fa4af76e,accept,0.293,True,True,4438,crashed,,,,,collect,"rc=1, see salami_pilot_collect.log",2026-09-10 07:55:53
+computer_keyboard,computer_keyboard,unknown,a25c537932e84ef693de2cdbfc9dd22d,accept,0.3571,True,True,2979,crashed,,,,,collect,"rc=1, see computer_keyboard_pilot_collect.log",2026-09-10 07:55:57
+crape2,crape,unknown,75a1e08e4b264ec8b9e2b082bb5d60f4,accept,0.8203,True,True,4295,crashed,,,,,collect,"rc=1, see crape2_pilot_collect.log",2026-09-10 07:56:23
+cucumber,cucumber,elongated_rope_stick,3ff09321a5b0462bb9d37d9958bf1675,accept,0.0604,True,False,5061,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 07:56:25
+detergent,detergent,unknown,7189f8017bfa42caae56cfe1b1d5d193,accept,0.0113,True,False,4626,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 07:56:27
+diaper3,diaper,unknown,00c3da4c6a054847b5c220f75d065f0d,accept,0.0261,True,True,3550,accepted,1.0,1.0,1.0,20,done,,2026-09-10 08:04:01
+beeper3,beeper,unknown,28e1b9e9950446f9abaea86f1975be3d,accept,0.0003,True,True,2843,timeout,,,,,collect,"timed out after 1800s, see beeper3_pilot_collect.log",2026-09-10 08:04:16
+bracelet,bracelet,unknown,4ade799e007e467a99261f6097a0c041,accept,0.0001,True,False,4567,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 08:04:19
+banana4,banana,unknown,b6361d444ed24591b15b9b28d39ac2e0,accept,0.0204,True,True,3618,timeout,,,,,collect,"timed out after 1801s, see banana4_pilot_collect.log",2026-09-10 08:09:58
+binder,binder,unknown,20f603f201c14f3b8a4f5ce150693c2a,accept,0.0356,True,False,4568,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 08:10:00
+briefcase,briefcase,unknown,10f03147643849b99acc31551af6c09d,accept,0.2185,True,False,6223,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 08:10:03
+cast3,cast,unknown,20a235aa7a804d3694b8953839db579f,accept,0.0075,True,True,3954,crashed,,,,,collect,"rc=1, see cast3_pilot_collect.log",2026-09-10 08:10:36
+alcohol,alcohol,unknown,2884e7f790a64d39b3a9f680d8bfb16d,accept,0.0039,True,False,4528,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 08:12:53
+bagel5,bagel,unknown,32c0bcf29aee45da8a7bcf7ffe1fd8c1,accept,0.069,True,True,3935,crashed,,,,,collect,"rc=1, see bagel5_pilot_collect.log",2026-09-10 08:14:17
+shot_glass2,shot_glass,tall_narrow,27c73eabfff14bdb912f467374119dc8,accept,0.0038,True,True,3921,accepted,0.8,0.84,0.96,20,done,,2026-09-10 08:15:14
+basket,basket,unknown,9c10ce62bfac419290f5ab20c070c503,accept,0.0048,True,False,4509,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 08:15:15
+award,award,unknown,2a115610451c4bd58a7f79d11a7bab61,accept,1.9105,True,False,5563,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 08:15:15
+bait,bait,unknown,645886761a804fa5bfb184d1ec8221b1,accept,0.0928,True,False,4662,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 08:15:17
+boiled_egg,boiled_egg,unknown,6e1a6841c5e44dd18554a20cac28c927,accept,0.0039,True,False,4787,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 08:15:17
+shovel2,shovel,unknown,f30ba7d7a43b436587f8d9c57e1656c5,accept,0.1483,True,True,4306,crashed,,,,,collect,"rc=1, see shovel2_pilot_collect.log",2026-09-10 08:15:26
+basketball_backboard6,basketball_backboard,unknown,2f3803f9694b4db88a41d75e37daf75b,accept,9.417,True,True,3356,crashed,,,,,collect,"rc=1, see basketball_backboard6_pilot_collect.log",2026-09-10 08:16:27
+baseball_cap4,baseball_cap,unknown,4a713326b70a4a32aa7ec6eca918603a,accept,0.1002,True,True,2460,crashed,,,,,collect,"rc=1, see baseball_cap4_pilot_collect.log",2026-09-10 08:16:38
+cardigan3,cardigan,unknown,c9cb359c89aa4ede842e1250d3e04b75,accept,0.0006,True,True,3517,crashed,,,,,collect,"rc=1, see cardigan3_pilot_collect.log",2026-09-10 08:16:38
+bob,bob,unknown,2f20d23e80ed432cb5866cab6f0f1461,accept,0.0003,True,False,5171,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 08:16:42
+choker,choker,unknown,18f84f3e9ad94bb69f570a437a719aa1,accept,0.1345,True,False,5052,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 08:16:50
+card4,card,unknown,44f633120a434b71931dacf9c8235184,accept,0.1678,True,True,2913,crashed,,,,,collect,"rc=1, see card4_pilot_collect.log",2026-09-10 08:17:08
+chocolate_mousse,chocolate_mousse,unknown,595ed4212cee46b494cb681cb5bd64fd,accept,0.1619,True,False,5600,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 08:17:09
+colander,colander,thin_shell_hollow,0ba23e1b5ca346eea78fb885dd1a59d3,accept,0.4153,True,False,4974,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 08:17:16
+apricot3,apricot,unknown,a4c9a503f63e440e8d6d924d4e5c36b1,accept,0.6003,True,True,3160,accepted,0.7143,0.7667,0.9333,20,done,,2026-09-10 08:17:57
+compass4,compass,small_tools_office,a1d1c782e1c14d29824a8f2983198e9c,accept,0.055,True,True,3974,crashed,,,,,collect,"rc=1, see compass4_pilot_collect.log",2026-09-10 08:21:19
+computer_keyboard2,computer_keyboard,unknown,a25c537932e84ef693de2cdbfc9dd22d,accept,0.3571,True,True,2979,crashed,,,,,collect,"rc=1, see computer_keyboard2_pilot_collect.log",2026-09-10 08:21:33
+crape3,crape,unknown,75a1e08e4b264ec8b9e2b082bb5d60f4,accept,0.8203,True,True,4295,crashed,,,,,collect,"rc=1, see crape3_pilot_collect.log",2026-09-10 08:21:58
+detergent,detergent,unknown,7189f8017bfa42caae56cfe1b1d5d193,accept,0.0113,True,False,4626,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 08:22:00
+doorknob,doorknob,compact_blobby,6b65ee4b71a848cbab23f2026ad23bfd,accept,0.001,True,True,3422,accepted,0.7692,0.8333,0.9667,20,done,,2026-09-10 08:22:45
+duffel_bag,duffel_bag,unknown,48a4cf76e3dd41e6834bda88ad360677,accept,0.0471,True,False,4659,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 08:22:46
+drum2,drum_(musical_instrument),unknown,5bfb43ddec994a21baa0eb5e458cdf09,accept,0.0006,True,True,2708,timeout,,,,,collect,"timed out after 1801s, see drum2_pilot_collect.log",2026-09-10 08:26:33
+file2,file_(tool),unknown,38eb1f950f414aeb95b7b7dc3506b7ab,accept,0.006,True,True,3667,crashed,,,,,collect,"rc=1, see file2_pilot_collect.log",2026-09-10 08:26:52
+cash_register2,cash_register,unknown,870f6ebb115a440da5b8fed8072d7d9e,accept,0.0153,True,True,2907,timeout,,,,,collect,"timed out after 1801s, see cash_register2_pilot_collect.log",2026-09-10 08:34:22
+clippers3,clippers_(for_plants),unknown,f85c796cdefc4b75b9d5892055650332,accept,0.1171,True,True,3803,timeout,,,,,collect,"timed out after 1801s, see clippers3_pilot_collect.log",2026-09-10 08:40:38
+battery4,battery,unknown,bf7360470ba342a1b9a2351a711542d9,accept,0.0006,True,True,3562,crashed,,,,,collect,"rc=1, see battery4_pilot_collect.log",2026-09-10 08:40:45
+fire_alarm3,fire_alarm,unknown,85c3d3b9cfd64c108dc548e525052c4e,accept,0.5732,True,True,3997,crashed,,,,,collect,"rc=1, see fire_alarm3_pilot_collect.log",2026-09-10 08:43:45
+barrel5,barrel,unknown,a35bdd1b77124e28a5179715ebc39037,accept,0.0001,True,True,2597,timeout,,,,,collect,"timed out after 1800s, see barrel5_pilot_collect.log",2026-09-10 08:44:18
+blueberry,blueberry,unknown,fd6eb6cff0a44166a4d57a7287182a41,accept,0.0002,True,False,5053,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 08:44:22
+alarm_clock7,alarm_clock,unknown,badd03bfce2b413f9b2adac9dd12e4ad,accept,0.0106,True,True,3616,crashed,,,,,collect,"rc=1, see alarm_clock7_pilot_collect.log",2026-09-10 08:46:14
+bolt4,bolt,unknown,48b7012e722449fe9320471dbba6f32a,accept,0.3802,True,True,3034,timeout,,,,,collect,"timed out after 1801s, see bolt4_pilot_collect.log",2026-09-10 08:46:29
+condiment3,condiment,unknown,bb7f9ec1585844a1a19c89e4e6c127eb,accept,1.5359,True,True,4449,timeout,,,,,collect,"timed out after 1801s, see condiment3_pilot_collect.log",2026-09-10 08:46:51
+garden_hose2,garden_hose,unknown,ca1155ccdfa04b1f965ad50b6f67a7a9,accept,0.0139,True,True,4125,crashed,,,,,collect,"rc=1, see garden_hose2_pilot_collect.log",2026-09-10 08:46:52
+crescent_roll,crescent_roll,unknown,51600a9a53284b18a9b1623ca54d9a49,accept,0.0696,True,False,6809,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 08:46:53
+hamburger,hamburger,unknown,cabcdfcdb2df473e8c2055bbc0c7b993,accept,0.9817,True,False,5431,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 08:46:55
+bamboo2,bamboo,unknown,d0d5eb345ff7420bb7f5c5239fcec637,accept,0.0004,True,True,3523,timeout,,,,,collect,"timed out after 1801s, see bamboo2_pilot_collect.log",2026-09-10 08:47:58
+bell3,bell,unknown,fc203fd849ea46f0b84d4843ba1aafcd,accept,0.0978,True,True,4092,crashed,,,,,collect,"rc=1, see bell3_pilot_collect.log",2026-09-10 08:50:12
+brassiere,brassiere,unknown,1b98b99b6c374df6beeebd9dc3332abb,accept,0.0,True,False,,,,,,,fem_gate,Failed to apply filter:  'meshing_close_holes. Current mesh does not have Any Faces.,2026-09-10 08:50:13
+casserole,casserole,unknown,3ff006d296224ad1b8a85ea3bcfc0870,accept,1.1132,True,False,5103,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 08:50:20
+cleat2,cleat_(for_securing_rope),unknown,62c27454917d40db8cd6e28f12ff4fc5,accept,0.0372,True,True,3366,crashed,,,,,collect,"rc=1, see cleat2_pilot_collect.log",2026-09-10 08:51:19
+drum3,drum_(musical_instrument),unknown,5bfb43ddec994a21baa0eb5e458cdf09,accept,0.0006,True,True,2708,timeout,,,,,collect,"timed out after 1800s, see drum3_pilot_collect.log",2026-09-10 08:52:04
+cookie2,cookie,unknown,4fc98176958f45dea72f0f000762d0dd,accept,0.0366,True,True,4203,crashed,,,,,collect,"rc=1, see cookie2_pilot_collect.log",2026-09-10 08:54:52
+funnel,funnel,thin_shell_hollow,0c7b15ee169046c9a3f07329a322b578,accept,0.1216,True,True,3061,low_success,0.4545,0.6,0.8444,20,done,,2026-09-10 08:55:57
+gameboard2,gameboard,unknown,2302e3bb270b4f8b84a7f3166fc45b7a,accept,1.4024,True,True,3494,crashed,,,,,collect,"rc=1, see gameboard2_pilot_collect.log",2026-09-10 08:56:12
+cleansing_agent3,cleansing_agent,unknown,8fbbd263c00f4a659d85963553136738,accept,0.0071,True,True,4117,accepted,0.5882,0.6,0.9429,20,done,,2026-09-10 08:58:17
+diaper4,diaper,unknown,00c3da4c6a054847b5c220f75d065f0d,accept,0.0261,True,True,3550,accepted,1.0,1.0,1.0,20,done,,2026-09-10 09:02:15
+duffel_bag,duffel_bag,unknown,48a4cf76e3dd41e6834bda88ad360677,accept,0.0471,True,False,4659,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 09:02:16
+cooler15,cooler_(for_food),unknown,4cd15dfdd2b64b5695e940f4f4609087,accept,0.0004,True,True,2780,timeout,,,,,collect,"timed out after 1801s, see cooler15_pilot_collect.log",2026-09-10 09:10:39
+cube,cube,unknown,0ffaeb577605464ea57c38d7157417ab,accept,0.0097,False,,,,,,,,mesh_prep,repair failed: mesh still not watertight after voxel-remesh fallback (FAILS LOUDLY per the 2026-09-07 DEVLOG lesson -- do not silently ship this),2026-09-10 09:10:42
+book5,book,unknown,202f3448f68c44ceaa5f7f8e28807341,accept,0.3343,True,True,2079,timeout,,,,,collect,"timed out after 1801s, see book5_pilot_collect.log",2026-09-10 09:10:47
+fire_alarm4,fire_alarm,unknown,85c3d3b9cfd64c108dc548e525052c4e,accept,0.5732,True,True,3997,crashed,,,,,collect,"rc=1, see fire_alarm4_pilot_collect.log",2026-09-10 09:13:25
+bottle_opener3,bottle_opener,complex_concave,4ccbb5d870ea4189a5ce53291ddb7921,accept,0.0092,True,True,3147,timeout,,,,,collect,"timed out after 1801s, see bottle_opener3_pilot_collect.log",2026-09-10 09:14:23
+gasmask,gasmask,unknown,e169676dcff64d588da211ae0265cbf6,accept,0.119,True,True,4043,crashed,,,,,collect,"rc=1, see gasmask_pilot_collect.log",2026-09-10 09:14:34
+hamper,hamper,unknown,20fc0680ea0143c0b7dcd66277eeaf80,accept,0.0005,True,False,5452,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 09:14:38
+bottle_cap3,bottle_cap,flat_thin,f0edda0b93e146fd83c7318d7f1bc695,accept,0.1121,True,True,3815,crashed,,,,,collect,"rc=1, see bottle_cap3_pilot_collect.log",2026-09-10 09:14:50
+carton,carton,unknown,cf71f2d412a5491ba70ef8081d553272,accept,0.0102,True,False,4695,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 09:14:53
+clasp4,clasp,unknown,25290cec69eb4154b7c831f76a5c022e,accept,0.0055,True,True,3474,crashed,,,,,collect,"rc=1, see clasp4_pilot_collect.log",2026-09-10 09:15:18
+coffeepot3,coffeepot,thin_shell_hollow,04206b246cf7419392e40881212a8010,accept,0.4331,True,True,3790,crashed,,,,,collect,"rc=1, see coffeepot3_pilot_collect.log",2026-09-10 09:16:16
+amplifier4,amplifier,unknown,19cf952615cf48e48ed5d2128eb8b23a,accept,0.0042,True,True,2444,timeout,,,,,collect,"timed out after 1800s, see amplifier4_pilot_collect.log",2026-09-10 09:16:18
+balloon,balloon,unknown,120fd69494994dcaa23c95e499ebd6e5,accept,0.0,True,False,,,,,,,fem_gate,Failed to apply filter:  'meshing_close_holes. Current mesh does not have Any Faces.,2026-09-10 09:16:26
+cart4,cart,unknown,8f340bb7c39b42fab68c628d9752f259,accept,0.0201,True,True,3359,timeout,,,,,collect,"timed out after 1801s, see cart4_pilot_collect.log",2026-09-10 09:16:30
+bead,bead,unknown,734ab343ed2d483b8127bf38d90311ad,accept,0.0006,True,False,6511,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 09:16:39
+bowl5,bowl,thin_shell_hollow,15b103f822ef4d92a386e95746a9aebe,accept,0.0117,True,False,5592,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 09:16:41
+bracelet,bracelet,unknown,4ade799e007e467a99261f6097a0c041,accept,0.0001,True,False,4567,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 09:16:43
+helmet,helmet,unknown,a64fa1262856414b8aa4bd9eaa1d2a7f,accept,0.0145,True,True,4229,timeout,,,,,collect,"timed out after 1800s, see helmet_pilot_collect.log",2026-09-10 09:16:56
+cash_register3,cash_register,unknown,870f6ebb115a440da5b8fed8072d7d9e,accept,0.0153,True,True,2907,crashed,,,,,collect,"rc=1, see cash_register3_pilot_collect.log",2026-09-10 09:17:41
+cleat3,cleat_(for_securing_rope),unknown,62c27454917d40db8cd6e28f12ff4fc5,accept,0.0372,True,True,3366,crashed,,,,,collect,"rc=1, see cleat3_pilot_collect.log",2026-09-10 09:18:39
+beeper4,beeper,unknown,28e1b9e9950446f9abaea86f1975be3d,accept,0.0003,True,True,2843,timeout,,,,,collect,"timed out after 1801s, see beeper4_pilot_collect.log",2026-09-10 09:19:24
+brassiere,brassiere,unknown,1b98b99b6c374df6beeebd9dc3332abb,accept,0.0,True,False,,,,,,,fem_gate,Failed to apply filter:  'meshing_close_holes. Current mesh does not have Any Faces.,2026-09-10 09:19:24
+casserole,casserole,unknown,3ff006d296224ad1b8a85ea3bcfc0870,accept,1.1132,True,False,5103,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 09:19:30
+cookie3,cookie,unknown,4fc98176958f45dea72f0f000762d0dd,accept,0.0366,True,True,4203,crashed,,,,,collect,"rc=1, see cookie3_pilot_collect.log",2026-09-10 09:19:52
+crouton,crouton,unknown,76d436d6fafb4bc3b5da646bd1f6c41a,accept,0.0035,True,True,4097,timeout,,,,,collect,"timed out after 1800s, see crouton_pilot_collect.log",2026-09-10 09:25:07
+gelatin3,gelatin,kitchen_containers,7da36ddc2a28494586269bca7d4a7942,accept,0.0291,True,True,2692,timeout,,,,,collect,"timed out after 1801s, see gelatin3_pilot_collect.log",2026-09-10 09:26:13
+cone3,cone,unknown,2315667320e048b780099cdf79f1d814,accept,0.1168,True,True,3294,timeout,,,,,collect,"timed out after 1801s, see cone3_pilot_collect.log",2026-09-10 09:28:18
+crossbar,crossbar,unknown,0018d378a2cd4ad58fa8fcae42e8af9e,accept,0.0014,True,False,3707,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 09:28:21
+fire_extinguisher2,fire_extinguisher,unknown,8b52b1f4c4c44bb9866146f60dbe534c,accept,0.017,True,True,3958,timeout,,,,,collect,"timed out after 1801s, see fire_extinguisher2_pilot_collect.log",2026-09-10 09:32:19
+flowerpot2,flowerpot,thin_shell_hollow,9241361a5ce14498ada7eb128b1f38ea,accept,1.724,True,False,5461,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 09:32:20
+flute_glass2,flute_glass,tall_narrow,531dc9b727254aef9918e1d0b7c06e97,accept,0.0004,True,True,3882,crashed,,,,,collect,"rc=1, see flute_glass2_pilot_collect.log",2026-09-10 09:33:26
+ginger,ginger,unknown,22e60495b7984dfa88d7198267512cb9,accept,0.0805,True,False,5163,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 09:33:39
+dishtowel2,dishtowel,unknown,f953ec3d3204405580d54f74e4aebe8f,accept,0.0009,True,True,4041,crashed,,,,,collect,"rc=1, see dishtowel2_pilot_collect.log",2026-09-10 09:34:14
+cantaloup4,cantaloup,unknown,4e0cd828f3b94c21b61a7de473533315,accept,0.0122,True,True,3455,accepted,0.5714,0.6,1.0,20,done,,2026-09-10 09:37:59
+iron,iron_(for_clothing),unknown,c5bcfb2d53934421be8f9e8b407c2633,accept,0.0029,True,True,3203,crashed,,,,,collect,"rc=1, see iron_pilot_collect.log",2026-09-10 09:38:37
+lemonade,lemonade,unknown,b56da3df5deb4a08b3f9519be1971085,accept,0.0002,True,False,4525,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 09:38:38
+hornet2,hornet,unknown,36a231c7af324000b0ea55afb6a1bb92,accept,0.0824,True,True,3633,timeout,,,,,collect,"timed out after 1801s, see hornet2_pilot_collect.log",2026-09-10 09:44:39
+joystick,joystick,unknown,8f51072b74fe456fa35bd1ac48e038e8,accept,0.0335,True,False,4837,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 09:44:42
+life_buoy,life_buoy,unknown,c15d1837e58c41cb81c3baf3b7e544ed,accept,0.0304,True,False,5787,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 09:44:44
+cigarette_case3,cigarette_case,unknown,659afc7b5cd84c91beaf3911888acb30,accept,1.1587,True,True,3168,timeout,,,,,collect,"timed out after 1801s, see cigarette_case3_pilot_collect.log",2026-09-10 09:46:31
+crouton2,crouton,unknown,76d436d6fafb4bc3b5da646bd1f6c41a,accept,0.0035,True,True,4097,accepted,0.5556,0.55,0.875,20,done,,2026-09-10 09:46:46
+cooler16,cooler_(for_food),unknown,4cd15dfdd2b64b5695e940f4f4609087,accept,0.0004,True,True,2780,timeout,,,,,collect,"timed out after 1800s, see cooler16_pilot_collect.log",2026-09-10 09:48:40
+cube,cube,unknown,0ffaeb577605464ea57c38d7157417ab,accept,0.0097,False,,,,,,,,mesh_prep,repair failed: mesh still not watertight after voxel-remesh fallback (FAILS LOUDLY per the 2026-09-07 DEVLOG lesson -- do not silently ship this),2026-09-10 09:48:44
+diary2,diary,unknown,d8bfbc48bbed4d73b7e21eb26c96990a,accept,0.0115,True,True,3725,crashed,,,,,collect,"rc=1, see diary2_pilot_collect.log",2026-09-10 09:49:25
+dumbbell,dumbbell,unknown,9a511d27d3e146189cf85535d010c145,accept,0.0004,True,False,5805,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 09:49:27
+clippers4,clippers_(for_plants),unknown,f85c796cdefc4b75b9d5892055650332,accept,0.1171,True,True,3803,timeout,,,,,collect,"timed out after 1801s, see clippers4_pilot_collect.log",2026-09-10 09:49:31
+dish_antenna2,dish_antenna,unknown,509a2cc74d0742f7a6ba5d3036deab32,accept,0.0084,True,True,2884,timeout,,,,,collect,"timed out after 1801s, see dish_antenna2_pilot_collect.log",2026-09-10 09:55:08
+halter_top2,halter_top,unknown,4630cf631895489eaf3185b914aa14f5,accept,0.0013,True,True,2959,timeout,,,,,collect,"timed out after 1801s, see halter_top2_pilot_collect.log",2026-09-10 09:56:14
+headset,headset,unknown,17ed1a8c68584cc381b1120729e6177e,accept,0.0358,True,False,4784,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 09:56:22
+inhaler,inhaler,unknown,4721a75efb6b4d1ba91cf61696fc9a31,accept,0.0188,True,False,5803,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 09:56:34
+keycard,keycard,flat_thin,1ec8c12f4fbd4987bfde21696d0c91b3,accept,0.0002,True,True,3837,crashed,,,,,collect,"rc=1, see keycard_pilot_collect.log",2026-09-10 09:56:50
+meatball2,meatball,unknown,d5cac0e6355a49f3aa7cb502bacc73e5,accept,0.1041,True,True,3546,accepted,0.8,0.8,1.0,20,done,,2026-09-10 10:01:50
+hand_glass3,hand_glass,unknown,6292c807b5074fb2a41448d8fd9e8bdb,accept,0.0069,True,True,3799,low_success,0.4762,0.5111,0.9556,20,done,,2026-09-10 10:03:09
+hose,hose,unknown,3490102dac814280b983f9ac95da20c9,accept,0.0055,True,False,4552,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 10:03:11
+easel2,easel,unknown,956b97c11aa94840a1e24ee1558fec73,accept,0.0005,True,True,3760,timeout,,,,,collect,"timed out after 1801s, see easel2_pilot_collect.log",2026-09-10 10:04:18
+fig,fig_(fruit),compact_blobby,72a394cdac1545e29100509a83a3e0c8,accept,1.0516,True,False,5232,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 10:04:20
+flag2,flag,unknown,b031f65dd5cb475fb00fb5d9ec229b87,accept,0.0393,True,True,4198,crashed,,,,,collect,"rc=1, see flag2_pilot_collect.log",2026-09-10 10:04:49
+chocolate_milk3,chocolate_milk,unknown,4ccf0fa531124ac29b4c8173471f8e1b,accept,0.0208,True,True,2602,timeout,,,,,collect,"timed out after 1801s, see chocolate_milk3_pilot_collect.log",2026-09-10 10:08:00
+coaster3,coaster,flat_thin,77a3a5bb2b5b497e9a1b97bf65efdd7d,accept,0.0057,True,True,2681,crashed,,,,,collect,"rc=1, see coaster3_pilot_collect.log",2026-09-10 10:08:27
+mast,mast,unknown,8963ad4edfbc41429825c75b07b0581b,accept,0.0031,True,True,3484,timeout,,,,,collect,"timed out after 1800s, see mast_pilot_collect.log",2026-09-10 10:08:42
+dish_antenna3,dish_antenna,unknown,509a2cc74d0742f7a6ba5d3036deab32,accept,0.0084,True,True,2884,timeout,,,,,collect,"timed out after 1801s, see dish_antenna3_pilot_collect.log",2026-09-10 10:16:47
+dishtowel3,dishtowel,unknown,f953ec3d3204405580d54f74e4aebe8f,accept,0.0009,True,True,4041,timeout,,,,,collect,"timed out after 1801s, see dishtowel3_pilot_collect.log",2026-09-10 10:18:45
+fire_extinguisher3,fire_extinguisher,unknown,8b52b1f4c4c44bb9866146f60dbe534c,accept,0.017,True,True,3958,timeout,,,,,collect,"timed out after 1801s, see fire_extinguisher3_pilot_collect.log",2026-09-10 10:19:29
+cornbread3,cornbread,unknown,0f2ad11b9ad8445e87b7c6ee8ef61e14,accept,0.4158,True,True,3576,timeout,,,,,collect,"timed out after 1801s, see cornbread3_pilot_collect.log",2026-09-10 10:19:32
+gasmask2,gasmask,unknown,e169676dcff64d588da211ae0265cbf6,accept,0.119,True,True,4043,crashed,,,,,collect,"rc=1, see gasmask2_pilot_collect.log",2026-09-10 10:20:37
+dustpan2,dustpan,unknown,c192ebcddbee49668d891b8e14c5f18e,accept,0.0359,True,True,3683,timeout,,,,,collect,"timed out after 1801s, see dustpan2_pilot_collect.log",2026-09-10 10:25:11
+fireplug,fireplug,unknown,1a55ff246d0240f19d8b10b06f93d461,accept,0.0164,True,False,4786,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 10:25:12
+ginger,ginger,unknown,22e60495b7984dfa88d7198267512cb9,accept,0.0805,True,False,5163,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 10:25:26
+green_bean,green_bean,elongated_rope_stick,147ebd486f04407d8a4d0825ffc2ebac,accept,0.4595,True,False,5620,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 10:25:27
+olive_oil2,olive_oil,unknown,1ae4148047c94a8d9f2d7c8443c29c5f,accept,0.0184,True,True,3517,accepted,0.6061,0.6571,0.7714,20,done,,2026-09-10 10:25:29
+hamper,hamper,unknown,20fc0680ea0143c0b7dcd66277eeaf80,accept,0.0005,True,False,5452,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 10:25:32
+keg,keg,unknown,7250baeb03e940d08aba4a03b91e081b,accept,0.0009,True,True,3289,accepted,0.5882,0.6571,0.9714,20,done,,2026-09-10 10:26:08
+lightbulb,lightbulb,unknown,871ed12da7484c86b4d59a306813b1f9,accept,0.6259,True,False,4690,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 10:26:09
+coin4,coin,flat_thin,5c7fa159c094419f9e11178456a2ba79,accept,0.0045,True,True,3804,accepted,0.9091,0.84,1.0,20,done,,2026-09-10 10:26:49
+coloring_material,coloring_material,unknown,76b43343e280494aa581ca01a138f4c8,accept,0.0199,True,False,5032,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 10:26:50
+cracker,cracker,unknown,77e34b5b67b64963a67f0d8d5e4eacae,accept,0.0151,True,False,5830,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 10:27:11
+deadbolt,deadbolt,unknown,f913bf792d5f480a8786e1ebdf704c4c,accept,0.0019,True,False,4836,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 10:27:12
+globe2,globe,unknown,4e9c3cccbaaa4adc947ad8e8ab351d0d,accept,0.0266,True,True,3203,timeout,,,,,collect,"timed out after 1801s, see globe2_pilot_collect.log",2026-09-10 10:34:51
+cone4,cone,unknown,2315667320e048b780099cdf79f1d814,accept,0.1168,True,True,3294,timeout,,,,,collect,"timed out after 1800s, see cone4_pilot_collect.log",2026-09-10 10:38:28
+crossbar,crossbar,unknown,0018d378a2cd4ad58fa8fcae42e8af9e,accept,0.0014,True,False,3707,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 10:38:31
+cupcake2,cupcake,unknown,a00977e464e34094b8a55aaacb17bcfa,accept,0.0893,True,True,3959,accepted,0.625,0.7143,1.0,20,done,,2026-09-10 10:44:16
+dispenser,dispenser,unknown,aeae5e2622344e298aa586f8db9d2172,accept,0.0018,True,False,5253,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 10:44:18
+eclair,eclair,unknown,b68ca06a1edb4edaae1978fda36c6aa4,accept,0.8221,True,False,4676,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 10:44:19
+medicine2,medicine,unknown,64fdc917a7934b07a1ac3287e9ade405,accept,0.0409,True,True,4193,accepted,0.7407,0.7667,0.9667,20,done,,2026-09-10 10:46:14
+dustpan3,dustpan,unknown,c192ebcddbee49668d891b8e14c5f18e,accept,0.0359,True,True,3683,timeout,,,,,collect,"timed out after 1801s, see dustpan3_pilot_collect.log",2026-09-10 10:46:50
+flashlight2,flashlight,unknown,85812bc38c3d410f9d75339df78f8051,accept,0.0139,True,True,3852,crashed,,,,,collect,"rc=1, see flashlight2_pilot_collect.log",2026-09-10 10:47:54
+easel3,easel,unknown,956b97c11aa94840a1e24ee1558fec73,accept,0.0005,True,True,3760,timeout,,,,,collect,"timed out after 1801s, see easel3_pilot_collect.log",2026-09-10 10:48:48
+hammock,hammock,unknown,cbb4bfc4e5654500a70dfe72ffc0ce0a,accept,0.0002,True,True,3917,timeout,,,,,collect,"timed out after 1801s, see hammock_pilot_collect.log",2026-09-10 10:50:50
+frisbee3,frisbee,toys_misc,71e5d069a583437ab6734944f0ca599b,accept,0.0013,True,True,3911,crashed,,,,,collect,"rc=1, see frisbee3_pilot_collect.log",2026-09-10 10:51:20
+green_onion3,green_onion,unknown,41f72822b6134246a7770f540f04c0e8,accept,0.0396,True,True,4349,crashed,,,,,collect,"rc=1, see green_onion3_pilot_collect.log",2026-09-10 10:51:43
+handle2,handle,unknown,baa90088dfb8429b9bbe7ed8f6746714,accept,0.0007,True,True,3051,crashed,,,,,collect,"rc=1, see handle2_pilot_collect.log",2026-09-10 10:52:20
+ice_maker,ice_maker,unknown,9885a4f288c24135a7796035cbae6de3,accept,0.0305,True,False,4614,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 10:52:21
+jar,jar,kitchen_containers,03a5f54034b64995bcce6291b35bff71,accept,0.0394,True,False,4698,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 10:52:22
+lantern2,lantern,unknown,a11b0cc9957d4e0296c7cff039ca245a,accept,0.0349,True,True,3146,crashed,,,,,collect,"rc=1, see lantern2_pilot_collect.log",2026-09-10 10:53:17
+hinge,hinge,unknown,7352393b15e742518d4c1df28fffee3b,accept,0.0001,True,True,2615,crashed,,,,,collect,"rc=1, see hinge_pilot_collect.log",2026-09-10 10:54:46
+hornet3,hornet,unknown,36a231c7af324000b0ea55afb6a1bb92,accept,0.0824,True,True,3633,timeout,,,,,collect,"timed out after 1801s, see hornet3_pilot_collect.log",2026-09-10 10:55:33
+joystick,joystick,unknown,8f51072b74fe456fa35bd1ac48e038e8,accept,0.0335,True,False,4837,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 10:55:35
+parka3,parka,unknown,b864380dfe96422e90f030203d110421,accept,0.012,True,True,3394,timeout,,,,,collect,"timed out after 1801s, see parka3_pilot_collect.log",2026-09-10 10:55:36
+life_buoy,life_buoy,unknown,c15d1837e58c41cb81c3baf3b7e544ed,accept,0.0304,True,False,5787,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 10:55:36
+perfume,perfume,tall_narrow,42602ad7a1024052a28e606031de0ca6,accept,0.0003,True,False,5228,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 10:55:44
+pizza,pizza,unknown,dabb763ced0b4e92bff3c48152c2080e,accept,0.0221,True,False,6412,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 10:55:46
+drone2,drone,unknown,4f95cb46814f43859b80172c9f712cd7,accept,0.0037,True,True,3283,timeout,,,,,collect,"timed out after 1801s, see drone2_pilot_collect.log",2026-09-10 10:57:15
+file3,file_(tool),unknown,38eb1f950f414aeb95b7b7dc3506b7ab,accept,0.006,True,True,3667,crashed,,,,,collect,"rc=1, see file3_pilot_collect.log",2026-09-10 10:57:32
+diary3,diary,unknown,d8bfbc48bbed4d73b7e21eb26c96990a,accept,0.0115,True,True,3725,crashed,,,,,collect,"rc=1, see diary3_pilot_collect.log",2026-09-10 10:59:27
+drumstick3,drumstick,elongated_rope_stick,9099f14a50194c6da24a526877b28066,accept,0.0231,True,True,3119,crashed,,,,,collect,"rc=1, see drumstick3_pilot_collect.log",2026-09-10 10:59:47
+dumbbell,dumbbell,unknown,9a511d27d3e146189cf85535d010c145,accept,0.0004,True,False,5805,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 10:59:49
+fireplug,fireplug,unknown,1a55ff246d0240f19d8b10b06f93d461,accept,0.0164,True,False,4786,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 10:59:51
+egg3,egg,compact_blobby,1bd870512aff40efba5678a97e7b05f4,accept,0.0002,True,True,3231,accepted,1.0,1.0,1.0,20,done,,2026-09-10 10:59:53
+flag3,flag,unknown,b031f65dd5cb475fb00fb5d9ec229b87,accept,0.0393,True,True,4198,crashed,,,,,collect,"rc=1, see flag3_pilot_collect.log",2026-09-10 11:00:19
+garden_hose3,garden_hose,unknown,ca1155ccdfa04b1f965ad50b6f67a7a9,accept,0.0139,True,True,4125,crashed,,,,,collect,"rc=1, see garden_hose3_pilot_collect.log",2026-09-10 11:00:36
+hand_glass4,hand_glass,unknown,6292c807b5074fb2a41448d8fd9e8bdb,accept,0.0069,True,True,3799,low_success,0.4651,0.5111,0.9556,20,done,,2026-09-10 11:04:28
+hose,hose,unknown,3490102dac814280b983f9ac95da20c9,accept,0.0055,True,False,4552,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 11:04:31
+mallard2,mallard,unknown,1c33bff9e6614181adc5f2c2657afff1,accept,0.0018,True,True,3722,accepted,0.8,0.88,1.0,20,done,,2026-09-10 11:09:26
+onion2,onion,compact_blobby,ee5476b5928142a9a579404a331528c2,accept,0.0322,True,True,4105,crashed,,,,,collect,"rc=1, see onion2_pilot_collect.log",2026-09-10 11:16:14
+flash2,flash,unknown,7aa816aa52f54e7b9249190b46ee4472,accept,0.0013,True,True,2091,timeout,,,,,collect,"timed out after 1801s, see flash2_pilot_collect.log",2026-09-10 11:18:49
+goggles3,goggles,unknown,566492c26f6949ec8f082c0710ca93e5,accept,0.0394,True,True,3088,accepted,0.6667,0.7333,0.8333,20,done,,2026-09-10 11:19:15
+jewelry,jewelry,unknown,77ff876381194041a525815d4b83d34f,accept,10.7218,True,True,3304,timeout,,,,,collect,"timed out after 1801s, see jewelry_pilot_collect.log",2026-09-10 11:24:48
+matchbox2,matchbox,unknown,16930ec31f5342a08e1233eaae01b2c9,accept,0.0395,True,True,3708,timeout,,,,,collect,"timed out after 1801s, see matchbox2_pilot_collect.log",2026-09-10 11:25:38
+propeller2,propeller,unknown,aa4b8ab41c3544edb4d9e32d80a8b599,accept,0.02,True,True,2121,timeout,,,,,collect,"timed out after 1801s, see propeller2_pilot_collect.log",2026-09-10 11:25:50
+router,router_(computer_equipment),unknown,84f5c1363273479fafc15e73c7c83abb,accept,0.0003,True,True,3766,crashed,,,,,collect,"rc=1, see router_pilot_collect.log",2026-09-10 11:26:21
+screwdriver,screwdriver,elongated_rope_stick,7066bc9b705c45d4a97971ff5aba38e6,accept,0.0002,True,False,5940,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 11:26:22
+shaving_cream3,shaving_cream,unknown,9ac7a85e1b7b4172afb7648ae270b7ef,accept,0.0018,True,True,4127,crashed,,,,,collect,"rc=1, see shaving_cream3_pilot_collect.log",2026-09-10 11:26:47
+keg2,keg,unknown,7250baeb03e940d08aba4a03b91e081b,accept,0.0009,True,True,3289,accepted,0.5714,0.6571,0.9429,20,done,,2026-09-10 11:27:03
+lightbulb,lightbulb,unknown,871ed12da7484c86b4d59a306813b1f9,accept,0.6259,True,False,4690,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 11:27:04
+globe3,globe,unknown,4e9c3cccbaaa4adc947ad8e8ab351d0d,accept,0.0266,True,True,3203,timeout,,,,,collect,"timed out after 1801s, see globe3_pilot_collect.log",2026-09-10 11:29:52
+gravy_boat2,gravy_boat,thin_shell_hollow,e6b4fbc8ec404d32a67cc67d574adaec,accept,0.0065,True,True,2593,timeout,,,,,collect,"timed out after 1801s, see gravy_boat2_pilot_collect.log",2026-09-10 11:30:41
+milkshake2,milkshake,unknown,0ab8c1875131421e9bb1c442fa3f5950,accept,0.1855,True,True,4382,accepted,0.6452,0.6286,0.9714,20,done,,2026-09-10 11:35:32
+overalls3,overalls_(clothing),unknown,08ccb9a009a34ca5916866149e5b51a3,accept,0.3328,True,True,2634,crashed,,,,,collect,"rc=1, see overalls3_pilot_collect.log",2026-09-10 11:39:30
+pastry,pastry,unknown,3f752c3834a74b4294c6686493c6fdb4,accept,0.7412,True,False,5736,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 11:39:33
+softball2,softball,unknown,b35454d6bf504f8b99a3d1c705eddb48,accept,0.0238,True,True,3064,accepted,1.0,1.0,1.0,20,done,,2026-09-10 11:39:44
+sugar_bowl,sugar_bowl,thin_shell_hollow,98152e492164485f9c476715c3477565,accept,0.0031,True,False,4805,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 11:39:46
+platter3,platter,unknown,791a73b17d7e40a4957e7c0df360e5a3,accept,0.1651,True,True,4300,crashed,,,,,collect,"rc=1, see platter3_pilot_collect.log",2026-09-10 11:40:01
+golf_club3,golf_club,unknown,a4f9de5cd6d04ff881c906ae5d0a7ee9,accept,0.0359,True,True,1964,timeout,,,,,collect,"timed out after 1801s, see golf_club3_pilot_collect.log",2026-09-10 11:49:00
+handcuff,handcuff,unknown,3c705cd9cd0b436dbc2987fac27af7aa,accept,0.2856,True,False,3161,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 11:49:02
+ipod3,iPod,unknown,417e80d50f4c4cb7a153d6ea593de9ee,accept,0.0927,True,True,3247,crashed,,,,,collect,"rc=1, see ipod3_pilot_collect.log",2026-09-10 11:49:16
+handcart2,handcart,unknown,53053c677f9d47edbab3e14c9f07c2ce,accept,0.0079,True,True,3778,timeout,,,,,collect,"timed out after 1801s, see handcart2_pilot_collect.log",2026-09-10 11:49:17
+lampshade3,lampshade,unknown,1aa6739d774348efa691340e3a12b870,accept,0.0145,True,True,2948,crashed,,,,,collect,"rc=1, see lampshade3_pilot_collect.log",2026-09-10 11:50:13
+handbag2,handbag,unknown,6fac63bf15bb409b8d4340544bb1b9df,accept,0.0306,True,True,4069,accepted,0.5882,0.6286,0.9143,20,done,,2026-09-10 11:55:37
+hammock2,hammock,unknown,cbb4bfc4e5654500a70dfe72ffc0ce0a,accept,0.0002,True,True,3917,timeout,,,,,collect,"timed out after 1801s, see hammock2_pilot_collect.log",2026-09-10 12:00:53
+hinge2,hinge,unknown,7352393b15e742518d4c1df28fffee3b,accept,0.0001,True,True,2615,crashed,,,,,collect,"rc=1, see hinge2_pilot_collect.log",2026-09-10 12:01:20
+potato,potato,compact_blobby,073f61374af74d4c81a80b11a698fe0a,accept,0.0084,True,True,3982,accepted,0.6897,0.7333,0.9667,20,done,,2026-09-10 12:01:30
+pudding,pudding,unknown,1ab28887546540d69a4c34618b285387,accept,0.055,True,False,5278,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 12:01:34
+rubber_band,rubber_band,toys_misc,60407a98754344cf8d23a33280a8af3a,accept,2.768,True,True,3923,crashed,,,,,collect,"rc=1, see rubber_band_pilot_collect.log",2026-09-10 12:04:05
+safety_pin2,safety_pin,unknown,fefe61636e7e4670b83f38943cdac85d,accept,0.0005,True,True,2249,crashed,,,,,collect,"rc=1, see safety_pin2_pilot_collect.log",2026-09-10 12:04:30
+shopping_bag,shopping_bag,unknown,bb501d2c0f584e62b9efd44a2ca733d0,accept,0.0018,True,False,5335,,,,,,fem_gate,direct_tet/ratio/tetcount gate failed,2026-09-10 12:04:40
+pajamas2,pajamas,unknown,1d909b482ccf4d3f8688702bff9d78ed,accept,0.0604,True,True,3881,timeout,,,,,collect,"timed out after 1801s, see pajamas2_pilot_collect.log",2026-09-10 12:05:39
+suitcase2,suitcase,unknown,09ca07e8534d4cb2a25f074ca9bdabe9,accept,1.1101,True,True,2610,timeout,,,,,collect,"timed out after 1801s, see suitcase2_pilot_collect.log",2026-09-10 12:09:58
+mail_slot4,mail_slot,unknown,5ab8a2aa7994478c987c3b541016a56a,accept,0.3452,True,True,3871,timeout,,,,,collect,"timed out after 1801s, see mail_slot4_pilot_collect.log",2026-09-10 12:20:16
+measuring_cup3,measuring_cup,thin_shell_hollow,39551948552d438499e8694b7d3691c5,accept,0.0456,True,True,4489,crashed,,,,,collect,"rc=1, see measuring_cup3_pilot_collect.log",2026-09-10 12:23:52
+pennant,pennant,unknown,2b3543bb1b924a36ac8b12d871477989,accept,0.1065,True,True,4124,timeout,,,,,collect,"timed out after 1801s, see pennant_pilot_collect.log",2026-09-10 12:35:45
+postbox15,postbox_(public),unknown,23a69d599a7c47318e9af642e5782877,accept,0.055,True,True,4111,crashed,,,,,collect,"rc=1, see postbox15_pilot_collect.log",2026-09-10 12:36:15
