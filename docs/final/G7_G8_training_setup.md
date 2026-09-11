@@ -155,3 +155,45 @@ Each run needs its own `EXPERIMENT.md` (motivation, hypothesis, git commit) and 
   almost no rotation when ~85° is required. Co-training will not fix that.
 - **G7 vs G8 is the clean comparison** (real held constant, sim varied). G8 vs `vnhnr` is the other
   clean one (sim held constant, real added). Comparing G7 to `vnhnr` varies both.
+
+---
+
+## 6. Cluster execution record (2026-09-11)
+
+**Submitted before the data was ready, deliberately.** The GPU queue is ~4 days deep and walltime
+does not affect position (probed 40 min → 12 h, identical estimates), so queue position is the
+scarce resource: both jobs were submitted at 20:26 and each **waits up to 6 h** for its merged
+dataset rather than asserting on it. (G5's first submission died in 5 s because it started 1 h 37 m
+ahead of its own estimate and hit a hard existence check — never race this scheduler.)
+
+| | job | epochs | note |
+|---|---|---|---|
+| G7 | `2312428` | ~158, computed at start | budget-matched to G6's 1,343,900 steps |
+| G8 | `2313137` | **70 (user override)** | 98 was too long on the cluster |
+
+⚠ **The G8 override breaks step-matching, and that costs the doc's "clean comparison".** §3 argues
+for equal STEPS, not equal epochs. At ~13,685 batches/epoch, 70 epochs is ~958,000 steps against
+G7's ~1,343,900 — about 71 % of the budget. So **G7-vs-G8 now varies the training budget as well as
+the sim half**, and G8-vs-`vnhnr` (sim held constant, real added) likewise varies budget. Neither is
+a clean single-variable comparison any more. If step-matching is wanted back later, G7 at ~113
+epochs would match G8's 70. Recorded as a deliberate choice, not an oversight.
+
+**Epochs are derived from CHUNKS, not frames.** `chunks = Σtraj_lengths − (H−1)·episodes`, then
+`ceil(target / ceil(chunks/128))`. The anchor's `EPOCHS=auto` uses raw frames, which overstates
+batches/epoch and under-trains — it cost G5 7.4 % of its intended budget at horizon 16. The wrapper
+computes this at job start from the actual merged npz, so the numbers come from the data rather than
+an estimate, and it prints both the matched value and the override.
+
+**Verified independently before merging:** all three inputs carry exactly **24 identical trailing
+action frames** (real7, v5_tail22, v6_tail22), confirming §1's claim that the real set was already
+tailed to match. Had it not been, the policy would have learned hold behaviour from sim only.
+
+### Chain supervision
+
+`.agent_tmp/g78_prepare.sh` (transfer wait → install → input gate → 2 merges → verify) runs
+detached on the login node. `.agent_tmp/g78_chain_watch.sh` guards every stage and **repairs** two
+failures rather than only reporting them: a dead prepare process is relaunched (idempotent — it
+skips completed merges), and a truncated/corrupt merged npz is deleted so it is rebuilt, so a
+queued job can never train on a half-written file. `.agent_tmp/g78_supervisor.sh` keeps the
+watchdog alive and streams its log; the watchdog runs under `setsid` in its own session, so killing
+the supervisor (or its Monitor) cannot kill it — re-attach by tailing `.agent_tmp/g78_chain.log`.
