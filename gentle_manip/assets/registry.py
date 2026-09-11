@@ -4621,6 +4621,1658 @@ OBJECT_MAP.update({
                     mesh_path=str(_OBJ_DIR / "radar.obj")),
 })
 
+# # bamboo3: Objaverse-LVIS bamboo (unknown bucket, uid d0d5eb345ff7420bb7f5c5239fcec637), object-expansion batch
+OBJECT_MAP.update({
+    "bamboo3": ObjectDef("bamboo3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05111, 0.05094, 0.07636), default_pos=(0.47, 0.0, 0.0363),
+                    mesh_path=str(_OBJ_DIR / "bamboo3.obj")),
+})
+
+# # bell4: Objaverse-LVIS bell (unknown bucket, uid fc203fd849ea46f0b84d4843ba1aafcd), object-expansion batch
+OBJECT_MAP.update({
+    "bell4": ObjectDef("bell4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.10698, 0.10610, 0.05097), default_pos=(0.47, 0.0, 0.0228),
+                    mesh_path=str(_OBJ_DIR / "bell4.obj")),
+})
+
+# # cast4: Objaverse-LVIS cast (unknown bucket, uid 20a235aa7a804d3694b8953839db579f), object-expansion batch
+OBJECT_MAP.update({
+    "cast4": ObjectDef("cast4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11517, 0.04372, 0.10329), default_pos=(0.47, 0.0, 0.0523),
+                    mesh_path=str(_OBJ_DIR / "cast4.obj")),
+})
+
+# # clock3: Objaverse-LVIS clock (unknown bucket, uid 6ce8e485da724a24ad63ff9047d78c21), object-expansion batch
+OBJECT_MAP.update({
+    "clock3": ObjectDef("clock3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.06973, 0.02658, 0.11900), default_pos=(0.47, 0.0, 0.0569),
+                    mesh_path=str(_OBJ_DIR / "clock3.obj")),
+})
+
+# # flower_arrangement3: Objaverse-LVIS flower_arrangement (unknown bucket, uid 23c639ca701d4713a8c7f6480d0a8797), object-expansion batch
+OBJECT_MAP.update({
+    "flower_arrangement3": ObjectDef("flower_arrangement3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.06337, 0.05343, 0.12198), default_pos=(0.47, 0.0, 0.0852),
+                    mesh_path=str(_OBJ_DIR / "flower_arrangement3.obj")),
+})
+
+# # funnel2: Objaverse-LVIS funnel (thin_shell_hollow bucket, uid 0c7b15ee169046c9a3f07329a322b578), object-expansion batch
+OBJECT_MAP.update({
+    "funnel2": ObjectDef("funnel2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04835, 0.05462, 0.07090), default_pos=(0.47, 0.0, 0.0346),
+                    mesh_path=str(_OBJ_DIR / "funnel2.obj")),
+})
+
+# # gelatin4: Objaverse-LVIS gelatin (kitchen_containers bucket, uid 7da36ddc2a28494586269bca7d4a7942), object-expansion batch
+OBJECT_MAP.update({
+    "gelatin4": ObjectDef("gelatin4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04561, 0.04607, 0.06320), default_pos=(0.47, 0.0, 0.0301),
+                    mesh_path=str(_OBJ_DIR / "gelatin4.obj")),
+})
+
+# # harmonium3: Objaverse-LVIS harmonium (unknown bucket, uid 61d5ad6897954f2484b9ca8dc5998096), object-expansion batch
+OBJECT_MAP.update({
+    "harmonium3": ObjectDef("harmonium3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.00172, 0.10686, 0.00738), default_pos=(0.47, 0.0, 0.0047),
+                    mesh_path=str(_OBJ_DIR / "harmonium3.obj")),
+})
+
+# # keycard2: Objaverse-LVIS keycard (flat_thin bucket, uid 1ec8c12f4fbd4987bfde21696d0c91b3), object-expansion batch
+OBJECT_MAP.update({
+    "keycard2": ObjectDef("keycard2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.20098, 0.02144, 0.13744), default_pos=(0.47, 0.0, 0.0677),
+                    mesh_path=str(_OBJ_DIR / "keycard2.obj")),
+})
+
+# # lasagna3: Objaverse-LVIS lasagna (unknown bucket, uid 5aef23e7d08748318c219da5a3257156), object-expansion batch
+OBJECT_MAP.update({
+    "lasagna3": ObjectDef("lasagna3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11837, 0.11833, 0.03304), default_pos=(0.47, 0.0, 0.0125),
+                    mesh_path=str(_OBJ_DIR / "lasagna3.obj")),
+})
+
+# # mandarin_orange3: Objaverse-LVIS mandarin_orange (unknown bucket, uid 9796bcdd0869446da27813947ecceb8b), object-expansion batch
+OBJECT_MAP.update({
+    "mandarin_orange3": ObjectDef("mandarin_orange3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04474, 0.04392, 0.04394), default_pos=(0.47, 0.0, 0.0242),
+                    mesh_path=str(_OBJ_DIR / "mandarin_orange3.obj")),
+})
+
+# # money2: Objaverse-LVIS money (unknown bucket, uid 359a17121a744e1cb1e9b5cee7b8161d), object-expansion batch
+OBJECT_MAP.update({
+    "money2": ObjectDef("money2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04659, 0.04656, 0.05334), default_pos=(0.47, 0.0, 0.0244),
+                    mesh_path=str(_OBJ_DIR / "money2.obj")),
+})
+
+# # pan: Objaverse-LVIS pan_(for_cooking) (unknown bucket, uid d501c3ff798945cebee84d7944edb19d), object-expansion batch
+OBJECT_MAP.update({
+    "pan": ObjectDef("pan", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11589, 0.11777, 0.04085), default_pos=(0.47, 0.0, 0.0202),
+                    mesh_path=str(_OBJ_DIR / "pan.obj")),
+})
+
+# # peach: Objaverse-LVIS peach (compact_blobby bucket, uid 678c310aa4cf445889e96e3298218bfb), object-expansion batch
+OBJECT_MAP.update({
+    "peach": ObjectDef("peach", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05020, 0.05067, 0.04611), default_pos=(0.47, 0.0, 0.0239),
+                    mesh_path=str(_OBJ_DIR / "peach.obj")),
+})
+
+# # pet: Objaverse-LVIS pet (unknown bucket, uid 5e3e6f8692584d67956cc501b869e02b), object-expansion batch
+OBJECT_MAP.update({
+    "pet": ObjectDef("pet", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.10400, 0.04362, 0.11516), default_pos=(0.47, 0.0, 0.0572),
+                    mesh_path=str(_OBJ_DIR / "pet.obj")),
+})
+
+# # radio_receiver: Objaverse-LVIS radio_receiver (unknown bucket, uid 9033159bd5ad4737b75d6a81f0a8301b), object-expansion batch
+OBJECT_MAP.update({
+    "radio_receiver": ObjectDef("radio_receiver", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.10324, 0.04878, 0.06251), default_pos=(0.47, 0.0, 0.0314),
+                    mesh_path=str(_OBJ_DIR / "radio_receiver.obj")),
+})
+
+# # backpack5: Objaverse-LVIS backpack (unknown bucket, uid 0b5f059d4ad346a79e7360f5904cf7cd), object-expansion batch
+OBJECT_MAP.update({
+    "backpack5": ObjectDef("backpack5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.03281, 0.11473, 0.03752), default_pos=(0.47, 0.0, 0.0197),
+                    mesh_path=str(_OBJ_DIR / "backpack5.obj")),
+})
+
+# # business_card7: Objaverse-LVIS business_card (unknown bucket, uid d975ecff85c54f6cb6c6a01787bed3a8), object-expansion batch
+OBJECT_MAP.update({
+    "business_card7": ObjectDef("business_card7", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.08286, 0.11487, 0.05329), default_pos=(0.47, 0.0, 0.0369),
+                    mesh_path=str(_OBJ_DIR / "business_card7.obj")),
+})
+
+# # lego5: Objaverse-LVIS Lego (unknown bucket, uid 3a4c4e3fd81241ec99e2a9dac838dc31), object-expansion batch
+OBJECT_MAP.update({
+    "lego5": ObjectDef("lego5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.09206, 0.04371, 0.11632), default_pos=(0.47, 0.0, 0.0500),
+                    mesh_path=str(_OBJ_DIR / "lego5.obj")),
+})
+
+# # banana5: Objaverse-LVIS banana (unknown bucket, uid b6361d444ed24591b15b9b28d39ac2e0), object-expansion batch
+OBJECT_MAP.update({
+    "banana5": ObjectDef("banana5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.07204, 0.05367, 0.05340), default_pos=(0.47, 0.0, 0.0254),
+                    mesh_path=str(_OBJ_DIR / "banana5.obj")),
+})
+
+# # burrito4: Objaverse-LVIS burrito (unknown bucket, uid 41196597e7d14b5f8210e075873f3529), object-expansion batch
+OBJECT_MAP.update({
+    "burrito4": ObjectDef("burrito4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11507, 0.06060, 0.03639), default_pos=(0.47, 0.0, 0.0165),
+                    mesh_path=str(_OBJ_DIR / "burrito4.obj")),
+})
+
+# # carrot3: Objaverse-LVIS carrot (elongated_rope_stick bucket, uid 50412b64aa20474b87e2ed690464cfea), object-expansion batch
+OBJECT_MAP.update({
+    "carrot3": ObjectDef("carrot3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.07611, 0.10563, 0.12428), default_pos=(0.47, 0.0, 0.0561),
+                    mesh_path=str(_OBJ_DIR / "carrot3.obj")),
+})
+
+# # cellular_telephone5: Objaverse-LVIS cellular_telephone (unknown bucket, uid 22c0fa4190db425ca8f6b5318f9e162f), object-expansion batch
+OBJECT_MAP.update({
+    "cellular_telephone5": ObjectDef("cellular_telephone5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.03426, 0.04790, 0.11334), default_pos=(0.47, 0.0, 0.0452),
+                    mesh_path=str(_OBJ_DIR / "cellular_telephone5.obj")),
+})
+
+# # cornmeal4: Objaverse-LVIS cornmeal (unknown bucket, uid 146e704d169d453c9b41f48d59652039), object-expansion batch
+OBJECT_MAP.update({
+    "cornmeal4": ObjectDef("cornmeal4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.00466, 0.07700, 0.06070), default_pos=(0.47, 0.0, 0.0314),
+                    mesh_path=str(_OBJ_DIR / "cornmeal4.obj")),
+})
+
+# # cock4: Objaverse-LVIS cock (unknown bucket, uid abe09cf8812a414b8a790a5e97920196), object-expansion batch
+OBJECT_MAP.update({
+    "cock4": ObjectDef("cock4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05960, 0.04694, 0.05050), default_pos=(0.47, 0.0, 0.0305),
+                    mesh_path=str(_OBJ_DIR / "cock4.obj")),
+})
+
+# # cup4: Objaverse-LVIS cup (thin_shell_hollow bucket, uid 4f3edd9bf5fb4b6ab11433cbd9e19c74), object-expansion batch
+OBJECT_MAP.update({
+    "cup4": ObjectDef("cup4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.06175, 0.04650, 0.05269), default_pos=(0.47, 0.0, 0.0289),
+                    mesh_path=str(_OBJ_DIR / "cup4.obj")),
+})
+
+# # armband5: Objaverse-LVIS armband (unknown bucket, uid 569c551891a14f8ba70ed992670e4cd3), object-expansion batch
+OBJECT_MAP.update({
+    "armband5": ObjectDef("armband5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11921, 0.11921, 0.04146), default_pos=(0.47, 0.0, 0.0217),
+                    mesh_path=str(_OBJ_DIR / "armband5.obj")),
+})
+
+# # cylinder5: Objaverse-LVIS cylinder (unknown bucket, uid fa44ddeb72614002ba960b85f4237a2c), object-expansion batch
+OBJECT_MAP.update({
+    "cylinder5": ObjectDef("cylinder5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.09784, 0.03332, 0.10305), default_pos=(0.47, 0.0, 0.0389),
+                    mesh_path=str(_OBJ_DIR / "cylinder5.obj")),
+})
+
+# # birthday_cake4: Objaverse-LVIS birthday_cake (unknown bucket, uid f058995dd57c445a8e50030702a8dbc6), object-expansion batch
+OBJECT_MAP.update({
+    "birthday_cake4": ObjectDef("birthday_cake4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11676, 0.11675, 0.04805), default_pos=(0.47, 0.0, 0.0190),
+                    mesh_path=str(_OBJ_DIR / "birthday_cake4.obj")),
+})
+
+# # cocoa3: Objaverse-LVIS cocoa_(beverage) (unknown bucket, uid 46e0b2e911594c699cff8a3cf533ff75), object-expansion batch
+OBJECT_MAP.update({
+    "cocoa3": ObjectDef("cocoa3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.07105, 0.07162, 0.04509), default_pos=(0.47, 0.0, 0.0249),
+                    mesh_path=str(_OBJ_DIR / "cocoa3.obj")),
+})
+
+# # barge4: Objaverse-LVIS barge (unknown bucket, uid b4379858a3224dec8b89f93656ccd156), object-expansion batch
+OBJECT_MAP.update({
+    "barge4": ObjectDef("barge4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11502, 0.04614, 0.03607), default_pos=(0.47, 0.0, 0.0162),
+                    mesh_path=str(_OBJ_DIR / "barge4.obj")),
+})
+
+# # bottle_opener4: Objaverse-LVIS bottle_opener (complex_concave bucket, uid 4ccbb5d870ea4189a5ce53291ddb7921), object-expansion batch
+OBJECT_MAP.update({
+    "bottle_opener4": ObjectDef("bottle_opener4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05746, 0.02071, 0.12786), default_pos=(0.47, 0.0, 0.0640),
+                    mesh_path=str(_OBJ_DIR / "bottle_opener4.obj")),
+})
+
+# # birthday_card4: Objaverse-LVIS birthday_card (unknown bucket, uid 68ba07440e744d5697050446162bc661), object-expansion batch
+OBJECT_MAP.update({
+    "birthday_card4": ObjectDef("birthday_card4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11563, 0.07324, 0.09031), default_pos=(0.47, 0.0, 0.0419),
+                    mesh_path=str(_OBJ_DIR / "birthday_card4.obj")),
+})
+
+# # chessboard4: Objaverse-LVIS chessboard (unknown bucket, uid 4252a510f3c8476ab98fe9f99100696e), object-expansion batch
+OBJECT_MAP.update({
+    "chessboard4": ObjectDef("chessboard4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11706, 0.11751, 0.03065), default_pos=(0.47, 0.0, 0.0145),
+                    mesh_path=str(_OBJ_DIR / "chessboard4.obj")),
+})
+
+# # dartboard2: Objaverse-LVIS dartboard (unknown bucket, uid fb08eb8a6b944b18aa54cfc7431d8809), object-expansion batch
+OBJECT_MAP.update({
+    "dartboard2": ObjectDef("dartboard2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.21033, 0.21352, 0.02703), default_pos=(0.47, 0.0, 0.0110),
+                    mesh_path=str(_OBJ_DIR / "dartboard2.obj")),
+})
+
+# # drill3: Objaverse-LVIS drill (unknown bucket, uid 82118925322647e38a6ea1a33e3bec4d), object-expansion batch
+OBJECT_MAP.update({
+    "drill3": ObjectDef("drill3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.03199, 0.11358, 0.08008), default_pos=(0.47, 0.0, 0.0437),
+                    mesh_path=str(_OBJ_DIR / "drill3.obj")),
+})
+
+# # doorknob2: Objaverse-LVIS doorknob (compact_blobby bucket, uid 6b65ee4b71a848cbab23f2026ad23bfd), object-expansion batch
+OBJECT_MAP.update({
+    "doorknob2": ObjectDef("doorknob2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04742, 0.04266, 0.05634), default_pos=(0.47, 0.0, 0.0307),
+                    mesh_path=str(_OBJ_DIR / "doorknob2.obj")),
+})
+
+# # football_helmet3: Objaverse-LVIS football_helmet (unknown bucket, uid 1ce02e5ab405495c97083b757f44a65b), object-expansion batch
+OBJECT_MAP.update({
+    "football_helmet3": ObjectDef("football_helmet3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05022, 0.06005, 0.05337), default_pos=(0.47, 0.0, 0.0268),
+                    mesh_path=str(_OBJ_DIR / "football_helmet3.obj")),
+})
+
+# # ferry3: Objaverse-LVIS ferry (unknown bucket, uid 51dba5eb17c24e0c9fbd1f817505cd60), object-expansion batch
+OBJECT_MAP.update({
+    "ferry3": ObjectDef("ferry3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04685, 0.05204, 0.09975), default_pos=(0.47, 0.0, 0.0508),
+                    mesh_path=str(_OBJ_DIR / "ferry3.obj")),
+})
+
+# # cougar2: Objaverse-LVIS cougar (unknown bucket, uid 6ec4ee91d6344924ab7d0fbf36e2a9ab), object-expansion batch
+OBJECT_MAP.update({
+    "cougar2": ObjectDef("cougar2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.03481, 0.11905, 0.06636), default_pos=(0.47, 0.0, 0.0334),
+                    mesh_path=str(_OBJ_DIR / "cougar2.obj")),
+})
+
+# # gameboard3: Objaverse-LVIS gameboard (unknown bucket, uid 2302e3bb270b4f8b84a7f3166fc45b7a), object-expansion batch
+OBJECT_MAP.update({
+    "gameboard3": ObjectDef("gameboard3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11457, 0.11403, 0.06389), default_pos=(0.47, 0.0, 0.0228),
+                    mesh_path=str(_OBJ_DIR / "gameboard3.obj")),
+})
+
+# # helmet2: Objaverse-LVIS helmet (unknown bucket, uid a64fa1262856414b8aa4bd9eaa1d2a7f), object-expansion batch
+OBJECT_MAP.update({
+    "helmet2": ObjectDef("helmet2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04185, 0.06530, 0.06274), default_pos=(0.47, 0.0, 0.0329),
+                    mesh_path=str(_OBJ_DIR / "helmet2.obj")),
+})
+
+# # headband4: Objaverse-LVIS headband (unknown bucket, uid be6ef0a613ab41ad908d0deb2b399925), object-expansion batch
+OBJECT_MAP.update({
+    "headband4": ObjectDef("headband4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11138, 0.11175, 0.02478), default_pos=(0.47, 0.0, 0.0085),
+                    mesh_path=str(_OBJ_DIR / "headband4.obj")),
+})
+
+# # ice_skate2: Objaverse-LVIS ice_skate (unknown bucket, uid 3f38a8a2273441508889951f6e312ae0), object-expansion batch
+OBJECT_MAP.update({
+    "ice_skate2": ObjectDef("ice_skate2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04858, 0.05946, 0.05227), default_pos=(0.47, 0.0, 0.0244),
+                    mesh_path=str(_OBJ_DIR / "ice_skate2.obj")),
+})
+
+# # lawn_mower3: Objaverse-LVIS lawn_mower (unknown bucket, uid 61b40bf8aa0748da88849a6336bf71de), object-expansion batch
+OBJECT_MAP.update({
+    "lawn_mower3": ObjectDef("lawn_mower3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05098, 0.07620, 0.04523), default_pos=(0.47, 0.0, 0.0224),
+                    mesh_path=str(_OBJ_DIR / "lawn_mower3.obj")),
+})
+
+# # coverall3: Objaverse-LVIS coverall (unknown bucket, uid 84f0eabb482d46e1b39a3d559130a664), object-expansion batch
+OBJECT_MAP.update({
+    "coverall3": ObjectDef("coverall3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11350, 0.02384, 0.10608), default_pos=(0.47, 0.0, 0.0595),
+                    mesh_path=str(_OBJ_DIR / "coverall3.obj")),
+})
+
+# # dagger4: Objaverse-LVIS dagger (unknown bucket, uid 5de582634cfe4c348e7fe81f1d29bf02), object-expansion batch
+OBJECT_MAP.update({
+    "dagger4": ObjectDef("dagger4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05913, 0.04014, 0.04500), default_pos=(0.47, 0.0, 0.0399),
+                    mesh_path=str(_OBJ_DIR / "dagger4.obj")),
+})
+
+# # beeper5: Objaverse-LVIS beeper (unknown bucket, uid 28e1b9e9950446f9abaea86f1975be3d), object-expansion batch
+OBJECT_MAP.update({
+    "beeper5": ObjectDef("beeper5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.02191, 0.07845, 0.14390), default_pos=(0.47, 0.0, 0.0752),
+                    mesh_path=str(_OBJ_DIR / "beeper5.obj")),
+})
+
+# # clippers5: Objaverse-LVIS clippers_(for_plants) (unknown bucket, uid f85c796cdefc4b75b9d5892055650332), object-expansion batch
+OBJECT_MAP.update({
+    "clippers5": ObjectDef("clippers5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05720, 0.04921, 0.05352), default_pos=(0.47, 0.0, 0.0269),
+                    mesh_path=str(_OBJ_DIR / "clippers5.obj")),
+})
+
+# # pen: Objaverse-LVIS pen (elongated_rope_stick bucket, uid f974e3e7c83d493ab8ed26e812567880), object-expansion batch
+OBJECT_MAP.update({
+    "pen": ObjectDef("pen", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11699, 0.07833, 0.10963), default_pos=(0.47, 0.0, 0.0415),
+                    mesh_path=str(_OBJ_DIR / "pen.obj")),
+})
+
+# # phonebook2: Objaverse-LVIS phonebook (unknown bucket, uid 485e8ea7bd4947428521570a747fd459), object-expansion batch
+OBJECT_MAP.update({
+    "phonebook2": ObjectDef("phonebook2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.10319, 0.11488, 0.02958), default_pos=(0.47, 0.0, 0.0158),
+                    mesh_path=str(_OBJ_DIR / "phonebook2.obj")),
+})
+
+# # pot: Objaverse-LVIS pot (unknown bucket, uid 6791a4ce3cb44c7c88b5713b5298d908), object-expansion batch
+OBJECT_MAP.update({
+    "pot": ObjectDef("pot", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04735, 0.04730, 0.04769), default_pos=(0.47, 0.0, 0.0243),
+                    mesh_path=str(_OBJ_DIR / "pot.obj")),
+})
+
+# # sausage2: Objaverse-LVIS sausage (unknown bucket, uid 602747b4fe4d435e8a37c7a2e3edce03), object-expansion batch
+OBJECT_MAP.update({
+    "sausage2": ObjectDef("sausage2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.02466, 0.11376, 0.02465), default_pos=(0.47, 0.0, 0.0128),
+                    mesh_path=str(_OBJ_DIR / "sausage2.obj")),
+})
+
+# # iron2: Objaverse-LVIS iron_(for_clothing) (unknown bucket, uid c5bcfb2d53934421be8f9e8b407c2633), object-expansion batch
+OBJECT_MAP.update({
+    "iron2": ObjectDef("iron2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.08220, 0.11535, 0.04204), default_pos=(0.47, 0.0, 0.0181),
+                    mesh_path=str(_OBJ_DIR / "iron2.obj")),
+})
+
+# # freshener2: Objaverse-LVIS freshener (unknown bucket, uid 59ed9da27c2d419b959fad13027a0dec), object-expansion batch
+OBJECT_MAP.update({
+    "freshener2": ObjectDef("freshener2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05060, 0.04219, 0.05161), default_pos=(0.47, 0.0, 0.0277),
+                    mesh_path=str(_OBJ_DIR / "freshener2.obj")),
+})
+
+# # stew2: Objaverse-LVIS stew (unknown bucket, uid a4475b81ba7b4d589faeba319b58b30e), object-expansion batch
+OBJECT_MAP.update({
+    "stew2": ObjectDef("stew2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.09628, 0.05051, 0.06951), default_pos=(0.47, 0.0, 0.0262),
+                    mesh_path=str(_OBJ_DIR / "stew2.obj")),
+})
+
+# # urn4: Objaverse-LVIS urn (unknown bucket, uid 49d1113fc0dd4664b4517b07ab6b9f28), object-expansion batch
+OBJECT_MAP.update({
+    "urn4": ObjectDef("urn4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04530, 0.04525, 0.07000), default_pos=(0.47, 0.0, 0.0379),
+                    mesh_path=str(_OBJ_DIR / "urn4.obj")),
+})
+
+# # drawer2: Objaverse-LVIS drawer (unknown bucket, uid e836eb07dc6e4dee859b920acb6d31f8), object-expansion batch
+OBJECT_MAP.update({
+    "drawer2": ObjectDef("drawer2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.08155, 0.04376, 0.04863), default_pos=(0.47, 0.0, 0.0317),
+                    mesh_path=str(_OBJ_DIR / "drawer2.obj")),
+})
+
+# # cast5: Objaverse-LVIS cast (unknown bucket, uid 20a235aa7a804d3694b8953839db579f), object-expansion batch
+OBJECT_MAP.update({
+    "cast5": ObjectDef("cast5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11517, 0.04372, 0.10329), default_pos=(0.47, 0.0, 0.0523),
+                    mesh_path=str(_OBJ_DIR / "cast5.obj")),
+})
+
+# # cornbread4: Objaverse-LVIS cornbread (unknown bucket, uid 0f2ad11b9ad8445e87b7c6ee8ef61e14), object-expansion batch
+OBJECT_MAP.update({
+    "cornbread4": ObjectDef("cornbread4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.07444, 0.09157, 0.04406), default_pos=(0.47, 0.0, 0.0204),
+                    mesh_path=str(_OBJ_DIR / "cornbread4.obj")),
+})
+
+# # clock4: Objaverse-LVIS clock (unknown bucket, uid 6ce8e485da724a24ad63ff9047d78c21), object-expansion batch
+OBJECT_MAP.update({
+    "clock4": ObjectDef("clock4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.06973, 0.02658, 0.11900), default_pos=(0.47, 0.0, 0.0569),
+                    mesh_path=str(_OBJ_DIR / "clock4.obj")),
+})
+
+# # window_box2: Objaverse-LVIS window_box_(for_plants) (unknown bucket, uid 7483c5fa79b443d183dd7718baa009ae), object-expansion batch
+OBJECT_MAP.update({
+    "window_box2": ObjectDef("window_box2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04190, 0.08653, 0.04684), default_pos=(0.47, 0.0, 0.0261),
+                    mesh_path=str(_OBJ_DIR / "window_box2.obj")),
+})
+
+# # bamboo4: Objaverse-LVIS bamboo (unknown bucket, uid d0d5eb345ff7420bb7f5c5239fcec637), object-expansion batch
+OBJECT_MAP.update({
+    "bamboo4": ObjectDef("bamboo4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05111, 0.05094, 0.07636), default_pos=(0.47, 0.0, 0.0363),
+                    mesh_path=str(_OBJ_DIR / "bamboo4.obj")),
+})
+
+# # bell5: Objaverse-LVIS bell (unknown bucket, uid fc203fd849ea46f0b84d4843ba1aafcd), object-expansion batch
+OBJECT_MAP.update({
+    "bell5": ObjectDef("bell5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.10698, 0.10610, 0.05097), default_pos=(0.47, 0.0, 0.0228),
+                    mesh_path=str(_OBJ_DIR / "bell5.obj")),
+})
+
+# # mat2: Objaverse-LVIS mat_(gym_equipment) (unknown bucket, uid b514529788a6456687c133b7fb92e6d1), object-expansion batch
+OBJECT_MAP.update({
+    "mat2": ObjectDef("mat2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05070, 0.07052, 0.06502), default_pos=(0.47, 0.0, 0.0344),
+                    mesh_path=str(_OBJ_DIR / "mat2.obj")),
+})
+
+# # burrito5: Objaverse-LVIS burrito (unknown bucket, uid 41196597e7d14b5f8210e075873f3529), object-expansion batch
+OBJECT_MAP.update({
+    "burrito5": ObjectDef("burrito5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11507, 0.06060, 0.03639), default_pos=(0.47, 0.0, 0.0165),
+                    mesh_path=str(_OBJ_DIR / "burrito5.obj")),
+})
+
+# # cellular_telephone6: Objaverse-LVIS cellular_telephone (unknown bucket, uid 22c0fa4190db425ca8f6b5318f9e162f), object-expansion batch
+OBJECT_MAP.update({
+    "cellular_telephone6": ObjectDef("cellular_telephone6", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.03426, 0.04790, 0.11334), default_pos=(0.47, 0.0, 0.0452),
+                    mesh_path=str(_OBJ_DIR / "cellular_telephone6.obj")),
+})
+
+# # hair_dryer4: Objaverse-LVIS hair_dryer (unknown bucket, uid 141202eed32747b7b1259a3efeba9c96), object-expansion batch
+OBJECT_MAP.update({
+    "hair_dryer4": ObjectDef("hair_dryer4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04389, 0.11687, 0.06874), default_pos=(0.47, 0.0, 0.0449),
+                    mesh_path=str(_OBJ_DIR / "hair_dryer4.obj")),
+})
+
+# # falcon2: Objaverse-LVIS falcon (unknown bucket, uid 534c7ef382f34700800f72f3374a10c5), object-expansion batch
+OBJECT_MAP.update({
+    "falcon2": ObjectDef("falcon2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.06042, 0.05706, 0.06075), default_pos=(0.47, 0.0, 0.0280),
+                    mesh_path=str(_OBJ_DIR / "falcon2.obj")),
+})
+
+# # banana6: Objaverse-LVIS banana (unknown bucket, uid b6361d444ed24591b15b9b28d39ac2e0), object-expansion batch
+OBJECT_MAP.update({
+    "banana6": ObjectDef("banana6", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.07204, 0.05367, 0.05340), default_pos=(0.47, 0.0, 0.0254),
+                    mesh_path=str(_OBJ_DIR / "banana6.obj")),
+})
+
+# # cocoa4: Objaverse-LVIS cocoa_(beverage) (unknown bucket, uid 46e0b2e911594c699cff8a3cf533ff75), object-expansion batch
+OBJECT_MAP.update({
+    "cocoa4": ObjectDef("cocoa4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.07105, 0.07162, 0.04509), default_pos=(0.47, 0.0, 0.0249),
+                    mesh_path=str(_OBJ_DIR / "cocoa4.obj")),
+})
+
+# # cupcake3: Objaverse-LVIS cupcake (unknown bucket, uid a00977e464e34094b8a55aaacb17bcfa), object-expansion batch
+OBJECT_MAP.update({
+    "cupcake3": ObjectDef("cupcake3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.06078, 0.05962, 0.04499), default_pos=(0.47, 0.0, 0.0235),
+                    mesh_path=str(_OBJ_DIR / "cupcake3.obj")),
+})
+
+# # compass5: Objaverse-LVIS compass (small_tools_office bucket, uid a1d1c782e1c14d29824a8f2983198e9c), object-expansion batch
+OBJECT_MAP.update({
+    "compass5": ObjectDef("compass5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11979, 0.11979, 0.02532), default_pos=(0.47, 0.0, 0.0117),
+                    mesh_path=str(_OBJ_DIR / "compass5.obj")),
+})
+
+# # notepad4: Objaverse-LVIS notepad (unknown bucket, uid fb0a11f22a6544189d357c8dd11c5664), object-expansion batch
+OBJECT_MAP.update({
+    "notepad4": ObjectDef("notepad4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.10281, 0.02956, 0.10166), default_pos=(0.47, 0.0, 0.0520),
+                    mesh_path=str(_OBJ_DIR / "notepad4.obj")),
+})
+
+# # football_helmet4: Objaverse-LVIS football_helmet (unknown bucket, uid 1ce02e5ab405495c97083b757f44a65b), object-expansion batch
+OBJECT_MAP.update({
+    "football_helmet4": ObjectDef("football_helmet4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05022, 0.06005, 0.05337), default_pos=(0.47, 0.0, 0.0268),
+                    mesh_path=str(_OBJ_DIR / "football_helmet4.obj")),
+})
+
+# # coaster4: Objaverse-LVIS coaster (flat_thin bucket, uid 77a3a5bb2b5b497e9a1b97bf65efdd7d), object-expansion batch
+OBJECT_MAP.update({
+    "coaster4": ObjectDef("coaster4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.08657, 0.08710, 0.04592), default_pos=(0.47, 0.0, 0.0131),
+                    mesh_path=str(_OBJ_DIR / "coaster4.obj")),
+})
+
+# # headboard2: Objaverse-LVIS headboard (unknown bucket, uid 62e03de5b2eb4e8d81d1ffe8e94720b8), object-expansion batch
+OBJECT_MAP.update({
+    "headboard2": ObjectDef("headboard2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11152, 0.03364, 0.07064), default_pos=(0.47, 0.0, 0.0351),
+                    mesh_path=str(_OBJ_DIR / "headboard2.obj")),
+})
+
+# # icecream3: Objaverse-LVIS icecream (unknown bucket, uid 07bbf4c6cb8e4ea59a9afadae21f82cf), object-expansion batch
+OBJECT_MAP.update({
+    "icecream3": ObjectDef("icecream3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04794, 0.04789, 0.07429), default_pos=(0.47, 0.0, 0.0399),
+                    mesh_path=str(_OBJ_DIR / "icecream3.obj")),
+})
+
+# # flower_arrangement4: Objaverse-LVIS flower_arrangement (unknown bucket, uid 23c639ca701d4713a8c7f6480d0a8797), object-expansion batch
+OBJECT_MAP.update({
+    "flower_arrangement4": ObjectDef("flower_arrangement4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.06337, 0.05343, 0.12198), default_pos=(0.47, 0.0, 0.0852),
+                    mesh_path=str(_OBJ_DIR / "flower_arrangement4.obj")),
+})
+
+# # harmonium4: Objaverse-LVIS harmonium (unknown bucket, uid 61d5ad6897954f2484b9ca8dc5998096), object-expansion batch
+OBJECT_MAP.update({
+    "harmonium4": ObjectDef("harmonium4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.00172, 0.10686, 0.00738), default_pos=(0.47, 0.0, 0.0047),
+                    mesh_path=str(_OBJ_DIR / "harmonium4.obj")),
+})
+
+# # headband5: Objaverse-LVIS headband (unknown bucket, uid be6ef0a613ab41ad908d0deb2b399925), object-expansion batch
+OBJECT_MAP.update({
+    "headband5": ObjectDef("headband5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11138, 0.11175, 0.02478), default_pos=(0.47, 0.0, 0.0085),
+                    mesh_path=str(_OBJ_DIR / "headband5.obj")),
+})
+
+# # legume2: Objaverse-LVIS legume (unknown bucket, uid 13d896955e8544e9aee219a2ddd8ecb1), object-expansion batch
+OBJECT_MAP.update({
+    "legume2": ObjectDef("legume2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04531, 0.04982, 0.04998), default_pos=(0.47, 0.0, 0.0269),
+                    mesh_path=str(_OBJ_DIR / "legume2.obj")),
+})
+
+# # fruit_juice3: Objaverse-LVIS fruit_juice (unknown bucket, uid 316cbfa55e8549d8bce87e6a8e884090), object-expansion batch
+OBJECT_MAP.update({
+    "fruit_juice3": ObjectDef("fruit_juice3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04396, 0.04383, 0.11495), default_pos=(0.47, 0.0, 0.0565),
+                    mesh_path=str(_OBJ_DIR / "fruit_juice3.obj")),
+})
+
+# # cornmeal5: Objaverse-LVIS cornmeal (unknown bucket, uid 146e704d169d453c9b41f48d59652039), object-expansion batch
+OBJECT_MAP.update({
+    "cornmeal5": ObjectDef("cornmeal5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.00466, 0.07700, 0.06070), default_pos=(0.47, 0.0, 0.0314),
+                    mesh_path=str(_OBJ_DIR / "cornmeal5.obj")),
+})
+
+# # bottle_cap4: Objaverse-LVIS bottle_cap (flat_thin bucket, uid f0edda0b93e146fd83c7318d7f1bc695), object-expansion batch
+OBJECT_MAP.update({
+    "bottle_cap4": ObjectDef("bottle_cap4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.10560, 0.10560, 0.04883), default_pos=(0.47, 0.0, 0.0253),
+                    mesh_path=str(_OBJ_DIR / "bottle_cap4.obj")),
+})
+
+# # coverall4: Objaverse-LVIS coverall (unknown bucket, uid 84f0eabb482d46e1b39a3d559130a664), object-expansion batch
+OBJECT_MAP.update({
+    "coverall4": ObjectDef("coverall4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11350, 0.02384, 0.10608), default_pos=(0.47, 0.0, 0.0595),
+                    mesh_path=str(_OBJ_DIR / "coverall4.obj")),
+})
+
+# # dagger5: Objaverse-LVIS dagger (unknown bucket, uid 5de582634cfe4c348e7fe81f1d29bf02), object-expansion batch
+OBJECT_MAP.update({
+    "dagger5": ObjectDef("dagger5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05913, 0.04014, 0.04500), default_pos=(0.47, 0.0, 0.0399),
+                    mesh_path=str(_OBJ_DIR / "dagger5.obj")),
+})
+
+# # business_card8: Objaverse-LVIS business_card (unknown bucket, uid d975ecff85c54f6cb6c6a01787bed3a8), object-expansion batch
+OBJECT_MAP.update({
+    "business_card8": ObjectDef("business_card8", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.08286, 0.11487, 0.05329), default_pos=(0.47, 0.0, 0.0369),
+                    mesh_path=str(_OBJ_DIR / "business_card8.obj")),
+})
+
+# # parachute2: Objaverse-LVIS parachute (unknown bucket, uid 35aa7192c0c0468aae7302204858cde0), object-expansion batch
+OBJECT_MAP.update({
+    "parachute2": ObjectDef("parachute2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11780, 0.11630, 0.07924), default_pos=(0.47, 0.0, 0.0405),
+                    mesh_path=str(_OBJ_DIR / "parachute2.obj")),
+})
+
+# # pear3: Objaverse-LVIS pear (compact_blobby bucket, uid 889f4a84f24144c0b1808d4b59c04d82), object-expansion batch
+OBJECT_MAP.update({
+    "pear3": ObjectDef("pear3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05062, 0.05108, 0.06524), default_pos=(0.47, 0.0, 0.0283),
+                    mesh_path=str(_OBJ_DIR / "pear3.obj")),
+})
+
+# # lemon2: Objaverse-LVIS lemon (compact_blobby bucket, uid 92ed1dee5a3149cc92a862795b87ead4), object-expansion batch
+OBJECT_MAP.update({
+    "lemon2": ObjectDef("lemon2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04753, 0.04180, 0.06427), default_pos=(0.47, 0.0, 0.0338),
+                    mesh_path=str(_OBJ_DIR / "lemon2.obj")),
+})
+
+# # mat3: Objaverse-LVIS mat_(gym_equipment) (unknown bucket, uid b514529788a6456687c133b7fb92e6d1), object-expansion batch
+OBJECT_MAP.update({
+    "mat3": ObjectDef("mat3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05070, 0.07052, 0.06502), default_pos=(0.47, 0.0, 0.0344),
+                    mesh_path=str(_OBJ_DIR / "mat3.obj")),
+})
+
+# # mast2: Objaverse-LVIS mast (unknown bucket, uid 8963ad4edfbc41429825c75b07b0581b), object-expansion batch
+OBJECT_MAP.update({
+    "mast2": ObjectDef("mast2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.02392, 0.11377, 0.10103), default_pos=(0.47, 0.0, 0.0333),
+                    mesh_path=str(_OBJ_DIR / "mast2.obj")),
+})
+
+# # alarm_clock8: Objaverse-LVIS alarm_clock (unknown bucket, uid badd03bfce2b413f9b2adac9dd12e4ad), object-expansion batch
+OBJECT_MAP.update({
+    "alarm_clock8": ObjectDef("alarm_clock8", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11656, 0.11662, 0.04199), default_pos=(0.47, 0.0, 0.0249),
+                    mesh_path=str(_OBJ_DIR / "alarm_clock8.obj")),
+})
+
+# # amplifier5: Objaverse-LVIS amplifier (unknown bucket, uid 19cf952615cf48e48ed5d2128eb8b23a), object-expansion batch
+OBJECT_MAP.update({
+    "amplifier5": ObjectDef("amplifier5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.07041, 0.05218, 0.07097), default_pos=(0.47, 0.0, 0.0460),
+                    mesh_path=str(_OBJ_DIR / "amplifier5.obj")),
+})
+
+# # martini: Objaverse-LVIS martini (unknown bucket, uid 0c18856042ec43458ac04a4a0ed9311e), object-expansion batch
+OBJECT_MAP.update({
+    "martini": ObjectDef("martini", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04837, 0.04842, 0.04642), default_pos=(0.47, 0.0, 0.0316),
+                    mesh_path=str(_OBJ_DIR / "martini.obj")),
+})
+
+# # barge5: Objaverse-LVIS barge (unknown bucket, uid b4379858a3224dec8b89f93656ccd156), object-expansion batch
+OBJECT_MAP.update({
+    "barge5": ObjectDef("barge5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11502, 0.04614, 0.03607), default_pos=(0.47, 0.0, 0.0162),
+                    mesh_path=str(_OBJ_DIR / "barge5.obj")),
+})
+
+# # halter_top3: Objaverse-LVIS halter_top (unknown bucket, uid 4630cf631895489eaf3185b914aa14f5), object-expansion batch
+OBJECT_MAP.update({
+    "halter_top3": ObjectDef("halter_top3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04123, 0.04116, 0.05535), default_pos=(0.47, 0.0, 0.0287),
+                    mesh_path=str(_OBJ_DIR / "halter_top3.obj")),
+})
+
+# # backpack6: Objaverse-LVIS backpack (unknown bucket, uid 0b5f059d4ad346a79e7360f5904cf7cd), object-expansion batch
+OBJECT_MAP.update({
+    "backpack6": ObjectDef("backpack6", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.03281, 0.11473, 0.03752), default_pos=(0.47, 0.0, 0.0197),
+                    mesh_path=str(_OBJ_DIR / "backpack6.obj")),
+})
+
+# # baseball_cap5: Objaverse-LVIS baseball_cap (unknown bucket, uid 4a713326b70a4a32aa7ec6eca918603a), object-expansion batch
+OBJECT_MAP.update({
+    "baseball_cap5": ObjectDef("baseball_cap5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11240, 0.04504, 0.05493), default_pos=(0.47, 0.0, 0.0195),
+                    mesh_path=str(_OBJ_DIR / "baseball_cap5.obj")),
+})
+
+# # cardigan4: Objaverse-LVIS cardigan (unknown bucket, uid c9cb359c89aa4ede842e1250d3e04b75), object-expansion batch
+OBJECT_MAP.update({
+    "cardigan4": ObjectDef("cardigan4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.10817, 0.02292, 0.11026), default_pos=(0.47, 0.0, 0.0616),
+                    mesh_path=str(_OBJ_DIR / "cardigan4.obj")),
+})
+
+# # cylinder6: Objaverse-LVIS cylinder (unknown bucket, uid fa44ddeb72614002ba960b85f4237a2c), object-expansion batch
+OBJECT_MAP.update({
+    "cylinder6": ObjectDef("cylinder6", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.09784, 0.03332, 0.10305), default_pos=(0.47, 0.0, 0.0389),
+                    mesh_path=str(_OBJ_DIR / "cylinder6.obj")),
+})
+
+# # condiment4: Objaverse-LVIS condiment (unknown bucket, uid bb7f9ec1585844a1a19c89e4e6c127eb), object-expansion batch
+OBJECT_MAP.update({
+    "condiment4": ObjectDef("condiment4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.06867, 0.05141, 0.11511), default_pos=(0.47, 0.0, 0.0619),
+                    mesh_path=str(_OBJ_DIR / "condiment4.obj")),
+})
+
+# # birthday_card5: Objaverse-LVIS birthday_card (unknown bucket, uid 68ba07440e744d5697050446162bc661), object-expansion batch
+OBJECT_MAP.update({
+    "birthday_card5": ObjectDef("birthday_card5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11563, 0.07324, 0.09031), default_pos=(0.47, 0.0, 0.0419),
+                    mesh_path=str(_OBJ_DIR / "birthday_card5.obj")),
+})
+
+# # cantaloup5: Objaverse-LVIS cantaloup (unknown bucket, uid 4e0cd828f3b94c21b61a7de473533315), object-expansion batch
+OBJECT_MAP.update({
+    "cantaloup5": ObjectDef("cantaloup5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.06361, 0.05419, 0.07323), default_pos=(0.47, 0.0, 0.0377),
+                    mesh_path=str(_OBJ_DIR / "cantaloup5.obj")),
+})
+
+# # drill4: Objaverse-LVIS drill (unknown bucket, uid 82118925322647e38a6ea1a33e3bec4d), object-expansion batch
+OBJECT_MAP.update({
+    "drill4": ObjectDef("drill4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.03199, 0.11358, 0.08008), default_pos=(0.47, 0.0, 0.0437),
+                    mesh_path=str(_OBJ_DIR / "drill4.obj")),
+})
+
+# # cock5: Objaverse-LVIS cock (unknown bucket, uid abe09cf8812a414b8a790a5e97920196), object-expansion batch
+OBJECT_MAP.update({
+    "cock5": ObjectDef("cock5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05960, 0.04694, 0.05050), default_pos=(0.47, 0.0, 0.0305),
+                    mesh_path=str(_OBJ_DIR / "cock5.obj")),
+})
+
+# # ring2: Objaverse-LVIS ring (unknown bucket, uid 1c5c7ffd7a95473dbe6c2d40d5623034), object-expansion batch
+OBJECT_MAP.update({
+    "ring2": ObjectDef("ring2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04990, 0.06277, 0.05211), default_pos=(0.47, 0.0, 0.0318),
+                    mesh_path=str(_OBJ_DIR / "ring2.obj")),
+})
+
+# # mug2: Objaverse-LVIS mug (thin_shell_hollow bucket, uid 13bd7511918640fba71dd4ca554d5a5e), object-expansion batch
+OBJECT_MAP.update({
+    "mug2": ObjectDef("mug2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04675, 0.04293, 0.04712), default_pos=(0.47, 0.0, 0.0243),
+                    mesh_path=str(_OBJ_DIR / "mug2.obj")),
+})
+
+# # barrel6: Objaverse-LVIS barrel (unknown bucket, uid a35bdd1b77124e28a5179715ebc39037), object-expansion batch
+OBJECT_MAP.update({
+    "barrel6": ObjectDef("barrel6", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.03876, 0.04899, 0.03881), default_pos=(0.47, 0.0, 0.0205),
+                    mesh_path=str(_OBJ_DIR / "barrel6.obj")),
+})
+
+# # ferry4: Objaverse-LVIS ferry (unknown bucket, uid 51dba5eb17c24e0c9fbd1f817505cd60), object-expansion batch
+OBJECT_MAP.update({
+    "ferry4": ObjectDef("ferry4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04685, 0.05204, 0.09975), default_pos=(0.47, 0.0, 0.0508),
+                    mesh_path=str(_OBJ_DIR / "ferry4.obj")),
+})
+
+# # flute_glass3: Objaverse-LVIS flute_glass (tall_narrow bucket, uid 531dc9b727254aef9918e1d0b7c06e97), object-expansion batch
+OBJECT_MAP.update({
+    "flute_glass3": ObjectDef("flute_glass3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04568, 0.04566, 0.09487), default_pos=(0.47, 0.0, 0.0546),
+                    mesh_path=str(_OBJ_DIR / "flute_glass3.obj")),
+})
+
+# # card5: Objaverse-LVIS card (unknown bucket, uid 44f633120a434b71931dacf9c8235184), object-expansion batch
+OBJECT_MAP.update({
+    "card5": ObjectDef("card5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.20860, 0.28944, 0.02765), default_pos=(0.47, 0.0, 0.0127),
+                    mesh_path=str(_OBJ_DIR / "card5.obj")),
+})
+
+# # carrot4: Objaverse-LVIS carrot (elongated_rope_stick bucket, uid 50412b64aa20474b87e2ed690464cfea), object-expansion batch
+OBJECT_MAP.update({
+    "carrot4": ObjectDef("carrot4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.07611, 0.10563, 0.12428), default_pos=(0.47, 0.0, 0.0561),
+                    mesh_path=str(_OBJ_DIR / "carrot4.obj")),
+})
+
+# # coffeepot4: Objaverse-LVIS coffeepot (thin_shell_hollow bucket, uid 04206b246cf7419392e40881212a8010), object-expansion batch
+OBJECT_MAP.update({
+    "coffeepot4": ObjectDef("coffeepot4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04726, 0.09720, 0.07240), default_pos=(0.47, 0.0, 0.0337),
+                    mesh_path=str(_OBJ_DIR / "coffeepot4.obj")),
+})
+
+# # computer_keyboard3: Objaverse-LVIS computer_keyboard (unknown bucket, uid a25c537932e84ef693de2cdbfc9dd22d), object-expansion batch
+OBJECT_MAP.update({
+    "computer_keyboard3": ObjectDef("computer_keyboard3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(1.56440, 0.35146, 0.04640), default_pos=(0.47, 0.0, 0.0232),
+                    mesh_path=str(_OBJ_DIR / "computer_keyboard3.obj")),
+})
+
+# # crape4: Objaverse-LVIS crape (unknown bucket, uid 75a1e08e4b264ec8b9e2b082bb5d60f4), object-expansion batch
+OBJECT_MAP.update({
+    "crape4": ObjectDef("crape4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11695, 0.06772, 0.03162), default_pos=(0.47, 0.0, 0.0156),
+                    mesh_path=str(_OBJ_DIR / "crape4.obj")),
+})
+
+# # fire_extinguisher4: Objaverse-LVIS fire_extinguisher (unknown bucket, uid 8b52b1f4c4c44bb9866146f60dbe534c), object-expansion batch
+OBJECT_MAP.update({
+    "fire_extinguisher4": ObjectDef("fire_extinguisher4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.06757, 0.04419, 0.11595), default_pos=(0.47, 0.0, 0.0551),
+                    mesh_path=str(_OBJ_DIR / "fire_extinguisher4.obj")),
+})
+
+# # saltshaker: Objaverse-LVIS saltshaker (tall_narrow bucket, uid 77a7cef9019c4a50b982e315b38a90df), object-expansion batch
+OBJECT_MAP.update({
+    "saltshaker": ObjectDef("saltshaker", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04352, 0.04345, 0.05271), default_pos=(0.47, 0.0, 0.0238),
+                    mesh_path=str(_OBJ_DIR / "saltshaker.obj")),
+})
+
+# # oil_lamp: Objaverse-LVIS oil_lamp (unknown bucket, uid 6d5c188ddfe143db90961503933f17d9), object-expansion batch
+OBJECT_MAP.update({
+    "oil_lamp": ObjectDef("oil_lamp", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04852, 0.04933, 0.08659), default_pos=(0.47, 0.0, 0.0403),
+                    mesh_path=str(_OBJ_DIR / "oil_lamp.obj")),
+})
+
+# # drumstick4: Objaverse-LVIS drumstick (elongated_rope_stick bucket, uid 9099f14a50194c6da24a526877b28066), object-expansion batch
+OBJECT_MAP.update({
+    "drumstick4": ObjectDef("drumstick4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.03802, 0.91369, 0.35779), default_pos=(0.47, 0.0, 0.1185),
+                    mesh_path=str(_OBJ_DIR / "drumstick4.obj")),
+})
+
+# # freshener3: Objaverse-LVIS freshener (unknown bucket, uid 59ed9da27c2d419b959fad13027a0dec), object-expansion batch
+OBJECT_MAP.update({
+    "freshener3": ObjectDef("freshener3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05060, 0.04219, 0.05161), default_pos=(0.47, 0.0, 0.0277),
+                    mesh_path=str(_OBJ_DIR / "freshener3.obj")),
+})
+
+# # parasol2: Objaverse-LVIS parasol (unknown bucket, uid 287738fd02734769ab20b648fa8537cb), object-expansion batch
+OBJECT_MAP.update({
+    "parasol2": ObjectDef("parasol2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11843, 0.11729, 0.03846), default_pos=(0.47, 0.0, 0.0149),
+                    mesh_path=str(_OBJ_DIR / "parasol2.obj")),
+})
+
+# # pencil_sharpener4: Objaverse-LVIS pencil_sharpener (small_tools_office bucket, uid aea08798296f4c0d99fcf11979b5e50d), object-expansion batch
+OBJECT_MAP.update({
+    "pencil_sharpener4": ObjectDef("pencil_sharpener4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05154, 0.05763, 0.04766), default_pos=(0.47, 0.0, 0.0211),
+                    mesh_path=str(_OBJ_DIR / "pencil_sharpener4.obj")),
+})
+
+# # birthday_cake5: Objaverse-LVIS birthday_cake (unknown bucket, uid f058995dd57c445a8e50030702a8dbc6), object-expansion batch
+OBJECT_MAP.update({
+    "birthday_cake5": ObjectDef("birthday_cake5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11676, 0.11675, 0.04805), default_pos=(0.47, 0.0, 0.0190),
+                    mesh_path=str(_OBJ_DIR / "birthday_cake5.obj")),
+})
+
+# # diary4: Objaverse-LVIS diary (unknown bucket, uid d8bfbc48bbed4d73b7e21eb26c96990a), object-expansion batch
+OBJECT_MAP.update({
+    "diary4": ObjectDef("diary4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.08877, 0.11942, 0.02514), default_pos=(0.47, 0.0, 0.0136),
+                    mesh_path=str(_OBJ_DIR / "diary4.obj")),
+})
+
+# # hand_glass5: Objaverse-LVIS hand_glass (unknown bucket, uid 6292c807b5074fb2a41448d8fd9e8bdb), object-expansion batch
+OBJECT_MAP.update({
+    "hand_glass5": ObjectDef("hand_glass5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04403, 0.04428, 0.11704), default_pos=(0.47, 0.0, 0.0508),
+                    mesh_path=str(_OBJ_DIR / "hand_glass5.obj")),
+})
+
+# # chessboard5: Objaverse-LVIS chessboard (unknown bucket, uid 4252a510f3c8476ab98fe9f99100696e), object-expansion batch
+OBJECT_MAP.update({
+    "chessboard5": ObjectDef("chessboard5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11706, 0.11751, 0.03065), default_pos=(0.47, 0.0, 0.0145),
+                    mesh_path=str(_OBJ_DIR / "chessboard5.obj")),
+})
+
+# # olive_oil3: Objaverse-LVIS olive_oil (unknown bucket, uid 1ae4148047c94a8d9f2d7c8443c29c5f), object-expansion batch
+OBJECT_MAP.update({
+    "olive_oil3": ObjectDef("olive_oil3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04912, 0.05354, 0.06526), default_pos=(0.47, 0.0, 0.0321),
+                    mesh_path=str(_OBJ_DIR / "olive_oil3.obj")),
+})
+
+# # muffin2: Objaverse-LVIS muffin (unknown bucket, uid 496270f009aa48ef9145dac2938b3403), object-expansion batch
+OBJECT_MAP.update({
+    "muffin2": ObjectDef("muffin2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.07183, 0.07189, 0.04609), default_pos=(0.47, 0.0, 0.0214),
+                    mesh_path=str(_OBJ_DIR / "muffin2.obj")),
+})
+
+# # dartboard3: Objaverse-LVIS dartboard (unknown bucket, uid fb08eb8a6b944b18aa54cfc7431d8809), object-expansion batch
+OBJECT_MAP.update({
+    "dartboard3": ObjectDef("dartboard3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.21033, 0.21352, 0.02703), default_pos=(0.47, 0.0, 0.0110),
+                    mesh_path=str(_OBJ_DIR / "dartboard3.obj")),
+})
+
+# # drone3: Objaverse-LVIS drone (unknown bucket, uid 4f95cb46814f43859b80172c9f712cd7), object-expansion batch
+OBJECT_MAP.update({
+    "drone3": ObjectDef("drone3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.07336, 0.11360, 0.02811), default_pos=(0.47, 0.0, 0.0152),
+                    mesh_path=str(_OBJ_DIR / "drone3.obj")),
+})
+
+# # legume3: Objaverse-LVIS legume (unknown bucket, uid 13d896955e8544e9aee219a2ddd8ecb1), object-expansion batch
+OBJECT_MAP.update({
+    "legume3": ObjectDef("legume3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04531, 0.04982, 0.04998), default_pos=(0.47, 0.0, 0.0269),
+                    mesh_path=str(_OBJ_DIR / "legume3.obj")),
+})
+
+# # cart5: Objaverse-LVIS cart (unknown bucket, uid 8f340bb7c39b42fab68c628d9752f259), object-expansion batch
+OBJECT_MAP.update({
+    "cart5": ObjectDef("cart5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.10687, 0.09956, 0.04648), default_pos=(0.47, 0.0, 0.0254),
+                    mesh_path=str(_OBJ_DIR / "cart5.obj")),
+})
+
+# # chocolate_milk4: Objaverse-LVIS chocolate_milk (unknown bucket, uid 4ccf0fa531124ac29b4c8173471f8e1b), object-expansion batch
+OBJECT_MAP.update({
+    "chocolate_milk4": ObjectDef("chocolate_milk4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04751, 0.04629, 0.06363), default_pos=(0.47, 0.0, 0.0318),
+                    mesh_path=str(_OBJ_DIR / "chocolate_milk4.obj")),
+})
+
+# # milkshake3: Objaverse-LVIS milkshake (unknown bucket, uid 0ab8c1875131421e9bb1c442fa3f5950), object-expansion batch
+OBJECT_MAP.update({
+    "milkshake3": ObjectDef("milkshake3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04375, 0.04817, 0.08035), default_pos=(0.47, 0.0, 0.0449),
+                    mesh_path=str(_OBJ_DIR / "milkshake3.obj")),
+})
+
+# # cougar3: Objaverse-LVIS cougar (unknown bucket, uid 6ec4ee91d6344924ab7d0fbf36e2a9ab), object-expansion batch
+OBJECT_MAP.update({
+    "cougar3": ObjectDef("cougar3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.03481, 0.11905, 0.06636), default_pos=(0.47, 0.0, 0.0334),
+                    mesh_path=str(_OBJ_DIR / "cougar3.obj")),
+})
+
+# # sharpener: Objaverse-LVIS sharpener (unknown bucket, uid 1d6c8a031c41489ebecda344fb2d4807), object-expansion batch
+OBJECT_MAP.update({
+    "sharpener": ObjectDef("sharpener", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.07308, 0.04370, 0.04958), default_pos=(0.47, 0.0, 0.0252),
+                    mesh_path=str(_OBJ_DIR / "sharpener.obj")),
+})
+
+# # pan2: Objaverse-LVIS pan_(for_cooking) (unknown bucket, uid d501c3ff798945cebee84d7944edb19d), object-expansion batch
+OBJECT_MAP.update({
+    "pan2": ObjectDef("pan2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11589, 0.11777, 0.04085), default_pos=(0.47, 0.0, 0.0202),
+                    mesh_path=str(_OBJ_DIR / "pan2.obj")),
+})
+
+# # gameboard4: Objaverse-LVIS gameboard (unknown bucket, uid 2302e3bb270b4f8b84a7f3166fc45b7a), object-expansion batch
+OBJECT_MAP.update({
+    "gameboard4": ObjectDef("gameboard4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11457, 0.11403, 0.06389), default_pos=(0.47, 0.0, 0.0228),
+                    mesh_path=str(_OBJ_DIR / "gameboard4.obj")),
+})
+
+# # helmet3: Objaverse-LVIS helmet (unknown bucket, uid a64fa1262856414b8aa4bd9eaa1d2a7f), object-expansion batch
+OBJECT_MAP.update({
+    "helmet3": ObjectDef("helmet3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04185, 0.06530, 0.06274), default_pos=(0.47, 0.0, 0.0329),
+                    mesh_path=str(_OBJ_DIR / "helmet3.obj")),
+})
+
+# # mast3: Objaverse-LVIS mast (unknown bucket, uid 8963ad4edfbc41429825c75b07b0581b), object-expansion batch
+OBJECT_MAP.update({
+    "mast3": ObjectDef("mast3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.02392, 0.11377, 0.10103), default_pos=(0.47, 0.0, 0.0333),
+                    mesh_path=str(_OBJ_DIR / "mast3.obj")),
+})
+
+# # propeller3: Objaverse-LVIS propeller (unknown bucket, uid aa4b8ab41c3544edb4d9e32d80a8b599), object-expansion batch
+OBJECT_MAP.update({
+    "propeller3": ObjectDef("propeller3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05174, 0.05181, 0.04622), default_pos=(0.47, 0.0, 0.0242),
+                    mesh_path=str(_OBJ_DIR / "propeller3.obj")),
+})
+
+# # file4: Objaverse-LVIS file_(tool) (unknown bucket, uid 38eb1f950f414aeb95b7b7dc3506b7ab), object-expansion batch
+OBJECT_MAP.update({
+    "file4": ObjectDef("file4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.49599, 0.03168, 0.13579), default_pos=(0.47, 0.0, 0.0688),
+                    mesh_path=str(_OBJ_DIR / "file4.obj")),
+})
+
+# # frisbee4: Objaverse-LVIS frisbee (toys_misc bucket, uid 71e5d069a583437ab6734944f0ca599b), object-expansion batch
+OBJECT_MAP.update({
+    "frisbee4": ObjectDef("frisbee4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11317, 0.11322, 0.03036), default_pos=(0.47, 0.0, 0.0123),
+                    mesh_path=str(_OBJ_DIR / "frisbee4.obj")),
+})
+
+# # globe4: Objaverse-LVIS globe (unknown bucket, uid 4e9c3cccbaaa4adc947ad8e8ab351d0d), object-expansion batch
+OBJECT_MAP.update({
+    "globe4": ObjectDef("globe4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04587, 0.04587, 0.05334), default_pos=(0.47, 0.0, 0.0277),
+                    mesh_path=str(_OBJ_DIR / "globe4.obj")),
+})
+
+# # pen2: Objaverse-LVIS pen (elongated_rope_stick bucket, uid f974e3e7c83d493ab8ed26e812567880), object-expansion batch
+OBJECT_MAP.update({
+    "pen2": ObjectDef("pen2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11699, 0.07833, 0.10963), default_pos=(0.47, 0.0, 0.0415),
+                    mesh_path=str(_OBJ_DIR / "pen2.obj")),
+})
+
+# # pet2: Objaverse-LVIS pet (unknown bucket, uid 5e3e6f8692584d67956cc501b869e02b), object-expansion batch
+OBJECT_MAP.update({
+    "pet2": ObjectDef("pet2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.10400, 0.04362, 0.11516), default_pos=(0.47, 0.0, 0.0572),
+                    mesh_path=str(_OBJ_DIR / "pet2.obj")),
+})
+
+# # garden_hose4: Objaverse-LVIS garden_hose (unknown bucket, uid ca1155ccdfa04b1f965ad50b6f67a7a9), object-expansion batch
+OBJECT_MAP.update({
+    "garden_hose4": ObjectDef("garden_hose4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11737, 0.05488, 0.11879), default_pos=(0.47, 0.0, 0.0655),
+                    mesh_path=str(_OBJ_DIR / "garden_hose4.obj")),
+})
+
+# # parka4: Objaverse-LVIS parka (unknown bucket, uid b864380dfe96422e90f030203d110421), object-expansion batch
+OBJECT_MAP.update({
+    "parka4": ObjectDef("parka4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05324, 0.05338, 0.09339), default_pos=(0.47, 0.0, 0.0492),
+                    mesh_path=str(_OBJ_DIR / "parka4.obj")),
+})
+
+# # hammock3: Objaverse-LVIS hammock (unknown bucket, uid cbb4bfc4e5654500a70dfe72ffc0ce0a), object-expansion batch
+OBJECT_MAP.update({
+    "hammock3": ObjectDef("hammock3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.08536, 0.08570, 0.05767), default_pos=(0.47, 0.0, 0.0348),
+                    mesh_path=str(_OBJ_DIR / "hammock3.obj")),
+})
+
+# # hair_dryer5: Objaverse-LVIS hair_dryer (unknown bucket, uid 141202eed32747b7b1259a3efeba9c96), object-expansion batch
+OBJECT_MAP.update({
+    "hair_dryer5": ObjectDef("hair_dryer5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04389, 0.11687, 0.06874), default_pos=(0.47, 0.0, 0.0449),
+                    mesh_path=str(_OBJ_DIR / "hair_dryer5.obj")),
+})
+
+# # pot2: Objaverse-LVIS pot (unknown bucket, uid 6791a4ce3cb44c7c88b5713b5298d908), object-expansion batch
+OBJECT_MAP.update({
+    "pot2": ObjectDef("pot2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04735, 0.04730, 0.04769), default_pos=(0.47, 0.0, 0.0243),
+                    mesh_path=str(_OBJ_DIR / "pot2.obj")),
+})
+
+# # cigarette_case4: Objaverse-LVIS cigarette_case (unknown bucket, uid 659afc7b5cd84c91beaf3911888acb30), object-expansion batch
+OBJECT_MAP.update({
+    "cigarette_case4": ObjectDef("cigarette_case4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.06987, 0.11482, 0.05944), default_pos=(0.47, 0.0, 0.0232),
+                    mesh_path=str(_OBJ_DIR / "cigarette_case4.obj")),
+})
+
+# # drum4: Objaverse-LVIS drum_(musical_instrument) (unknown bucket, uid 5bfb43ddec994a21baa0eb5e458cdf09), object-expansion batch
+OBJECT_MAP.update({
+    "drum4": ObjectDef("drum4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.06387, 0.05921, 0.04298), default_pos=(0.47, 0.0, 0.0246),
+                    mesh_path=str(_OBJ_DIR / "drum4.obj")),
+})
+
+# # sausage3: Objaverse-LVIS sausage (unknown bucket, uid 602747b4fe4d435e8a37c7a2e3edce03), object-expansion batch
+OBJECT_MAP.update({
+    "sausage3": ObjectDef("sausage3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.02466, 0.11376, 0.02465), default_pos=(0.47, 0.0, 0.0128),
+                    mesh_path=str(_OBJ_DIR / "sausage3.obj")),
+})
+
+# # drawer3: Objaverse-LVIS drawer (unknown bucket, uid e836eb07dc6e4dee859b920acb6d31f8), object-expansion batch
+OBJECT_MAP.update({
+    "drawer3": ObjectDef("drawer3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.08155, 0.04376, 0.04863), default_pos=(0.47, 0.0, 0.0317),
+                    mesh_path=str(_OBJ_DIR / "drawer3.obj")),
+})
+
+# # kiwi_fruit: Objaverse-LVIS kiwi_fruit (compact_blobby bucket, uid 5ebb6b41072547189da584d9ba1e217c), object-expansion batch
+OBJECT_MAP.update({
+    "kiwi_fruit": ObjectDef("kiwi_fruit", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04465, 0.06071, 0.04871), default_pos=(0.47, 0.0, 0.0252),
+                    mesh_path=str(_OBJ_DIR / "kiwi_fruit.obj")),
+})
+
+# # smoothie: Objaverse-LVIS smoothie (unknown bucket, uid bd769a8792b9477a9de7b4cfb2d96c0e), object-expansion batch
+OBJECT_MAP.update({
+    "smoothie": ObjectDef("smoothie", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.03860, 0.03846, 0.04222), default_pos=(0.47, 0.0, 0.0278),
+                    mesh_path=str(_OBJ_DIR / "smoothie.obj")),
+})
+
+# # stew3: Objaverse-LVIS stew (unknown bucket, uid a4475b81ba7b4d589faeba319b58b30e), object-expansion batch
+OBJECT_MAP.update({
+    "stew3": ObjectDef("stew3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.09628, 0.05051, 0.06951), default_pos=(0.47, 0.0, 0.0262),
+                    mesh_path=str(_OBJ_DIR / "stew3.obj")),
+})
+
+# # router2: Objaverse-LVIS router_(computer_equipment) (unknown bucket, uid 84f5c1363273479fafc15e73c7c83abb), object-expansion batch
+OBJECT_MAP.update({
+    "router2": ObjectDef("router2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.12713, 0.11425, 0.05984), default_pos=(0.47, 0.0, 0.0196),
+                    mesh_path=str(_OBJ_DIR / "router2.obj")),
+})
+
+# # saltshaker2: Objaverse-LVIS saltshaker (tall_narrow bucket, uid 77a7cef9019c4a50b982e315b38a90df), object-expansion batch
+OBJECT_MAP.update({
+    "saltshaker2": ObjectDef("saltshaker2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04352, 0.04345, 0.05271), default_pos=(0.47, 0.0, 0.0238),
+                    mesh_path=str(_OBJ_DIR / "saltshaker2.obj")),
+})
+
+# # handbag3: Objaverse-LVIS handbag (unknown bucket, uid 6fac63bf15bb409b8d4340544bb1b9df), object-expansion batch
+OBJECT_MAP.update({
+    "handbag3": ObjectDef("handbag3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.06825, 0.06825, 0.04301), default_pos=(0.47, 0.0, 0.0225),
+                    mesh_path=str(_OBJ_DIR / "handbag3.obj")),
+})
+
+# # teacup2: Objaverse-LVIS teacup (tall_narrow bucket, uid 1f0920eb333f402f994a4f7c39c2944b), object-expansion batch
+OBJECT_MAP.update({
+    "teacup2": ObjectDef("teacup2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05294, 0.05290, 0.04272), default_pos=(0.47, 0.0, 0.0182),
+                    mesh_path=str(_OBJ_DIR / "teacup2.obj")),
+})
+
+# # platter4: Objaverse-LVIS platter (unknown bucket, uid 791a73b17d7e40a4957e7c0df360e5a3), object-expansion batch
+OBJECT_MAP.update({
+    "platter4": ObjectDef("platter4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11467, 0.07258, 0.02589), default_pos=(0.47, 0.0, 0.0100),
+                    mesh_path=str(_OBJ_DIR / "platter4.obj")),
+})
+
+# # rubber_band2: Objaverse-LVIS rubber_band (toys_misc bucket, uid 60407a98754344cf8d23a33280a8af3a), object-expansion batch
+OBJECT_MAP.update({
+    "rubber_band2": ObjectDef("rubber_band2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11515, 0.06872, 0.04328), default_pos=(0.47, 0.0, 0.0173),
+                    mesh_path=str(_OBJ_DIR / "rubber_band2.obj")),
+})
+
+# # hinge3: Objaverse-LVIS hinge (unknown bucket, uid 7352393b15e742518d4c1df28fffee3b), object-expansion batch
+OBJECT_MAP.update({
+    "hinge3": ObjectDef("hinge3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11722, 0.03307, 0.02840), default_pos=(0.47, 0.0, 0.0183),
+                    mesh_path=str(_OBJ_DIR / "hinge3.obj")),
+})
+
+# # keg3: Objaverse-LVIS keg (unknown bucket, uid 7250baeb03e940d08aba4a03b91e081b), object-expansion batch
+OBJECT_MAP.update({
+    "keg3": ObjectDef("keg3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04905, 0.05019, 0.04509), default_pos=(0.47, 0.0, 0.0236),
+                    mesh_path=str(_OBJ_DIR / "keg3.obj")),
+})
+
+# # safety_pin3: Objaverse-LVIS safety_pin (unknown bucket, uid fefe61636e7e4670b83f38943cdac85d), object-expansion batch
+OBJECT_MAP.update({
+    "safety_pin3": ObjectDef("safety_pin3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.10951, 0.04031, 0.07047), default_pos=(0.47, 0.0, 0.0385),
+                    mesh_path=str(_OBJ_DIR / "safety_pin3.obj")),
+})
+
+# # soup4: Objaverse-LVIS soup (unknown bucket, uid 04d0d8204db4400197ea4cc170c7cc15), object-expansion batch
+OBJECT_MAP.update({
+    "soup4": ObjectDef("soup4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04667, 0.05185, 0.09771), default_pos=(0.47, 0.0, 0.0423),
+                    mesh_path=str(_OBJ_DIR / "soup4.obj")),
+})
+
+# # headboard3: Objaverse-LVIS headboard (unknown bucket, uid 62e03de5b2eb4e8d81d1ffe8e94720b8), object-expansion batch
+OBJECT_MAP.update({
+    "headboard3": ObjectDef("headboard3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11152, 0.03364, 0.07064), default_pos=(0.47, 0.0, 0.0351),
+                    mesh_path=str(_OBJ_DIR / "headboard3.obj")),
+})
+
+# # falcon3: Objaverse-LVIS falcon (unknown bucket, uid 534c7ef382f34700800f72f3374a10c5), object-expansion batch
+OBJECT_MAP.update({
+    "falcon3": ObjectDef("falcon3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.06042, 0.05706, 0.06075), default_pos=(0.47, 0.0, 0.0280),
+                    mesh_path=str(_OBJ_DIR / "falcon3.obj")),
+})
+
+# # urn5: Objaverse-LVIS urn (unknown bucket, uid 49d1113fc0dd4664b4517b07ab6b9f28), object-expansion batch
+OBJECT_MAP.update({
+    "urn5": ObjectDef("urn5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04530, 0.04525, 0.07000), default_pos=(0.47, 0.0, 0.0379),
+                    mesh_path=str(_OBJ_DIR / "urn5.obj")),
+})
+
+# # iron3: Objaverse-LVIS iron_(for_clothing) (unknown bucket, uid c5bcfb2d53934421be8f9e8b407c2633), object-expansion batch
+OBJECT_MAP.update({
+    "iron3": ObjectDef("iron3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.08220, 0.11535, 0.04204), default_pos=(0.47, 0.0, 0.0181),
+                    mesh_path=str(_OBJ_DIR / "iron3.obj")),
+})
+
+# # medicine3: Objaverse-LVIS medicine (unknown bucket, uid 64fdc917a7934b07a1ac3287e9ade405), object-expansion batch
+OBJECT_MAP.update({
+    "medicine3": ObjectDef("medicine3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04187, 0.04182, 0.08858), default_pos=(0.47, 0.0, 0.0468),
+                    mesh_path=str(_OBJ_DIR / "medicine3.obj")),
+})
+
+# # cone5: Objaverse-LVIS cone (unknown bucket, uid 2315667320e048b780099cdf79f1d814), object-expansion batch
+OBJECT_MAP.update({
+    "cone5": ObjectDef("cone5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05210, 0.04553, 0.04561), default_pos=(0.47, 0.0, 0.0140),
+                    mesh_path=str(_OBJ_DIR / "cone5.obj")),
+})
+
+# # fire_alarm5: Objaverse-LVIS fire_alarm (unknown bucket, uid 85c3d3b9cfd64c108dc548e525052c4e), object-expansion batch
+OBJECT_MAP.update({
+    "fire_alarm5": ObjectDef("fire_alarm5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.08807, 0.03993, 0.11954), default_pos=(0.47, 0.0, 0.0601),
+                    mesh_path=str(_OBJ_DIR / "fire_alarm5.obj")),
+})
+
+# # window_box3: Objaverse-LVIS window_box_(for_plants) (unknown bucket, uid 7483c5fa79b443d183dd7718baa009ae), object-expansion batch
+OBJECT_MAP.update({
+    "window_box3": ObjectDef("window_box3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04190, 0.08653, 0.04684), default_pos=(0.47, 0.0, 0.0261),
+                    mesh_path=str(_OBJ_DIR / "window_box3.obj")),
+})
+
+# # hot_air_balloon3: Objaverse-LVIS hot-air_balloon (unknown bucket, uid d7c26b14eba741d2bb0120069c5eac4f), object-expansion batch
+OBJECT_MAP.update({
+    "hot_air_balloon3": ObjectDef("hot_air_balloon3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.06627, 0.07340, 0.08724), default_pos=(0.47, 0.0, 0.0541),
+                    mesh_path=str(_OBJ_DIR / "hot_air_balloon3.obj")),
+})
+
+# # sunflower2: Objaverse-LVIS sunflower (unknown bucket, uid bf0666bbc6184f5da9245a4be6c63588), object-expansion batch
+OBJECT_MAP.update({
+    "sunflower2": ObjectDef("sunflower2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05335, 0.07855, 0.04947), default_pos=(0.47, 0.0, 0.0297),
+                    mesh_path=str(_OBJ_DIR / "sunflower2.obj")),
+})
+
+# # microscope3: Objaverse-LVIS microscope (unknown bucket, uid fd336d24aa5945b9b640409b9a5a9701), object-expansion batch
+OBJECT_MAP.update({
+    "microscope3": ObjectDef("microscope3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.09260, 0.05392, 0.11580), default_pos=(0.47, 0.0, 0.0561),
+                    mesh_path=str(_OBJ_DIR / "microscope3.obj")),
+})
+
+# # onion3: Objaverse-LVIS onion (compact_blobby bucket, uid ee5476b5928142a9a579404a331528c2), object-expansion batch
+OBJECT_MAP.update({
+    "onion3": ObjectDef("onion3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.09696, 0.05634, 0.05213), default_pos=(0.47, 0.0, 0.0178),
+                    mesh_path=str(_OBJ_DIR / "onion3.obj")),
+})
+
+# # gasmask3: Objaverse-LVIS gasmask (unknown bucket, uid e169676dcff64d588da211ae0265cbf6), object-expansion batch
+OBJECT_MAP.update({
+    "gasmask3": ObjectDef("gasmask3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.08616, 0.08598, 0.04667), default_pos=(0.47, 0.0, 0.0162),
+                    mesh_path=str(_OBJ_DIR / "gasmask3.obj")),
+})
+
+# # fruit_juice4: Objaverse-LVIS fruit_juice (unknown bucket, uid 316cbfa55e8549d8bce87e6a8e884090), object-expansion batch
+OBJECT_MAP.update({
+    "fruit_juice4": ObjectDef("fruit_juice4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04396, 0.04383, 0.11495), default_pos=(0.47, 0.0, 0.0565),
+                    mesh_path=str(_OBJ_DIR / "fruit_juice4.obj")),
+})
+
+# # matchbox3: Objaverse-LVIS matchbox (unknown bucket, uid 16930ec31f5342a08e1233eaae01b2c9), object-expansion batch
+OBJECT_MAP.update({
+    "matchbox3": ObjectDef("matchbox3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.08799, 0.11944, 0.03994), default_pos=(0.47, 0.0, 0.0176),
+                    mesh_path=str(_OBJ_DIR / "matchbox3.obj")),
+})
+
+# # dish_antenna4: Objaverse-LVIS dish_antenna (unknown bucket, uid 509a2cc74d0742f7a6ba5d3036deab32), object-expansion batch
+OBJECT_MAP.update({
+    "dish_antenna4": ObjectDef("dish_antenna4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.06340, 0.04626, 0.06191), default_pos=(0.47, 0.0, 0.0296),
+                    mesh_path=str(_OBJ_DIR / "dish_antenna4.obj")),
+})
+
+# # lampshade4: Objaverse-LVIS lampshade (unknown bucket, uid 1aa6739d774348efa691340e3a12b870), object-expansion batch
+OBJECT_MAP.update({
+    "lampshade4": ObjectDef("lampshade4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05445, 0.04549, 0.11496), default_pos=(0.47, 0.0, 0.0719),
+                    mesh_path=str(_OBJ_DIR / "lampshade4.obj")),
+})
+
+# # gelatin5: Objaverse-LVIS gelatin (kitchen_containers bucket, uid 7da36ddc2a28494586269bca7d4a7942), object-expansion batch
+OBJECT_MAP.update({
+    "gelatin5": ObjectDef("gelatin5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04561, 0.04607, 0.06320), default_pos=(0.47, 0.0, 0.0301),
+                    mesh_path=str(_OBJ_DIR / "gelatin5.obj")),
+})
+
+# # postbox16: Objaverse-LVIS postbox_(public) (unknown bucket, uid 23a69d599a7c47318e9af642e5782877), object-expansion batch
+OBJECT_MAP.update({
+    "postbox16": ObjectDef("postbox16", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11445, 0.03561, 0.07151), default_pos=(0.47, 0.0, 0.0409),
+                    mesh_path=str(_OBJ_DIR / "postbox16.obj")),
+})
+
+# # radar2: Objaverse-LVIS radar (unknown bucket, uid 61ec1fa948e04e2eaf87b44e03ff7da2), object-expansion batch
+OBJECT_MAP.update({
+    "radar2": ObjectDef("radar2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04908, 0.04909, 0.04772), default_pos=(0.47, 0.0, 0.0239),
+                    mesh_path=str(_OBJ_DIR / "radar2.obj")),
+})
+
+# # paddle2: Objaverse-LVIS paddle (unknown bucket, uid 863f20dcd6324b799b69e6a583909a6b), object-expansion batch
+OBJECT_MAP.update({
+    "paddle2": ObjectDef("paddle2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04211, 0.11400, 0.02854), default_pos=(0.47, 0.0, 0.0139),
+                    mesh_path=str(_OBJ_DIR / "paddle2.obj")),
+})
+
+# # gravy_boat3: Objaverse-LVIS gravy_boat (thin_shell_hollow bucket, uid e6b4fbc8ec404d32a67cc67d574adaec), object-expansion batch
+OBJECT_MAP.update({
+    "gravy_boat3": ObjectDef("gravy_boat3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04345, 0.05051, 0.05924), default_pos=(0.47, 0.0, 0.0190),
+                    mesh_path=str(_OBJ_DIR / "gravy_boat3.obj")),
+})
+
+# # overalls4: Objaverse-LVIS overalls_(clothing) (unknown bucket, uid 08ccb9a009a34ca5916866149e5b51a3), object-expansion batch
+OBJECT_MAP.update({
+    "overalls4": ObjectDef("overalls4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11336, 0.11400, 0.02796), default_pos=(0.47, 0.0, 0.0194),
+                    mesh_path=str(_OBJ_DIR / "overalls4.obj")),
+})
+
+# # dustpan4: Objaverse-LVIS dustpan (unknown bucket, uid c192ebcddbee49668d891b8e14c5f18e), object-expansion batch
+OBJECT_MAP.update({
+    "dustpan4": ObjectDef("dustpan4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04490, 0.07545, 0.09649), default_pos=(0.47, 0.0, 0.0445),
+                    mesh_path=str(_OBJ_DIR / "dustpan4.obj")),
+})
+
+# # mail_slot5: Objaverse-LVIS mail_slot (unknown bucket, uid 5ab8a2aa7994478c987c3b541016a56a), object-expansion batch
+OBJECT_MAP.update({
+    "mail_slot5": ObjectDef("mail_slot5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04243, 0.09053, 0.05936), default_pos=(0.47, 0.0, 0.0329),
+                    mesh_path=str(_OBJ_DIR / "mail_slot5.obj")),
+})
+
+# # sandwich2: Objaverse-LVIS sandwich (unknown bucket, uid 8e8b342613f0477182ec8586876291cf), object-expansion batch
+OBJECT_MAP.update({
+    "sandwich2": ObjectDef("sandwich2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.06862, 0.11621, 0.04292), default_pos=(0.47, 0.0, 0.0226),
+                    mesh_path=str(_OBJ_DIR / "sandwich2.obj")),
+})
+
+# # shredder: Objaverse-LVIS shredder_(for_paper) (unknown bucket, uid 3932389d516a4cbfb3644f40922e542d), object-expansion batch
+OBJECT_MAP.update({
+    "shredder": ObjectDef("shredder", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11105, 0.05173, 0.10947), default_pos=(0.47, 0.0, 0.0490),
+                    mesh_path=str(_OBJ_DIR / "shredder.obj")),
+})
+
+# # squid: Objaverse-LVIS squid_(food) (unknown bucket, uid 0fb0c4ff0d3f489288caa0afef723230), object-expansion batch
+OBJECT_MAP.update({
+    "squid": ObjectDef("squid", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04583, 0.04060, 0.07437), default_pos=(0.47, 0.0, 0.0404),
+                    mesh_path=str(_OBJ_DIR / "squid.obj")),
+})
+
+# # hornet4: Objaverse-LVIS hornet (unknown bucket, uid 36a231c7af324000b0ea55afb6a1bb92), object-expansion batch
+OBJECT_MAP.update({
+    "hornet4": ObjectDef("hornet4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04778, 0.10061, 0.06059), default_pos=(0.47, 0.0, 0.0262),
+                    mesh_path=str(_OBJ_DIR / "hornet4.obj")),
+})
+
+# # peanut_butter2: Objaverse-LVIS peanut_butter (unknown bucket, uid 686c71ef72f04b50aa522325651e3222), object-expansion batch
+OBJECT_MAP.update({
+    "peanut_butter2": ObjectDef("peanut_butter2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05757, 0.05860, 0.07933), default_pos=(0.47, 0.0, 0.0393),
+                    mesh_path=str(_OBJ_DIR / "peanut_butter2.obj")),
+})
+
+# # halter_top4: Objaverse-LVIS halter_top (unknown bucket, uid 4630cf631895489eaf3185b914aa14f5), object-expansion batch
+OBJECT_MAP.update({
+    "halter_top4": ObjectDef("halter_top4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04123, 0.04116, 0.05535), default_pos=(0.47, 0.0, 0.0287),
+                    mesh_path=str(_OBJ_DIR / "halter_top4.obj")),
+})
+
+# # tambourine: Objaverse-LVIS tambourine (unknown bucket, uid 3e6004858508416293b536efaa2cbedc), object-expansion batch
+OBJECT_MAP.update({
+    "tambourine": ObjectDef("tambourine", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.08154, 0.07276, 0.10952), default_pos=(0.47, 0.0, 0.0419),
+                    mesh_path=str(_OBJ_DIR / "tambourine.obj")),
+})
+
+# # flag4: Objaverse-LVIS flag (unknown bucket, uid b031f65dd5cb475fb00fb5d9ec229b87), object-expansion batch
+OBJECT_MAP.update({
+    "flag4": ObjectDef("flag4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11584, 0.03791, 0.09628), default_pos=(0.47, 0.0, 0.0499),
+                    mesh_path=str(_OBJ_DIR / "flag4.obj")),
+})
+
+# # goggles4: Objaverse-LVIS goggles (unknown bucket, uid 566492c26f6949ec8f082c0710ca93e5), object-expansion batch
+OBJECT_MAP.update({
+    "goggles4": ObjectDef("goggles4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04753, 0.04743, 0.04786), default_pos=(0.47, 0.0, 0.0288),
+                    mesh_path=str(_OBJ_DIR / "goggles4.obj")),
+})
+
+# # measuring_cup4: Objaverse-LVIS measuring_cup (thin_shell_hollow bucket, uid 39551948552d438499e8694b7d3691c5), object-expansion batch
+OBJECT_MAP.update({
+    "measuring_cup4": ObjectDef("measuring_cup4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.10503, 0.09793, 0.04086), default_pos=(0.47, 0.0, 0.0086),
+                    mesh_path=str(_OBJ_DIR / "measuring_cup4.obj")),
+})
+
+# # phonebook3: Objaverse-LVIS phonebook (unknown bucket, uid 485e8ea7bd4947428521570a747fd459), object-expansion batch
+OBJECT_MAP.update({
+    "phonebook3": ObjectDef("phonebook3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.10319, 0.11488, 0.02958), default_pos=(0.47, 0.0, 0.0158),
+                    mesh_path=str(_OBJ_DIR / "phonebook3.obj")),
+})
+
+# # pottery2: Objaverse-LVIS pottery (unknown bucket, uid 7c3daf651aa54283aaca355fc0a83191), object-expansion batch
+OBJECT_MAP.update({
+    "pottery2": ObjectDef("pottery2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04790, 0.05229, 0.05174), default_pos=(0.47, 0.0, 0.0255),
+                    mesh_path=str(_OBJ_DIR / "pottery2.obj")),
+})
+
+# # keycard3: Objaverse-LVIS keycard (flat_thin bucket, uid 1ec8c12f4fbd4987bfde21696d0c91b3), object-expansion batch
+OBJECT_MAP.update({
+    "keycard3": ObjectDef("keycard3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.20098, 0.02144, 0.13744), default_pos=(0.47, 0.0, 0.0677),
+                    mesh_path=str(_OBJ_DIR / "keycard3.obj")),
+})
+
+# # milk_can4: Objaverse-LVIS milk_can (unknown bucket, uid 490ea567e32f42748f654c41ff0f1873), object-expansion batch
+OBJECT_MAP.update({
+    "milk_can4": ObjectDef("milk_can4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04332, 0.03957, 0.06040), default_pos=(0.47, 0.0, 0.0328),
+                    mesh_path=str(_OBJ_DIR / "milk_can4.obj")),
+})
+
+# # wedding_ring: Objaverse-LVIS wedding_ring (unknown bucket, uid 83a6fc8e16e04f5fad3c929893f275b4), object-expansion batch
+OBJECT_MAP.update({
+    "wedding_ring": ObjectDef("wedding_ring", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.08583, 0.04741, 0.09841), default_pos=(0.47, 0.0, 0.0553),
+                    mesh_path=str(_OBJ_DIR / "wedding_ring.obj")),
+})
+
+# # saxophone2: Objaverse-LVIS saxophone (unknown bucket, uid ed1423c2d56e4f6d9f61d52cfa3bbd86), object-expansion batch
+OBJECT_MAP.update({
+    "saxophone2": ObjectDef("saxophone2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04588, 0.03243, 0.11705), default_pos=(0.47, 0.0, 0.0512),
+                    mesh_path=str(_OBJ_DIR / "saxophone2.obj")),
+})
+
+# # handcart3: Objaverse-LVIS handcart (unknown bucket, uid 53053c677f9d47edbab3e14c9f07c2ce), object-expansion batch
+OBJECT_MAP.update({
+    "handcart3": ObjectDef("handcart3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.09160, 0.08059, 0.04780), default_pos=(0.47, 0.0, 0.0259),
+                    mesh_path=str(_OBJ_DIR / "handcart3.obj")),
+})
+
+# # pajamas3: Objaverse-LVIS pajamas (unknown bucket, uid 1d909b482ccf4d3f8688702bff9d78ed), object-expansion batch
+OBJECT_MAP.update({
+    "pajamas3": ObjectDef("pajamas3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.06414, 0.03260, 0.11595), default_pos=(0.47, 0.0, 0.0574),
+                    mesh_path=str(_OBJ_DIR / "pajamas3.obj")),
+})
+
+# # lego6: Objaverse-LVIS Lego (unknown bucket, uid 3a4c4e3fd81241ec99e2a9dac838dc31), object-expansion batch
+OBJECT_MAP.update({
+    "lego6": ObjectDef("lego6", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.09206, 0.04371, 0.11632), default_pos=(0.47, 0.0, 0.0500),
+                    mesh_path=str(_OBJ_DIR / "lego6.obj")),
+})
+
+# # hot_sauce3: Objaverse-LVIS hot_sauce (unknown bucket, uid 0e5d6fec63714df0b49b3399c59044c8), object-expansion batch
+OBJECT_MAP.update({
+    "hot_sauce3": ObjectDef("hot_sauce3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.02799, 0.05806, 0.11254), default_pos=(0.47, 0.0, 0.0286),
+                    mesh_path=str(_OBJ_DIR / "hot_sauce3.obj")),
+})
+
+# # battery5: Objaverse-LVIS battery (unknown bucket, uid bf7360470ba342a1b9a2351a711542d9), object-expansion batch
+OBJECT_MAP.update({
+    "battery5": ObjectDef("battery5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.09450, 0.04517, 0.05830), default_pos=(0.47, 0.0, 0.0298),
+                    mesh_path=str(_OBJ_DIR / "battery5.obj")),
+})
+
+# # armband6: Objaverse-LVIS armband (unknown bucket, uid 569c551891a14f8ba70ed992670e4cd3), object-expansion batch
+OBJECT_MAP.update({
+    "armband6": ObjectDef("armband6", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11921, 0.11921, 0.04146), default_pos=(0.47, 0.0, 0.0217),
+                    mesh_path=str(_OBJ_DIR / "armband6.obj")),
+})
+
+# # bagel6: Objaverse-LVIS bagel (unknown bucket, uid 32c0bcf29aee45da8a7bcf7ffe1fd8c1), object-expansion batch
+OBJECT_MAP.update({
+    "bagel6": ObjectDef("bagel6", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11784, 0.11972, 0.04817), default_pos=(0.47, 0.0, 0.0255),
+                    mesh_path=str(_OBJ_DIR / "bagel6.obj")),
+})
+
+# # cash_register4: Objaverse-LVIS cash_register (unknown bucket, uid 870f6ebb115a440da5b8fed8072d7d9e), object-expansion batch
+OBJECT_MAP.update({
+    "cash_register4": ObjectDef("cash_register4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04686, 0.05778, 0.07812), default_pos=(0.47, 0.0, 0.0328),
+                    mesh_path=str(_OBJ_DIR / "cash_register4.obj")),
+})
+
+# # basketball_backboard7: Objaverse-LVIS basketball_backboard (unknown bucket, uid 2f3803f9694b4db88a41d75e37daf75b), object-expansion batch
+OBJECT_MAP.update({
+    "basketball_backboard7": ObjectDef("basketball_backboard7", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.07279, 0.04989, 0.04031), default_pos=(0.47, 0.0, 0.0205),
+                    mesh_path=str(_OBJ_DIR / "basketball_backboard7.obj")),
+})
+
+# # book6: Objaverse-LVIS book (unknown bucket, uid 202f3448f68c44ceaa5f7f8e28807341), object-expansion batch
+OBJECT_MAP.update({
+    "book6": ObjectDef("book6", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05448, 0.11257, 0.11430), default_pos=(0.47, 0.0, 0.0578),
+                    mesh_path=str(_OBJ_DIR / "book6.obj")),
+})
+
+# # cleat4: Objaverse-LVIS cleat_(for_securing_rope) (unknown bucket, uid 62c27454917d40db8cd6e28f12ff4fc5), object-expansion batch
+OBJECT_MAP.update({
+    "cleat4": ObjectDef("cleat4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.08369, 0.08060, 0.06230), default_pos=(0.47, 0.0, 0.0208),
+                    mesh_path=str(_OBJ_DIR / "cleat4.obj")),
+})
+
+# # clasp5: Objaverse-LVIS clasp (unknown bucket, uid 25290cec69eb4154b7c831f76a5c022e), object-expansion batch
+OBJECT_MAP.update({
+    "clasp5": ObjectDef("clasp5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11866, 0.04002, 0.11837), default_pos=(0.47, 0.0, 0.0665),
+                    mesh_path=str(_OBJ_DIR / "clasp5.obj")),
+})
+
+# # coin5: Objaverse-LVIS coin (flat_thin bucket, uid 5c7fa159c094419f9e11178456a2ba79), object-expansion batch
+OBJECT_MAP.update({
+    "coin5": ObjectDef("coin5", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05162, 0.05312, 0.04251), default_pos=(0.47, 0.0, 0.0208),
+                    mesh_path=str(_OBJ_DIR / "coin5.obj")),
+})
+
+# # cookie4: Objaverse-LVIS cookie (unknown bucket, uid 4fc98176958f45dea72f0f000762d0dd), object-expansion batch
+OBJECT_MAP.update({
+    "cookie4": ObjectDef("cookie4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11180, 0.11883, 0.03923), default_pos=(0.47, 0.0, 0.0176),
+                    mesh_path=str(_OBJ_DIR / "cookie4.obj")),
+})
+
+# # crouton3: Objaverse-LVIS crouton (unknown bucket, uid 76d436d6fafb4bc3b5da646bd1f6c41a), object-expansion batch
+OBJECT_MAP.update({
+    "crouton3": ObjectDef("crouton3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.06194, 0.06628, 0.05620), default_pos=(0.47, 0.0, 0.0274),
+                    mesh_path=str(_OBJ_DIR / "crouton3.obj")),
+})
+
+# # cooler17: Objaverse-LVIS cooler_(for_food) (unknown bucket, uid 4cd15dfdd2b64b5695e940f4f4609087), object-expansion batch
+OBJECT_MAP.update({
+    "cooler17": ObjectDef("cooler17", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.03837, 0.11912, 0.08144), default_pos=(0.47, 0.0, 0.0440),
+                    mesh_path=str(_OBJ_DIR / "cooler17.obj")),
+})
+
+# # dishtowel4: Objaverse-LVIS dishtowel (unknown bucket, uid f953ec3d3204405580d54f74e4aebe8f), object-expansion batch
+OBJECT_MAP.update({
+    "dishtowel4": ObjectDef("dishtowel4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.08778, 0.03634, 0.11115), default_pos=(0.47, 0.0, 0.0556),
+                    mesh_path=str(_OBJ_DIR / "dishtowel4.obj")),
+})
+
+# # flashlight3: Objaverse-LVIS flashlight (unknown bucket, uid 85812bc38c3d410f9d75339df78f8051), object-expansion batch
+OBJECT_MAP.update({
+    "flashlight3": ObjectDef("flashlight3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11536, 0.02382, 0.02391), default_pos=(0.47, 0.0, 0.0129),
+                    mesh_path=str(_OBJ_DIR / "flashlight3.obj")),
+})
+
+# # green_onion4: Objaverse-LVIS green_onion (unknown bucket, uid 41f72822b6134246a7770f540f04c0e8), object-expansion batch
+OBJECT_MAP.update({
+    "green_onion4": ObjectDef("green_onion4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.03403, 0.02355, 0.18432), default_pos=(0.47, 0.0, 0.0833),
+                    mesh_path=str(_OBJ_DIR / "green_onion4.obj")),
+})
+
+# # handle3: Objaverse-LVIS handle (unknown bucket, uid baa90088dfb8429b9bbe7ed8f6746714), object-expansion batch
+OBJECT_MAP.update({
+    "handle3": ObjectDef("handle3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.11482, 0.02652, 0.04699), default_pos=(0.47, 0.0, 0.0264),
+                    mesh_path=str(_OBJ_DIR / "handle3.obj")),
+})
+
+# # lawn_mower4: Objaverse-LVIS lawn_mower (unknown bucket, uid 61b40bf8aa0748da88849a6336bf71de), object-expansion batch
+OBJECT_MAP.update({
+    "lawn_mower4": ObjectDef("lawn_mower4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.05098, 0.07620, 0.04523), default_pos=(0.47, 0.0, 0.0224),
+                    mesh_path=str(_OBJ_DIR / "lawn_mower4.obj")),
+})
+
+# # easel4: Objaverse-LVIS easel (unknown bucket, uid 956b97c11aa94840a1e24ee1558fec73), object-expansion batch
+OBJECT_MAP.update({
+    "easel4": ObjectDef("easel4", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.03952, 0.03982, 0.11735), default_pos=(0.47, 0.0, 0.0353),
+                    mesh_path=str(_OBJ_DIR / "easel4.obj")),
+})
+
+# # lemon3: Objaverse-LVIS lemon (compact_blobby bucket, uid 92ed1dee5a3149cc92a862795b87ead4), object-expansion batch
+OBJECT_MAP.update({
+    "lemon3": ObjectDef("lemon3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04753, 0.04180, 0.06427), default_pos=(0.47, 0.0, 0.0338),
+                    mesh_path=str(_OBJ_DIR / "lemon3.obj")),
+})
+
+# # flash3: Objaverse-LVIS flash (unknown bucket, uid 7aa816aa52f54e7b9249190b46ee4472), object-expansion batch
+OBJECT_MAP.update({
+    "flash3": ObjectDef("flash3", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04732, 0.04727, 0.04508), default_pos=(0.47, 0.0, 0.0151),
+                    mesh_path=str(_OBJ_DIR / "flash3.obj")),
+})
+
+# # martini2: Objaverse-LVIS martini (unknown bucket, uid 0c18856042ec43458ac04a4a0ed9311e), object-expansion batch
+OBJECT_MAP.update({
+    "martini2": ObjectDef("martini2", MATERIALS["soft_shape"], object_type="soft",
+                    size=(0.04837, 0.04842, 0.04642), default_pos=(0.47, 0.0, 0.0316),
+                    mesh_path=str(_OBJ_DIR / "martini2.obj")),
+})
+
 def get_object_def(name: str) -> ObjectDef:
     if name not in OBJECT_MAP:
         raise KeyError(f"Unknown object {name!r}; known objects: {sorted(OBJECT_MAP)}")
