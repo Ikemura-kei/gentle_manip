@@ -63,6 +63,43 @@ MATERIALS: dict[str, Material] = {
     # confounded material change. Same soft-end E for the same MPM-stability reason.
     "soft_shape": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=1000.0,
                            von_mises_yield_stress=4e4),
+
+    # ── Objaverse expansion: per-object density so each lands at 50-100 g (user, 2026-09-10) ──
+    # soft_shape's rho 1000 made mass follow VOLUME, which for these scanned meshes spans 5-300 cm^3
+    # (5 g to 300 g). E/nu/yield are soft_shape's, unchanged, so only mass differs between them.
+    # Density is clamped to [150, 2500] kg/m^3; martini, smoothie and telephoto_lens are too small
+    # in volume to reach 50 g without exceeding that, and stay lighter.
+    "objexp_hose": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=1672.4, von_mises_yield_stress=4e4),   # 49 cm^3 -> 82 g
+    "objexp_lemonade": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=416.1, von_mises_yield_stress=4e4),   # 123 cm^3 -> 51 g
+    "objexp_license_plate": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=858.3, von_mises_yield_stress=4e4),   # 74 cm^3 -> 64 g
+    "objexp_martini": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=2500.0, von_mises_yield_stress=4e4),   # 18 cm^3 -> 45 g
+    "objexp_napkin": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=1326.7, von_mises_yield_stress=4e4),   # 65 cm^3 -> 87 g
+    "objexp_oil_lamp": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=1391.6, von_mises_yield_stress=4e4),   # 60 cm^3 -> 84 g
+    "objexp_pan": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=539.4, von_mises_yield_stress=4e4),   # 175 cm^3 -> 95 g
+    "objexp_pet": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=721.7, von_mises_yield_stress=4e4),   # 75 cm^3 -> 54 g
+    "objexp_pillow": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=1042.3, von_mises_yield_stress=4e4),   # 68 cm^3 -> 71 g
+    "objexp_pocket_watch": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=1849.6, von_mises_yield_stress=4e4),   # 28 cm^3 -> 51 g
+    "objexp_postcard": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=210.1, von_mises_yield_stress=4e4),   # 290 cm^3 -> 61 g
+    "objexp_pot": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=1948.1, von_mises_yield_stress=4e4),   # 39 cm^3 -> 75 g
+    "objexp_radio_receiver": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=516.9, von_mises_yield_stress=4e4),   # 99 cm^3 -> 51 g
+    "objexp_saucepan": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=514.0, von_mises_yield_stress=4e4),   # 117 cm^3 -> 60 g
+    "objexp_sharpener": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=1845.3, von_mises_yield_stress=4e4),   # 45 cm^3 -> 82 g
+    "objexp_shower_cap": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=1337.2, von_mises_yield_stress=4e4),   # 58 cm^3 -> 77 g
+    "objexp_shredder": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=203.1, von_mises_yield_stress=4e4),   # 300 cm^3 -> 61 g
+    "objexp_skullcap": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=1457.6, von_mises_yield_stress=4e4),   # 55 cm^3 -> 79 g
+    "objexp_smoothie": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=2500.0, von_mises_yield_stress=4e4),   # 5 cm^3 -> 13 g
+    "objexp_squid": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=764.5, von_mises_yield_stress=4e4),   # 66 cm^3 -> 50 g
+    "objexp_strainer": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=1460.1, von_mises_yield_stress=4e4),   # 62 cm^3 -> 90 g
+    "objexp_sweet_potato": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=1727.4, von_mises_yield_stress=4e4),   # 49 cm^3 -> 85 g
+    "objexp_tambourine": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=458.9, von_mises_yield_stress=4e4),   # 146 cm^3 -> 67 g
+    "objexp_tartan": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=956.2, von_mises_yield_stress=4e4),   # 60 cm^3 -> 58 g
+    "objexp_telephoto_lens": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=2500.0, von_mises_yield_stress=4e4),   # 35 cm^3 -> 87 g
+    "objexp_thimble": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=1121.4, von_mises_yield_stress=4e4),   # 60 cm^3 -> 67 g
+    "objexp_timer": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=416.0, von_mises_yield_stress=4e4),   # 131 cm^3 -> 55 g
+    "objexp_tote_bag": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=205.9, von_mises_yield_stress=4e4),   # 266 cm^3 -> 55 g
+    "objexp_volleyball": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=1794.0, von_mises_yield_stress=4e4),   # 51 cm^3 -> 92 g
+    "objexp_wallet": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=433.1, von_mises_yield_stress=4e4),   # 185 cm^3 -> 80 g
+    "objexp_water_faucet": Material(youngs_modulus=3e5, poisson_ratio=0.35, density=2062.1, von_mises_yield_stress=4e4),   # 44 cm^3 -> 90 g
     # Raspberry (Rubus idaeus): a drupelet aggregate, markedly more fragile than a mushroom —
     # it bruises at a light squeeze. Softer (E 0.1 MPa) with a lower yield (15 kPa) and lower
     # density (it is largely water in thin-walled drupelets, and juicier/lighter than a mushroom).

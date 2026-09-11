@@ -10142,6 +10142,41 @@ Committed 2026-09-07 with the user's go-ahead (3 meshes, registry, 9 config yaml
   required env vars; EPOCHS=auto derives the epoch count from a TARGET of 380,000 gradient steps at batch 128 (user; round 4
   reference = 280,000: 140 batches/epoch x 2000). Verified: per-axis shift bounded at 5 / 3.5 / 1.5 mm and rigid within each cloud.
 
+## 2026-09-11 — G6 launched (`vnhnr`): two scaling limits the pipeline had never hit
+
+G6 = the G5/`fsynt` recipe held fixed, data scaled 6,270 -> 10,139 episodes (294 runs: the original
+6k, the 91-object campaign, rod/donuts, and both halves of the Objaverse expansion). 125 episodes
+dropped (no_close 89, stress_nan 29, heavy_padding 15, explosion 7, empty_cloud 6) -> 9,125 train /
+1,014 val. Overrides diffed against `fsynt`'s recorded `.hydra/overrides.yaml`: byte-identical apart
+from `env=` and `n_epochs=100`. wandb `gentle_manip_generalist`/f0lpz8c0.
+
+**Two things broke that had never broken at G5's size — both are size-dependent, so they will recur
+on the next scale-up and are worth remembering.**
+
+1. **`augment_hold_tail` held three copies of the dataset.** Load every key -> build a per-episode
+   list -> concatenate. ~70 GB peak for a 24 GB cloud array; OOM-killed (rc=137) on the 62 GB box.
+   Rewritten to stream: one gather-index array, then each key written into the zip in 20k-row chunks.
+   Peak 6.2 GB. Verified bit-identical to the old semantics on a synthetic case first.
+
+2. **The point-cloud bank does not fit the local GPU.** `StitchedSequencePointCloudDataset` moves the
+   entire bank to the GPU as float32 — 21.3 GiB train + 2.3 GiB val = **23.6 GiB on a 24.0 GiB
+   4090**, before the model. This is invisible at G5's size and silently fatal above it. Added
+   `GM_CLOUD_DEVICE=cpu`: bank stays in host RAM as float32, ~12 KB per sample to the GPU. Chose this
+   over a half-precision bank precisely because it is numerically identical to on-device residency —
+   fp16 would quantize cloud coordinates to ~0.5 mm, which is defensible (below the d435i
+   augmentation noise) but is still a change to what the policy sees, and the point of G6 is to hold
+   the recipe fixed while only the data changes.
+
+   **Cost: 26.8 steps/s vs `mmgyy`'s 47.3 — 100 epochs goes from ~7.7 h to ~13.9 h.** The general
+   lesson: a wall-clock estimate extrapolated from a smaller run silently assumes the same memory
+   regime. Check that the bank still fits before quoting a rate.
+
+Startup invariants verified against prediction: 13,439 batches/epoch, 1,858,495 train steps,
+3,194,016 parameters — all exact. Epochs 1-2 train loss 0.2174 -> 0.0355 (G5's `mmgyy`: 0.3034 ->
+0.0583), 502 s/epoch steady. Build stages: convert 11 min, hold-tail 13 min.
+
+Full setup, per-component bookkeeping and the raw/filtered data analysis: `docs/final/G6_training_setup.md`.
+
 ## 2026-09-10 — RGB encoder ablation: what generalizes is ADAPTATION, not ImageNet
 
 Three runs on `single_lift_real7_bc_rgb224_v1` (117 real demos), identical apart from the encoder.

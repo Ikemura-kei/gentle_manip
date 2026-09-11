@@ -12,3 +12,8 @@ icra/*.bbl
 icra/*.blg
 icra/*.out
 icra/preview.pdf
+
+# fragment previews (preview.sh)
+.preview/
+grasp_synth.pdf
+method.pdf

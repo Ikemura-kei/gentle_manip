@@ -353,8 +353,12 @@ class _DiffusionPolicy:
         if not self._obs_dump_tag or not self._obs_buf["state"]:
             return
         from pathlib import Path
-        out = Path("/nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip"
-                   ) / ".agent_tmp" / f"{self._obs_dump_tag}_obs_b{self._dump_batch}.npz"
+        # GM_OBS_DUMP_DIR overrides the root (the default is the cluster scratch, which does not
+        # exist on the local box); the dump is otherwise unchanged.
+        _root = Path(os.environ.get("GM_OBS_DUMP_DIR")
+                     or "/nobackup/proj/disk/softenable-codesign26/personal/ikemura/gentle_manip")
+        out = _root / ".agent_tmp" / f"{self._obs_dump_tag}_obs_b{self._dump_batch}.npz"
+        out.parent.mkdir(parents=True, exist_ok=True)
         payload = {"state_norm": np.asarray(self._obs_buf["state"], dtype=np.float32),
                    "action_norm": np.asarray(self._obs_buf["action"], dtype=np.float32)}
         nzp = os.environ.get("GM_WIDTH_NORM")

@@ -22,7 +22,7 @@ objects far outside that set**, including a pen: elongated and thin, a shape cla
 representative in training. Grasps are qualitatively gentle, and it appears to stop closing at the
 right moment.
 
-Configuration (`lyslr`): ImageNet-pretrained ResNet-18 with GroupNorm, 224 px, horizon 16 executing
+Configuration (`pwifv`): ImageNet-pretrained ResNet-18 with GroupNorm, 224 px, horizon 16 executing
 4, random shift + photometric augmentation, temporal ensembling at inference.
 
 **Observed limitations, from the same sessions:**
@@ -94,7 +94,7 @@ stress. Several other ideas were negatives and are recorded as such.
 [R3M](https://arxiv.org/abs/2203.12601) and VC-1 report large gains from pretrained
 representations, while [Hansen et al., ICML 2023](https://arxiv.org/abs/2212.05749) find a
 from-scratch net with **random shift augmentation** competitive with R3M and MVP — and Diffusion
-Policy's own real-robot config uses **random initialisation**. `lyslr` has pretrained weights *and*
+Policy's own real-robot config uses **random initialisation**. `pwifv` has pretrained weights *and*
 fine-tuning *and* augmentation, so the credit is unassigned. **One 2 h run with random init settles
 it**, and either outcome is worth reporting.
 

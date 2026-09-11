@@ -173,34 +173,19 @@ cd "$(dirname "$0")/../../.."
 
 
 # +-----------------------------------------------------------------------------------------------------------
-# | REAL-only BC, RGB = lyslr: ImageNet-pretrained ResNet-18 (GroupNorm) at 224px, horizon 16, shift +
-# | photometric aug. Matched to the point-cloud arm otherwise. Stopped at 500 ep; val bottomed at 100,
-# | so try EARLY ckpts first (100/200/400), not the last. Normalization is inside the encoder.
+# | REAL-only BC, RGB 600ep = pwifv: ImageNet ResNet-18, fully trainable. The cosine anneals to min_lr
+# | by 600, so state_600 is a converged short run (DP uses 600). BASELINE arm of the encoder ablation
+# | -- compare against bhzdw (random init) and anjbm (frozen) below, all three at state_600.
+# | Falls back through 500/400 if state_600 is worse.
 # +-----------------------------------------------------------------------------------------------------------
-# ckpt=logs/dppo/dppo-pretrain/single_lift_real7_bc_rgb224_v1/lyslr/checkpoint/state_200.pt
+# ckpt=logs/dppo/dppo-pretrain/single_lift_real7_bc_rgb224_v1/pwifv/checkpoint/state_600.pt
 # normalization=dataset/dppo/single_lift_real7_bc_rgb224_v1/normalization.npz
 # uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
 #   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
 #   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus_rgb.yaml \
 #   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
 #   --act-steps 4 --temporal-ensemble --ensemble-m 0.33 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-#   --record dataset/real_deploy/real7_bc_rgb_lyslr_200 --shard-size 10 --record-rgb \
-#   --max-steps 5000 "$@"
-
-
-# +-----------------------------------------------------------------------------------------------------------
-# | REAL-only BC, RGB 600ep = pwifv: lyslr with EPOCHS=600 only. NOT a truncation -- the cosine anneals to
-# | min_lr by 600, where lyslr was still near peak LR, so state_600 is a converged short run (DP uses 600).
-# | Compare state_600 against lyslr/state_200. Falls back through 500/400 if it is worse.
-# +-----------------------------------------------------------------------------------------------------------
-# ckpt=logs/dppo/dppo-pretrain/single_lift_real7_bc_rgb224_v1/pwifv/checkpoint/state_200.pt
-# normalization=dataset/dppo/single_lift_real7_bc_rgb224_v1/normalization.npz
-# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
-#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
-#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus_rgb.yaml \
-#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
-#   --act-steps 4 --temporal-ensemble --ensemble-m 0.33 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-#   --record dataset/real_deploy/real7_bc_rgb_pwifv_200 --shard-size 10 --record-rgb \
+#   --record dataset/real_deploy/real7_bc_rgb_pwifv_600 --shard-size 10 --record-rgb \
 #   --max-steps 5000 "$@"
 
 
@@ -226,12 +211,87 @@ cd "$(dirname "$0")/../../.."
 # | bn->gn installs fresh norms, so freezing those too would confound "frozen" with "uncalibrated".
 # | Third arm of pwifv (tuned) / bhzdw (random) / anjbm (frozen): is ImageNet useful as-is, or only as a prior?
 # +-----------------------------------------------------------------------------------------------------------
-ckpt=logs/dppo/dppo-pretrain/single_lift_real7_bc_rgb224_v1/anjbm/checkpoint/state_300.pt
-normalization=dataset/dppo/single_lift_real7_bc_rgb224_v1/normalization.npz
+# ckpt=logs/dppo/dppo-pretrain/single_lift_real7_bc_rgb224_v1/anjbm/checkpoint/state_300.pt
+# normalization=dataset/dppo/single_lift_real7_bc_rgb224_v1/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus_rgb.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
+#   --act-steps 4 --temporal-ensemble --ensemble-m 0.33 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/real7_bc_rgb_anjbm_300 --shard-size 10 --record-rgb \
+#   --max-steps 5000 "$@"
+
+
+# +-----------------------------------------------------------------------------------------------------------
+# | REAL-only BC, POINT CLOUD on the 7-object data = ywkho: jfwqs's G5 recipe (meanmax + horizon 16) on
+# | real7 instead of real6, 1500 epochs. Closes the confound in the jfwqs-vs-pwifv comparison, which was
+# | point-cloud-on-99-eps vs RGB-on-117-eps -- ywkho and pwifv share the SAME 117 demos (tofu included).
+# | Note the obs config is the NON-rgb cloud (point_cloud_1cam_armfocus.yaml), as jfwqs uses.
+# +-----------------------------------------------------------------------------------------------------------
+# ckpt=logs/dppo/dppo-pretrain/single_lift_real7_bc_v1/ywkho/checkpoint/state_1500.pt
+# normalization=dataset/dppo/single_lift_real7_bc_v1/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
+#   --act-steps 4 --temporal-ensemble --ensemble-m 0.33 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/real7_bc_pc_ywkho_1500 --shard-size 10 --record-rgb \
+#   --max-steps 5000 "$@"
+
+# +-----------------------------------------------------------------------------------------------------------
+# | GENERALIST G6 = vnhnr (2026-09-11): the fsynt/G5 recipe held fixed, data scaled 6,270 -> 10,139
+# | episodes (294 runs; 280 objects in 153 categories). Only `env=` and n_epochs=100 differ from fsynt's
+# | overrides. Deploy settings below are fsynt's VERBATIM, so a G5-vs-G6 comparison is data-only.
+# |
+# | YAW PROBE (2026-09-11). On a real toothpaste tube, state_20 never rotated past 11 deg and cycled the
+# | gripper open/closed, while the SAME checkpoint in sim rotated to -48/+60/+64 deg on can_lying_mush
+# | and closed cleanly. The tube is not in the training set, so that run does not settle whether the
+# | policy under-rotates on objects it was trained on. Re-test banana and can, and run the G5 control
+# | BELOW on the same objects in the same session -- without it the result is uninterpretable.
+# | Set OBJ per object so recordings never overwrite each other (the first banana run was lost that way).
+# +-----------------------------------------------------------------------------------------------------------
+# obj=${OBJ:-banana}          # OBJ=banana | can | tube
+# ckpt=logs/dppo/dppo-pretrain/single_lift_generalist_soft_v6_tail22/vnhnr/checkpoint/state_40.pt
+# normalization=dataset/dppo/single_lift_generalist_soft_v6_tail22/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
+#   --act-steps 1 --temporal-ensemble --ensemble-m 0.01 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/g6_vnhnr40_${obj} --shard-size 10 --record-rgb \
+#   --max-steps 5000 "$@"
+
+
+# +-----------------------------------------------------------------------------------------------------------
+# | G5 CONTROL for the yaw probe = fsynt state_113, the validated real policy. Run this on the SAME
+# | objects in the SAME session as the G6 entry above. G5 rotates and G6 does not -> the problem is G6;
+# | neither rotates -> rig/perception, not the data; both rotate -> the tube result was object-specific.
+# | Settings are identical to the G6 entry apart from the checkpoint and its normalization.
+# +-----------------------------------------------------------------------------------------------------------
+obj=${OBJ:-banana}
+ckpt=logs/dppo/dppo-pretrain/single_lift_generalist_soft_v5_tail22/fsynt/checkpoint/state_113.pt
+normalization=dataset/dppo/single_lift_generalist_soft_v5_tail22/normalization.npz
 uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
-  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus_rgb.yaml \
+  --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
-  --act-steps 4 --temporal-ensemble --ensemble-m 0.33 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
-  --record dataset/real_deploy/real7_bc_rgb_anjbm_300 --shard-size 10 --record-rgb \
+  --act-steps 1 --temporal-ensemble --ensemble-m 0.01 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+  --record dataset/real_deploy/g5_fsynt113_${obj} --shard-size 10 --record-rgb \
   --max-steps 5000 "$@"
+
+
+# +-----------------------------------------------------------------------------------------------------------
+# | G6 NO-ENSEMBLE variant -- only if the G6 entry under-rotates. act-steps 1 + ensemble m=0.01 is heavy
+# | temporal smoothing; if the policy is bimodal (frontal vs rotated) it blends the two toward frontal.
+# | This runs open chunks instead, so a committed rotation survives.
+# +-----------------------------------------------------------------------------------------------------------
+# obj=${OBJ:-banana}
+# ckpt=logs/dppo/dppo-pretrain/single_lift_generalist_soft_v6_tail22/vnhnr/checkpoint/state_40.pt
+# normalization=dataset/dppo/single_lift_generalist_soft_v6_tail22/normalization.npz
+# uv run --project envs/dppo_deploy python gentle_manip/scripts/deploy_real_dppo.py \
+#   --ckpt ${ckpt} --ft-denoising-steps 0 --normalization ${normalization} \
+#   --obs-config gentle_manip/configs/obs/point_cloud_1cam_armfocus.yaml \
+#   --action-config gentle_manip/configs/action/abs_pose_euler_abs_gripper_z15.yaml \
+#   --act-steps 4 --smooth-alpha 0.6 --max-pos-step-m 0.0065 \
+#   --record dataset/real_deploy/g6_vnhnr40_noens_${obj} --shard-size 10 --record-rgb \
+#   --max-steps 5000 "$@"

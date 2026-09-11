@@ -1,0 +1,255 @@
+% ---------------------------------------------------------------------------
+% Stress-aware grasp synthesis.
+%
+% Replaces \subsection{Stress-aware grasp synthesis} (sec:method:synth) in method.tex.
+% Written against the pipeline that actually generated the data: smgrasp/finger_grasp_final.py
+% driven by grasp_synthesis/collect_demos_synth_v4.py. The earlier draft described
+% smgrasp/finger_grasp.py (the v3 collector), which differs in the objective, the selection
+% rule and the derived-parameter claims.
+%
+% The appendix block at the end holds the numeric detail; move it behind \appendix.
+% Algorithm 1 is built from base LaTeX (no algorithm/algpseudocode in this install).
+% ---------------------------------------------------------------------------
+
+\subsection{Stress-aware grasp synthesis}
+\label{sec:method:synth}
+For each object instance the demonstrator plans a $7$-DoF grasp
+$x=(\mathbf{t},\mathbf{r},\omega)$: tool-centre position, orientation, and \emph{commanded}
+gripper width. Planning runs on the mesh, outside the physics simulator.
+
+The workflow is three parts. A width-controlled finite-element contact model predicts, for a
+candidate grasp, the stress it would impose and the force it would hold with; the model is
+factored once per geometry, which makes both the search and randomisation over material
+properties cheap. A feasibility ladder then excludes candidates that miss the object, penetrate it,
+or cannot carry it, and among those that survive an objective trades bulk deformation against
+local contact pressure. Finally a search --- geometric seeding, a batched
+scoring pass, local optimisation, and a width rescan --- returns the gentlest holdable grasp,
+re-run under progressively looser bounds if the object admits none. We detail each in turn.
+
+\noindent\textbf{Width-controlled contact model.}
+Common parallel jaw grippers are position-controlled: one commands a width and the grip force is an
+outcome. We model this directly. The object is tetrahedralised and a linear-elastic stiffness
+matrix assembled; since it is free-floating the system is singular in the six rigid-body modes,
+so we solve a bordered inertia-relief system, factored once per geometry. Two rigid pads, whose
+rectangular footprints are taken from the real gripper's finger meshes, are closed to width
+$\omega$. Boundary nodes inside a footprint are pushed onto the pad's flat plane and constrained
+\emph{only} along the closing axis, leaving tangential motion free so the material bulges; a
+thin smoothstep fillet at the pad edge avoids a flat-punch stress singularity. Contact is
+normal-only, and friction enters solely through the holdability test below.
+
+\noindent\textbf{Material scaling.}
+Because the displacement is prescribed rather than the force, the deformation field is
+independent of Young's modulus, instead is dictated by the grasp width. Thus below yield both stress and grip force are linear in it,
+\begin{equation}
+  \sigma(E) = E\,\sigma_1, \qquad F(E) = E\,F_1 .
+  \label{eq:E-linear}
+\end{equation}
+One solve at $E\!=\!1$ therefore yields every material by scalar multiplication, which makes
+randomising stiffness across the demonstration set essentially free. A grasp is
+\emph{holdable} when Coulomb friction at the two pads carries the object's weight with an
+acceleration margin, $2\mu F(E) \ge m\,(g+a)$; we use $\mu\!=\!0.7$ and $a\!=\!g$, a quasi-static
+$2g$ criterion rather than a wrench-closure analysis.
+
+
+\begin{table}[t]\centering\footnotesize
+\caption{Feasibility gates. $\delta$ is the pad indentation, $F$ the per-jaw normal force,
+$A_{\min}$ the smaller pad's contact area, $\hat{\mathbf{a}}$ the closing axis,
+$\boldsymbol{\tau}$ the gravitational torque about the object's centre of mass, and $\sigma_Y$ the
+material's yield stress. A candidate failing a gate returns a penalty shaped by its margin of
+failure, so the search retains a gradient toward the feasible band rather than a flat infeasible
+plateau. Nominal bounds are given in Appendix~\ref{app:synth:constants}.}
+\label{tab:gates}
+\begin{tabular}{@{}ll@{}}
+\toprule
+gate & feasible when \\
+\midrule
+table       & fingers stay above the table plane \\
+penetration & finger bodies stay outside the object \\
+contact     & each pad captures a non-empty contact patch \\
+indentation & $\delta \le \delta_{\max}$ (linear-elastic regime) \\
+holdability & $2\mu F \ge m\,(g+a)$ \\
+torsion     & $\bigl|\boldsymbol{\tau}\cdot\hat{\mathbf{a}}\bigr| \le
+               \tfrac{4}{3}\,\mu F \sqrt{A_{\min}/\pi}$ \\
+yield       & $\sigma_{\mathrm{blk}} \le \sigma_Y$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent\textbf{Objective.}
+A candidate is \emph{feasible} when it clears every gate of Table~\ref{tab:gates}: the fingers
+clear the table and the object's interior, both pads make contact at an indentation the
+linear-elastic model still supports, and the grasp holds the object against sliding, twisting and
+yielding. Among feasible candidates we maximise
+\begin{equation}
+  S(x) \;=\; -\,\sigma_{\mathrm{blk}} \;-\; w_{\mathrm{pr}}\,\frac{F}{A_{\min}},
+  \label{eq:score}
+\end{equation}
+where $\sigma_{\mathrm{blk}}$ be the mean of the top decile of element stresses with contact-adjacent elements masked out, so that it reports
+\emph{bulk} deformation rather than the mesh-dependent contact singularity.  $A_{\min}$ is the contact area of the worse pad, so the second term is the mean contact
+pressure. 
+% The pressure term is what separates enveloping grasps from stem-type ones: squeezing a
+% stiff, slender part deforms the body \emph{less} and therefore scores better on bulk stress alone,
+% but concentrates the same holding force on a far smaller area. 
+Bulk gentleness and local gentleness are thus both represented, and neither is a hand-set floor.
+
+\noindent\textbf{Search.}
+The search is a funnel (Algorithm~\ref{alg:synth}). Candidates are seeded from two geometric
+generators --- antipodal surface pairs inside the friction cone, and medial-axis points closing
+across the local tangent. Each primitive determines a complete $7$-DoF pose: its axis and anchor
+fix the orientation and position, and the object's local cross-section there fixes the commanded
+width (Appendix~\ref{app:synth:seeds}).
+
+Seeds are pre-screened on the two gates that batch cheaply --- table clearance and finger
+penetration, at a deliberately loose tolerance --- and on an orientation box. Survivors are
+scored in one batched solve, where the full ladder of Table~\ref{tab:gates} applies, and the
+best few initialise a multi-start CMA-ES run whose proposals are scored the same way. The
+orientation box bounds the search rather than gating it: roll and pitch are kept away from
+extreme tilts, at which the wrist and forearm would strike the table --- geometry the
+finger-level gates do not see --- and yaw is limited so the fingers do not occlude the object in
+the very view the policy must act on. Poses outside it are never evaluated, whereas a candidate
+failing a gate is evaluated and penalised, and it is the bound the relaxation ladder below
+widens first. The CMA runs search all seven degrees of freedom jointly and advance in lockstep, so each
+generation is a single batched solve. A final pass then holds each of the best spatially
+distinct poses \emph{fixed} and sweeps the one remaining degree of freedom, width, exhaustively
+on a grid several times finer than the optimiser's step, keeping the widest holdable
+value. Width is singled out because it is what the real gripper actually commands, and because
+the joint search resolves it least well.
+
+\noindent\textbf{Relaxation ladder.}
+A single fixed feasibility band cannot serve an object set spanning three orders of magnitude in
+stiffness and scale: bounds loose enough for the hardest object admit poor grasps on the
+easiest. The funnel is therefore run inside a short ladder. The first pass uses nominal bounds;
+if it yields no holdable grasp, a second pass widens the orientation box and the penetration
+tolerance. The candidates this admits skew toward pinch grasps, so the same pass \emph{doubles}
+the pressure weight of Eq.~\eqref{eq:score}: the constraints loosen and the objective tightens
+together, buying reach without buying grasps that hold an object on two small patches. A third
+pass additionally releases the yield gate, accepting a grasp that marks the object rather than
+failing to lift it. This last release is a deliberate trade: a demonstration that never lifts
+teaches the policy nothing, whereas one that marks the object still carries the approach, grasp
+and lift structure we need from it. It is a last resort rather than a licence: $2.9\%$ of
+planned grasps released the gate (Appendix~\ref{app:synth:tiers}). If none succeeds the planner
+returns its most-centred feasible seed and the episode is recorded as an attempt. The ladder
+stops at the first pass that produces a holdable grasp, so it costs nothing on objects that do
+not need it.
+
+\begin{figure}[t]
+\hrule\vspace{3pt}
+\noindent\textbf{Algorithm~1}~~Stress-aware grasp synthesis
+\vspace{2pt}\hrule\vspace{4pt}
+\footnotesize
+\noindent\begin{tabular}{@{}r@{~~}p{0.86\linewidth}@{}}
+   & \textbf{Input:} mesh, pose, material $(E,\rho,\mu)$, table height \\
+   & \textbf{Output:} grasp $x=(\mathbf{t},\mathbf{r},\omega)$ and its tier \\[2pt]
+ 1 & assemble FEM, factor the bordered system \emph{once} \\
+ 2 & $P \leftarrow$ antipodal pairs $\cup$ medial-axis points \\
+ 3 & $X_0 \leftarrow$ \textsc{LiftToPose}($P$) \hfill\emph{axis, height, local cross-section} \\[3pt]
+ 4 & \textbf{for} tier $t = 0,1,2$ \textbf{do} \\
+ 5 & \quad bounds $\leftarrow$ \textsc{Relax}($t$) \\
+ 6 & \quad $X_1 \leftarrow \{x \in X_0 :$ table, orientation, penetration $\}$ \\
+ 7 & \quad score $X_1$ in one batched solve; $X_2 \leftarrow$ best $K$ \\
+ 8 & \quad $X_3 \leftarrow$ \textsc{CMA-ES}($X_2$) over all $7$ DoF, runs in lockstep \\
+ 9 & \quad $X_4 \leftarrow$ spatially distinct poses of $X_3$ \\
+10 & \quad $x^\ast \leftarrow \arg\max S(x)$ over a $1$-DoF width sweep at each pose of $X_4$ \\
+11 & \quad \textbf{if} $x^\ast$ is holdable \textbf{then return} $(x^\ast, t)$ \\[3pt]
+12 & \textbf{return} most-centred feasible seed, tier $3$ \\
+\end{tabular}
+\vspace{4pt}\hrule
+\caption{The funnel (lines 6--10) is re-run under progressively looser bounds and returns at the
+first tier that yields a holdable grasp.}
+\label{alg:synth}
+\end{figure}
+
+% ===========================================================================
+%  APPENDIX MATERIAL --- move behind \appendix
+% ===========================================================================
+
+\section{Grasp synthesis: implementation detail}
+\label{app:synth}
+
+\subsection{Seed construction}
+\label{app:synth:seeds}
+The closing axis fixes the tool $y$ axis, with the approach taken as near vertical as that axis
+permits and yaw folded into $[-90^\circ,90^\circ]$ by jaw symmetry. The pads are centred on the
+anchor, the fingertip height is sampled between table clearance and the object's top, and the
+commanded width is the object's span inside the pad footprint at that height, less a small closure
+margin. The span is measured as below.
+
+\subsection{Local cross-section on objects with holes}
+\label{app:synth:width}
+A seed's commanded width is the object's thickness at the anchor along the intended closing axis.
+The natural estimate collects surface vertices in a thin cylinder around the anchor aligned with
+that axis, projects them onto it, and takes the extent. On a convex body this is exactly the local
+thickness.
+
+On a ring, a handle or a deep concavity it is not: the cylinder passes through the void and
+collects surface on the far side, so the extent measures the whole object rather than the material
+between the fingers. On our smaller torus --- $100$~mm outer diameter, $19$~mm tube --- the
+estimate returns $100$~mm where the correct value is $19$~mm. Every medial seed therefore asked the
+gripper to close on the entire ring; $63\%$ saturated at the $79$~mm jaw limit, and none of those
+attempts lifted the object.
+
+We instead march the signed distance field outward from the anchor along $\pm$ the closing axis in
+$0.5$~mm steps and take the first exit in each direction; their sum is the \emph{solid run}
+actually traversed. The solid run replaces the extent only when it is below a quarter of it, that
+is, only when a genuine void was crossed. On a convex body the two agree and the rule is inert, so
+it changes rings and handles and nothing else. Demonstrator success on the small torus rose from
+$13.8\%$ to $47.2\%$.
+
+\subsection{Statistics computed but not scored}
+\label{app:synth:gates}
+An alignment statistic (the mean absolute cosine between the closing axis and the local surface
+normals) and an unmasked $98$th-percentile stress are computed and logged for analysis but do
+\emph{not} enter Eq.~\eqref{eq:score}.
+
+\subsection{Relaxation tiers}
+\label{app:synth:tiers}
+\begin{center}\footnotesize
+\begin{tabular}{@{}cp{0.62\linewidth}@{}}
+\toprule
+tier & settings \\
+\midrule
+$0$ & nominal: roll $\pm25^\circ$, pitch $\pm20^\circ$, yaw $\pm60^\circ$ ($\pm90^\circ$ for objects
+      whose largest extent exceeds $70$~mm, which cannot be hidden by the fingers at any yaw);
+      penetration $5$~mm; indent $10$~mm \\
+$1$ & roll/pitch $+10^\circ$, yaw $\pm80^\circ$, penetration $20$~mm, indent $12$~mm; yield gate
+      kept. Pressure weight $\times 2$ --- a tightening, not a relaxation \\
+$2$ & as tier $1$, yield gate released \\
+$3$ & no tier succeeded: the feasible seed nearest the object centre of mass \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The planner records the tier that produced each grasp. Over $12{,}617$ planning attempts spanning
+$291$ of the $294$ collection runs:
+
+\begin{center}\footnotesize
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+object group & tier $0$ & tier $1$ & tier $2$ & fallback \\
+\midrule
+all                 & $93.2\%$ & $3.0\%$  & $2.9\%$  & $0.9\%$ \\
+original subset     & $93.1\%$ & $2.5\%$  & $3.9\%$  & $0.5\%$ \\
+primitive campaign  & $99.8\%$ & $0.2\%$  & $0.0\%$  & $0.0\%$ \\
+rod and tori        & $62.9\%$ & $21.4\%$ & $12.1\%$ & $3.6\%$ \\
+held-out categories & $77.2$--$95.6\%$ & $3.3$--$7.2\%$ & $0.7$--$7.8\%$ & $0.4$--$7.7\%$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The spread is the point. The primitive-shape campaign essentially never needs the ladder, while the
+rod-and-torus group --- chosen because a thin rod and a ring are hard to grasp gently --- needs it
+on a third of attempts. Rates are per attempt; weighting each object or each category equally
+instead moves the tier-$2$ share by about a point. Attempts exceed episodes because a plan is made
+for every attempt, including those that go on to fail.
+
+\subsection{Constants}
+\label{app:synth:constants}
+Gate bounds (Table~\ref{tab:gates}): $2$~mm table tolerance, $5$~mm finger-body penetration,
+$\delta_{\max}=10$~mm indentation, $\mu=0.7$ and $a=g$ in the holdability test, and the object's
+own $\sigma_Y$. Seeds: $2600$ antipodal pairs and $500$ medial-axis points, the latter expanded to
+four widths each. Filter: $10$~mm per-finger penetration. Search: $K=6$ seeds carried forward, $400$
+evaluations per seed, poses counted distinct beyond $5$~mm or $10^\circ$, the best $15$ carried to
+the width rescan, which samples $25$ widths over $\pm3$~mm at $0.25$~mm resolution. Gripper range
+$8$--$79$~mm; Poisson ratio $0.33$; $\sim\!1500$ tetrahedra per object. These are fixed across the
+entire object set; none is set per object or per category. The one object-dependent bound is the
+yaw limit, which switches at a $70$~mm extent as described above.

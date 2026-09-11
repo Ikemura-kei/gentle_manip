@@ -22,25 +22,57 @@ import numpy as np
 
 
 def augment_split(src: Path, dst: Path, k: int) -> None:
-    d = dict(np.load(src, allow_pickle=False))
-    tl = d["traj_lengths"]
-    starts = np.concatenate([[0], np.cumsum(tl)])
-    per_step = {key: v for key, v in d.items() if key != "traj_lengths" and v.shape[0] == int(tl.sum())}
-    out = {key: [] for key in per_step}
+    """Stream key-by-key in row chunks.
+
+    The obvious implementation (load every key, build a per-episode list, concatenate) holds
+    three copies of the point-cloud array at once — ~70 GB for a 10k-episode set, which the
+    box cannot do. Instead: build one gather-index array, then for each key write the output
+    rows straight into the zip in chunks, so peak memory is one source key plus a chunk.
+    """
+    import zipfile
+    from numpy.lib import format as npformat
+
+    z = np.load(src, allow_pickle=False)
+    tl = z["traj_lengths"]
+    starts = np.concatenate([[0], np.cumsum(tl)]).astype(np.int64)
+    total_in = int(tl.sum())
+
+    # output row i takes source row idx[i]; each episode's last row repeats k times
+    idx = np.empty(total_in + k * len(tl), dtype=np.int64)
+    w = 0
     for i in range(len(tl)):
-        s, e = starts[i], starts[i + 1]
-        for key, v in per_step.items():
-            seg = v[s:e]
-            tail = np.repeat(seg[-1:], k, axis=0)
-            out[key].append(np.concatenate([seg, tail], axis=0))
-    arrays = {key: np.concatenate(chunks, axis=0) for key, chunks in out.items()}
-    arrays["traj_lengths"] = (tl + k).astype(np.int64)
-    # keys that were not per-step (none expected, but preserve anything constant-shaped)
-    for key, v in d.items():
-        if key not in arrays and key != "traj_lengths":
-            arrays[key] = v
-    np.savez_compressed(dst, **arrays)
-    print(f"  {src.name}: {len(tl)} eps, +{k} tail frames each -> {int(arrays['traj_lengths'].sum())} steps")
+        s0, e0 = starts[i], starts[i + 1]
+        n = e0 - s0
+        idx[w:w + n] = np.arange(s0, e0)
+        idx[w + n:w + n + k] = e0 - 1
+        w += n + k
+    assert w == idx.size
+
+    per_step, other = [], []
+    for key in z.files:
+        if key == "traj_lengths":
+            continue
+        (per_step if z[key].shape[0] == total_in else other).append(key)
+
+    ROWS = 20000
+    with zipfile.ZipFile(dst, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
+        for key in per_step:
+            v = z[key]                                   # one key resident at a time
+            shape = (idx.size,) + v.shape[1:]
+            zi = zipfile.ZipInfo(key + ".npy")
+            zi.compress_type = zipfile.ZIP_DEFLATED
+            with zf.open(zi, "w", force_zip64=True) as fh:
+                npformat.write_array_header_2_0(fh, {"descr": npformat.dtype_to_descr(v.dtype),
+                                                     "fortran_order": False, "shape": shape})
+                for a in range(0, idx.size, ROWS):
+                    fh.write(np.ascontiguousarray(v[idx[a:a + ROWS]]).tobytes())
+            del v
+        for key, arr in [(key, z[key]) for key in other] + [("traj_lengths", (tl + k).astype(np.int64))]:
+            zi = zipfile.ZipInfo(key + ".npy")
+            zi.compress_type = zipfile.ZIP_DEFLATED
+            with zf.open(zi, "w", force_zip64=True) as fh:
+                npformat.write_array(fh, np.ascontiguousarray(arr))
+    print(f"  {src.name}: {len(tl)} eps, +{k} tail frames each -> {idx.size} steps")
 
 
 def main() -> None:

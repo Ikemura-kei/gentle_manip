@@ -28,8 +28,13 @@ json.dump(s, open(sys.argv[1], "w"), indent=1)
 PY
   echo "### [$((i+1))/$N] $OBJ  n=$NEP envs=$NENV  $(date '+%F %T')"
   t0=$(date +%s)
-  OBJ="$OBJ" N_EPISODES="$NEP" N_ENVS="$NENV" SEED=0 EXTRA_ARGS="${EXTRA_ARGS:-}" \
-    bash gentle_manip/scripts/final/collect_demo_template.sh > "logs/campaign/${OBJ}.log" 2>&1
+  # OBJ_TIMEOUT (0 = off) bounds ONE object. --max-attempts caps the NUMBER of attempts but not a
+  # single hung one; the Objaverse set has known hangers, and an unattended stall would eat the queue.
+  # SEED overridable (default 0 = unchanged): a TOP-UP pass over objects already collected must
+  # use a different seed, or the DR draws and CMA-ES streams repeat and the "new" demos are copies.
+  OBJ="$OBJ" N_EPISODES="$NEP" N_ENVS="$NENV" SEED="${SEED:-0}" EXTRA_ARGS="${EXTRA_ARGS:-}" \
+    timeout ${OBJ_TIMEOUT:-0} bash gentle_manip/scripts/final/collect_demo_template.sh \
+      > "logs/campaign/${OBJ}.log" 2>&1
   rc=$?; t1=$(date +%s)
   python3 - "$STATUS" "$OBJ" "$rc" "$((t1-t0))" <<'PY'
 import json, sys, glob, os, yaml

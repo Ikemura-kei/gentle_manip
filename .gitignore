@@ -144,3 +144,11 @@ grasp_synthesis/collect_demos_synth_v4_backup.py
 # generated data, never committed (2026-09-08)
 dataset/ablation/
 dataset/demos_staging/
+
+# Objaverse source-mesh download cache (9.3 GB; re-downloadable from the uid in candidates_all.csv)
+dataset/object_expansion/objaverse_cache/
+
+# Colleague's raw demo bundle, extracted (11 GB; the ONLY copy of that data — keep on disk, never commit)
+dataset/bundle_2026-09-11/
+# Raw source meshes pulled for asset prep (54 GB-scale scratch; processed meshes live in gentle_manip/assets/objects/)
+obj_meshes/

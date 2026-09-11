@@ -10,6 +10,7 @@ Imported inside envs/dppo (dppo on path) via hydra ``_target_``; genesis-free.
 """
 from __future__ import annotations
 
+import os
 import numpy as np
 import torch
 
@@ -68,7 +69,17 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
         # identically at eval/deploy, where only those two are available (user requirement).
         self.obj_crop = bool(obj_crop)
         total = int(np.sum(data["traj_lengths"][:max_n_episodes]))
-        self.point_clouds = torch.from_numpy(data["point_cloud"][:total]).float().to(device)
+        # GM_CLOUD_DEVICE=cpu keeps the cloud bank in host RAM and ships only the few frames a
+        # sample needs to the GPU. The bank is float32 either way, so this is numerically
+        # identical to GPU residency -- it exists because the bank alone is 21 GiB for a 9k-episode
+        # set, which does not fit a 24 GiB card alongside the model. Per-sample transfer is ~12 KB.
+        self._cloud_dev = os.environ.get("GM_CLOUD_DEVICE", "") or device
+        self.point_clouds = torch.from_numpy(data["point_cloud"][:total]).float()
+        if str(self._cloud_dev) != "cpu":
+            self.point_clouds = self.point_clouds.to(device)   # left in host RAM otherwise (not
+                                                               # pinned: a 21 GiB non-pageable
+                                                               # block buys nothing at 12 KB/sample)
+        self._cloud_off_device = str(self._cloud_dev) == "cpu"
         # item 12: map every global step -> its episode's FIRST step (for the first-frame
         # context cloud). Never jittered — the anchor frame is the trustworthy view.
         # (Placed AFTER the data load; the first revision referenced `data` before it
@@ -195,6 +206,8 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
         batch = super().__getitem__(idx)             # {"state": (cond_steps, Do)}, actions
         start, num_before_start = self.indices[idx]
         pc = self.point_clouds[(start - num_before_start):(start + 1)]
+        if self._cloud_off_device:
+            pc = pc.to(self.device, non_blocking=True)
         pc = torch.stack([pc[max(num_before_start - t, 0)]        # recent last, left-pad start
                           for t in reversed(range(self.pc_cond_steps))])
         if self.jit_trans > 0 or self.jit_rot > 0:   # camera-pose DR (see __init__)
@@ -220,7 +233,9 @@ class StitchedSequencePointCloudDataset(StitchedSequenceDataset):
                 device=self.width_loss_mask.device)
         conditions["point_cloud"] = pc               # (pc_cond_steps, N, 3)
         if self.first_frame_context:
-            conditions["first_point_cloud"] = self.point_clouds[self.first_idx[start]][None]  # (1,N,3)
+            _ffc = self.point_clouds[self.first_idx[start]][None]  # (1,N,3)
+            conditions["first_point_cloud"] = (_ffc.to(self.device, non_blocking=True)
+                                               if self._cloud_off_device else _ffc)
         if self.obj_crop:
             conditions["obj_points"] = self.obj_points[self.ep_of_step[start]][None]  # (1,K,3)
         if self.aux_contact is not None:
