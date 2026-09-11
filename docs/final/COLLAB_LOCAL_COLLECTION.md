@@ -195,7 +195,62 @@ From this session's DEVLOG (`docs/final/DEVLOG.md`, 2026-09-09 entries):
 All of these are logged per-object in `EXPANSION_LOG.csv` and the batch moves on. A ~85%
 loss rate at the collection stage is expected.
 
-## 9. DR coverage (open item)
+## 9. Training data — the demos collected so far
+
+As of 2026-09-11: **93 categories / 129 object instances / 2,580 episodes** have a
+complete, accepted collection (`collection_status == accepted` in `EXPANSION_LOG.csv` —
+this means the object hit `--min-success 0.5` and saved the full `--n-episodes 20`).
+This is what's ready to train on right now (separate from the "98 categories" figure on
+the Grasp Reel page, which also counts categories still mid-collection with partial data).
+
+**Full path on the cluster (all demos, including in-progress/failed attempts, 67 GB):**
+```
+/nobackup/proj/disk/softenable-codesign26/personal/yifeid/gentle_manip/dataset/demos/
+```
+Each object instance's demos live at `dataset/demos/single_lift_<name>_soft/<run_id>/`,
+containing `data.pkl` (the (obs, action) episodes), `stats.yaml` (success rate etc.),
+`videos/` (per-episode render), `config.yaml`/`config_resolved.yaml` (env snapshot —
+hard requirement #7 in `CLAUDE.md`).
+
+**You only need the 129 accepted-object directories for training (~11 GB, not the full
+67 GB)** — the rest is failed/partial/low-success attempts kept only for pipeline
+diagnostics. Regenerate the exact list from the (git-tracked) `EXPANSION_LOG.csv` and
+pull just those:
+```bash
+cd gentle_manip   # repo root, after `git pull origin expand-categories-30`
+python3 -c "
+import csv
+cats = {}
+with open('gentle_manip/scripts/object_expansion/EXPANSION_LOG.csv') as f:
+    for row in csv.DictReader(f):
+        if row['collection_status'] == 'accepted':
+            cats.setdefault(row['category'], []).append(row['name'])
+print(f\"{len(cats)} categories, {sum(len(v) for v in cats.values())} object instances\")
+with open('/tmp/accepted_demo_dirs.txt', 'w') as o:
+    for names in cats.values():
+        for n in names:
+            o.write(f'single_lift_{n}_soft\n')
+"
+rsync -avz --progress --files-from=/tmp/accepted_demo_dirs.txt \
+  yifeid@arrhenius1.hpc.arrhenius.naiss.se:/nobackup/proj/disk/softenable-codesign26/personal/yifeid/gentle_manip/dataset/demos/ \
+  dataset/demos/
+```
+
+**Accompanying files needed for training (all already in git, come from `git pull`):**
+- `gentle_manip/assets/objects/*.obj` — the meshes (needed if any eval/env-rebuild step
+  re-instantiates the Genesis scene, e.g. DP3's in-training sim eval bridge).
+- `gentle_manip/assets/registry.py` — `OBJECT_MAP`, maps each object name to its mesh +
+  material defaults.
+- `gentle_manip/configs/{tasks,dr,experiments}/single_lift_<name>_soft*.yaml` — per-object
+  task/DR/experiment config trio, one set per registered name.
+- `gentle_manip/scripts/object_expansion/EXPANSION_LOG.csv` — full pipeline audit log
+  (per-object status, success rate, episode counts) — the source of truth used above.
+
+You do **not** need `dataset/object_expansion/objaverse_cache` (9.3 GB) for training —
+that's only the raw source-mesh cache used to *register new* categories (§2b). Skip it
+unless you're also going to run collection yourself.
+
+## 10. DR coverage (open item)
 
 Current per-object DR: position XY, full yaw, ±45Β° pitch/roll, 25% upside-down flip,
 scale ×[0.6,1.6] uniform + ×[0.6,1.6] on one random axis, mild bend/twist/taper, E/ν/ρ
